@@ -2048,6 +2048,11 @@ export const en = {
       tipoNoComp: 'Agricultural products outside Table A, part one',
       tipoOcc34bis: 'Occasional operations under art. 34-bis',
       tipoInvcont: 'Reverse charge, art. 21 paragraph 6-bis letter a)',
+      tipoCun: 'Monitored agrifood: the CUN product code from the MASAF list in "Text ref." (mandatory for those products)',
+      tipoInfo: 'Free note agreed with the customer (a vendor convention, no official meaning)',
+      tipoDivisa: 'Original currency of the amount (convention: FatturaPA carries Divisa only per document)',
+      tipoPrezzoval: 'Price in the original currency (convention)',
+      tipoCambio: 'Exchange rate applied (convention)',
     },
     doc: {
       title: 'Document preview',

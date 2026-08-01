@@ -180,6 +180,19 @@ const ADG_TIPI: ReadonlyArray<readonly [string, string]> = [
   ['NO-COMP', 'invoices.adg.tipoNoComp'],
   ['OCC34BIS', 'invoices.adg.tipoOcc34bis'],
   ['INVCONT', 'invoices.adg.tipoInvcont'],
+  // Mandated elsewhere, not by the AdE guide: the agrifood CUN comes from
+  // the MASAF rules on monitored products.
+  ['CUN', 'invoices.adg.tipoCun'],
+  // De-facto conventions with NO official standing, offered because they
+  // fill a real gap: FatturaPA carries Divisa only at document level, so
+  // a per-line foreign amount has nowhere else to go. Deliberately NOT
+  // offering CASSA-PREV: DatiCassaPrevidenziale (2.1.1.7) is a typed
+  // block with its own TipoCassa enum, and burying the same information
+  // here means the Agenzia's automation never sees it as a cassa.
+  ['INFO', 'invoices.adg.tipoInfo'],
+  ['DIVISA', 'invoices.adg.tipoDivisa'],
+  ['PREZZOVAL', 'invoices.adg.tipoPrezzoval'],
+  ['CAMBIO', 'invoices.adg.tipoCambio'],
 ]
 // XSD facets, mirrored so the browser stops the user before the API
 // does: String10Type / String60LatinType. The service caps a line at 50

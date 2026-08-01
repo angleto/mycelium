@@ -2047,6 +2047,11 @@ export const it: Catalog = {
       tipoNoComp: 'Prodotti agricoli fuori dalla Tabella A, parte prima',
       tipoOcc34bis: 'Operazioni occasionali in regime art. 34-bis',
       tipoInvcont: 'Inversione contabile, art. 21 comma 6-bis lettera a)',
+      tipoCun: 'Agroalimentare monitorato: codice CUN dalla lista MASAF in "Rif. testo" (obbligatorio per quei prodotti)',
+      tipoInfo: 'Annotazione libera concordata col cliente (convenzione dei gestionali, nessun significato ufficiale)',
+      tipoDivisa: 'Valuta originaria dell\'importo (convenzione: FatturaPA ha la divisa solo a livello documento)',
+      tipoPrezzoval: 'Prezzo nella valuta originaria (convenzione)',
+      tipoCambio: 'Tasso di cambio applicato (convenzione)',
     },
     doc: {
       title: 'Anteprima documento',
