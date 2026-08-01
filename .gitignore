@@ -35,6 +35,16 @@ web/e2e-prod/.auth/
 *.p12
 *.pfx
 
+# Defensive: electronic-invoice files and SdI receipts, wherever they
+# land. The SdI names them <IdPaese><IdCodice>_<progressivo>.xml, plus a
+# _RC_/_NS_/_MC_/_NE_/_MT_/_DT_/_AT_/_EC_ variant per receipt kind.
+# THIS REPOSITORY IS PUBLIC: the filename alone carries the transmitter's
+# fiscal identifier, and a receipt carries the IdentificativoSdI, the
+# MessageId and the delivery timestamps. Committing one publishes it
+# irreversibly -- a later removal does not erase it from the history.
+# (Two RC receipts were caught by `git add -A` once; this is the guard.)
+IT*_*.xml
+
 # Node / web
 node_modules/
 web/dist/
