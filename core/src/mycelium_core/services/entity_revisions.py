@@ -56,7 +56,10 @@ IDLE_SAFETY_SEAL_SECONDS = 60
 
 ENTITY_KIND_TASK = "task"
 ENTITY_KIND_NOTE = "note"
-_VALID_KINDS: frozenset[str] = frozenset({ENTITY_KIND_TASK, ENTITY_KIND_NOTE})
+ENTITY_KIND_ANNOTATION = "annotation"
+_VALID_KINDS: frozenset[str] = frozenset(
+    {ENTITY_KIND_TASK, ENTITY_KIND_NOTE, ENTITY_KIND_ANNOTATION}
+)
 _VALID_CHANNELS: frozenset[str] = frozenset(
     {"web", "mcp", "api", "worker", "cli", "telegram", "restore", "system"}
 )
@@ -169,6 +172,32 @@ _TASK_RESTORABLE_FIELDS: frozenset[str] = frozenset(
     }
 )
 _NOTE_RESTORABLE_FIELDS: frozenset[str] = frozenset({"title", "transcript"})
+# A comment/suggestion (migration 0090). ``body`` is the human-written
+# text; the rest is context the timeline shows but a restore must not
+# rewrite.
+_ANNOTATION_SNAPSHOT_FIELDS: tuple[str, ...] = (
+    "body",
+    "kind",
+    "status",
+    "doc_kind",
+    "anchor_quote",
+    "original_text",
+    "proposed_text",
+    "parent_id",
+    "author_identity_id",
+    "assigned_to_identity_id",
+    "resolved_at",
+    "edited_at",
+    "deleted_at",
+)
+# ``body`` ALONE. Restoring a comment must not un-resolve a thread,
+# re-assign it, reattach it to a different document or rewrite its
+# authorship -- the same principle that keeps ``state_id`` / ``status``
+# out of the task and note sets: revert the words, never the routing.
+# ``original_text`` / ``proposed_text`` stay out too: a suggestion that
+# was accepted spliced those into a document, so rewriting them after
+# the fact would desynchronise the suggestion from the edit it made.
+_ANNOTATION_RESTORABLE_FIELDS: frozenset[str] = frozenset({"body"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -199,17 +228,57 @@ async def snapshot_task(session: AsyncSession, task: Task) -> dict[str, Any]:
 
 async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
     """Build a complete snapshot payload from a Note ORM row. Phase 6
-    final: the canonical body is read from ``note_part(ord=0)+`` and
-    stored under the ``transcript`` key so a future restore can
-    recover it (the restore path will route it back to part(ord=0))."""
+    final: the canonical body lives in ``note_part(ord=0)+``.
+
+    The body is captured TWICE, on purpose:
+
+    - ``transcript`` -- the flat ``\\n\\n``-joined body. The display
+      contract: the SPA revision diff and every existing consumer read
+      this key, and every revision written before migration 0089 has
+      only this.
+    - ``parts`` -- the structural body, one entry per part with its id,
+      ord, title, lang, version and body. This is what a restore
+      replays, so restoring a multi-part note puts the parts back as
+      parts instead of collapsing them into part(ord=0).
+
+    The duplication costs storage proportional to the body on every
+    note revision; the retention sweep and ``coarsen`` bound it. The
+    alternative -- deriving ``transcript`` at read time -- would move
+    the cost onto the SPA diff and the two payload serializers, for a
+    field they already treat as stored.
+    """
+    from mycelium_core.services.note_parts import list_parts as _list_parts
     from mycelium_core.services.notes import get_body as _get_body
 
     payload: dict[str, Any] = {
         field: _json_safe(getattr(note, field)) for field in _NOTE_SNAPSHOT_ROW_FIELDS
     }
     payload["transcript"] = _json_safe(await _get_body(session, note_id=note.id))
+    payload["parts"] = [
+        {
+            "id": str(p.id),
+            "ord": int(p.ord),
+            "title": p.title,
+            "body": p.body or "",
+            "lang": p.lang,
+            "version": int(p.version),
+        }
+        for p in await _list_parts(session, org_id=note.org_id, note_id=note.id)
+    ]
     payload["tags"] = await _tags_for_note(session, note_id=note.id)
     return payload
+
+
+def snapshot_annotation(annotation: Any) -> dict[str, Any]:
+    """Snapshot payload for a comment / suggestion (migration 0090).
+
+    Synchronous and tag-free, unlike the task and note snapshots: an
+    annotation owns no junction rows, so there is nothing to join and no
+    reason to make every caller await.
+    """
+    return {
+        field: _json_safe(getattr(annotation, field, None)) for field in _ANNOTATION_SNAPSHOT_FIELDS
+    }
 
 
 async def _tags_for_task(session: AsyncSession, *, task_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -659,6 +728,51 @@ async def list_pending_summaries(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def erase_for_entity(
+    session: AsyncSession,
+    *,
+    entity_kind: str,
+    entity_id: uuid.UUID,
+) -> int:
+    """Destroy every revision of one entity. Returns the count removed.
+
+    For GDPR erasure only. A snapshot is a FULL COPY of the entity's
+    content at a point in time, and this table is polymorphic on
+    ``(entity_kind, entity_id)`` with no FK to ``tasks`` / ``notes`` --
+    so deleting the entity row leaves its snapshots behind, intact and
+    readable. Anything that claims to erase the content has to come
+    through here as well, or the text simply moves into the timeline.
+
+    Deliberately NOT wired into the ordinary delete paths: trashing is
+    reversible precisely because the history survives it, and the
+    retention sweep coarsens by age rather than erasing on demand.
+    """
+    if entity_kind not in _VALID_KINDS:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    doomed = list(
+        (
+            await session.execute(
+                select(EntityRevision.id).where(
+                    EntityRevision.entity_kind == entity_kind,
+                    EntityRevision.entity_id == entity_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if doomed:
+        # ``restored_from`` is a self-FK ON DELETE SET NULL, so a row
+        # outside this set that points at one of these simply loses the
+        # pointer instead of blocking the delete.
+        await session.execute(
+            text("DELETE FROM entity_revision WHERE id = ANY(:ids)"),
+            {"ids": [str(i) for i in doomed]},
+        )
+        await session.flush()
+    return len(doomed)
+
+
 def restorable_payload(
     revision: EntityRevision, *, fields: Sequence[str] | None = None
 ) -> dict[str, Any]:
@@ -670,11 +784,11 @@ def restorable_payload(
     snapshot; a non-empty ``fields`` narrows to that subset and raises
     ``DomainError`` if it contains a non-restorable name.
     """
-    allowed = (
-        _TASK_RESTORABLE_FIELDS
-        if revision.entity_kind == ENTITY_KIND_TASK
-        else _NOTE_RESTORABLE_FIELDS
-    )
+    allowed = {
+        ENTITY_KIND_TASK: _TASK_RESTORABLE_FIELDS,
+        ENTITY_KIND_NOTE: _NOTE_RESTORABLE_FIELDS,
+        ENTITY_KIND_ANNOTATION: _ANNOTATION_RESTORABLE_FIELDS,
+    }[revision.entity_kind]
     snap: Mapping[str, Any] = revision.snapshot or {}
     if fields is None:
         chosen = [f for f in allowed if f in snap]

@@ -122,10 +122,45 @@ def test_rest_and_mcp_agree_on_equivalent_operations() -> None:
         (("POST", "/tasks"), "create_task"),
         (("GET", "/notes"), "list_notes"),
         (("POST", "/notes"), "create_note"),
+        # The destructive pairs, where a divergence costs the most: the
+        # part PURGE is the danger key on both surfaces, and the
+        # restorable trash/restore pair is an ordinary note write on both.
+        (("DELETE", "/notes/{note_id}/parts/{part_id}"), "delete_note_part"),
+        (("POST", "/notes/{note_id}/parts/{part_id}/trash"), "trash_note_part"),
+        (("POST", "/notes/{note_id}/parts/{part_id}/restore"), "restore_note_part"),
+        (("GET", "/notes/{note_id}/parts:trashed"), "list_trashed_note_parts"),
     ):
         assert ROUTE_SCOPES.get((method, path)) == TOOL_SCOPES[tool], (
             f"{method} {path} and MCP {tool} disagree"
         )
+
+
+def test_comment_writes_reach_the_same_rows_on_both_surfaces() -> None:
+    """The annotation body/lifecycle writes are an any-of pair, not a single
+    key, because the MCP twins are split across the two families that both
+    address the same ``comments`` rows: ``update_comment`` / ``delete_comment``
+    / ``restore_comment`` / ``replace_in_comment`` cost comments:write, while
+    ``edit_annotation`` / ``delete_annotation`` cost annotations:write. Mapping
+    the REST routes to one key would make whichever surface is cheaper the
+    bypass; the any-of makes them agree by construction."""
+    for method, path in (
+        ("PATCH", "/annotations/{annotation_id}"),
+        ("DELETE", "/annotations/{annotation_id}"),
+        ("POST", "/annotations/{annotation_id}/body/patch"),
+        ("POST", "/annotations/{annotation_id}/body/replace"),
+        ("PATCH", "/annotations/{annotation_id}/body/stream"),
+        ("POST", "/annotations/{annotation_id}/restore"),
+    ):
+        req = ROUTE_SCOPES[(method, path)]
+        assert isinstance(req, frozenset), (method, path)
+        assert req == {"annotations:write", "comments:write"}, (method, path)
+        assert scope_permits(method, path, ["comments:write"])
+        assert scope_permits(method, path, ["annotations:write"])
+        assert not scope_permits(method, path, ["annotations:read"])
+    # Both MCP families really do target the same rows, which is why the
+    # any-of is the honest mapping rather than a widening.
+    assert TOOL_SCOPES["update_comment"] == "comments:write"
+    assert TOOL_SCOPES["edit_annotation"] == "annotations:write"
 
 
 # --------------------------------------------------------------------------

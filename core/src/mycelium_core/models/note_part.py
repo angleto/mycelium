@@ -21,6 +21,7 @@ import datetime
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -83,6 +84,53 @@ class NotePart(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         PG_UUID(as_uuid=True),
         nullable=True,
     )
+
+
+class NotePartTrash(UUIDPKMixin, OrgScopedMixin, Base):
+    """A trashed part, waiting to be restored or purged (migration 0089).
+
+    The restorable half of part deletion. ``id`` is the ORIGINAL part's
+    id (supplied by the service, not defaulted) so a restore puts the
+    same part back rather than a copy: ids referenced elsewhere resolve
+    again after the round trip.
+
+    No ``VersionMixin``: a trashed part is not editable, and the version
+    the row carried at trash time is preserved verbatim in
+    ``part_version`` so restoring resumes the sequence instead of
+    resetting it -- an ``expected_version`` captured before the trash
+    must still lose after the restore.
+
+    Lives in its own table rather than as a ``deleted_at`` flag on
+    ``note_part`` because ``uq_note_part_note_id_ord`` has to stay
+    DEFERRABLE for the insert-at-ord shift, and Postgres has no partial
+    deferrable UNIQUE constraint to exclude tombstones from it.
+    """
+
+    __tablename__ = "note_part_trash"
+
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The ord held at trash time. Restore aims for it and shifts the
+    # survivors aside if the slot was taken in the meantime.
+    ord: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    lang: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    merged_from_note_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+    )
+    part_version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="1")
+    trashed_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # No FK: the actor row can be purged while the entry is still
+    # restorable, and the attribution is audit sugar.
+    trashed_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
 
 class NotePartUIState(Base):

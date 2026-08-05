@@ -322,3 +322,70 @@ async def test_merge_idempotent_on_already_merged_source() -> None:
         )
         assert again.status_code == 200, again.text
         assert len(again.json()["parts"]) == n_parts  # no double-move
+
+
+async def test_trash_list_restore_round_trip_over_rest() -> None:
+    """The restorable delete at the integration boundary: POST .../trash
+    removes the part, GET /parts:trashed surfaces it, POST .../restore
+    puts the SAME id back at its old ord."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "n")
+        a = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "A"})).json()
+        b = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "B"})).json()
+        d = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "D"})).json()
+
+        trashed = await c.post(f"/notes/{note_id}/parts/{b['id']}/trash", headers=h)
+        assert trashed.status_code == 204, trashed.text
+        listed = (await c.get(f"/notes/{note_id}/parts", headers=h)).json()
+        assert [p["id"] for p in listed] == [a["id"], d["id"]]
+
+        bin_ = await c.get(f"/notes/{note_id}/parts:trashed", headers=h)
+        assert bin_.status_code == 200, bin_.text
+        assert [e["id"] for e in bin_.json()] == [b["id"]]
+        assert bin_.json()[0]["body"] == "B"
+
+        restored = await c.post(f"/notes/{note_id}/parts/{b['id']}/restore", headers=h)
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["id"] == b["id"]
+        assert restored.json()["ord"] == b["ord"]
+        after = (await c.get(f"/notes/{note_id}/parts", headers=h)).json()
+        assert [p["id"] for p in after] == [a["id"], b["id"], d["id"]]
+        assert (await c.get(f"/notes/{note_id}/parts:trashed", headers=h)).json() == []
+
+
+async def test_trash_expected_version_guard_over_rest() -> None:
+    """The optional concurrency guard is a query param; a stale value
+    409s and leaves the part in place."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "n")
+        p = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "A"})).json()
+        await c.patch(
+            f"/notes/{note_id}/parts/{p['id']}",
+            headers=h,
+            json={"expected_version": 1, "body": "A edited"},
+        )
+        stale = await c.post(
+            f"/notes/{note_id}/parts/{p['id']}/trash?expected_version=1", headers=h
+        )
+        assert stale.status_code == 409, stale.text
+        assert len((await c.get(f"/notes/{note_id}/parts", headers=h)).json()) == 1
+
+        ok = await c.post(f"/notes/{note_id}/parts/{p['id']}/trash?expected_version=2", headers=h)
+        assert ok.status_code == 204, ok.text
+
+
+async def test_purge_is_not_restorable_over_rest() -> None:
+    """DELETE stays the irreversible verb: after it, restore 404s."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "n")
+        p = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "A"})).json()
+        assert (await c.delete(f"/notes/{note_id}/parts/{p['id']}", headers=h)).status_code == 204
+        gone = await c.post(f"/notes/{note_id}/parts/{p['id']}/restore", headers=h)
+        assert gone.status_code == 404, gone.text
+        assert (await c.get(f"/notes/{note_id}/parts:trashed", headers=h)).json() == []

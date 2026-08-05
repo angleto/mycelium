@@ -244,7 +244,7 @@ async def test_empty_trash_erases_blobs_by_provenance(_embedder: None) -> None:
         )
     async with tenant_session(str(org), str(owner)) as s:
         counts = await trash.empty_trash(s, org_id=org, actor_id=owner)
-    assert counts == {"tasks": 1, "notes": 1}
+    assert counts == {"tasks": 1, "notes": 1, "note_parts": 0}
     blobs_left, sources_left = await _blob_and_source_counts(org, owner, doomed_blobs)
     assert blobs_left == 0
     assert sources_left == 0

@@ -391,15 +391,34 @@ parts_app = typer.Typer(
 app.add_typer(parts_app, name="parts")
 
 
-def _resolve_part(c: Any, note_id: str, partial: str) -> str:
-    """Resolve a short-id (or full uuid) to a part id within a note."""
+def _resolve_part(c: Any, note_id: str, partial: str, *, include_trashed: bool = False) -> str:
+    """Resolve a short-id (or full uuid) to a part id within a note.
+    ``include_trashed`` also searches the note's trash, for the commands
+    (the purge) that accept a part in either state."""
     if len(partial) >= 32:
         return partial
     rows = get_json(c.get(f"/notes/{note_id}/parts"))
+    if include_trashed:
+        rows = list(rows) + list(get_json(c.get(f"/notes/{note_id}/parts:trashed")))
     short = partial.lower()
     matches = [p for p in rows if str(p["id"]).lower().startswith(short)]
     if not matches:
         raise CLIError(f"no part matching '{partial}' on note {short_id(note_id)}.")
+    if len({str(p["id"]) for p in matches}) > 1:
+        raise CLIError(f"part prefix '{partial}' is ambiguous on note {short_id(note_id)}.")
+    return str(matches[0]["id"])
+
+
+def _resolve_trashed_part(c: Any, note_id: str, partial: str) -> str:
+    """Resolve a short-id against the note's TRASHED parts only (a
+    restore never targets a live one)."""
+    if len(partial) >= 32:
+        return partial
+    rows = get_json(c.get(f"/notes/{note_id}/parts:trashed"))
+    short = partial.lower()
+    matches = [p for p in rows if str(p["id"]).lower().startswith(short)]
+    if not matches:
+        raise CLIError(f"no trashed part matching '{partial}' on note {short_id(note_id)}.")
     if len(matches) > 1:
         raise CLIError(f"part prefix '{partial}' is ambiguous on note {short_id(note_id)}.")
     return str(matches[0]["id"])
@@ -734,19 +753,68 @@ def parts_edit(
     success(f"updated part {short_id(pid)} (v{resp.get('version')})")
 
 
+@parts_app.command("trash")
+def parts_trash(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+) -> None:
+    """Remove a part, restorably (``parts restore`` puts it back).
+    Remaining ords stay as-is (no compaction)."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        resp = c.post(f"/notes/{full}/parts/{pid}/trash")
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"trashed part {short_id(pid)} from note {short_id(full)}")
+
+
+@parts_app.command("restore")
+def parts_restore(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(..., help="Id from `parts trashed` (short ids accepted)."),
+) -> None:
+    """Put a trashed part back at the ord it held, with its original id."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_trashed_part(c, full, part_id)
+        part = get_json(c.post(f"/notes/{full}/parts/{pid}/restore"))
+    success(f"restored part {short_id(pid)} at ord {part.get('ord')}")
+
+
+@parts_app.command("trashed")
+def parts_trashed(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+) -> None:
+    """List the note's trashed parts, most recently trashed first."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        rows = get_json(c.get(f"/notes/{full}/parts:trashed"))
+    if not rows:
+        success(f"no trashed parts on note {short_id(full)}")
+        return
+    for r in rows:
+        head = next((ln.strip() for ln in (r.get("body") or "").splitlines() if ln.strip()), "")
+        typer.echo(
+            f"{short_id(str(r['id']))}  ord={r['ord']}  {r.get('trashed_at', '')}  {head[:60]}"
+        )
+
+
 @parts_app.command("rm")
 def parts_rm(
     note_id: str = typer.Argument(..., autocompletion=complete_note_id),
     part_id: str = typer.Argument(...),
 ) -> None:
-    """Hard-delete a part. Remaining ords stay as-is (no compaction)."""
+    """PURGE a part: irreversible, nothing to restore from. Use
+    ``parts trash`` for the restorable delete. Accepts a live or an
+    already-trashed part. Remaining ords stay as-is (no compaction)."""
     with client() as c:
         full = _resolve_note(c, note_id)
-        pid = _resolve_part(c, full, part_id)
+        pid = _resolve_part(c, full, part_id, include_trashed=True)
         resp = c.delete(f"/notes/{full}/parts/{pid}")
         if resp.status_code not in (200, 204):
             get_json(resp)
-    success(f"deleted part {short_id(pid)} from note {short_id(full)}")
+    success(f"purged part {short_id(pid)} from note {short_id(full)}")
 
 
 @parts_app.command("reorder")

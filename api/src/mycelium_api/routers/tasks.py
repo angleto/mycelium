@@ -38,6 +38,7 @@ from mycelium_api.schemas import (
     ParticipantOut,
     ReminderIn,
     ReminderOut,
+    ReplaceOut,
     RevisionOut,
     RevisionRestoreIn,
     RevisionSummaryIn,
@@ -52,6 +53,7 @@ from mycelium_api.schemas import (
     TaskCreateIn,
     TaskDescriptionAppendIn,
     TaskDescriptionPrependIn,
+    TaskDescriptionReplaceIn,
     TaskNoteCreateIn,
     TaskNoteLinkIn,
     TaskNoteLinksOut,
@@ -659,6 +661,30 @@ async def prepend_description(
         dedupe_if_head_matches=body.dedupe_if_head_matches,
     )
     return AppendOut(id=task_id, version=new_version, appended_chars=prepended)
+
+
+@router.post("/{task_id}/description/replace", response_model=ReplaceOut)
+async def replace_in_description(
+    task_id: uuid.UUID,
+    body: TaskDescriptionReplaceIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> ReplaceOut:
+    """Anchored find/replace inside ``task.description`` without
+    resending it -- the twin of the note-part and annotation replaces.
+    The description could be appended and prepended to but never amended
+    in place. ``count=0`` replaces every occurrence; a no-op (``find``
+    absent) returns ``replacements=0`` and leaves the version alone."""
+    new_version, n = await svc.replace_in_description(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        find=body.find,
+        replace=body.replace,
+        expected_version=body.expected_version,
+        count=body.count,
+    )
+    return ReplaceOut(id=task_id, version=new_version, replacements=n)
 
 
 @router.get("/{task_id}/description/raw")

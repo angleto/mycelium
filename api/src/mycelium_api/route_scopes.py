@@ -63,6 +63,16 @@ re-litigated per route):
   comment body while a tasks-only one is granted it). The REST map does not
   inherit the MCP bug; the MCP-side split is tracked separately.
 
+- The annotation body/lifecycle WRITES (PATCH, DELETE, ``body/patch``,
+  ``body/replace``, ``body/stream``, ``restore``) map to the any-of
+  ``ANNOTATION_WRITE_ANY``. The MCP twins are split across two families
+  addressing the same ``comments`` rows -- ``update_comment`` /
+  ``delete_comment`` / ``replace_in_comment`` / ``restore_comment`` are
+  ``comments:write``, ``edit_annotation`` / ``delete_annotation`` are
+  ``annotations:write`` -- so pinning one key here would make whichever
+  surface is cheaper the bypass. Unlike LINK_WRITE_ANY, no handler-side
+  narrowing follows: either key genuinely suffices.
+
 - Read-only notification routes fall onto ``notifications:write`` because the
   catalog has no ``notifications:read`` key (neither surface does). Requiring
   MORE scope to read is fail-safe, not a hole; adding the read key is a
@@ -84,6 +94,18 @@ UNMAPPED: object = object()
 # precise per-kind key (see deps.require_agent_scope). ``notes:write`` OR
 # ``tasks:write`` covers the note<->task link routes (task c19f2f63 review, #5).
 LINK_WRITE_ANY: frozenset[str] = frozenset({"notes:write", "tasks:write"})
+
+# Any-of value, second family: the annotation body/lifecycle writes. ``comments:*``
+# denotes the comment/suggestion COLLABORATION family, not "task work-diary rows
+# only" -- add_comment, propose/accept/reject_suggestion and resolve all sit on
+# comments:write and all already reach inline note annotations, which are the
+# same table and the same ``_get``. Editing, replacing and restoring a comment
+# therefore cannot cost a different key than creating and deleting it: the
+# quintet create/edit/replace/delete/restore either belongs to the family or it
+# does not. Unlike LINK_WRITE_ANY there is no per-body discriminator to narrow
+# in the handler -- either key genuinely suffices, so no ``require_agent_scope``
+# call follows.
+ANNOTATION_WRITE_ANY: frozenset[str] = frozenset({"annotations:write", "comments:write"})
 
 # (METHOD, path template) -> scope key | PUBLIC | HUMAN_ONLY | any-of frozenset
 ROUTE_SCOPES: dict[tuple[str, str], object] = {
@@ -126,16 +148,25 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/annotations/suggestion/stream"): "comments:write",
     ("PUT", "/annotations/ui-state"): "annotations:write",
     ("GET", "/annotations/{annotation_id}"): "annotations:read",
-    ("PATCH", "/annotations/{annotation_id}"): "annotations:write",
-    ("DELETE", "/annotations/{annotation_id}"): "annotations:write",
+    ("PATCH", "/annotations/{annotation_id}"): ANNOTATION_WRITE_ANY,
+    ("DELETE", "/annotations/{annotation_id}"): ANNOTATION_WRITE_ANY,
     ("POST", "/annotations/{annotation_id}/accept"): "comments:write",
     ("POST", "/annotations/{annotation_id}/assign"): "annotations:write",
-    ("POST", "/annotations/{annotation_id}/body/patch"): "annotations:write",
+    ("POST", "/annotations/{annotation_id}/body/append"): ANNOTATION_WRITE_ANY,
+    ("POST", "/annotations/{annotation_id}/body/patch"): ANNOTATION_WRITE_ANY,
+    ("POST", "/annotations/{annotation_id}/body/prepend"): ANNOTATION_WRITE_ANY,
     ("GET", "/annotations/{annotation_id}/body/raw"): "annotations:read",
-    ("PATCH", "/annotations/{annotation_id}/body/stream"): "annotations:write",
+    ("POST", "/annotations/{annotation_id}/body/replace"): ANNOTATION_WRITE_ANY,
+    ("PATCH", "/annotations/{annotation_id}/body/stream"): ANNOTATION_WRITE_ANY,
     ("POST", "/annotations/{annotation_id}/reject"): "comments:write",
     ("POST", "/annotations/{annotation_id}/reopen"): "annotations:write",
+    ("POST", "/annotations/{annotation_id}/purge"): "delete:comments",
     ("POST", "/annotations/{annotation_id}/resolve"): "comments:write",
+    ("GET", "/annotations/{annotation_id}/revisions"): "comments:read",
+    ("GET", "/annotations/{annotation_id}/revisions/{rev_id}"): "comments:read",
+    ("PATCH", "/annotations/{annotation_id}/revisions/{rev_id}"): ANNOTATION_WRITE_ANY,
+    ("POST", "/annotations/{annotation_id}/revisions/{rev_id}/restore"): ANNOTATION_WRITE_ANY,
+    ("POST", "/annotations/{annotation_id}/restore"): ANNOTATION_WRITE_ANY,
     ("PUT", "/annotations/{annotation_id}/ui-state"): "annotations:write",
     # --- app ---
     ("GET", "/apidocs"): PUBLIC,
@@ -368,8 +399,13 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("PUT", "/notes/{note_id}/parts/order"): "notes:write",
     ("POST", "/notes/{note_id}/parts/stream"): "notes:write",
     ("PUT", "/notes/{note_id}/parts/ui-state"): "notes:write",
+    ("GET", "/notes/{note_id}/parts:trashed"): "notes:read",
     ("PATCH", "/notes/{note_id}/parts/{part_id}"): "notes:write",
+    # The PURGE (irreversible) stays on the danger key; the restorable
+    # delete is POST .../trash, which is an ordinary note write.
     ("DELETE", "/notes/{note_id}/parts/{part_id}"): "delete:notes",
+    ("POST", "/notes/{note_id}/parts/{part_id}/restore"): "notes:write",
+    ("POST", "/notes/{note_id}/parts/{part_id}/trash"): "notes:write",
     ("POST", "/notes/{note_id}/parts/{part_id}/append"): "notes:write",
     ("POST", "/notes/{note_id}/parts/{part_id}/body/patch"): "notes:write",
     ("GET", "/notes/{note_id}/parts/{part_id}/body/raw"): "notes:read",
@@ -477,6 +513,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/tasks/{task_id}/description/append"): "tasks:write",
     ("POST", "/tasks/{task_id}/description/patch"): "tasks:write",
     ("POST", "/tasks/{task_id}/description/prepend"): "tasks:write",
+    ("POST", "/tasks/{task_id}/description/replace"): "tasks:write",
     ("GET", "/tasks/{task_id}/description/raw"): "tasks:read",
     ("PUT", "/tasks/{task_id}/description/stream"): "tasks:write",
     ("POST", "/tasks/{task_id}/edit-session/seal"): "tasks:write",

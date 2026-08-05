@@ -1,7 +1,10 @@
 """Empty the workspace recycle bin.
 
 Hard-deletes every soft-deleted task and note for the current
-workspace (and their attachment blobs in the object store, if any).
+workspace (and their attachment blobs in the object store, if any),
+plus every trashed note PART -- those live in their own side table
+(migration 0089) and belong to notes that are usually still alive, so
+no note purge would ever reach them.
 Restricted to ``Role.admin`` (so owners and admins, never members).
 
 Mirrors the cascading-delete strategy of
@@ -22,7 +25,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
-from mycelium_core.models.note_part import NotePart
+from mycelium_core.models.note_part import NotePart, NotePartTrash
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit
 from mycelium_core.services.memory import erase_blobs_for_sources
@@ -35,9 +38,11 @@ async def empty_trash(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
 ) -> dict[str, int]:
-    """Permanently delete every soft-deleted task/note in the workspace.
+    """Permanently delete every soft-deleted task/note in the workspace,
+    plus every trashed note part.
 
-    Returns ``{"tasks": n, "notes": m}`` with the counts purged.
+    Returns ``{"tasks": n, "notes": m, "note_parts": p}`` with the counts
+    purged.
     """
     await require_role(session, org_id, actor_id, Role.admin)
 
@@ -109,6 +114,20 @@ async def empty_trash(
         await session.execute(delete(Task).where(Task.id.in_(task_ids)))
     if note_ids:
         await session.execute(delete(Note).where(Note.id.in_(note_ids)))
+    # Trashed note PARTS are in the bin too (migration 0089), so emptying
+    # the bin empties them -- including those belonging to notes that are
+    # very much alive. Entries whose note was purged above are already
+    # gone with it (FK note_id ON DELETE CASCADE); this DELETE catches the
+    # rest. No blob sweep: a part's search blob is dropped when it is
+    # trashed, not when it is purged.
+    trashed_part_ids = list(
+        (await session.execute(select(NotePartTrash.id).where(NotePartTrash.org_id == org_id)))
+        .scalars()
+        .all()
+    )
+    if trashed_part_ids:
+        await session.execute(delete(NotePartTrash).where(NotePartTrash.id.in_(trashed_part_ids)))
+    parts_purged = len(trashed_part_ids)
     await session.flush()
 
     await audit.log(
@@ -118,6 +137,11 @@ async def empty_trash(
         entity="workspace",
         entity_id=org_id,
         action="empty_trash",
-        diff={"tasks": len(task_ids), "notes": len(note_ids), "blobs": blobs_deleted},
+        diff={
+            "tasks": len(task_ids),
+            "notes": len(note_ids),
+            "note_parts": parts_purged,
+            "blobs": blobs_deleted,
+        },
     )
-    return {"tasks": len(task_ids), "notes": len(note_ids)}
+    return {"tasks": len(task_ids), "notes": len(note_ids), "note_parts": parts_purged}

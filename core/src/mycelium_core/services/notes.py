@@ -14,12 +14,12 @@ from __future__ import annotations
 import datetime as dt
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.ai_providers import (
@@ -611,9 +611,9 @@ async def restore_revision(
     payload = _revisions.restorable_payload(revision, fields=fields)
     if not payload:
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    # Phase 6 final: ``transcript`` left the Note row; route a
-    # restored transcript into note_part(ord=0). Other restorable
-    # fields (``title``) flow through the row as before.
+    # Phase 6 final: ``transcript`` left the Note row; a restored body
+    # goes back into the parts table. Other restorable fields
+    # (``title``) flow through the row as before.
     transcript_target: str | None = None
     row_values: dict[str, Any] = {}
     for key, value in payload.items():
@@ -621,6 +621,19 @@ async def restore_revision(
             transcript_target = value or ""
         else:
             row_values[key] = value
+    # ``parts`` is the structural form of the same body (migration 0089
+    # onward). It is not itself a restorable FIELD -- the public
+    # contract stays ``transcript``, which is what the SPA picker asks
+    # for -- but when the snapshot carries it, restoring "the body"
+    # means replaying the parts, so a multi-part note comes back as
+    # multiple parts. Revisions written before that key existed fall
+    # back to the flat path.
+    snapshot: Mapping[str, Any] = revision.snapshot or {}
+    parts_target: list[dict[str, Any]] | None = None
+    if transcript_target is not None:
+        raw_parts = snapshot.get("parts")
+        if isinstance(raw_parts, list):
+            parts_target = [p for p in raw_parts if isinstance(p, dict)]
     if not row_values and transcript_target is None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     if not row_values:
@@ -641,9 +654,155 @@ async def restore_revision(
         edit_session_id=None,
         restored_from=revision_id,
     )
-    if transcript_target is not None:
-        await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=transcript_target)
+    if parts_target is not None:
+        await _restore_parts(session, org_id=org_id, note_id=note_id, parts=parts_target)
+    elif transcript_target is not None:
+        await _collapse_parts_to_body(
+            session, org_id=org_id, note_id=note_id, body=transcript_target
+        )
     return new_version
+
+
+async def _restore_parts(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    parts: Sequence[Mapping[str, Any]],
+) -> None:
+    """Replay a snapshot's ``parts`` onto a note, structure and all.
+
+    Upsert rather than wipe-and-recreate: a part id present in both the
+    snapshot and the live note is UPDATED in place, so its per-user
+    collapse state (``note_part_ui_state``, FK ON DELETE CASCADE) and
+    its search-blob pointer survive a restore. Live parts absent from
+    the snapshot are removed with their blobs; snapshot parts absent
+    from the note are re-inserted with their ORIGINAL id, so ids
+    captured before the restore resolve again.
+
+    Versions only ever go UP. A rewritten part's version is bumped from
+    its CURRENT value, not reset to the snapshot's, so a client that
+    read the part before the restore loses its next write instead of
+    silently clobbering the restore -- ``version`` is bumped explicitly
+    by the service layer here (VersionMixin has no ORM-side counter), so
+    forgetting this would be a silent lost-update hole. A re-inserted
+    part takes the highest version it is known to have reached, so the
+    same guard holds across a trash round trip.
+
+    Ord collisions mid-replay are fine: ``uq_note_part_note_id_ord`` is
+    DEFERRABLE INITIALLY DEFERRED, so uniqueness is checked at COMMIT,
+    after every row has landed on its final ord.
+    """
+    from mycelium_core.models.note_part import NotePart, NotePartTrash
+    from mycelium_core.services import note_search
+
+    live = {
+        p.id: p
+        for p in (
+            (
+                await session.execute(
+                    select(NotePart).where(NotePart.note_id == note_id, NotePart.org_id == org_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    }
+    wanted: set[uuid.UUID] = set()
+    for entry in parts:
+        try:
+            pid = uuid.UUID(str(entry.get("id")))
+        except (ValueError, TypeError):
+            # A snapshot row without a usable id cannot be placed;
+            # skipping it is better than inventing an identity.
+            continue
+        wanted.add(pid)
+        body = entry.get("body") or ""
+        ord_ = int(entry.get("ord") or 0)
+        existing = live.get(pid)
+        if existing is not None:
+            existing.ord = ord_
+            existing.title = entry.get("title")
+            existing.body = body
+            existing.lang = entry.get("lang")
+            # Monotone: a restore is a write like any other, so anyone
+            # holding the pre-restore version must lose their next save.
+            existing.version = int(existing.version) + 1
+        else:
+            # The part may have been trashed since the snapshot. It is
+            # live again now, so the trash copy is moot -- and leaving
+            # it would let a later restore_part collide on the PK. Its
+            # stored version is the highest this id is known to have
+            # reached, so the concurrency guard survives the round trip.
+            trashed_version = (
+                await session.execute(
+                    select(NotePartTrash.part_version).where(
+                        NotePartTrash.id == pid, NotePartTrash.org_id == org_id
+                    )
+                )
+            ).scalar_one_or_none()
+            session.add(
+                NotePart(
+                    id=pid,
+                    org_id=org_id,
+                    note_id=note_id,
+                    ord=ord_,
+                    title=entry.get("title"),
+                    body=body,
+                    lang=entry.get("lang"),
+                    version=max(int(entry.get("version") or 1), int(trashed_version or 1)),
+                )
+            )
+            if trashed_version is not None:
+                await session.execute(
+                    delete(NotePartTrash).where(
+                        NotePartTrash.id == pid, NotePartTrash.org_id == org_id
+                    )
+                )
+        note_search.mark_note_part_dirty(session, pid)
+    for pid in set(live) - wanted:
+        await note_search.delete_part_index_now(session, pid)
+        await session.execute(delete(NotePart).where(NotePart.id == pid, NotePart.org_id == org_id))
+    await session.flush()
+
+
+async def _collapse_parts_to_body(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    body: str,
+) -> None:
+    """Make ``body`` the note's ENTIRE body: part(ord=0) becomes it and
+    every other part goes.
+
+    The fallback for revisions written before snapshots carried
+    ``parts``. Those snapshots hold only the flat join of every part,
+    so structure is genuinely unrecoverable from them -- but the join
+    already CONTAINS the other parts' text. Writing it into part 0 and
+    leaving the rest in place (what the restore used to do) duplicated
+    every part after the first into the note body.
+    """
+    from mycelium_core.models.note_part import NotePart
+    from mycelium_core.services import note_search
+
+    stale = (
+        (
+            await session.execute(
+                select(NotePart.id).where(
+                    NotePart.note_id == note_id,
+                    NotePart.org_id == org_id,
+                    NotePart.ord != 0,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for pid in stale:
+        await note_search.delete_part_index_now(session, pid)
+        await session.execute(delete(NotePart).where(NotePart.id == pid, NotePart.org_id == org_id))
+    await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=body)
 
 
 async def update_note(
@@ -1458,7 +1617,12 @@ async def gdpr_erase_note(
     (``source_kind='note'``, written by older transcribes) and the
     per-part search blobs (``source_kind='note_part'``) that the note
     search index (services.note_search) now writes for every part. Both
-    must go so an erase leaves no embedding behind."""
+    must go so an erase leaves no embedding behind.
+
+    Trashed parts (``note_part_trash``, migration 0089) hold bodies too;
+    they go with the note row via the FK CASCADE, and their blobs were
+    already dropped when they were trashed -- so an erase leaves nothing
+    of them behind either."""
     from mycelium_core.models.note_part import NotePart
 
     await require_role(session, org_id, actor_id, Role.member)
@@ -1491,6 +1655,14 @@ async def gdpr_erase_note(
     from mycelium_core.services import kg as kg_svc
 
     await kg_svc.erase_by_source(session, org_id=org_id, actor_id=actor_id, source_note_id=note_id)
+    # The recovery history holds FULL COPIES of the body (``transcript``,
+    # plus the per-part ``parts`` since migration 0089), and it is NOT
+    # reached by a foreign key -- ``entity_revision`` is polymorphic on
+    # ``(entity_kind, entity_id)``. What clears it is the AFTER DELETE
+    # trigger ``trg_note_revision_cascade`` (migration 0006), which fires
+    # on the row delete below. No explicit sweep here: a second delete
+    # would be dead code whose only effect is to suggest the trigger
+    # cannot be relied on.
     await session.delete(note)
     await session.flush()
     await audit.log(

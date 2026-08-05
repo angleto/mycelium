@@ -130,6 +130,61 @@ def test_delete_keys_are_danger_and_gate_hard_destruction() -> None:
     assert TOOL_SCOPES["clear_done"] == "delete:tasks"
 
 
+def test_part_removal_is_reachable_without_the_danger_key() -> None:
+    """The other half of review #3's own rule: only the IRREVERSIBLE op
+    belongs on the danger key, so the RESTORABLE one must be an ordinary
+    note write.
+
+    Removing a block of a note is routine editing. While the purge was the
+    only way to do it, that routine operation cost a danger key no ordinary
+    assistant holds (``DEFAULT_SCOPES`` is reads-only), and the capability
+    read as simply absent from the surface -- the tool was filtered out
+    before an MCP client could ever see it. ``trash_note_part`` /
+    ``restore_note_part`` restore the symmetry that ``delete_note`` (soft,
+    notes:write) always had; ``delete_note_part`` keeps the danger key
+    because it still destroys for good.
+    """
+    assert TOOL_SCOPES["trash_note_part"] == "notes:write"
+    assert TOOL_SCOPES["restore_note_part"] == "notes:write"
+    assert TOOL_SCOPES["list_trashed_note_parts"] == "notes:read"
+    assert TOOL_SCOPES["delete_note_part"] == "delete:notes"
+    tok = _PRINCIPAL_SCOPE.set(["notes:read", "notes:write"])
+    try:
+        assert _scope_permits("trash_note_part")
+        assert _scope_permits("restore_note_part")
+        assert _scope_permits("list_trashed_note_parts")
+        assert not _scope_permits("delete_note_part")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+def test_comment_family_is_one_key() -> None:
+    """``comments:write`` denotes the comment/suggestion collaboration
+    family, so the whole quintet costs the same key.
+
+    Before, an assistant holding comments:write could CREATE a comment
+    (``add_comment``) and DESTROY it (``delete_comment``) but never rewrite
+    it: every body-write path was annotations:write. A caller allowed to
+    delete a comment but not to fix a typo in it is an incoherent surface,
+    not a tighter one.
+    """
+    for tool in (
+        "add_comment",
+        "update_comment",
+        "replace_in_comment",
+        "delete_comment",
+        "restore_comment",
+    ):
+        assert TOOL_SCOPES[tool] == "comments:write", tool
+    tok = _PRINCIPAL_SCOPE.set(["comments:read", "comments:write"])
+    try:
+        assert _scope_permits("update_comment")
+        assert _scope_permits("replace_in_comment")
+        assert _scope_permits("restore_comment")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
 def test_meta_tools_are_exactly_the_bootstrap_trio() -> None:
     """META = callable with any scope. Keep this set tiny and auditable: it is
     the standing hole in the gate, so it may only hold self-identity /

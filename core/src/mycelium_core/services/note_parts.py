@@ -34,11 +34,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.concurrency import optimistic_update
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
-from mycelium_core.models.note_part import NotePart, NotePartUIState
+from mycelium_core.models.note_part import NotePart, NotePartTrash, NotePartUIState
 from mycelium_core.services import audit, note_search, text_patch
 from mycelium_core.services.rbac import require_role
 
@@ -123,12 +123,67 @@ async def _get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.U
     return part
 
 
+async def _get_trashed(
+    session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID
+) -> NotePartTrash:
+    entry = (
+        await session.execute(
+            select(NotePartTrash).where(NotePartTrash.id == part_id, NotePartTrash.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise NotFoundError(MessageCode.NOTE_PART_NOT_TRASHED)
+    return entry
+
+
 async def get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID) -> NotePart:
     """Read a single part by id: random access into a long note's body
     without fetching every other part. Member-level; RLS already scopes
     the SELECT to the tenant. Raises ``NOTE_NOT_FOUND`` for an unknown or
     foreign part id."""
     return await _get_part(session, org_id=org_id, part_id=part_id)
+
+
+async def _log_parts_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    changed_fields: list[str],
+    channel: str = "api",
+) -> None:
+    """Recovery-history row for a STRUCTURAL change to a note's parts.
+
+    The body mutators (update / append / prepend / replace) have always
+    written one; create, reorder, merge, trash, restore and purge did
+    not, which left three holes: the timeline claimed nothing happened,
+    a mis-click was unrecoverable, and -- now that a snapshot carries
+    ``parts`` and not only the flat ``transcript`` -- a restore of the
+    preceding revision is what actually undoes them. Every mutation of a
+    note's body, content OR structure, writes a row here.
+
+    ``version_from == version_to``: parts carry their own
+    ``VersionMixin``, so a part change never bumps the note row's
+    version; the snapshot is what records the change. Channel ``api``
+    (not ``web``) on purpose -- these are discrete structural acts, not
+    keystrokes, so each seals its own row instead of coalescing into an
+    autosave window.
+    """
+    from mycelium_core.services.notes import _log_note_revision
+
+    note = await _get_note_in_org(session, org_id=org_id, note_id=note_id)
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        version_from=note.version,
+        version_to=note.version,
+        changed_fields=changed_fields,
+        channel=channel,
+        edit_session_id=None,
+    )
 
 
 async def _assert_not_promoted(
@@ -200,6 +255,13 @@ async def create_part(
     )
     session.add(part)
     await session.flush()
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        changed_fields=[f"parts[{target_ord}]._create"],
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -570,6 +632,189 @@ async def replace_in_part(
     return new_version, n
 
 
+async def trash_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+    expected_version: int | None = None,
+) -> None:
+    """Remove a part from the note, RESTORABLY: the row moves to
+    ``note_part_trash`` (migration 0089) keeping its id, ord, body,
+    title, lang and version, and :func:`restore_part` puts it back.
+    This is the ordinary delete verb for a part -- the inverse pair
+    ``Note`` and ``Task`` already had, and the reason part removal no
+    longer has to be fenced behind a danger scope.
+
+    The remaining parts keep their ords (no automatic compaction) so
+    any deep-link via ord survives, and so a restore can aim at the
+    slot the part came from; reorder stays an explicit operation.
+
+    ``expected_version`` is an optional optimistic-concurrency guard:
+    supply it to refuse trashing a part someone edited since you read
+    it (``stale_version``). Omitting it trashes unconditionally, which
+    is the contract the REST DELETE and the SPA already rely on.
+
+    The search blob goes with the part: a trashed part must not keep
+    surfacing in ``memory_search``. :func:`restore_part` re-indexes,
+    which mints a NEW blob -- the content round-trips losslessly, the
+    blob's clustering and access counters do not.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    if expected_version is not None and part.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION, current_version=int(part.version))
+    session.add(
+        NotePartTrash(
+            id=part.id,
+            org_id=org_id,
+            note_id=part.note_id,
+            ord=part.ord,
+            title=part.title,
+            body=part.body,
+            lang=part.lang,
+            merged_from_note_id=part.merged_from_note_id,
+            part_version=part.version,
+            trashed_by=actor_id,
+        )
+    )
+    # Drop the part's search blob inline first: the index pointer cascades
+    # with the part row (FK ON DELETE CASCADE), so a deferred flush would
+    # no longer resolve the blob to delete. Deleting the blob now cascades
+    # the pointer, so the part DELETE below has nothing left to cascade.
+    await note_search.delete_part_index_now(session, part_id)
+    await session.execute(delete(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id))
+    await session.flush()
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=part.note_id,
+        changed_fields=[f"parts[{part.ord}]._trash"],
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_part",
+        entity_id=part_id,
+        action="trash",
+        diff={"note_id": str(part.note_id), "ord": str(part.ord)},
+    )
+
+
+async def restore_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+) -> NotePart:
+    """Put a trashed part back into its note -- the exact inverse of
+    :func:`trash_part`. The part returns with its ORIGINAL id, body,
+    title, lang and version, so ids captured before the trash resolve
+    again and a stale ``expected_version`` still loses.
+
+    Placement: the part aims at the ord it held when trashed. If that
+    slot was taken in the meantime, everything at or after it shifts
+    forward by one (the same deferred-unique shift :func:`create_part`
+    uses for insert-at-ord), so the part lands where it was relative
+    to its neighbours instead of being appended at the end.
+
+    Raises ``note.part.not_trashed`` when no trash entry matches:
+    an unknown id, one already restored, or one purged by
+    :func:`delete_part`.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    entry = await _get_trashed(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=entry.note_id)
+    # The note itself may have been deleted (and its trash rows cascade
+    # with it), but a note can also have been emptied of parts; validate
+    # it is still there so the re-INSERT cannot violate the FK.
+    await _get_note_in_org(session, org_id=org_id, note_id=entry.note_id)
+    occupied = (
+        await session.execute(
+            select(NotePart.id).where(
+                NotePart.note_id == entry.note_id,
+                NotePart.org_id == org_id,
+                NotePart.ord == entry.ord,
+            )
+        )
+    ).scalar_one_or_none()
+    if occupied is not None:
+        await session.execute(
+            update(NotePart)
+            .where(
+                NotePart.note_id == entry.note_id,
+                NotePart.org_id == org_id,
+                NotePart.ord >= entry.ord,
+            )
+            .values(ord=NotePart.ord + 1)
+            .execution_options(synchronize_session=False)
+        )
+    part = NotePart(
+        id=entry.id,
+        org_id=org_id,
+        note_id=entry.note_id,
+        ord=entry.ord,
+        title=entry.title,
+        body=entry.body,
+        lang=entry.lang,
+        merged_from_note_id=entry.merged_from_note_id,
+        version=entry.part_version,
+    )
+    session.add(part)
+    await session.execute(
+        delete(NotePartTrash).where(NotePartTrash.id == part_id, NotePartTrash.org_id == org_id)
+    )
+    await session.flush()
+    # Re-index: trash dropped the blob, so this mints a fresh one from
+    # the restored row on the next search flush.
+    note_search.mark_note_part_dirty(session, part.id)
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=entry.note_id,
+        changed_fields=[f"parts[{entry.ord}]._restore"],
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_part",
+        entity_id=part_id,
+        action="restore",
+        diff={"note_id": str(entry.note_id), "ord": str(entry.ord)},
+    )
+    return part
+
+
+async def list_trashed(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+) -> list[NotePartTrash]:
+    """Trashed parts of a note, most recently trashed first. Without
+    this a restore would be undiscoverable: the caller that trashed the
+    part is rarely the one that wants it back."""
+    rows = (
+        (
+            await session.execute(
+                select(NotePartTrash)
+                .where(NotePartTrash.note_id == note_id, NotePartTrash.org_id == org_id)
+                .order_by(NotePartTrash.trashed_at.desc(), NotePartTrash.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
 async def delete_part(
     session: AsyncSession,
     *,
@@ -577,11 +822,38 @@ async def delete_part(
     actor_id: uuid.UUID,
     part_id: uuid.UUID,
 ) -> None:
-    """Hard-delete a part. The remaining parts keep their ords (no
-    automatic compaction) so any deep-link via ord survives; reorder
-    is an explicit operation."""
+    """PURGE a part: irreversible, no trash entry, nothing to restore
+    from. This is what the ``delete:notes`` danger key fences; the
+    restorable delete is :func:`trash_part`.
+
+    Accepts a part in either state. A live part is destroyed outright
+    (its search blob with it); an already-trashed one has its trash
+    entry destroyed, so a purge never needs a restore-then-delete
+    dance. The remaining parts keep their ords in both cases.
+    """
     await require_role(session, org_id, actor_id, Role.member)
-    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    part = (
+        await session.execute(
+            select(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if part is None:
+        # Not live: purge the trash entry, or 404 if there is none.
+        entry = await _get_trashed(session, org_id=org_id, part_id=part_id)
+        await session.execute(
+            delete(NotePartTrash).where(NotePartTrash.id == part_id, NotePartTrash.org_id == org_id)
+        )
+        await session.flush()
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note_part",
+            entity_id=part_id,
+            action="purge",
+            diff={"note_id": str(entry.note_id), "ord": str(entry.ord), "from": "trash"},
+        )
+        return
     await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     # Drop the part's search blob inline first: the index pointer cascades
     # with the part row (FK ON DELETE CASCADE), so a deferred flush would
@@ -590,6 +862,13 @@ async def delete_part(
     await note_search.delete_part_index_now(session, part_id)
     await session.execute(delete(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id))
     await session.flush()
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=part.note_id,
+        changed_fields=[f"parts[{part.ord}]._purge"],
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -650,6 +929,16 @@ async def reorder_parts(
             .execution_options(synchronize_session=False)
         )
     await session.flush()
+    # The PREVIOUS revision holds the previous ordering, which is the
+    # only record of it: reorder rewrites every ord in place and keeps
+    # no history of its own.
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        changed_fields=["parts._reorder"],
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -847,6 +1136,25 @@ async def merge_notes(
             )
         )
     await session.flush()
+    # BOTH notes changed shape, so both get a revision: the target
+    # gained parts, the source lost every one of them and was trashed.
+    # Without the pair, the only record of a merge was an audit line
+    # with two ids in it, and neither note's timeline showed the biggest
+    # edit it ever had.
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=target_note_id,
+        changed_fields=["parts._merge_in"],
+    )
+    await _log_parts_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=source_note_id,
+        changed_fields=["parts._merge_out"],
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -867,14 +1175,20 @@ async def merge_notes(
 
 
 __all__ = [
+    "append_to_part",
     "create_part",
     "delete_part",
+    "get_part",
     "get_ui_states_for_user",
     "list_parts",
+    "list_trashed",
     "merge_notes",
     "parts_by_note",
+    "prepend_to_part",
     "reorder_parts",
     "replace_in_part",
+    "restore_part",
     "set_ui_state",
+    "trash_part",
     "update_part",
 ]

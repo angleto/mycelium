@@ -264,13 +264,18 @@ async def empty_workspace_trash(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TrashEmptyOut:
     """Permanently delete every soft-deleted task and note in the
-    current workspace (owner/admin only; the service re-checks)."""
+    current workspace, plus every trashed note part (owner/admin only;
+    the service re-checks)."""
     counts = await trash.empty_trash(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
     )
-    return TrashEmptyOut(tasks=counts["tasks"], notes=counts["notes"])
+    return TrashEmptyOut(
+        tasks=counts["tasks"],
+        notes=counts["notes"],
+        note_parts=counts["note_parts"],
+    )
 
 
 @router.delete(

@@ -72,7 +72,18 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
     ),
     ScopeDef("notes:write", "write", "Write notes", "Create and edit notes."),
     ScopeDef("memory:write", "write", "Write memory", "Append to the memory store."),
-    ScopeDef("comments:write", "write", "Write comments", "Add comments to tasks."),
+    ScopeDef(
+        "comments:write",
+        "write",
+        "Write comments",
+        "Take part in the comment/suggestion conversation: add, edit, replace, "
+        "delete and restore a comment, and propose / accept / reject / resolve "
+        "a suggestion. Covers both places comments live -- a task's work diary "
+        "and an inline note annotation -- since they are one kind of row. "
+        "Accepting a suggestion additionally needs write on the document it "
+        "splices into (notes:write / tasks:write), so this key is never a way "
+        "to edit a document body indirectly.",
+    ),
     ScopeDef("calendar:write", "write", "Write calendar", "Create or edit events and holidays."),
     ScopeDef(
         "dependencies:write", "write", "Write dependencies", "Create or remove task dependencies."
@@ -104,9 +115,10 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "delete:notes",
         "danger",
         "Delete note data",
-        "Irreversibly destroy note content: hard-delete a note part (its row and "
-        "search index) or purge checklist items. Trashing a note (restorable) "
-        "stays under notes:write.",
+        "Irreversibly destroy note content: PURGE a note part (its row, its "
+        "trash entry and its search index) or purge checklist items. The "
+        "restorable operations stay under notes:write -- trashing a note, and "
+        "trashing a part (trash_note_part / restore_note_part).",
     ),
     ScopeDef(
         "delete:tasks",
@@ -114,6 +126,16 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Delete task data",
         "Irreversibly purge task checklist items (no restore). Trashing a task "
         "(restorable) stays under tasks:write.",
+    ),
+    ScopeDef(
+        "delete:comments",
+        "danger",
+        "Delete comment data",
+        "Irreversibly destroy a comment or suggestion: the entry, its per-user "
+        "card state and its whole revision history, with no restore. Deleting a "
+        "comment the ordinary (restorable) way stays under comments:write. "
+        "Admin-only at the service layer as well: erasing a signed entry from a "
+        "shared conversation is not the author's private business.",
     ),
     ScopeDef(
         "dispatch:approve",

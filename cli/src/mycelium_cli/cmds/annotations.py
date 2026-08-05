@@ -212,12 +212,53 @@ def edit(
     success(f"edited {short_id(annotation_id)}")
 
 
+@app.command("replace")
+def replace(
+    annotation_id: str = typer.Argument(...),
+    find: str = typer.Option(..., "--find", help="Literal text to swap."),
+    repl: str = typer.Option(..., "--replace", help="Replacement text."),
+    count: int = typer.Option(0, "--count", help="0 = every occurrence; N = the first N."),
+) -> None:
+    """Anchored find/replace inside an annotation body, without
+    resending the whole thing (author or admin only)."""
+    with client() as c:
+        version = _annotation_version(c, annotation_id)
+        out = get_json(
+            c.post(
+                f"/annotations/{annotation_id}/body/replace",
+                json={
+                    "find": find,
+                    "replace": repl,
+                    "expected_version": version,
+                    "count": count,
+                },
+            )
+        )
+    success(f"replaced {out.get('replacements')} occurrence(s) in {short_id(annotation_id)}")
+
+
 @app.command("rm")
 def remove(annotation_id: str = typer.Argument(...)) -> None:
-    """Soft-delete an annotation / withdraw a pending suggestion."""
+    """Soft-delete an annotation / withdraw a pending suggestion
+    (``annotations restore`` brings it back)."""
     with client() as c:
         version = _annotation_version(c, annotation_id)
         resp = c.delete(f"/annotations/{annotation_id}", params={"expected_version": version})
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"removed {short_id(annotation_id)}")
+
+
+@app.command("restore")
+def restore(annotation_id: str = typer.Argument(...)) -> None:
+    """Undo an ``annotations rm``: the comment (or withdrawn suggestion)
+    is back in the diary. Author or admin only."""
+    with client() as c:
+        deleted = get_json(c.get(f"/annotations/{annotation_id}", params={"include_deleted": True}))
+        get_json(
+            c.post(
+                f"/annotations/{annotation_id}/restore",
+                json={"expected_version": int(deleted["version"])},
+            )
+        )
+    success(f"restored {short_id(annotation_id)}")

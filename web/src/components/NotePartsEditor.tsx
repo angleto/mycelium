@@ -86,6 +86,10 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     // Which part's id chip just got copied (transient, per-part so only
     // the clicked chip flips to its "copied" label, not every chip).
     const [copiedPid, setCopiedPid] = useState<string | null>(null)
+    // The part just moved to the trash, if any: the undo bar restores
+    // it. Cleared on the next reload of a different kind, so the offer
+    // does not outlive the edit that produced it.
+    const [undoPid, setUndoPid] = useState<string | null>(null)
     const [editingBody, setEditingBody] = useState<Record<string, string>>({})
     // Title draft keyed by part.id. Distinct from ``editingBody`` so
     // a user can edit just the title without bumping the body draft
@@ -237,18 +241,52 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       }
     }
 
+    // Removing a part is RESTORABLE (migration 0089): the block moves to
+    // the note's trash and ``.../restore`` puts it back with the same id
+    // at the same ord. The DELETE verb on the same path is the
+    // irreversible purge and is deliberately NOT what this button calls
+    // -- the editor's × should never destroy prose for good.
     const removePart = async (pid: string) => {
-      if (!confirm(t('notes.parts.confirmDelete', { defaultValue: 'Remove this part?' })))
+      if (
+        !confirm(
+          t('notes.parts.confirmDelete', {
+            defaultValue: 'Remove this part? You can undo this.',
+          }),
+        )
+      )
         return
       setBusyPid(pid)
       try {
-        const res = await authFetch(`/notes/${noteId}/parts/${pid}`, {
-          method: 'DELETE',
+        const res = await authFetch(`/notes/${noteId}/parts/${pid}/trash`, {
+          method: 'POST',
         })
         if (!res.ok && res.status !== 204) {
           setErr(errMessage(await res.json().catch(() => ({}))))
           return
         }
+        // Offer the undo instead of only announcing the removal: without
+        // a way back from here, a restorable delete would look exactly
+        // like the irreversible one it replaced.
+        setUndoPid(pid)
+        await reload()
+      } finally {
+        setBusyPid(null)
+      }
+    }
+
+    const undoRemove = async () => {
+      if (!undoPid) return
+      const pid = undoPid
+      setBusyPid(pid)
+      try {
+        const res = await authFetch(`/notes/${noteId}/parts/${pid}/restore`, {
+          method: 'POST',
+        })
+        if (!res.ok) {
+          setErr(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+        setUndoPid(null)
         await reload()
       } finally {
         setBusyPid(null)
@@ -514,6 +552,27 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           )}
         </header>
         {err && <p className="error">{err}</p>}
+        {undoPid && (
+          <p className="hint parts-editor__undo">
+            {t('notes.parts.trashed', { defaultValue: 'Part removed.' })}{' '}
+            <button
+              type="button"
+              className="btn--sm"
+              disabled={busyPid !== null}
+              onClick={() => void undoRemove()}
+            >
+              {t('notes.parts.undoRemove', { defaultValue: 'Undo' })}
+            </button>{' '}
+            <button
+              type="button"
+              className="btn--sm btn--ghost"
+              onClick={() => setUndoPid(null)}
+              aria-label={t('common.dismiss', { defaultValue: 'Dismiss' })}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </p>
+        )}
         {loading && <p className="hint">{t('common.loading')}</p>}
         {!loading && parts.length === 0 && (
           <p className="hint">

@@ -81,15 +81,31 @@ TOOL_SCOPES: dict[str, str | None] = {
     "create_calendar": "calendar:write",
     "remove_holiday": "calendar:write",
     "set_user_calendar": "calendar:write",
+    "get_comment": "comments:read",
+    "get_comment_revision": "comments:read",
+    "list_comment_revisions": "comments:read",
     "list_comments": "comments:read",
+    "list_trashed_comments": "comments:read",
     "accept_suggestion": "comments:write",
     "add_comment": "comments:write",
     "add_comment_instructions": "comments:write",
+    # The comment quintet is one family, so it is one key: creating and
+    # deleting a comment already cost comments:write, and editing,
+    # replacing or restoring the same row cannot cost a different one
+    # without making the surface incoherent (a caller able to destroy a
+    # comment but not to fix a typo in it). The REST twins are mapped to
+    # the ANNOTATION_WRITE_ANY any-of so the two surfaces agree.
+    "append_to_comment": "comments:write",
     "delete_comment": "comments:write",
+    "prepend_to_comment": "comments:write",
     "propose_suggestion": "comments:write",
     "propose_suggestion_instructions": "comments:write",
     "reject_suggestion": "comments:write",
+    "replace_in_comment": "comments:write",
     "resolve_annotation": "comments:write",
+    "restore_comment": "comments:write",
+    "restore_comment_revision": "comments:write",
+    "update_comment": "comments:write",
     "graph": "dependencies:read",
     "list_dependencies": "dependencies:read",
     "add_dependency": "dependencies:write",
@@ -162,6 +178,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "list_note_revisions": "notes:read",
     "list_note_task_links": "notes:read",
     "list_notes": "notes:read",
+    "list_trashed_note_parts": "notes:read",
     "list_turns": "notes:read",
     "suggest_note_links": "notes:read",
     "add_note_part": "notes:write",
@@ -178,7 +195,18 @@ TOOL_SCOPES: dict[str, str | None] = {
     "create_note": "notes:write",
     "create_task_note": "notes:write",
     "delete_note": "notes:write",
+    # PURGE, irreversible -> danger key (taxonomy review, task c19f2f63).
+    # The RESTORABLE delete of a part is trash_note_part, which is an
+    # ordinary note write by that review's own rule ("soft-delete
+    # (trash, restorable) and archive stay on notes:write"). Before the
+    # trash existed, purging was the ONLY way to remove a block, which
+    # put a routine editing operation behind a danger scope no ordinary
+    # assistant holds.
     "delete_note_part": "delete:notes",
+    # Same rule one family over: destroying a comment's entry AND its
+    # revision history leaves nothing to restore from, so it is fenced;
+    # delete_comment (soft, restorable) stays on comments:write.
+    "purge_comment": "delete:comments",
     "email_to_note": "notes:write",
     "garden_apply": "notes:write",
     "garden_review_approve": "notes:write",
@@ -195,6 +223,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "reorder_note_parts": "notes:write",
     "replace_in_note_part": "notes:write",
     "restore_note": "notes:write",
+    "restore_note_part": "notes:write",
     "restore_note_revision": "notes:write",
     "run_command": "notes:write",
     "set_note_client": "notes:write",
@@ -203,6 +232,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "set_note_part_body_instructions": "notes:write",
     "start_conversation_session": "notes:write",
     "start_task_on_note": "notes:write",
+    "trash_note_part": "notes:write",
     "unlink_note_task": "notes:write",
     "unlink_notes": "notes:write",
     "update_note": "notes:write",
@@ -260,6 +290,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "derive_task_from_note": "tasks:write",
     "email_to_task": "tasks:write",
     "prepend_to_task_description": "tasks:write",
+    "replace_in_task_description": "tasks:write",
     "promote_note_to_task": "tasks:write",
     "record_task_artifact": "tasks:write",
     "remove_item": "delete:tasks",

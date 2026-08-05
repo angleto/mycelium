@@ -301,6 +301,62 @@ async def test_lifecycle_resolve_reopen_edit_delete() -> None:
         ).json()
         assert listed == []
 
+        # ...and restore brings it back: the delete is soft on every
+        # surface now, not just in the row.
+        rs = await c.post(
+            f"/annotations/{aid}/restore", headers=h, json={"expected_version": d.json()["version"]}
+        )
+        assert rs.status_code == 200, rs.text
+        back = (
+            await c.get(
+                "/annotations", headers=h, params={"doc_kind": "task_description", "doc_id": tid}
+            )
+        ).json()
+        assert [x["id"] for x in back] == [aid]
+
+
+async def test_replace_in_annotation_body_over_rest() -> None:
+    """Anchored find/replace on a comment body: the twin of the note-part
+    replace, which the annotation family did not have at any scope. The
+    no-op contract matches too (no version bump, stale cursor ignored)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        tid = (await c.post("/tasks", headers=h, json={"title": "T"})).json()["id"]
+        a = (
+            await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={
+                    "doc_kind": "task_description",
+                    "doc_id": tid,
+                    "body": "ship friday, review friday",
+                },
+            )
+        ).json()
+        aid = a["id"]
+
+        r = await c.post(
+            f"/annotations/{aid}/body/replace",
+            headers=h,
+            json={"find": "friday", "replace": "monday", "expected_version": a["version"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["replacements"] == 2
+        assert r.json()["version"] == a["version"] + 1
+        assert (await c.get(f"/annotations/{aid}", headers=h)).json()["body"] == (
+            "ship monday, review monday"
+        )
+
+        noop = await c.post(
+            f"/annotations/{aid}/body/replace",
+            headers=h,
+            json={"find": "absent", "replace": "x", "expected_version": 999},
+        )
+        assert noop.status_code == 200, noop.text
+        assert noop.json()["replacements"] == 0
+        assert noop.json()["version"] == a["version"] + 1  # unchanged
+
 
 async def test_accept_rejects_a_plain_comment() -> None:
     transport = ASGITransport(app=app)

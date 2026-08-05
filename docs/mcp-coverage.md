@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**258 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**273 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -175,7 +175,7 @@ over-fetch the org table and filter in its head.
 | `memory_write` | Write a memory blob (embedding metered when produced; degrades |
 | `set_email_ingest_to_memory` | Toggle whether this account's synced (non-bulk) messages are |
 
-### notes (57)
+### notes (60)
 
 | Tool | Summary |
 |---|---|
@@ -191,7 +191,7 @@ over-fetch the org table and filter in its head.
 | `create_note` | Capture a note (voice\|text\|conversation). Unmetered. |
 | `create_task_note` | TASK-side of the bidirectional Proposal A link: create a *fresh* |
 | `delete_note` | Soft-delete a note (recoverable via restore_note). |
-| `delete_note_part` | Hard-delete a part. Remaining parts keep their ord values (no |
+| `delete_note_part` | PURGE a part: irreversible, nothing to restore from afterwards. |
 | `derive_task_from_note` | Create a task as a fruit of this note. The note stays alive |
 | `distill_note` | Fungal decomposition (ADR-0034): distil a note's body into a |
 | `email_to_note` | Create a note from a message (WS-3), with a back-link. The account's |
@@ -209,6 +209,7 @@ over-fetch the org table and filter in its head.
 | `list_note_revisions` | Recovery-history timeline for a note, most recent first. |
 | `list_notes` | List notes (newest first); for the @note picker. Returns the paginated |
 | `list_task_participants` | List the additional identities pinned to an appointment-task |
+| `list_trashed_note_parts` | Parts of a note that were trashed and can still be restored, most |
 | `list_turns` | List the turns of a conversation note, in order. Returns the paginated |
 | `merge_notes` | Fold the source note's parts into the target (task 7070a456 |
 | `move_note_to_project` | Move a note into a project (share it). A note has at most one |
@@ -223,6 +224,7 @@ over-fetch the org table and filter in its head.
 | `reorder_note_parts` | Rewrite the entire ordering of a note's parts. ``part_ids`` |
 | `replace_in_note_part` | Anchored edit inside ONE note part: replace occurrences of the |
 | `restore_note` | Restore a soft-deleted note. |
+| `restore_note_part` | Put a trashed part back into its note -- the inverse of |
 | `restore_note_revision` | Revert a note's ``title`` / ``transcript`` to a past revision. |
 | `run_command` | Deterministic canonical NL command (offline, unmetered). |
 | `set_note_client` | Re-point a note at a client. A note has exactly one client, so |
@@ -234,6 +236,7 @@ over-fetch the org table and filter in its head.
 | `start_task_on_note` | Watering: this task is the work of growing the note. Records a |
 | `synthesize_speech` | TTS voice-out (metered per character). |
 | `transcribe_note` | Run STT on a voice note (metered per audio-minute). |
+| `trash_note_part` | DELETE one part of a note, restorably: the block leaves the note |
 | `update_note` | Edit a note's title/body. A blank title is re-derived from the |
 | `update_note_part` | Edit a part's body / lang. ``expected_version`` enforces |
 
@@ -299,13 +302,14 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (34)
+### tasks (46)
 
 | Tool | Summary |
 |---|---|
 | `add_checklist_item` | Append a checklist item to a task ("alexa, add bread to the |
 | `add_comment` | Add a comment to a task (a chronological work-diary entry on the |
 | `add_comment_instructions` | Recipe for a TOKEN-FREE inline comment: stream the comment text |
+| `append_to_comment` | Append ``text`` to the END of a comment without reading or |
 | `append_to_task_description` | Append ``text`` to ``task.description`` without first reading the |
 | `archive_task` | Archive (or unarchive with ``archived=False``) a task. |
 | `assign_task` | Assign a user to a task (idempotent). |
@@ -316,16 +320,26 @@ over-fetch the org table and filter in its head.
 | `delete_comment` | Soft-delete a comment -- the inverse of ``add_comment`` (author or |
 | `delete_task` | Soft-delete a task (recoverable via restore_task). |
 | `download_attachment_capability` | Mint ONE short-TTL capability token that downloads EVERY attachment |
+| `get_comment` | Read ONE comment by id: random access into a long work diary |
+| `get_comment_revision` | Single comment-revision lookup; 404 if the id does not belong to |
 | `get_task` | Read one task with its full attribute set (for editing). Includes |
 | `get_task_revision` | Single revision lookup; 404 if the id doesn't belong to this |
 | `list_attachments` | List a note's OR a task's attachments (metadata only; the binary |
 | `list_checklist` | List a task's checklist items, ordered by position. |
+| `list_comment_revisions` | Recovery-history timeline for ONE comment, most recent first |
 | `list_comments` | List a task's work-diary comments (doc_kind='task_description'), oldest |
 | `list_task_revisions` | Recovery-history timeline for a task, most recent first. |
 | `list_tasks` | List tasks: filter by state, tag, parent, assignee, owner, free-text |
+| `list_trashed_comments` | Comments of a task that were deleted and can still be restored, |
+| `prepend_to_comment` | Prepend ``text`` to the FRONT of a comment without reading or |
 | `prepend_to_task_description` | Prepend ``text`` to the FRONT of ``task.description`` without |
+| `purge_comment` | PURGE a comment: destroy the entry, its card state and its whole |
 | `record_task_artifact` | The task produced (or updated) this note. Records an |
 | `remove_item` | Remove an item from the task's checklist. |
+| `replace_in_comment` | Anchored edit inside ONE comment: replace occurrences of the |
+| `replace_in_task_description` | Anchored edit inside ``task.description``: replace occurrences of |
+| `restore_comment` | Undo a ``delete_comment``: the comment (or withdrawn suggestion) |
+| `restore_comment_revision` | Revert a comment's BODY to a past revision. Only the body is |
 | `restore_task` | Restore a soft-deleted task. |
 | `restore_task_revision` | Revert a task's restorable content fields to a past revision. |
 | `set_task_assignee` | Set or clear who should work on the task (docs/adr/0028 D2). |
@@ -333,6 +347,7 @@ over-fetch the org table and filter in its head.
 | `task_decline` | Member: decline an offered task (lightweight: notify the offerer |
 | `unassign_task` | Unassign a user from a task. |
 | `uncheck_item` | Un-tick a checklist item (clears ``done_at`` / ``done_by``). |
+| `update_comment` | EDIT a comment: replace its whole body. Completes the |
 | `update_task` | Edit task fields (only the given ones). ``priority`` is a |
 | `upload_attachment` | Attach a file (base64-encoded bytes) to a note OR a task. |
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
@@ -378,17 +393,27 @@ over-fetch the org table and filter in its head.
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
 <!-- END GENERATED -->
 
-## Scope model (advisory)
+## Scope model
 
 Every tool maps to a scope key in `SCOPE_CATALOG`
 (`core/src/mycelium_core/mcp_scopes.py`) — the single source of truth, in
-three buckets: **read**, **write**, **danger**. Enforcement is still
-advisory (the per-tool gate is the deferred item flagged in
-`mcp_scopes.py`); the safe default once flipped is “key missing → off for
-any non-legacy assistant” (principle of least authority). The binding
-follows a **most-specific** rule: a tool that mutates a task while touching
-a tag is `tasks:write`, not `tags:write`, because the mutation lives on the
-task row.
+three buckets: **read**, **write**, **danger**. Enforcement is **live and
+fail-closed**: a bound assistant is denied any tool whose key it does not
+hold, and a tool absent from `TOOL_SCOPES` is denied outright rather than
+allowed (`mcp/src/mycelium_mcp/server.py`, `_scope_permits`). A denied tool
+is not merely un-callable — it is filtered out of `search_tools` /
+`describe_tools`, so to the caller it reads as absent from the surface. The
+default grant is reads-only; writes and danger keys are opt-in, granted by
+a human at mint. The binding follows a **most-specific** rule: a tool that
+mutates a task while touching a tag is `tasks:write`, not `tags:write`,
+because the mutation lives on the task row.
+
+Danger keys carry exactly the operations that **cannot be undone**. The
+restorable counterpart of a destructive operation belongs on the ordinary
+write key, and every destructive operation should have one: `delete_note`
+(soft) vs the trash purge, `trash_note_part` / `restore_note_part` vs
+`delete_note_part`, `delete_comment` / `restore_comment`. A destructive
+verb with no inverse is the thing to fix, not the thing to fence.
 
 ## Service capabilities not (yet) on MCP
 

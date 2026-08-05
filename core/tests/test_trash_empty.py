@@ -92,7 +92,7 @@ async def test_empty_trash_purges_only_soft_deleted() -> None:
         )
     async with tenant_session(str(org), str(owner)) as s:
         counts = await trash.empty_trash(s, org_id=org, actor_id=owner)
-    assert counts == {"tasks": 1, "notes": 1}
+    assert counts == {"tasks": 1, "notes": 1, "note_parts": 0}
 
     async with tenant_session(str(org), str(owner)) as s:
         assert (await s.execute(select(Task).where(Task.id == live.id))).scalar_one_or_none()
@@ -134,4 +134,4 @@ async def test_empty_trash_noop_when_empty() -> None:
     org, owner = await _owner_org()
     async with tenant_session(str(org), str(owner)) as s:
         counts = await trash.empty_trash(s, org_id=org, actor_id=owner)
-    assert counts == {"tasks": 0, "notes": 0}
+    assert counts == {"tasks": 0, "notes": 0, "note_parts": 0}

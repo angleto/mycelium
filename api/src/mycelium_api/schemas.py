@@ -421,10 +421,14 @@ class EditSessionSealOut(BaseModel):
 
 
 class TrashEmptyOut(BaseModel):
-    """Counts of rows purged by ``POST /workspaces/me/trash/empty``."""
+    """Counts of rows purged by ``POST /workspaces/me/trash/empty``.
+    ``note_parts`` counts trashed note BLOCKS (migration 0089), which
+    the bin holds independently of their notes -- a live note can have
+    trashed parts, and emptying the bin purges those too."""
 
     tasks: int
     notes: int
+    note_parts: int = 0
 
 
 class TagCreateIn(BaseModel):
@@ -2464,6 +2468,21 @@ class TaskDescriptionPrependIn(BaseModel):
     dedupe_if_head_matches: bool = False
 
 
+class TaskDescriptionReplaceIn(BaseModel):
+    """Body for POST /tasks/{id}/description/replace: anchored
+    find/replace inside ``task.description`` without resending it. Same
+    semantics as the note-part and annotation replaces -- ``count=0``
+    (default) swaps every occurrence of the literal ``find``, a positive
+    ``count`` only the first N, and a no-op returns ``replacements=0``
+    without bumping the version. ``expected_version`` omitted writes onto
+    the current version, matching the append/prepend twins."""
+
+    find: str = Field(min_length=1)
+    replace: str
+    expected_version: int | None = None
+    count: int = Field(default=0, ge=0)
+
+
 class AppendOut(BaseModel):
     """Response for the append endpoints. ``appended_chars`` is 0 when
     ``dedupe_if_tail_matches=True`` triggered a no-op."""
@@ -2528,6 +2547,35 @@ class NotePartReplaceIn(BaseModel):
     operation_id: str | None = None
 
 
+class AnnotationAppendIn(BaseModel):
+    """Body for POST /annotations/{id}/body/{append,prepend}: add text to
+    one end of a comment/annotation body without resending it. The
+    annotation twin of the task-description append, so the same shape --
+    ``expected_version`` omitted writes onto the current version, and the
+    dedupe flag makes a replay a no-op (it tests the tail on append, the
+    head on prepend)."""
+
+    text: str = Field(min_length=1)
+    separator: str = "\n\n"
+    expected_version: int | None = None
+    dedupe_if_tail_matches: bool = False
+
+
+class AnnotationReplaceIn(BaseModel):
+    """Body for POST /annotations/{id}/body/replace: anchored
+    find/replace inside one comment/annotation body without resending
+    it. The annotation twin of ``NotePartReplaceIn``, same semantics --
+    ``count=0`` (default) replaces every occurrence of the literal
+    ``find``, a positive ``count`` only the first N, and a no-op
+    (``find`` absent) returns ``replacements=0`` without bumping the
+    version."""
+
+    find: str = Field(min_length=1)
+    replace: str
+    expected_version: int
+    count: int = Field(default=0, ge=0)
+
+
 class NotePartOut(BaseModel):
     """One ordered markdown block of a note (task 71c9d670 Phase 2a).
     ``ui_collapsed`` is the caller's current collapse state for this
@@ -2543,6 +2591,22 @@ class NotePartOut(BaseModel):
     merged_from_note_id: uuid.UUID | None = None
     version: int
     ui_collapsed: bool = False
+
+
+class NotePartTrashOut(BaseModel):
+    """A trashed note part, restorable by id (migration 0089). Same
+    content shape as ``NotePartOut`` minus the live-only fields, plus
+    when and by whom it was trashed. ``ord`` is the position it will
+    aim for on restore."""
+
+    id: uuid.UUID
+    note_id: uuid.UUID
+    ord: int
+    title: str | None = None
+    body: str
+    lang: str | None = None
+    trashed_at: datetime.datetime
+    trashed_by: uuid.UUID | None = None
 
 
 class NotePartCreateIn(BaseModel):

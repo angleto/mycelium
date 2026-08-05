@@ -26,7 +26,7 @@ import datetime as dt
 import uuid
 from typing import cast
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit, md_anchor, text_patch
+from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services.rbac import require_role
 
@@ -124,6 +125,45 @@ async def _get(
     if ann.deleted_at is not None and not include_deleted:
         raise NotFoundError(MessageCode.ANNOTATION_NOT_FOUND)
     return ann
+
+
+async def _log_annotation_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    version_from: int,
+    version_to: int,
+    changed_fields: list[str],
+    channel: str = "api",
+    restored_from: uuid.UUID | None = None,
+) -> None:
+    """Recovery-history entry for a comment mutation (migration 0090).
+
+    Reads the row back so the snapshot reflects the POST-update state --
+    the Core UPDATE inside ``optimistic_update`` bypasses the ORM
+    mapper, exactly as it does for notes and tasks.
+
+    Channel ``api``, never ``web``: a comment is written in one shot from
+    a card, not keystroke-by-keystroke into an autosave window, so there
+    is nothing to coalesce and every edit seals its own row.
+    """
+    fresh = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    await _revisions.append(
+        session,
+        org_id=org_id,
+        entity_kind=_revisions.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+        actor_id=actor_id,
+        snapshot=_revisions.snapshot_annotation(fresh),
+        changed_fields=changed_fields,
+        channel=channel,
+        version_from=version_from,
+        version_to=version_to,
+        edit_session_id=None,
+        restored_from=restored_from,
+    )
 
 
 async def _require_author_or_admin(
@@ -226,6 +266,15 @@ async def create_comment(
         action="create",
         diff={"kind": "comment", "doc_kind": doc_kind},
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=ann.id,
+        version_from=ann.version,
+        version_to=ann.version,
+        changed_fields=["_create"],
+    )
     return ann
 
 
@@ -287,6 +336,15 @@ async def propose_suggestion(
         entity_id=ann.id,
         action="create",
         diff={"kind": "suggestion", "doc_kind": doc_kind},
+    )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=ann.id,
+        version_from=ann.version,
+        version_to=ann.version,
+        changed_fields=["_create"],
     )
     return ann
 
@@ -366,9 +424,21 @@ async def count_for_doc(
 
 
 async def get_annotation(
-    session: AsyncSession, *, org_id: uuid.UUID, annotation_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    include_deleted: bool = False,
 ) -> Annotation:
-    return await _get(session, org_id=org_id, annotation_id=annotation_id)
+    """``include_deleted=True`` reads a soft-deleted row: the only way to
+    learn the ``version`` :func:`restore` needs, for a caller that was not
+    the one who deleted it."""
+    return await _get(
+        session,
+        org_id=org_id,
+        annotation_id=annotation_id,
+        include_deleted=include_deleted,
+    )
 
 
 async def list_assigned(
@@ -428,6 +498,15 @@ async def edit(
         entity_id=annotation_id,
         action="edit",
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["body"],
+    )
     return new_version
 
 
@@ -463,6 +542,142 @@ async def apply_patch_to_body(
         expected_version=expected_version,
         actor_identity_id=actor_identity_id,
     )
+
+
+async def append_to_body(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_tail_matches: bool = False,
+    actor_identity_id: uuid.UUID | None = None,
+) -> tuple[int, int]:
+    """Append ``text`` to a comment/annotation body WITHOUT reading it
+    first -- the annotation twin of ``tasks.append_to_description`` and
+    ``note_parts.append_to_part``, the one family that had no way to add
+    to a body except resending the whole thing.
+
+    ``expected_version=None`` appends onto the current version (the
+    blind-append contract the task twin uses).
+    ``dedupe_if_tail_matches=True`` makes a replay a no-op returning
+    ``(current_version, 0)``. ``BODY_LIMIT_EXCEEDED`` past the body cap.
+    Persists through :func:`edit`, inheriting the author-or-admin gate
+    and the ``edited_at`` stamp.
+    """
+    from mycelium_core.services.notes import _collapsed_concat
+
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    current = ann.body or ""
+    if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
+        return ann.version, 0
+    new_body = _collapsed_concat(current, separator, text)
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await edit(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        body=new_body,
+        expected_version=expected_version if expected_version is not None else ann.version,
+        actor_identity_id=actor_identity_id,
+    )
+    return new_version, len(text)
+
+
+async def prepend_to_body(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_head_matches: bool = False,
+    actor_identity_id: uuid.UUID | None = None,
+) -> tuple[int, int]:
+    """Prepend ``text`` to the FRONT of a comment/annotation body: the
+    mirror of :func:`append_to_body`, same contract with the concat
+    order swapped. ``dedupe_if_head_matches=True`` no-ops when the body
+    already starts with ``text``."""
+    from mycelium_core.services.notes import _collapsed_concat
+
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    current = ann.body or ""
+    if dedupe_if_head_matches and current and current.lstrip().startswith(text.lstrip()):
+        return ann.version, 0
+    new_body = _collapsed_concat(text, separator, current)
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await edit(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        body=new_body,
+        expected_version=expected_version if expected_version is not None else ann.version,
+        actor_identity_id=actor_identity_id,
+    )
+    return new_version, len(text)
+
+
+async def replace_in_body(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    find: str,
+    replace: str,
+    expected_version: int,
+    count: int = 0,
+    actor_identity_id: uuid.UUID | None = None,
+) -> tuple[int, int]:
+    """Anchored find/replace inside ONE comment/annotation body without
+    resending it: the twin of ``note_parts.replace_in_part`` for the
+    annotation family, which had no anchored edit at any scope. Swaps
+    the literal ``find`` for ``replace``; ``count`` <= 0 replaces every
+    occurrence, a positive ``count`` only the first N. Returns
+    ``(new_version, replacements)``.
+
+    A no-op -- ``find`` empty or absent from the body -- returns
+    ``(current_version, 0)`` WITHOUT bumping the version and without
+    asserting ``expected_version`` (nothing changed, so nothing to
+    race), exactly like the note-part twin. Refuses with
+    ``body.limit_exceeded`` when the result would outgrow
+    ``MYCELIUM_NOTE_BODY_MAX_BYTES``.
+
+    Persists through :func:`edit`, so the author-or-admin gate, the
+    ``edited_at`` stamp and the version guard are inherited rather than
+    re-implemented (the delegation :func:`apply_patch_to_body` uses).
+    """
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    body = ann.body or ""
+    occurrences = body.count(find) if find else 0
+    if occurrences == 0:
+        return ann.version, 0
+    n = occurrences if count <= 0 else min(count, occurrences)
+    new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await edit(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        body=new_body,
+        expected_version=expected_version,
+        actor_identity_id=actor_identity_id,
+    )
+    return new_version, n
 
 
 async def assign(
@@ -526,6 +741,15 @@ async def assign(
         entity_id=annotation_id,
         action="unassign" if target is None else "assign",
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["assigned_to_identity_id"],
+    )
     return new_version
 
 
@@ -560,7 +784,166 @@ async def soft_delete(
         entity_id=annotation_id,
         action="delete",
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["_delete"],
+    )
     return new_version
+
+
+async def restore(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    expected_version: int,
+    actor_identity_id: uuid.UUID | None = None,
+) -> int:
+    """Undo a :func:`soft_delete`: clear ``deleted_at`` and the comment
+    (or withdrawn suggestion) is back in the diary. Author or admin
+    only, same gate as the delete it reverses.
+
+    Until this existed ``soft_delete`` had no inverse anywhere in the
+    tree: the row was retained but unreachable on every surface, which
+    made "soft" delete a one-way door in practice.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    await _require_author_or_admin(
+        session, org_id=org_id, actor_id=actor_id, actor_identity_id=actor_identity_id, ann=ann
+    )
+    new_version = await optimistic_update(
+        session,
+        Annotation,
+        pk=annotation_id,
+        expected_version=expected_version,
+        values={"deleted_at": None},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="annotation",
+        entity_id=annotation_id,
+        action="restore",
+    )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["_restore"],
+    )
+    return new_version
+
+
+async def restore_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    expected_version: int,
+    actor_identity_id: uuid.UUID | None = None,
+) -> int:
+    """Revert a comment's ``body`` to the snapshot in ``revision_id``.
+
+    ``body`` is the only restorable field (see
+    ``_ANNOTATION_RESTORABLE_FIELDS``): a restore reverts the words, not
+    the thread's status, its assignee or its anchoring. Produces a NEW
+    revision on the ``restore`` channel with ``restored_from`` set, so
+    the timeline stays monotonic and the restore is itself auditable --
+    same contract as the task and note restores.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    await _require_author_or_admin(
+        session, org_id=org_id, actor_id=actor_id, actor_identity_id=actor_identity_id, ann=ann
+    )
+    revision = await _revisions.get_revision(
+        session,
+        revision_id=revision_id,
+        entity_kind=_revisions.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+    )
+    payload = _revisions.restorable_payload(revision)
+    if not payload:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    new_version = await optimistic_update(
+        session,
+        Annotation,
+        pk=annotation_id,
+        expected_version=expected_version,
+        values={"body": payload["body"] or "", "edited_at": dt.datetime.now(dt.UTC)},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="annotation",
+        entity_id=annotation_id,
+        action="restore_revision",
+    )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["body"],
+        channel="restore",
+        restored_from=revision_id,
+    )
+    return new_version
+
+
+async def purge(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+) -> None:
+    """Destroy a comment for good: the row, its per-user card state and
+    its whole revision history. Irreversible -- this is what the
+    ``delete:comments`` danger key fences, and the counterpart of
+    ``note_parts.delete_part``. The ordinary, restorable removal is
+    :func:`soft_delete`.
+
+    Admin only, NOT author-or-admin. Everything else in this module lets
+    an author manage their own words, and that is right for a reversible
+    delete; erasing a signed entry from a shared conversation for good is
+    a different act, and the person best placed to abuse it is its
+    author. Accepts a live or an already-soft-deleted row.
+
+    The revision history goes with it via ``trg_comment_revision_cascade``
+    (migration 0090), which is also the only thing preventing a purged
+    comment's text from surviving in the timeline.
+    """
+    await require_role(session, org_id, actor_id, Role.admin)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    doc_kind = ann.doc_kind
+    await session.execute(delete(Annotation).where(Annotation.id == annotation_id))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="annotation",
+        entity_id=annotation_id,
+        action="purge",
+        diff={"doc_kind": doc_kind},
+    )
 
 
 async def resolve(
@@ -597,6 +980,15 @@ async def resolve(
         entity_id=annotation_id,
         action="resolve",
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["status"],
+    )
     return new_version
 
 
@@ -624,6 +1016,15 @@ async def reopen(
         entity="annotation",
         entity_id=annotation_id,
         action="reopen",
+    )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["status"],
     )
     return new_version
 
@@ -761,6 +1162,15 @@ async def accept_suggestion(
         entity_id=annotation_id,
         action="accept",
     )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["status"],
+    )
     return new_version
 
 
@@ -801,6 +1211,15 @@ async def reject_suggestion(
         entity="annotation",
         entity_id=annotation_id,
         action="reject",
+    )
+    await _log_annotation_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["status"],
     )
     return new_version
 

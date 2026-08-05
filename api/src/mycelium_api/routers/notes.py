@@ -51,6 +51,7 @@ from mycelium_api.schemas import (
     NotePartPrependIn,
     NotePartReorderIn,
     NotePartReplaceIn,
+    NotePartTrashOut,
     NotePartUIStateIn,
     NotePatchIn,
     NotePromoteIn,
@@ -1002,6 +1003,86 @@ async def patch_note_part_body(
     return VersionOut(id=part_id, version=v)
 
 
+@router.post(
+    "/{note_id}/parts/{part_id}/trash",
+    status_code=204,
+    tags=["garden"],
+)
+async def trash_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    expected_version: Annotated[int | None, Query(ge=1)] = None,
+) -> None:
+    """Remove a part RESTORABLY: it moves to the trash keeping its id
+    and content, and ``.../restore`` puts it back where it was. This is
+    the ordinary delete for a part; the DELETE verb on the same path is
+    the irreversible purge. Remaining parts keep their ords (no
+    compaction) so deep links by ord survive.
+
+    ``expected_version`` is an optional concurrency guard: supply it to
+    refuse trashing a part that changed since you read it."""
+    await parts_svc.trash_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        expected_version=expected_version,
+    )
+
+
+@router.post(
+    "/{note_id}/parts/{part_id}/restore",
+    response_model=NotePartOut,
+    tags=["garden"],
+)
+async def restore_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> NotePartOut:
+    """Put a trashed part back into its note with its original id, body
+    and version. It aims for the ord it held; if that slot was taken in
+    the meantime the parts at or after it shift forward by one. 404
+    ``note.part.not_trashed`` when nothing matches (never trashed,
+    already restored, or purged)."""
+    part = await parts_svc.restore_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+    )
+    return _part_out(part)
+
+
+@router.get(
+    "/{note_id}/parts:trashed",
+    response_model=list[NotePartTrashOut],
+    tags=["garden"],
+)
+async def list_trashed_note_parts(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[NotePartTrashOut]:
+    """Trashed parts of this note, most recently trashed first. The
+    discovery half of the trash/restore pair: whoever wants a part back
+    is rarely whoever removed it."""
+    rows = await parts_svc.list_trashed(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    return [
+        NotePartTrashOut(
+            id=r.id,
+            note_id=r.note_id,
+            ord=r.ord,
+            title=r.title,
+            body=r.body,
+            lang=r.lang,
+            trashed_at=r.trashed_at,
+            trashed_by=r.trashed_by,
+        )
+        for r in rows
+    ]
+
+
 @router.delete(
     "/{note_id}/parts/{part_id}",
     status_code=204,
@@ -1012,8 +1093,11 @@ async def delete_note_part(
     part_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
-    """Hard-delete a part. Remaining parts keep their ords (no
-    compaction) so deep links by ord survive; reorder is explicit."""
+    """PURGE a part: irreversible, nothing to restore from. Accepts a
+    part in either state -- a live one is destroyed outright, an
+    already-trashed one has its trash entry destroyed. For the
+    restorable delete use ``POST .../trash``. Remaining parts keep
+    their ords (no compaction) so deep links by ord survive."""
     await parts_svc.delete_part(
         ctx.session,
         org_id=ctx.org_id,

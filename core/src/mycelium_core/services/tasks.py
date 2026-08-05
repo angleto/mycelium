@@ -1064,6 +1064,78 @@ def _coerce_task_restore_values(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+async def replace_in_description(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    find: str,
+    replace: str,
+    expected_version: int | None = None,
+    count: int = 0,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Anchored find/replace inside ``task.description`` without
+    resending it. The task-description twin of
+    ``note_parts.replace_in_part`` and ``annotations.replace_in_body``:
+    the description was the one markdown document of the three that could
+    be appended and prepended to but never amended in place.
+
+    ``count`` <= 0 replaces every occurrence, a positive ``count`` only
+    the first N. Returns ``(new_version, replacements)``. A no-op --
+    ``find`` empty or absent -- returns ``(current_version, 0)`` WITHOUT
+    bumping the version and without asserting ``expected_version``
+    (nothing changed, so nothing to race). ``expected_version=None``
+    replaces on the current version, matching the blind-write contract of
+    the append/prepend twins. ``BODY_LIMIT_EXCEEDED`` past the body cap.
+    """
+    from mycelium_core.config import get_settings as _get_settings
+
+    await require_role(session, org_id, actor_id, Role.member)
+    task = await get_task(session, org_id=org_id, task_id=task_id)
+    body = task.description or ""
+    occurrences = body.count(find) if find else 0
+    if occurrences == 0:
+        return task.version, 0
+    n = occurrences if count <= 0 else min(count, occurrences)
+    new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
+    max_bytes = _get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    eff_version = expected_version if expected_version is not None else task.version
+    new_version = await optimistic_update(
+        session,
+        Task,
+        pk=task_id,
+        expected_version=eff_version,
+        values={"description": new_body},
+    )
+    _task_search.mark_task_dirty(session, task_id)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="description.replace",
+        diff={"replacements": str(n)},
+    )
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=eff_version,
+        version_to=new_version,
+        changed_fields=["description"],
+        channel=channel,
+        edit_session_id=None,
+        restored_from=None,
+    )
+    return new_version, n
+
+
 async def restore_revision(
     session: AsyncSession,
     *,

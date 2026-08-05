@@ -23,13 +23,19 @@ from mycelium_api.deps import (
     tenant_ctx,
 )
 from mycelium_api.schemas import (
+    AnnotationAppendIn,
     AnnotationAssignIn,
     AnnotationCommentIn,
     AnnotationEditIn,
     AnnotationOut,
+    AnnotationReplaceIn,
     AnnotationUIStateBulkIn,
     AnnotationUIStateIn,
+    AppendOut,
     ExpectedVersionIn,
+    ReplaceOut,
+    RevisionOut,
+    RevisionSummaryIn,
     SuggestionIn,
     VersionOut,
 )
@@ -41,6 +47,7 @@ from mycelium_core.models.annotation import Annotation
 from mycelium_core.models.identity import Identity
 from mycelium_core.services import annotations as svc
 from mycelium_core.services import capability_tokens as capability_tokens_svc
+from mycelium_core.services import entity_revisions as rev_svc
 from mycelium_core.services import identities as identities_svc
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
@@ -176,13 +183,17 @@ async def list_annotations(
     doc_kind: Annotated[str, Query()],
     doc_id: Annotated[uuid.UUID, Query()],
     include_resolved: Annotated[bool, Query()] = True,
+    include_deleted: Annotated[bool, Query()] = False,
 ) -> list[AnnotationOut]:
+    """``include_deleted=True`` surfaces soft-deleted rows, which is how a
+    caller finds the id and ``version`` to POST to ``.../restore``."""
     rows = await svc.list_for_doc(
         ctx.session,
         org_id=ctx.org_id,
         doc_kind=doc_kind,
         doc_id=doc_id,
         include_resolved=include_resolved,
+        include_deleted=include_deleted,
     )
     ui = await svc.get_ui_states_for_user(
         ctx.session, user_id=ctx.user_id, doc_kind=doc_kind, doc_id=doc_id
@@ -400,8 +411,16 @@ async def list_assigned_annotations(
 async def get_annotation(
     annotation_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_deleted: Annotated[bool, Query()] = False,
 ) -> AnnotationOut:
-    a = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
+    """``include_deleted=True`` reads a soft-deleted annotation, which is
+    how a caller learns the ``version`` that ``.../restore`` requires."""
+    a = await svc.get_annotation(
+        ctx.session,
+        org_id=ctx.org_id,
+        annotation_id=annotation_id,
+        include_deleted=include_deleted,
+    )
     ui = await svc.get_ui_states_by_ids(
         ctx.session, user_id=ctx.user_id, annotation_ids=[annotation_id]
     )
@@ -520,6 +539,235 @@ async def patch_annotation_body(
     if ctx.capability_token_id is not None:
         await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return VersionOut(id=annotation_id, version=v)
+
+
+@router.post("/{annotation_id}/body/append", response_model=AppendOut)
+async def append_to_annotation_body(
+    annotation_id: uuid.UUID,
+    body: AnnotationAppendIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+) -> AppendOut:
+    """Append text to the END of a comment/annotation body without
+    reading it first: the annotation twin of the note-part and
+    task-description appends. ``expected_version`` omitted appends onto
+    the current version. Author-or-admin."""
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v, n = await svc.append_to_body(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        text=body.text,
+        separator=body.separator,
+        expected_version=body.expected_version,
+        dedupe_if_tail_matches=body.dedupe_if_tail_matches,
+        actor_identity_id=ident,
+    )
+    return AppendOut(id=annotation_id, version=v, appended_chars=n)
+
+
+@router.post("/{annotation_id}/body/prepend", response_model=AppendOut)
+async def prepend_to_annotation_body(
+    annotation_id: uuid.UUID,
+    body: AnnotationAppendIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+) -> AppendOut:
+    """Prepend text to the FRONT of a comment/annotation body: the mirror
+    of the append route, same contract. Author-or-admin."""
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v, n = await svc.prepend_to_body(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        text=body.text,
+        separator=body.separator,
+        expected_version=body.expected_version,
+        dedupe_if_head_matches=body.dedupe_if_tail_matches,
+        actor_identity_id=ident,
+    )
+    return AppendOut(id=annotation_id, version=v, appended_chars=n)
+
+
+@router.post("/{annotation_id}/body/replace", response_model=ReplaceOut)
+async def replace_in_annotation_body(
+    annotation_id: uuid.UUID,
+    body: AnnotationReplaceIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+) -> ReplaceOut:
+    """Anchored find/replace inside ONE comment/annotation body without
+    resending it: swap the literal ``find`` for ``replace``. The twin of
+    the note-part replace, which the annotation family lacked entirely.
+    ``count=0`` replaces every occurrence; a positive ``count`` only the
+    first N. Concurrency-safe via ``expected_version``. A no-op (``find``
+    absent) returns ``replacements=0`` and leaves the version untouched.
+    Author-or-admin, like every other body write."""
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v, replacements = await svc.replace_in_body(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        find=body.find,
+        replace=body.replace,
+        expected_version=body.expected_version,
+        count=body.count,
+        actor_identity_id=ident,
+    )
+    return ReplaceOut(id=annotation_id, version=v, replacements=replacements)
+
+
+@router.post("/{annotation_id}/restore", response_model=VersionOut)
+async def restore_annotation(
+    annotation_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+) -> VersionOut:
+    """Undo a delete: the comment (or withdrawn suggestion) is back in
+    the diary. Author-or-admin, the same gate as the delete it reverses.
+    Without this the soft delete was a one-way door -- the row was
+    retained but unreachable on every surface."""
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v = await svc.restore(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        expected_version=body.expected_version,
+        actor_identity_id=ident,
+    )
+    return VersionOut(id=annotation_id, version=v)
+
+
+def _revision_out(rev: Any, seq: int | None = None) -> RevisionOut:
+    """Serialize an EntityRevision row (same shape the task and note
+    timelines use; ``org_id`` is dropped -- RLS already scoped it)."""
+    return RevisionOut(
+        id=rev.id,
+        entity_kind=rev.entity_kind,
+        entity_id=rev.entity_id,
+        snapshot=rev.snapshot or {},
+        changed_fields=list(rev.changed_fields or []),
+        channel=rev.channel,
+        actor_id=rev.actor_id,
+        actor_kind=rev.actor_kind,
+        actor_subject_id=rev.actor_subject_id,
+        edit_session_id=rev.edit_session_id,
+        version_from=rev.version_from,
+        version_to=rev.version_to,
+        seq=seq,
+        edit_count=rev.edit_count,
+        started_at=rev.started_at,
+        last_edit_at=rev.last_edit_at,
+        sealed_at=rev.sealed_at,
+        restored_from=rev.restored_from,
+        summary=rev.summary,
+    )
+
+
+@router.get("/{annotation_id}/revisions", response_model=list[RevisionOut])
+async def list_annotation_revisions(
+    annotation_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[RevisionOut]:
+    """Timeline of revisions for this comment, most recent first
+    (migration 0090). Comments were the last markdown document with no
+    history: ``version`` said an entry had changed, nothing said what it
+    used to say."""
+    await svc.get_annotation(
+        ctx.session, org_id=ctx.org_id, annotation_id=annotation_id, include_deleted=True
+    )
+    rows = await rev_svc.list_revisions(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+        limit=limit,
+    )
+    seqs = await rev_svc.revision_sequence(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+        only_ids=[r.id for r in rows],
+    )
+    return [_revision_out(r, seq=seqs.get(r.id)) for r in rows]
+
+
+@router.get("/{annotation_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def get_annotation_revision(
+    annotation_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> RevisionOut:
+    rev = await rev_svc.get_revision(
+        ctx.session,
+        revision_id=rev_id,
+        entity_kind=rev_svc.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+    )
+    return _revision_out(rev)
+
+
+@router.patch("/{annotation_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def update_annotation_revision_summary(
+    annotation_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: RevisionSummaryIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> RevisionOut:
+    """Set / clear the ``summary`` label on a revision. Mirror of the
+    /notes and /tasks endpoints; see those for the contract."""
+    rev = await rev_svc.set_summary(
+        ctx.session,
+        revision_id=rev_id,
+        summary=body.summary,
+        entity_kind=rev_svc.ENTITY_KIND_ANNOTATION,
+        entity_id=annotation_id,
+    )
+    return _revision_out(rev)
+
+
+@router.post("/{annotation_id}/revisions/{rev_id}/restore", response_model=VersionOut)
+async def restore_annotation_revision(
+    annotation_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+) -> VersionOut:
+    """Revert the comment's BODY to this revision. Only the body is
+    restorable: never the thread's status, assignee or anchoring."""
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v = await svc.restore_revision(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        revision_id=rev_id,
+        expected_version=body.expected_version,
+        actor_identity_id=ident,
+    )
+    return VersionOut(id=annotation_id, version=v)
+
+
+@router.post("/{annotation_id}/purge", status_code=204)
+async def purge_annotation(
+    annotation_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> None:
+    """PURGE: destroy the comment, its card state and its entire revision
+    history. Irreversible, admin-only, and a separate path from DELETE --
+    which is the ordinary restorable removal and stays that way."""
+    await svc.purge(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+    )
 
 
 @router.delete("/{annotation_id}", response_model=VersionOut)

@@ -1337,7 +1337,11 @@ async def count_tasks(
 async def add_comment(token: str, org_id: str, task_id: str, body: str) -> dict[str, Any]:
     """Add a comment to a task (a chronological work-diary entry on the
     task description). Authorship is the calling identity -- an
-    ai_assistant when the call uses an agent token."""
+    ai_assistant when the call uses an agent token.
+
+    Afterwards the entry is fully editable: ``update_comment`` rewrites
+    it, ``replace_in_comment`` amends one passage, ``delete_comment``
+    removes it and ``restore_comment`` brings it back."""
     async with _tenant(token, org_id) as (s, org, user):
         author_id, _tok = await _resolve_agent_context(s, org)
         c = await tasks.add_comment(
@@ -1354,11 +1358,299 @@ async def add_comment(token: str, org_id: str, task_id: str, body: str) -> dict[
 
 
 @mcp.tool()
+async def get_comment(token: str, org_id: str, comment_id: str) -> dict[str, Any]:
+    """Read ONE comment by id: random access into a long work diary
+    without pulling every entry into context. The comment twin of
+    ``get_note_part``. Returns the full row incl. body, status, author
+    and ``version`` (the cursor the edit / delete tools need).
+
+    Reads a soft-deleted comment too, so you can inspect one before
+    handing its ``version`` to ``restore_comment``."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        a = await annotations_svc.get_annotation(
+            s,
+            org_id=org,
+            annotation_id=uuid.UUID(comment_id),
+            include_deleted=True,
+        )
+        return _annotation_dict(a)
+
+
+@mcp.tool()
+async def list_trashed_comments(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
+    """Comments of a task that were deleted and can still be restored,
+    oldest first. The discovery half of ``delete_comment`` /
+    ``restore_comment``, and the comment twin of
+    ``list_trashed_note_parts``: whoever wants an entry back is rarely
+    whoever removed it, and a deleted comment is invisible to
+    ``list_comments``."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await annotations_svc.list_for_doc(
+            s,
+            org_id=org,
+            doc_kind="task_description",
+            doc_id=uuid.UUID(task_id),
+            include_deleted=True,
+        )
+        return [_annotation_dict(a) for a in rows if a.deleted_at is not None]
+
+
+@mcp.tool()
+async def append_to_comment(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+) -> dict[str, Any]:
+    """Append ``text`` to the END of a comment without reading or
+    resending its body -- the comment twin of ``append_note_part`` and
+    ``append_to_task_description``. The cheap way to add a follow-up to
+    your own diary entry instead of posting a second comment.
+
+    ``expected_version`` omitted appends onto the current version (blind
+    append, no round trip); pass it to make the write conditional.
+    Returns ``{id, version, appended_chars}``. Author or admin only."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v, n = await annotations_svc.append_to_body(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            text=text,
+            separator=separator,
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v, "appended_chars": n}
+
+
+@mcp.tool()
+async def prepend_to_comment(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+) -> dict[str, Any]:
+    """Prepend ``text`` to the FRONT of a comment without reading or
+    resending its body: the mirror of ``append_to_comment``, for a
+    correction or a TL;DR that has to lead. Returns ``{id, version,
+    prepended_chars}``. Author or admin only."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v, n = await annotations_svc.prepend_to_body(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            text=text,
+            separator=separator,
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v, "prepended_chars": n}
+
+
+@mcp.tool()
+async def update_comment(
+    token: str, org_id: str, comment_id: str, body: str, expected_version: int
+) -> dict[str, Any]:
+    """EDIT a comment: replace its whole body. Completes the
+    ``add_comment`` / ``delete_comment`` pair, which could create and
+    remove a comment but never rewrite one.
+
+    ``comment_id`` is the ``id`` from ``add_comment`` / ``list_comments``;
+    author or admin only. ``expected_version`` is that comment's
+    ``version`` (optimistic-concurrency guard -- fails with
+    ``concurrency.stale_version`` if the comment changed since you read
+    it, carrying the CURRENT ``current_version``; that is NOT a
+    permissions error). Do not blind-retry with the new version: a
+    full-body edit would overwrite the other author's change. Re-read,
+    merge, then retry -- or use ``replace_in_comment`` to change one
+    passage without touching the rest.
+
+    Accepts any comment id, task work-diary or inline note comment."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.edit(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            body=body,
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v}
+
+
+@mcp.tool()
+async def replace_in_comment(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    find: str,
+    replace: str,
+    expected_version: int,
+    count: int = 0,
+) -> dict[str, Any]:
+    """Anchored edit inside ONE comment: replace occurrences of the
+    literal ``find`` with ``replace`` without resending the whole body.
+    The comment twin of ``replace_in_note_part``, and the safe way to
+    amend a long comment you did not write from scratch.
+
+    ``count=0`` (default) replaces every occurrence; a positive ``count``
+    only the first N. ``expected_version`` guards optimistic concurrency
+    (same contract as ``update_comment``). Returns ``{id, version,
+    replacements}``; a no-op (``find`` absent or empty) returns
+    replacements=0 and does not bump the version. Author or admin
+    only."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v, n = await annotations_svc.replace_in_body(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            find=find,
+            replace=replace,
+            expected_version=expected_version,
+            count=count,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v, "replacements": n}
+
+
+@mcp.tool()
+async def restore_comment(
+    token: str, org_id: str, comment_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Undo a ``delete_comment``: the comment (or withdrawn suggestion)
+    is back in the diary. Author or admin only, the same gate as the
+    delete it reverses; ``expected_version`` is the deleted comment's
+    ``version``.
+
+    This is what makes the delete honestly soft -- until it existed the
+    row was retained but unreachable on every surface."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.restore(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v, "deleted": False}
+
+
+@mcp.tool()
+async def list_comment_revisions(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Recovery-history timeline for ONE comment, most recent first
+    (migration 0090). Comments were the last markdown document in the
+    model with no history: ``version`` said an entry had changed and
+    nothing said what it used to say.
+
+    Each row carries the snapshot, who edited, when, and
+    ``changed_fields`` (``body`` / ``status`` / ``_create`` / ``_delete``
+    / ``_restore``). Feed an id to ``restore_comment_revision``."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rows = await revisions_svc.list_revisions(
+            s,
+            entity_kind=revisions_svc.ENTITY_KIND_ANNOTATION,
+            entity_id=uuid.UUID(comment_id),
+            limit=limit,
+        )
+        return [_revision_payload(r) for r in rows]
+
+
+@mcp.tool()
+async def get_comment_revision(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    revision_id: str,
+) -> dict[str, Any]:
+    """Single comment-revision lookup; 404 if the id does not belong to
+    this comment. Read the old body before deciding to restore it."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rev = await revisions_svc.get_revision(
+            s,
+            revision_id=uuid.UUID(revision_id),
+            entity_kind=revisions_svc.ENTITY_KIND_ANNOTATION,
+            entity_id=uuid.UUID(comment_id),
+        )
+        return _revision_payload(rev)
+
+
+@mcp.tool()
+async def restore_comment_revision(
+    token: str,
+    org_id: str,
+    comment_id: str,
+    revision_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Revert a comment's BODY to a past revision. Only the body is
+    restorable: a restore reverts the words, never the thread's status,
+    its assignee or its anchoring.
+
+    Author or admin, like every other write to a comment. Logged as a
+    NEW revision on the ``restore`` channel, so the timeline stays
+    monotonic and the restore is itself recoverable."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.restore_revision(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            revision_id=uuid.UUID(revision_id),
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v}
+
+
+@mcp.tool()
+async def purge_comment(token: str, org_id: str, comment_id: str) -> dict[str, Any]:
+    """PURGE a comment: destroy the entry, its card state and its whole
+    revision history, for good. The counterpart of ``delete_note_part``
+    for the comment family, and why it costs the ``delete:comments``
+    danger scope. The ordinary, restorable removal is ``delete_comment``.
+
+    ADMIN only -- not author-or-admin like every other comment write.
+    An author managing their own words is right for a reversible delete;
+    erasing a signed entry from a shared conversation so that no trace
+    remains is a different act, and the person most likely to want it
+    is the author. Accepts a live or an already-deleted comment."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await annotations_svc.purge(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+        )
+        return {"id": comment_id, "purged": True}
+
+
+@mcp.tool()
 async def delete_comment(
     token: str, org_id: str, comment_id: str, expected_version: int
 ) -> dict[str, Any]:
     """Soft-delete a comment -- the inverse of ``add_comment`` (author or
-    admin only; the entry is retained in the recovery history). ``comment_id``
+    admin only; the entry is retained and ``restore_comment`` brings it
+    back). ``comment_id``
     is the ``id`` returned by ``add_comment`` / ``list_comments``;
     ``expected_version`` is that comment's ``version`` (optimistic-concurrency
     guard -- fails with ``concurrency.stale_version`` if the comment changed
@@ -1526,6 +1818,42 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             collaborators=collaborators,
             state=state,
         )
+
+
+@mcp.tool()
+async def replace_in_task_description(
+    token: str,
+    org_id: str,
+    task_id: str,
+    find: str,
+    replace: str,
+    expected_version: int | None = None,
+    count: int = 0,
+) -> dict[str, Any]:
+    """Anchored edit inside ``task.description``: replace occurrences of
+    the literal ``find`` with ``replace`` without resending the body. The
+    task twin of ``replace_in_note_part`` / ``replace_in_comment`` -- the
+    description could be appended and prepended to but never amended in
+    place, so fixing one line meant rewriting the whole thing.
+
+    ``count=0`` (default) replaces every occurrence; a positive ``count``
+    only the first N. ``expected_version`` omitted replaces on the
+    current version (same blind-write contract as
+    ``append_to_task_description``). Returns ``{task_id, version,
+    replacements}``; a no-op (``find`` absent or empty) returns
+    replacements=0 and does not bump the version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        new_version, n = await tasks.replace_in_description(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            find=find,
+            replace=replace,
+            expected_version=expected_version,
+            count=count,
+        )
+        return {"task_id": task_id, "version": new_version, "replacements": n}
 
 
 @mcp.tool()
@@ -1961,6 +2289,7 @@ async def list_annotations(
     doc_kind: str,
     doc_id: str,
     include_resolved: bool = True,
+    include_deleted: bool = False,
     kind: str | None = None,
     limit: int | None = None,
     cursor: str | None = None,
@@ -1968,7 +2297,9 @@ async def list_annotations(
     """List the annotations (comments + suggestions) on a markdown document,
     oldest first. include_resolved defaults True (returns resolved/accepted/
     rejected rows too, unlike the SPA); pass include_resolved=False for
-    open-only. ``kind`` optionally narrows to 'comment' or 'suggestion'. A
+    open-only. ``include_deleted=True`` also returns soft-deleted rows, which
+    is how you find the id and ``version`` to hand to ``restore_comment``.
+    ``kind`` optionally narrows to 'comment' or 'suggestion'. A
     task's work-diary comments are also reachable via list_comments. For just
     the open/total counts use ``count_annotations``. Returns the paginated
     envelope ``{items, next_cursor, truncated}``: pass ``limit`` to page, then
@@ -1984,6 +2315,7 @@ async def list_annotations(
             doc_kind=doc_kind,
             doc_id=uuid.UUID(doc_id),
             include_resolved=include_resolved,
+            include_deleted=include_deleted,
             kind=kind,
             limit=(limit + 1) if limit else None,
             after=after,
@@ -5082,9 +5414,100 @@ async def reorder_note_parts(
 
 
 @mcp.tool()
+async def trash_note_part(
+    token: str,
+    org_id: str,
+    part_id: str,
+    expected_version: int | None = None,
+) -> dict[str, Any]:
+    """DELETE one part of a note, restorably: the block leaves the note
+    and ``restore_note_part`` puts it back with the same id, body and
+    position. This is the delete verb to reach for -- ``delete_note``
+    removes the WHOLE note, and ``delete_note_part`` is the irreversible
+    purge behind a danger scope.
+
+    Remaining parts keep their ords (no compaction), so deep links by
+    ord survive and a restore can aim at the slot this part came from.
+    ``expected_version`` is an optional concurrency guard: pass the
+    part's ``version`` to refuse trashing a block someone edited since
+    you read it (``stale_version``, carrying the current version).
+
+    The part stops being retrievable by search while trashed; restoring
+    re-indexes it."""
+    from mycelium_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        await parts_svc_local.trash_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+            expected_version=expected_version,
+        )
+        return {"part_id": part_id, "trashed": True}
+
+
+@mcp.tool()
+async def restore_note_part(token: str, org_id: str, part_id: str) -> dict[str, Any]:
+    """Put a trashed part back into its note -- the inverse of
+    ``trash_note_part``. It returns with its ORIGINAL id, body, title,
+    lang and version, at the ord it held (the parts at or after that
+    slot shift forward by one if it was taken meanwhile).
+
+    Fails with ``note.part.not_trashed`` when nothing matches: never
+    trashed, already restored, or purged. Find restorable parts with
+    ``list_trashed_note_parts``."""
+    from mycelium_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        part = await parts_svc_local.restore_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+        )
+        return _note_part(part)
+
+
+@mcp.tool()
+async def list_trashed_note_parts(
+    token: str,
+    org_id: str,
+    note_id: str,
+) -> list[dict[str, Any]]:
+    """Parts of a note that were trashed and can still be restored, most
+    recently trashed first. The discovery half of ``trash_note_part`` /
+    ``restore_note_part``: whoever wants a block back is rarely whoever
+    removed it. Returns id / ord / title / lang / body / trashed_at."""
+    from mycelium_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await parts_svc_local.list_trashed(s, org_id=org, note_id=uuid.UUID(note_id))
+        return [
+            {
+                "id": str(r.id),
+                "note_id": str(r.note_id),
+                "ord": r.ord,
+                "title": r.title,
+                "body": r.body or "",
+                "lang": r.lang,
+                "trashed_at": r.trashed_at.isoformat() if r.trashed_at else None,
+            }
+            for r in rows
+        ]
+
+
+@mcp.tool()
 async def delete_note_part(token: str, org_id: str, part_id: str) -> dict[str, Any]:
-    """Hard-delete a part. Remaining parts keep their ord values (no
-    compaction) so deep links by ord survive; reorder is explicit."""
+    """PURGE a part: irreversible, nothing to restore from afterwards.
+    Use ``trash_note_part`` for the ordinary, restorable delete -- this
+    tool is the destroy-for-good one, which is why it costs the
+    ``delete:notes`` danger scope.
+
+    Accepts a part in either state: a live part is destroyed outright,
+    an already-trashed one has its trash entry destroyed. Remaining
+    parts keep their ord values (no compaction) so deep links by ord
+    survive; reorder is explicit."""
     from mycelium_core.services import note_parts as parts_svc_local
 
     async with _tenant(token, org_id) as (s, org, user):

@@ -56,7 +56,13 @@ function formatTime(iso: string | null): string {
   return d.toLocaleString()
 }
 
-const PART_FIELD_RE = /^parts\[(\d+)\]\.(body|title|lang)$/
+// ``parts[N].<what>``: a body field, or a structural lifecycle tag
+// (``_create`` / ``_trash`` / ``_restore`` / ``_purge``). The leading
+// underscore marks "this happened to the part" rather than "this field
+// of the part changed"; it is stripped for the i18n key.
+const PART_FIELD_RE = /^parts\[(\d+)\]\.(body|title|lang|_create|_trash|_restore|_purge)$/
+// Note-wide structural tags: they name no single part.
+const PARTS_STRUCTURAL_RE = /^parts\.(_reorder|_merge_in|_merge_out)$/
 
 /** Humanise a single ``changed_fields`` token for the timeline label.
  *
@@ -69,7 +75,13 @@ const PART_FIELD_RE = /^parts\[(\d+)\]\.(body|title|lang)$/
 function prettyField(token: string, t: TFunction): string {
   const m = PART_FIELD_RE.exec(token)
   if (m)
-    return t(`revisions.fields.part_${m[2]}`, { n: m[1], defaultValue: token })
+    return t(`revisions.fields.part_${m[2].replace(/^_/, '')}`, {
+      n: m[1],
+      defaultValue: token,
+    })
+  const s = PARTS_STRUCTURAL_RE.exec(token)
+  if (s)
+    return t(`revisions.fields.parts${s[1]}`, { defaultValue: token })
   if (token === 'parts.body' || token === 'parts.title' || token === 'parts.lang')
     return t(`revisions.fields.${token.replace('.', '_')}_noord`, {
       defaultValue: token,

@@ -126,7 +126,14 @@ async def test_every_content_mutator_refuses_a_promoted_note() -> None:
                 s, org_id=org, actor_id=user, source_note_id=target.id, target_note_id=note.id
             )
         assert _is_promoted_readonly(e)
-        # delete_part last (it would otherwise remove the row under the others).
+        # The two removal verbs last (either would otherwise take the row
+        # out from under the mutators above). trash_part is the
+        # restorable one, delete_part the purge; the read-only invariant
+        # binds both -- a transplanted note must not lose a block by
+        # either route.
+        with pytest.raises(DomainError) as e:
+            await np.trash_part(s, org_id=org, actor_id=user, part_id=part.id)
+        assert _is_promoted_readonly(e)
         with pytest.raises(DomainError) as e:
             await np.delete_part(s, org_id=org, actor_id=user, part_id=part.id)
         assert _is_promoted_readonly(e)

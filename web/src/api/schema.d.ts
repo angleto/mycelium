@@ -500,7 +500,8 @@ export interface paths {
         /**
          * Empty Workspace Trash
          * @description Permanently delete every soft-deleted task and note in the
-         *     current workspace (owner/admin only; the service re-checks).
+         *     current workspace, plus every trashed note part (owner/admin only;
+         *     the service re-checks).
          */
         post: operations["empty_workspace_trash_workspaces_me_trash_empty_post"];
         delete?: never;
@@ -810,6 +811,30 @@ export interface paths {
          *     re-sending the body. ``appended_chars`` reports the prepended count.
          */
         post: operations["prepend_description_tasks__task_id__description_prepend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/description/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace In Description
+         * @description Anchored find/replace inside ``task.description`` without
+         *     resending it -- the twin of the note-part and annotation replaces.
+         *     The description could be appended and prepended to but never amended
+         *     in place. ``count=0`` replaces every occurrence; a no-op (``find``
+         *     absent) returns ``replacements=0`` and leaves the version alone.
+         */
+        post: operations["replace_in_description_tasks__task_id__description_replace_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1483,7 +1508,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Annotations */
+        /**
+         * List Annotations
+         * @description ``include_deleted=True`` surfaces soft-deleted rows, which is how a
+         *     caller finds the id and ``version`` to POST to ``.../restore``.
+         */
         get: operations["list_annotations_annotations_get"];
         put?: never;
         post?: never;
@@ -1652,7 +1681,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Annotation */
+        /**
+         * Get Annotation
+         * @description ``include_deleted=True`` reads a soft-deleted annotation, which is
+         *     how a caller learns the ``version`` that ``.../restore`` requires.
+         */
         get: operations["get_annotation_annotations__annotation_id__get"];
         put?: never;
         post?: never;
@@ -1737,6 +1770,187 @@ export interface paths {
          *     ``patch_text_block_capability`` tool (kind=``annotation``).
          */
         post: operations["patch_annotation_body_annotations__annotation_id__body_patch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append To Annotation Body
+         * @description Append text to the END of a comment/annotation body without
+         *     reading it first: the annotation twin of the note-part and
+         *     task-description appends. ``expected_version`` omitted appends onto
+         *     the current version. Author-or-admin.
+         */
+        post: operations["append_to_annotation_body_annotations__annotation_id__body_append_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/prepend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepend To Annotation Body
+         * @description Prepend text to the FRONT of a comment/annotation body: the mirror
+         *     of the append route, same contract. Author-or-admin.
+         */
+        post: operations["prepend_to_annotation_body_annotations__annotation_id__body_prepend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace In Annotation Body
+         * @description Anchored find/replace inside ONE comment/annotation body without
+         *     resending it: swap the literal ``find`` for ``replace``. The twin of
+         *     the note-part replace, which the annotation family lacked entirely.
+         *     ``count=0`` replaces every occurrence; a positive ``count`` only the
+         *     first N. Concurrency-safe via ``expected_version``. A no-op (``find``
+         *     absent) returns ``replacements=0`` and leaves the version untouched.
+         *     Author-or-admin, like every other body write.
+         */
+        post: operations["replace_in_annotation_body_annotations__annotation_id__body_replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Annotation
+         * @description Undo a delete: the comment (or withdrawn suggestion) is back in
+         *     the diary. Author-or-admin, the same gate as the delete it reverses.
+         *     Without this the soft delete was a one-way door -- the row was
+         *     retained but unreachable on every surface.
+         */
+        post: operations["restore_annotation_annotations__annotation_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Annotation Revisions
+         * @description Timeline of revisions for this comment, most recent first
+         *     (migration 0090). Comments were the last markdown document with no
+         *     history: ``version`` said an entry had changed, nothing said what it
+         *     used to say.
+         */
+        get: operations["list_annotation_revisions_annotations__annotation_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/revisions/{rev_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annotation Revision */
+        get: operations["get_annotation_revision_annotations__annotation_id__revisions__rev_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Annotation Revision Summary
+         * @description Set / clear the ``summary`` label on a revision. Mirror of the
+         *     /notes and /tasks endpoints; see those for the contract.
+         */
+        patch: operations["update_annotation_revision_summary_annotations__annotation_id__revisions__rev_id__patch"];
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/revisions/{rev_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Annotation Revision
+         * @description Revert the comment's BODY to this revision. Only the body is
+         *     restorable: never the thread's status, assignee or anchoring.
+         */
+        post: operations["restore_annotation_revision_annotations__annotation_id__revisions__rev_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Annotation
+         * @description PURGE: destroy the comment, its card state and its entire revision
+         *     history. Irreversible, admin-only, and a separate path from DELETE --
+         *     which is the ordinary restorable removal and stays that way.
+         */
+        post: operations["purge_annotation_annotations__annotation_id__purge_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4102,8 +4316,11 @@ export interface paths {
         post?: never;
         /**
          * Delete Note Part
-         * @description Hard-delete a part. Remaining parts keep their ords (no
-         *     compaction) so deep links by ord survive; reorder is explicit.
+         * @description PURGE a part: irreversible, nothing to restore from. Accepts a
+         *     part in either state -- a live one is destroyed outright, an
+         *     already-trashed one has its trash entry destroyed. For the
+         *     restorable delete use ``POST .../trash``. Remaining parts keep
+         *     their ords (no compaction) so deep links by ord survive.
          */
         delete: operations["delete_note_part_notes__note_id__parts__part_id__delete"];
         options?: never;
@@ -4199,6 +4416,79 @@ export interface paths {
          *     for the matching ``curl``.
          */
         post: operations["patch_note_part_body_notes__note_id__parts__part_id__body_patch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trash Note Part
+         * @description Remove a part RESTORABLY: it moves to the trash keeping its id
+         *     and content, and ``.../restore`` puts it back where it was. This is
+         *     the ordinary delete for a part; the DELETE verb on the same path is
+         *     the irreversible purge. Remaining parts keep their ords (no
+         *     compaction) so deep links by ord survive.
+         *
+         *     ``expected_version`` is an optional concurrency guard: supply it to
+         *     refuse trashing a part that changed since you read it.
+         */
+        post: operations["trash_note_part_notes__note_id__parts__part_id__trash_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Note Part
+         * @description Put a trashed part back into its note with its original id, body
+         *     and version. It aims for the ord it held; if that slot was taken in
+         *     the meantime the parts at or after it shift forward by one. 404
+         *     ``note.part.not_trashed`` when nothing matches (never trashed,
+         *     already restored, or purged).
+         */
+        post: operations["restore_note_part_notes__note_id__parts__part_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts:trashed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trashed Note Parts
+         * @description Trashed parts of this note, most recently trashed first. The
+         *     discovery half of the trash/restore pair: whoever wants a part back
+         *     is rarely whoever removed it.
+         */
+        get: operations["list_trashed_note_parts_notes__note_id__parts_trashed_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6875,6 +7165,31 @@ export interface components {
             is_active?: boolean | null;
         };
         /**
+         * AnnotationAppendIn
+         * @description Body for POST /annotations/{id}/body/{append,prepend}: add text to
+         *     one end of a comment/annotation body without resending it. The
+         *     annotation twin of the task-description append, so the same shape --
+         *     ``expected_version`` omitted writes onto the current version, and the
+         *     dedupe flag makes a replay a no-op (it tests the tail on append, the
+         *     head on prepend).
+         */
+        AnnotationAppendIn: {
+            /** Text */
+            text: string;
+            /**
+             * Separator
+             * @default
+             */
+            separator?: string;
+            /** Expected Version */
+            expected_version?: number | null;
+            /**
+             * Dedupe If Tail Matches
+             * @default false
+             */
+            dedupe_if_tail_matches?: boolean;
+        };
+        /**
          * AnnotationAssignIn
          * @description Assign an annotation to a workspace identity, or clear it. Pass an
          *     ``assignee_identity_id`` OR an ``assignee_handle`` (bare / ``@handle`` /
@@ -6996,6 +7311,29 @@ export interface components {
              * @default false
              */
             ui_collapsed?: boolean;
+        };
+        /**
+         * AnnotationReplaceIn
+         * @description Body for POST /annotations/{id}/body/replace: anchored
+         *     find/replace inside one comment/annotation body without resending
+         *     it. The annotation twin of ``NotePartReplaceIn``, same semantics --
+         *     ``count=0`` (default) replaces every occurrence of the literal
+         *     ``find``, a positive ``count`` only the first N, and a no-op
+         *     (``find`` absent) returns ``replacements=0`` without bumping the
+         *     version.
+         */
+        AnnotationReplaceIn: {
+            /** Find */
+            find: string;
+            /** Replace */
+            replace: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Count
+             * @default 0
+             */
+            count?: number;
         };
         /**
          * AnnotationUIStateBulkIn
@@ -10549,6 +10887,40 @@ export interface components {
             operation_id?: string | null;
         };
         /**
+         * NotePartTrashOut
+         * @description A trashed note part, restorable by id (migration 0089). Same
+         *     content shape as ``NotePartOut`` minus the live-only fields, plus
+         *     when and by whom it was trashed. ``ord`` is the position it will
+         *     aim for on restore.
+         */
+        NotePartTrashOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Ord */
+            ord: number;
+            /** Title */
+            title?: string | null;
+            /** Body */
+            body: string;
+            /** Lang */
+            lang?: string | null;
+            /**
+             * Trashed At
+             * Format: date-time
+             */
+            trashed_at: string;
+            /** Trashed By */
+            trashed_by?: string | null;
+        };
+        /**
          * NotePartUIStateIn
          * @description Body for PUT /notes/{id}/parts/{pid}/ui-state. User-scoped,
          *     last-write-wins (no version).
@@ -12100,6 +12472,29 @@ export interface components {
              */
             dedupe_if_head_matches?: boolean;
         };
+        /**
+         * TaskDescriptionReplaceIn
+         * @description Body for POST /tasks/{id}/description/replace: anchored
+         *     find/replace inside ``task.description`` without resending it. Same
+         *     semantics as the note-part and annotation replaces -- ``count=0``
+         *     (default) swaps every occurrence of the literal ``find``, a positive
+         *     ``count`` only the first N, and a no-op returns ``replacements=0``
+         *     without bumping the version. ``expected_version`` omitted writes onto
+         *     the current version, matching the append/prepend twins.
+         */
+        TaskDescriptionReplaceIn: {
+            /** Find */
+            find: string;
+            /** Replace */
+            replace: string;
+            /** Expected Version */
+            expected_version?: number | null;
+            /**
+             * Count
+             * @default 0
+             */
+            count?: number;
+        };
         /** TaskIdOut */
         TaskIdOut: {
             /**
@@ -12638,12 +13033,20 @@ export interface components {
         /**
          * TrashEmptyOut
          * @description Counts of rows purged by ``POST /workspaces/me/trash/empty``.
+         *     ``note_parts`` counts trashed note BLOCKS (migration 0089), which
+         *     the bin holds independently of their notes -- a live note can have
+         *     trashed parts, and emptying the bin purges those too.
          */
         TrashEmptyOut: {
             /** Tasks */
             tasks: number;
             /** Notes */
             notes: number;
+            /**
+             * Note Parts
+             * @default 0
+             */
+            note_parts?: number;
         };
         /**
          * TurnRole
@@ -14892,6 +15295,46 @@ export interface operations {
             };
         };
     };
+    replace_in_description_tasks__task_id__description_replace_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskDescriptionReplaceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_task_description_raw_tasks__task_id__description_raw_get: {
         parameters: {
             query?: never;
@@ -16492,6 +16935,7 @@ export interface operations {
                 doc_kind: string;
                 doc_id: string;
                 include_resolved?: boolean;
+                include_deleted?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -16799,7 +17243,9 @@ export interface operations {
     };
     get_annotation_annotations__annotation_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_deleted?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
@@ -17012,6 +17458,357 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_to_annotation_body_annotations__annotation_id__body_append_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepend_to_annotation_body_annotations__annotation_id__body_prepend_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_in_annotation_body_annotations__annotation_id__body_replace_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationReplaceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_annotation_annotations__annotation_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_annotation_revisions_annotations__annotation_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_annotation_revision_annotations__annotation_id__revisions__rev_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_annotation_revision_summary_annotations__annotation_id__revisions__rev_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionSummaryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_annotation_revision_annotations__annotation_id__revisions__rev_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_annotation_annotations__annotation_id__purge_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -23026,6 +23823,116 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trash_note_part_notes__note_id__parts__part_id__trash_post: {
+        parameters: {
+            query?: {
+                expected_version?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_note_part_notes__note_id__parts__part_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_trashed_note_parts_notes__note_id__parts_trashed_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartTrashOut"][];
                 };
             };
             /** @description Validation Error */
