@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "eslint .",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "e2e": "playwright test",
     "gen:api": "cd .. && uv run python scripts/dump_openapi.py web/openapi.json && cd web && openapi-typescript ./openapi.json -o src/api/schema.d.ts --default-non-nullable false && rm -f openapi.json",
     "preview": "vite preview"

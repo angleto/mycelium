@@ -92,6 +92,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm exec eslint . --no-cache
+      # Every static t('...') must resolve in src/i18n/en.ts. The SPA-side
+      # port of the backend's test_i18n_catalog: without it, a missing key
+      # renders either the raw dotted key or -- behind a defaultValue --
+      # English in every locale, and neither shows up in a type error.
+      - name: i18n keys
+        run: pnpm check:i18n
       # Explicit, before the bundle. `pnpm build` already runs `tsc -b`
       # first, so this adds no coverage -- it buys attribution: a type
       # error surfaces as "Typecheck" instead of a Build failure whose

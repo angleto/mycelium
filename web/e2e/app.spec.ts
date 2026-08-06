@@ -262,6 +262,11 @@ test('mode chip cycles User → Owner → Admin and gates accordingly', async ({
   await chip.click()
   await expect(chip).toHaveClass(/modechip--admin/)
   await page.goto('/admin/users')
+  // The list is one bounded page, newest first: find the account by
+  // SEARCH rather than expecting it on the first page. On a database with
+  // real history this row is nowhere near the top, which is the whole
+  // reason the endpoint was paginated.
+  await page.locator('input.adminsearch').fill(EMAIL)
   const arow = page
     .locator('table.tbl tbody tr', { hasText: EMAIL })
     .first()

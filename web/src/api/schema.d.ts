@@ -252,7 +252,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Users */
+        /**
+         * List Users
+         * @description Users, newest first, one bounded page at a time.
+         *
+         *     ``q`` is a case-insensitive substring of the email or the display
+         *     name. Search is the point, not paging: this table grows without
+         *     limit and an admin's job here is "find one person, toggle a flag",
+         *     which walking pages does not serve. Before this was bounded the
+         *     handler selected EVERY user row into one response.
+         *
+         *     The sort key is ``(created_at, id)``, not ``created_at`` alone:
+         *     accounts get created in the same clock tick (the test suite signs
+         *     one up per test), and a non-total ordering makes ``offset`` drop and
+         *     repeat rows across pages.
+         */
         get: operations["list_users_admin_users_get"];
         put?: never;
         post?: never;
@@ -13909,7 +13923,11 @@ export interface operations {
     };
     list_users_admin_users_get: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
             header?: {
                 "x-admin-mode"?: string | null;
             };

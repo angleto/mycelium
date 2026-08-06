@@ -164,6 +164,8 @@ export const en = {
     reload: 'Reload',
     reloadAnyway: 'Reload anyway',
     dismiss: 'Dismiss',
+    save: 'Save',
+    edit: 'Edit',
   },
   taskLinkKind: {
     subject: 'subject',
@@ -368,6 +370,9 @@ export const en = {
   },
   admin: {
     usersNav: 'Users',
+    search: 'Search by email or name…',
+    noMatch: 'No users match the search.',
+    end: 'End of list.',
     usersTitle: 'User administration',
     badge: 'Admin mode',
     enter: 'Admin',
@@ -397,6 +402,18 @@ export const en = {
     search: 'Search tags…',
     noMatch: 'No matching tags',
     remove: 'Remove tag',
+    // Structural pair (ADR-0050): a note/task has exactly one client and
+    // at most one project, and the project decides the client — hence the
+    // two explanatory lines, which are the ones that most needed saying
+    // in the reader's own language.
+    client: 'Client',
+    noClient: 'No client',
+    project: 'Project',
+    noProject: 'No project',
+    pickProjectToMove: 'Pick a project of this client: the project decides the client.',
+    pickProjectOrNone:
+      'Pick a project of this client, or drop the project first: the project decides the client.',
+    noFacets: 'No other tags',
   },
   attach: {
     title: 'Attachments',
@@ -1811,6 +1828,18 @@ export const en = {
   },
   annotations: {
     title: 'Comments & suggestions',
+    // Concurrency copy: a comment is co-edited by a human and an agent,
+    // so "someone else saved" is the ordinary case, not an error. The
+    // wording has to say what happened to the reader's own draft.
+    staleConflict:
+      'This comment changed since you opened it (someone else saved). The card now shows the current version — review it and try again if needed.',
+    staleEditConflict:
+      'Someone else saved this comment since you opened it. The card now shows their version; your unsaved draft was kept — click “Re-apply my draft” to merge it on top, then save.',
+    draftKept: 'You have an unsaved draft from before this comment changed.',
+    reapplyDraft: 'Re-apply my draft',
+    discardDraft: 'Discard draft',
+    copyId: 'Copy comment id',
+    idCopied: 'Comment id copied',
     diaryTitle: 'Work diary, comments & suggestions',
     empty: 'No comments yet.',
     showResolved: 'Show resolved',
@@ -1902,6 +1931,10 @@ export const en = {
     saved: 'Saved.',
     saving: 'Saving…',
     autosaved: 'Autosaved',
+    // Rendered the raw key 'notes.unsaved' to the user: the call site
+    // (NoteDetailRoute) passes no defaultValue, and only tasks.unsaved
+    // existed.
+    unsaved: 'Unsaved changes',
     archive: 'Archive',
     delete: 'Delete',
     confirmDelete: 'Delete this note? (recoverable from Trash)',

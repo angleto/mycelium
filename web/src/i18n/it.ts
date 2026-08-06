@@ -163,6 +163,8 @@ export const it: Catalog = {
     reload: 'Ricarica',
     reloadAnyway: 'Ricarica comunque',
     dismiss: 'Ignora',
+    save: 'Salva',
+    edit: 'Modifica',
   },
   taskLinkKind: {
     subject: 'oggetto',
@@ -367,6 +369,9 @@ export const it: Catalog = {
   },
   admin: {
     usersNav: 'Utenti',
+    search: 'Cerca per email o nome…',
+    noMatch: 'Nessun utente corrisponde alla ricerca.',
+    end: 'Fine dell\'elenco.',
     usersTitle: 'Amministrazione utenti',
     badge: 'Modalita admin',
     enter: 'Admin',
@@ -396,6 +401,15 @@ export const it: Catalog = {
     search: 'Cerca tag…',
     noMatch: 'Nessun tag corrispondente',
     remove: 'Rimuovi tag',
+    client: 'Cliente',
+    noClient: 'Nessun cliente',
+    project: 'Progetto',
+    noProject: 'Nessun progetto',
+    pickProjectToMove:
+      'Scegli un progetto di questo cliente: è il progetto a determinare il cliente.',
+    pickProjectOrNone:
+      'Scegli un progetto di questo cliente, oppure rimuovi prima il progetto: è il progetto a determinare il cliente.',
+    noFacets: 'Nessun altro tag',
   },
   attach: {
     title: 'Allegati',
@@ -1812,6 +1826,15 @@ export const it: Catalog = {
   },
   annotations: {
     title: 'Commenti e suggerimenti',
+    staleConflict:
+      'Questo commento è cambiato da quando l\'hai aperto (l\'ha salvato qualcun altro). La scheda mostra ora la versione corrente: controllala e riprova se serve.',
+    staleEditConflict:
+      'Qualcun altro ha salvato questo commento da quando l\'hai aperto. La scheda mostra ora la sua versione; la tua bozza non salvata è stata conservata: clicca “Riapplica la mia bozza” per unirla sopra, poi salva.',
+    draftKept: 'Hai una bozza non salvata, precedente alla modifica di questo commento.',
+    reapplyDraft: 'Riapplica la mia bozza',
+    discardDraft: 'Scarta la bozza',
+    copyId: 'Copia id del commento',
+    idCopied: 'Id del commento copiato',
     diaryTitle: 'Diario di lavoro, commenti e suggerimenti',
     empty: 'Ancora nessun commento.',
     showResolved: 'Mostra risolti',
@@ -1903,6 +1926,7 @@ export const it: Catalog = {
     saved: 'Salvato.',
     saving: 'Salvataggio…',
     autosaved: 'Salvato automaticamente',
+    unsaved: 'Modifiche non salvate',
     archive: 'Archivia',
     delete: 'Elimina',
     confirmDelete: 'Eliminare questa nota? (recuperabile dal Cestino)',

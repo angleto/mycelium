@@ -13,7 +13,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from starlette.responses import Response
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
@@ -191,8 +191,12 @@ async def list_entries(
     billable: bool | None = None,
     client_tag_id: uuid.UUID | None = None,
     project_tag_id: uuid.UUID | None = None,
-    limit: int | None = None,
-    offset: int = 0,
+    # Range-validated but deliberately still unbounded by DEFAULT: the
+    # task drill-down in TimeRoute relies on getting every entry that
+    # matches its filters, so a default page size would silently truncate
+    # it. Bounding it needs that panel to page first.
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TimeEntryOut]:
     rows = await svc.list_entries(
         ctx.session,

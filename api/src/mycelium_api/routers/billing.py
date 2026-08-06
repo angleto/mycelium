@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
@@ -98,8 +98,8 @@ async def meter(
 @router.get("/ledger", response_model=list[LedgerOut])
 async def ledger(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-    limit: int = 100,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[LedgerOut]:
     rows = await svc.list_ledger(ctx.session, org_id=ctx.org_id, limit=limit, offset=offset)
 
@@ -119,7 +119,7 @@ async def ledger(
 @router.get("/usage", response_model=list[UsageOut])
 async def usage(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> list[UsageOut]:
     rows = await svc.list_usage(ctx.session, org_id=ctx.org_id, limit=limit)
     return [_usage_out(r) for r in rows]
