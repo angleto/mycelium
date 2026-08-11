@@ -150,6 +150,24 @@ test('links keep their destination through the rich editor', async ({ page }) =>
   expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(md)
 })
 
+test('sub/sup render as real elements and round-trip, but stay literal in code', async ({
+  page,
+}) => {
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+  const md = 'x<sub>0</sub> e 2<sup>t</sup>, ma `x<sup>2</sup>` resta letterale'
+  await page.locator('textarea.rte__raw').first().fill(md)
+  await toggleBtn(page).click() // -> WYSIWYG
+  await expect(page.locator('.ProseMirror sup').first()).toBeVisible()
+  expect(await page.locator('.ProseMirror sup').count()).toBe(1)
+  expect(await page.locator('.ProseMirror sub').count()).toBe(1)
+  // Inside a code span the author asked for the characters, not the markup.
+  expect(await page.locator('.ProseMirror code sup').count()).toBe(0)
+  await toggleBtn(page).click() // -> back to markdown
+  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(md)
+})
+
 test('in markdown mode the Attach-file block does not overlap the editor', async ({
   page,
 }) => {

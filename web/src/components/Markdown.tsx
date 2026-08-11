@@ -18,6 +18,7 @@ import {
   type TaskMentionInfo,
 } from '../lib/taskMentionCache'
 import { isPrefixCandidate } from '../lib/prefixLookup'
+import { remarkSubSup } from '../lib/remarkSubSup'
 import { PrefixMentionChip } from './PrefixMentionChip'
 import { Mermaid } from './Mermaid'
 
@@ -477,7 +478,7 @@ export function MarkdownView({
     <div className="md">
       <Markdown
         components={components}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkSubSup]}
         rehypePlugins={[rehypeKatex]}
       >
         {text}

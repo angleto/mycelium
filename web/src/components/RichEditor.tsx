@@ -53,6 +53,7 @@ import {
 } from '../lib/attachmentRef'
 import { AttachmentPicker } from './AttachmentPicker'
 import { isEditorHref } from '../lib/editorHref'
+import { Subscript, Superscript } from '../lib/subSupMarks'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
 // all editors). Defaults to shown; collapsing is the opt-in for a
@@ -953,6 +954,11 @@ export function RichEditor({
       // destination gone. Exclude the formatting marks (CommonMark has no
       // emphasis inside code) but not ``link``.
       Code.extend({ excludes: 'bold italic strike underline' }),
+      // ``x<sub>0</sub>`` / ``2<sup>t</sup>``: the cheapest notation for
+      // light maths in prose, and what the read-side renderer shows. Only
+      // these two tags; all other inline HTML stays literal text.
+      Superscript,
+      Subscript,
       Link.configure({
         openOnClick: false,
         autolink: false,
