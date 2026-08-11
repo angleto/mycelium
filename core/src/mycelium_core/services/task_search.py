@@ -69,9 +69,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, object_session
 
 from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
+from mycelium_core.errors import DomainError
 from mycelium_core.models.identity import Identity
 from mycelium_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
+from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
@@ -89,6 +91,12 @@ logger = logging.getLogger(__name__)
 _DIRTY_KEY = "task_search_dirty"
 _DELETED_KEY = "task_search_deleted"
 _EMBED_TIMEOUT_S = 2.0
+# Cross-branch relative floor for the unified merge: keep hits within this
+# fraction of the top score. Deliberately its own constant rather than a
+# reuse of memory's per-branch ratio -- same shape and same starting value,
+# but a different cut (between branches, not inside one) that can be tuned
+# on its own evidence.
+_CROSS_BRANCH_FLOOR_RATIO = 0.4
 _NO_EMBED_MODEL = "none"
 
 
@@ -634,7 +642,21 @@ async def search_unified_with_meta(
     """
     # Local imports break a static cycle: memory imports nothing from
     # task_search, but task_search imports memory only at call time.
+    from mycelium_core.services import lookup as lookup_svc
     from mycelium_core.services import memory as memory_svc
+
+    # An entity code is a LOOKUP, not a similarity question. Searching
+    # ``f62ff51d`` asks "which entity is this, and where is it cited", and
+    # the only meaningful match for either half is EXACT. Left to the normal
+    # pipeline the token gets embedded, and since 8 hex digits carry no
+    # meaning its nearest neighbours are arbitrary: five confident, unrelated
+    # results for a query that should have returned one row or none.
+    #
+    # So an id query runs the same branches with ``exact_only``: verbatim FTS
+    # only, no embedding, no stemming, no cross-encoder. The prefix
+    # resolution is added on top, because that is the half no text retrieval
+    # can produce (a note does not contain its own id).
+    code_query = lookup_svc.looks_like_entity_code(query)
 
     want_task = "task" in kinds
     want_note = "note" in kinds
@@ -676,6 +698,7 @@ async def search_unified_with_meta(
             channel_key="task",
             rerank=rerank,
             include_deleted_sources=include_deleted,
+            exact_only=code_query,
         )
         metas.append(task_rmeta)
         if task_hits:
@@ -735,6 +758,7 @@ async def search_unified_with_meta(
             channel_key="note",
             rerank=rerank,
             include_deleted_sources=include_deleted,
+            exact_only=code_query,
         )
         metas.append(note_rmeta)
         if note_hits:
@@ -795,6 +819,7 @@ async def search_unified_with_meta(
             channel_key=single_channel,
             rerank=rerank,
             include_deleted_sources=include_deleted,
+            exact_only=code_query,
         )
         metas.append(blob_rmeta)
         if blob_hits:
@@ -827,9 +852,153 @@ async def search_unified_with_meta(
     if typed_blob_ids:
         hits = [h for h in hits if not (h.kind == "blob" and h.blob_id in typed_blob_ids)]
 
+    if code_query:
+        # The entity the code NAMES, which no text retrieval can find: a note
+        # does not contain its own id. Scored above every retrieved hit (the
+        # fused RRF scale tops out around 0.03), so it leads and the literal
+        # citations follow.
+        resolved = await _entity_code_matches(
+            session,
+            prefix=query,
+            want_task=want_task,
+            want_note=want_note,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
+        if resolved:
+            named = {(h.kind, h.task_id, h.note_id) for h in resolved}
+            hits = resolved + [h for h in hits if (h.kind, h.task_id, h.note_id) not in named]
+
     hits.sort(key=lambda r: (-r.score, r.kind, str(r.blob_id)))
+    if not code_query:
+        # Cross-branch relative floor. Each branch already drops its own tail
+        # (RelativeFloorStage), but that floor is relative to the branch's OWN
+        # top -- so a branch holding no real match has a FLAT score profile,
+        # where the floor is deliberately a no-op to protect recall on
+        # conceptual queries, and it contributes its full quota of weak hits
+        # to a merge that had no floor at all. That is how a query with one
+        # strong note match came back padded with four unrelated tasks.
+        #
+        # The branches share one RRF scale (same k, same weights), so their
+        # scores are directly comparable. Same shape as the per-branch rule:
+        # a wide gap means real hits set the top and the tail is noise; a flat
+        # all-semantic profile is untouched.
+        top = hits[0].score if hits else 0.0
+        if top > 0.0:
+            floor = _CROSS_BRANCH_FLOOR_RATIO * top
+            hits = [h for h in hits if h.score >= floor]
     final = hits[:limit]
     return final, _aggregate(final)
+
+
+async def _entity_code_matches(
+    session: AsyncSession,
+    *,
+    prefix: str,
+    want_task: bool,
+    want_note: bool,
+    include_archived: bool,
+    include_deleted: bool,
+) -> list[UnifiedHit]:
+    """The entities whose id starts with ``prefix``, shaped as search hits.
+
+    An entity is surfaced only when it has an index blob, because
+    ``UnifiedHit`` is keyed on one: everything indexable is indexed, and an
+    entity created microseconds ago and not yet flushed is better absent
+    than surfaced as a row the click telemetry cannot key.
+    """
+    from mycelium_core.services import lookup as lookup_svc
+
+    kinds = tuple(k for k, want in (("task", want_task), ("note", want_note)) if want)
+    if not kinds:
+        return []
+    try:
+        p = lookup_svc.normalise_prefix(prefix)
+    except DomainError:
+        # Unreachable via ``looks_like_entity_code`` (stricter on both ends);
+        # cheap insurance for any other caller.
+        return []
+    matches = await lookup_svc.resolve_prefix(
+        session,
+        prefix=p,
+        kinds=kinds,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+    )
+    if not matches:
+        return []
+
+    task_ids = [m.id for m in matches if m.kind == "task"]
+    note_ids = [m.id for m in matches if m.kind == "note"]
+    task_blob: dict[uuid.UUID, uuid.UUID] = {}
+    if task_ids:
+        task_rows = (
+            await session.execute(
+                select(TaskIndexPointer.task_id, TaskIndexPointer.blob_id).where(
+                    TaskIndexPointer.task_id.in_(task_ids)
+                )
+            )
+        ).all()
+        task_blob = {tid: bid for tid, bid in task_rows}
+    note_blob: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
+    if note_ids:
+        # Route to the note's FIRST part: the top of the document is where a
+        # reader who followed an id wants to land.
+        note_rows = (
+            await session.execute(
+                select(
+                    NotePartIndexPointer.note_id,
+                    NotePartIndexPointer.blob_id,
+                    NotePartIndexPointer.part_id,
+                )
+                .join(NotePart, NotePart.id == NotePartIndexPointer.part_id)
+                .where(NotePartIndexPointer.note_id.in_(note_ids))
+                .order_by(NotePartIndexPointer.note_id, NotePart.ord)
+            )
+        ).all()
+        for nid, bid, pid in note_rows:
+            note_blob.setdefault(nid, (bid, pid))
+
+    out: list[UnifiedHit] = []
+    for i, m in enumerate(matches):
+        # Preserve the resolver's deliberate order (tasks first, then most
+        # recently updated) through the score sort below, which would
+        # otherwise re-break ties on kind and blob id.
+        score = 1.0 - i * 1e-6
+        if m.kind == "task":
+            bid = task_blob.get(m.id)
+            if bid is None:
+                continue
+            out.append(
+                UnifiedHit(
+                    kind="task",
+                    blob_id=bid,
+                    task_id=m.id,
+                    title=m.title,
+                    snippet=None,
+                    score=score,
+                    scope="org",
+                )
+            )
+        else:
+            ref = note_blob.get(m.id)
+            if ref is None:
+                continue
+            bid, pid = ref
+            out.append(
+                UnifiedHit(
+                    kind="note",
+                    blob_id=bid,
+                    task_id=None,
+                    note_id=m.id,
+                    part_id=pid,
+                    title=m.title,
+                    snippet=None,
+                    score=score,
+                    scope="org",
+                )
+            )
+    return out
 
 
 async def search_unified(

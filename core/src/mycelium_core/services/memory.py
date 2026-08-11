@@ -561,6 +561,7 @@ async def retrieve_with_meta(
     exclude_humus_from_base: bool = False,
     probe: bool = False,
     include_deleted_sources: bool = False,
+    exact_only: bool = False,
 ) -> tuple[list[Hit], RetrievalMeta]:
     """Like :func:`retrieve` but also returns a :class:`RetrievalMeta` so the
     caller can distinguish 'nothing relevant' from 'dense recall silently
@@ -590,7 +591,12 @@ async def retrieve_with_meta(
     from mycelium_core.services.embedder_resolver import resolve_hosted_embedder
 
     emb = embedder or get_embedder()
-    qres = await _safe_embed(emb, query)
+    # ``exact_only``: verbatim matching, nothing else. An entity-code lookup
+    # (see ``lookup.looks_like_entity_code``) has no similarity question to
+    # ask, so the query is never embedded -- no dense branch, no humus, no
+    # cross-encoder, and no embed cost metered for a query that could only
+    # have returned its arbitrary nearest neighbours.
+    qres = None if exact_only else await _safe_embed(emb, query)
     if qres is not None:
         # The query embedding is also a metered cost op. Skipped when
         # the embedder is unavailable: there is no semantic branch and
@@ -612,7 +618,9 @@ async def retrieve_with_meta(
     hosted = await resolve_hosted_embedder(session, org_id)
     hosted_emb = hosted[0] if hosted is not None else None
     hosted_basis = hosted[1] if hosted is not None else CostBasis.local
-    qres_hosted = await _safe_embed(hosted_emb, query) if hosted_emb is not None else None
+    qres_hosted = (
+        await _safe_embed(hosted_emb, query) if hosted_emb is not None and not exact_only else None
+    )
     if qres_hosted is not None:
         await billing.meter_if_billable(
             session,
@@ -715,7 +723,7 @@ async def retrieve_with_meta(
     # query length and candidate count (see RerankGate); a gated-off
     # stage is a no-op so the pipeline cost is bounded by RRF.
     settings = _get_settings()
-    use_rerank = rerank or settings.reranker_enabled
+    use_rerank = (rerank or settings.reranker_enabled) and not exact_only
     # Humus branch on/off: an explicit ``humus=`` wins; else the workspace
     # default (``settings.humus_enabled``, historically True). When off, both
     # the humus source stage and its cap are dropped from the pipeline.
@@ -723,7 +731,9 @@ async def retrieve_with_meta(
     # ANDs the base tag_clauses (which then contain the exclusion), so a
     # branch over an excluded set could only run empty -- short-circuit it.
     use_humus = settings.humus_enabled if humus is None else humus
-    if exclude_humus_from_base:
+    if exclude_humus_from_base or exact_only:
+        # Humus is a dense branch; there is nothing for it to do without a
+        # query embedding.
         use_humus = False
     sem_min_sim = await semantic_min_similarity(session, org_id)
     # The grader/abstain floor: an explicit caller value wins; otherwise
@@ -741,10 +751,9 @@ async def retrieve_with_meta(
         effective_grader_min_rerank = await grader_min_rerank_logit_floor(session, org_id)
     from mycelium_core.services.retrieval.types import Stage as _Stage
 
-    stages: list[_Stage] = [
-        LexicalFTSStage(oversample=_OVERSAMPLE),
-        SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
-    ]
+    stages: list[_Stage] = [LexicalFTSStage(oversample=_OVERSAMPLE, exact_only=exact_only)]
+    if not exact_only:
+        stages.append(SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim))
     if use_humus:
         # Parallel humus source (ADR-0034): archived material re-enters the
         # focused walk, late-fused below with a fixed boost + small k, then

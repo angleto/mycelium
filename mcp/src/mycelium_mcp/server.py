@@ -4744,6 +4744,12 @@ async def search(
     snippet. Use this over ``memory_search`` for "everything that mentions
     X". ``rerank=True`` opts into the cross-encoder top-K pass.
 
+    An ENTITY CODE (8+ hex digits, e.g. ``f62ff51d`` or a full UUID) is
+    answered as an exact LOOKUP, not a similarity question: the entity whose
+    id starts with it, plus the places that cite it verbatim. No embedding,
+    no stemming. An unknown code returns an EMPTY list, which is the honest
+    answer -- do not read it as "the search is broken".
+
     Returns ``{hits, meta}``. Each hit carries ``model_id`` ('none' = a
     keyword-only row, no dense vector). ``offset`` pages the ranked results
     (offset, not cursor: ranked retrieval has no stable keyset). ``meta``

@@ -408,3 +408,135 @@ async def test_grader_floor_abstains_through_unified_search(_fake_embedder: None
         # A tiny positive floor (a real threshold, not on/off) -> hit returns.
         await _set_floor(0.001)
         assert _found((await c.post("/search", headers=h, json=body)).json())
+
+
+# ------------------------------------------------------------ id lookups
+#
+# Searching an entity code is a LOOKUP, not a similarity question. It has
+# exactly two right answers -- the entity the code names, and the places
+# that cite it verbatim -- and both are exact. Left to the hybrid pipeline
+# the code was embedded instead, and since 8 hex digits carry no meaning
+# its nearest neighbours are arbitrary: an id query came back with a page
+# of confident, unrelated results.
+
+
+async def test_searching_an_id_returns_the_entity_it_names(_fake_embedder: None) -> None:
+    """The task whose id starts with the code leads the results, and the
+    note that cites the code verbatim follows.
+
+    Neither half is reachable through similarity: a task does not contain
+    its own id, and a hex token has no neighbours worth having."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        tid = (
+            await c.post("/tasks", headers=h, json={"title": "Riallineare il set consolidato"})
+        ).json()["id"]
+        code = tid[:8]
+        # A note that MENTIONS the code, the "where is this cited" half.
+        citing = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={
+                    "kind": "text",
+                    "title": "Registro decisioni",
+                    "text": f"Deciso oggi: chiudere {code} prima del rilascio.",
+                },
+            )
+        ).json()["id"]
+        # Decoys with no relation to the code and no shared vocabulary.
+        for n in range(3):
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": f"Decoy {n}", "text": f"Materiale estraneo {n}."},
+            )
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": code, "kinds": ["task", "note"], "limit": 10},
+            )
+        ).json()
+
+        assert hits, "an id that names a live task must not come back empty"
+        assert hits[0]["kind"] == "task" and hits[0]["task_id"] == tid, (
+            f"the named entity must lead, got {hits[0]}"
+        )
+        assert any(hit["kind"] == "note" and hit["note_id"] == citing for hit in hits), (
+            f"the note citing {code} verbatim must be found, got {hits}"
+        )
+        # And nothing else: every decoy would have arrived as a nearest
+        # neighbour of the embedded code.
+        returned = {(hit["kind"], hit.get("task_id") or hit.get("note_id")) for hit in hits}
+        assert returned == {("task", tid), ("note", citing)}, (
+            f"an id lookup must return only exact matches, got {hits}"
+        )
+
+
+async def test_an_id_that_matches_nothing_returns_nothing(_fake_embedder: None) -> None:
+    """The honest answer to an unknown code is an empty list.
+
+    ``5d44d8e5`` in the field was a REVISION id: never an entity, never
+    written in prose. It came back with five results anyway."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        tid = (await c.post("/tasks", headers=h, json={"title": "Qualcosa"})).json()["id"]
+        for n in range(3):
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": f"Nota {n}", "text": f"Contenuto {n}."},
+            )
+
+        unknown = "5d44d8e5"
+        assert not tid.startswith(unknown), "fixture collision: pick another code"
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": unknown, "kinds": ["task", "note"], "limit": 10},
+            )
+        ).json()
+        assert hits == [], f"an unknown id must return nothing, got {hits}"
+
+
+async def test_a_branch_with_no_real_match_cannot_pad_the_page(_fake_embedder: None) -> None:
+    """Cross-branch floor: an exact hit in one branch must not drag the
+    other branch's semantic tail along.
+
+    Each branch already drops its own tail, but relative to its OWN top --
+    so a branch holding nothing has a flat profile, keeps everything, and
+    used to hand it all to a merge with no floor at all."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        tid = (
+            await c.post("/tasks", headers=h, json={"title": "Revisione zqxwvu trimestrale"})
+        ).json()["id"]
+        for n in range(3):
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": f"Altro {n}", "text": f"Argomento diverso {n}."},
+            )
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "zqxwvu", "kinds": ["task", "note"], "limit": 10},
+            )
+        ).json()
+
+        assert any(hit["kind"] == "task" and hit["task_id"] == tid for hit in hits)
+        assert [hit for hit in hits if hit["kind"] == "note"] == [], (
+            f"the note branch had no match for 'zqxwvu' and must contribute nothing, got {hits}"
+        )

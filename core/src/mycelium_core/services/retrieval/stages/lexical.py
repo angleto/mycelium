@@ -38,6 +38,10 @@ from mycelium_core.services.retrieval.types import (
 class LexicalFTSStage(Stage):
     name: str = "lexical"
     oversample: int = 50
+    # Emit ONLY the verbatim signal. Set for an entity-code lookup, where
+    # stemming has nothing to contribute and can only introduce a
+    # near-match: an id is either present in the text or it is not.
+    exact_only: bool = False
 
     async def _ranked(
         self, ctx: RetrievalContext, query: str, *, match: str, rank: str, key: str
@@ -76,6 +80,8 @@ class LexicalFTSStage(Stage):
             rank="ts_rank(fts, plainto_tsquery('simple', :q))",
             key="lexical_exact",
         )
+        if self.exact_only:
+            return merge_candidates(candidates, exact)
         # Stem in the ROW's own language (task b1baaf52): fts_lang is now a
         # per-row tsvector (migration 0066), so the matching tsquery must use
         # the same config. fts_language is a closed domain (a valid config or

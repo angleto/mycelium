@@ -43,6 +43,35 @@ _PREFIX_RE = re.compile(r"^[0-9a-f][0-9a-f-]{2,34}[0-9a-f]$", re.IGNORECASE)
 MIN_PREFIX_LEN = 4
 MAX_PREFIX_LEN = 36
 
+# A whole query that IS an entity code, for the search surfaces. Searching
+# an id is a LOOKUP, not a similarity question: the only meaningful match
+# is exact, so the caller answers it by resolving the prefix (and by exact
+# literal occurrences of the string) instead of embedding it. An 8-char
+# hex token has no semantic content, but an embedder still returns its
+# nearest neighbours, which are arbitrary -- that is how `5d44d8e5` came
+# back with five confident, unrelated results.
+#
+# The floor is 8 hex digits, the ADR-0038 convention, and NOT the 4 that
+# ``normalise_prefix`` accepts: shorter runs collide with ordinary words
+# spelled in hex ('cafe', 'decade', 'faced', 'added'), which must keep
+# going through the normal pipeline. At 8+ a collision ('deadbeef') is
+# rare, and answering it with exact matches is still sensible.
+IDENTIFIER_MIN_HEX = 8
+
+
+def looks_like_entity_code(raw: str) -> bool:
+    """True when the whole query is an entity-code lookup (see above).
+
+    Deliberately strict: one token, no whitespace, hex with optional
+    dashes, at least ``IDENTIFIER_MIN_HEX`` hex digits, no longer than a
+    canonical UUID."""
+    s = raw.strip().lower()
+    if not s or len(s) > MAX_PREFIX_LEN or any(ch.isspace() for ch in s):
+        return False
+    if len(s.replace("-", "")) < IDENTIFIER_MIN_HEX:
+        return False
+    return bool(_PREFIX_RE.match(s))
+
 
 @dataclass(frozen=True, slots=True)
 class LookupMatch:
