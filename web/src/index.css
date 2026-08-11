@@ -2844,6 +2844,14 @@ button.btn--danger:hover {
   margin: 0.25rem 0 0;
   font-size: 0.82rem;
 }
+/* "This body is verbatim source, the rich editor would rewrite it": shown
+ * when the markdown round-trip is not a fixed point and the editor has
+ * therefore withheld the WYSIWYG surface. */
+.rte__notice {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
 /* Embedded markdown images: capped at the editor/view width so a
  * full-resolution screenshot does not blow up the layout. ``--loading``
  * is the placeholder span shown while the auth-fetch is in flight. */

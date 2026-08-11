@@ -9,6 +9,7 @@ import {
   type NodeViewProps,
 } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import Code from '@tiptap/extension-code'
 import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -19,7 +20,7 @@ import Suggestion, {
   type SuggestionKeyDownProps,
   type SuggestionProps,
 } from '@tiptap/suggestion'
-import { PluginKey } from '@tiptap/pm/state'
+import { PluginKey, type Transaction } from '@tiptap/pm/state'
 import { InlineMath, BlockMath } from './MarkdownMath'
 import {
   AnnotationDecorations,
@@ -51,6 +52,7 @@ import {
   type AttachmentRef,
 } from '../lib/attachmentRef'
 import { AttachmentPicker } from './AttachmentPicker'
+import { isEditorHref } from '../lib/editorHref'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
 // all editors). Defaults to shown; collapsing is the opt-in for a
@@ -634,6 +636,24 @@ export function RichEditor({
   // round-trip). Both modes read/write the same `value` markdown
   // string (bitvision EvidenceEditor pattern).
   const [rawMode, setRawMode] = useState(false)
+  // A body that arrived from outside the app (an MCP upload, the CLI, an
+  // import) is markdown SOURCE, and the WYSIWYG surface can only ever
+  // write back what its serializer produces. That round-trip is not the
+  // identity: prosemirror-markdown re-flows paragraphs onto a single line,
+  // escapes ``[`` and ``_``, rewrites table separators as ``| --- |`` and
+  // drops the trailing newline. So the editor may replace a body only when
+  // the body it was handed is already a FIXED POINT of its own round-trip.
+  // Everything authored in the app is (the serializer produced it), so this
+  // is invisible there; verbatim content opens as source instead of being
+  // silently normalised. Measured once per editor instance, below.
+  const [lossyRoundTrip, setLossyRoundTrip] = useState(false)
+  // The user asked for WYSIWYG on a non-fixed-point body anyway. An
+  // explicit, informed choice: the notice says what will be rewritten.
+  const [acceptedNormalisation, setAcceptedNormalisation] = useState(false)
+  const sourceOnly = lossyRoundTrip && !acceptedNormalisation
+  // Source mode is forced whenever the body cannot survive WYSIWYG, on top
+  // of the user's own toggle.
+  const showRaw = rawMode || sourceOnly
   // Collapse the formatting buttons to reclaim writing space (a single
   // tap on a phone, where the wrapped bar otherwise eats several rows).
   // Persisted so the choice sticks across editors and sessions.
@@ -663,10 +683,15 @@ export function RichEditor({
   // Latest rawMode for the scroll handle (built once, must see the live
   // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
   // to scroll to.
-  const rawModeRef = useRef(rawMode)
+  const rawModeRef = useRef(showRaw)
   useEffect(() => {
-    rawModeRef.current = rawMode
-  }, [rawMode])
+    rawModeRef.current = showRaw
+  }, [showRaw])
+  // Same value, read from inside the editor's own onUpdate closure.
+  const sourceOnlyRef = useRef(sourceOnly)
+  useEffect(() => {
+    sourceOnlyRef.current = sourceOnly
+  }, [sourceOnly])
   // Single coalesced timer that clears the flash decoration; a new flash
   // (repeat click or prev/next step) cancels the prior clear before
   // re-arming so the pulse always runs its full duration.
@@ -770,7 +795,7 @@ export function RichEditor({
       filename: att.filename,
       mime_type: att.mimeType,
     }
-    if (rawMode) {
+    if (showRaw) {
       insertRawSnippet(attachmentMarkdownRef(meta))
       return
     }
@@ -793,7 +818,7 @@ export function RichEditor({
       // A new file exists now; drop the cached name->id map so a later
       // `![alt](filename)` reference to it resolves.
       invalidateAttachmentManifest(parent)
-      if (rawMode) {
+      if (showRaw) {
         insertRawSnippet(`![${up.filename}](${up.url})`)
       } else if (editorRef.current) {
         editorRef.current
@@ -906,27 +931,39 @@ export function RichEditor({
       // replaces it (same node name + ```fence round-trip) so a ```mermaid
       // block renders its diagram live while every other code block keeps
       // the default behaviour.
-      StarterKit.configure({ link: false, codeBlock: false }),
+      // ``trailingNode`` is DELIBERATELY off. StarterKit bundles it, and its
+      // plugin appends a paragraph to any document whose last block is not
+      // one — on the FIRST transaction of any kind, meta-only transactions
+      // included (see @tiptap/extensions trailing-node: appendTransaction
+      // never checks docChanged). The annotation-decoration dispatch below
+      // is exactly such a transaction, so merely MOUNTING an editor over a
+      // note part mutated the document, which emitted ``update``, which the
+      // host read as "the user edited this", which autosaved a full lossy
+      // re-serialisation over verbatim content nobody had touched.
+      StarterKit.configure({
+        link: false,
+        codeBlock: false,
+        trailingNode: false,
+        code: false,
+      }),
+      // StarterKit's ``code`` mark declares ``excludes: '_'`` (excludes every
+      // other mark), so a link whose label is inline code — the ordinary way
+      // to write [`00-overview.md`](00-overview.md) — loses its ``link`` mark
+      // at PARSE time and serialises back as a bare code span with the
+      // destination gone. Exclude the formatting marks (CommonMark has no
+      // emphasis inside code) but not ``link``.
+      Code.extend({ excludes: 'bold italic strike underline' }),
       Link.configure({
         openOnClick: false,
         autolink: false,
-        // Accept the @kind:uuid mention DSL hrefs AND the relative
-        // /attachments/<id>/download route in addition to regular links,
-        // so [label](@note:uuid) and [file.pdf](/attachments/<id>/download)
-        // survive the markdown round-trip as a clickable link. Without
-        // the /attachments arm the Link mark is silently stripped to bare
-        // text on parse-back — the link would vanish on save/reload.
-        validate: (url: string) => {
-          if (!url) return false
-          if (/^@(?:task|note|tag):/.test(url)) return true
-          if (/^\/attachments\//.test(url)) return true
-          // A bare filename ref to an attachment of this note/task, e.g.
-          // [report.pdf](report.pdf): no scheme/leading slash, no spaces,
-          // ending in an extension. Kept so the link survives the
-          // markdown round-trip; the click-interceptor resolves it.
-          if (/^[^\s:/][^\s:]*\.[A-Za-z0-9]{1,12}$/.test(url)) return true
-          return /^(https?:|mailto:|tel:)/i.test(url)
-        },
+        // ``isAllowedUri`` is the parse/render gate in tiptap v3. The
+        // ``validate`` option that used to live here is NOT this gate any
+        // more: v3 aliases it onto ``shouldAutoLink``, which only feeds the
+        // autolink plugin — off, one line above. So the custom policy was
+        // dead code and tiptap's default (which rejects every relative path
+        // containing a ``/``) silently governed the round-trip instead.
+        isAllowedUri: (url: string) => isEditorHref(url),
+        shouldAutoLink: () => false,
       }),
       // GitHub-flavored task lists: round-trip via tiptap-markdown's
       // built-in task_list / task_item serializers (`- [ ]` / `- [x]`).
@@ -967,7 +1004,31 @@ export function RichEditor({
     ],
     content: value,
     editorProps,
-    onUpdate: ({ editor }: { editor: CoreEditor }) => {
+    // Is the body this editor was built on a FIXED POINT of the markdown
+    // round-trip? Measured once, on the exact bytes the server handed us,
+    // before any transaction. If it is not, the WYSIWYG surface is never
+    // rendered (``sourceOnly``), so it cannot write a normalised copy over
+    // the original. Measured here rather than in an effect because "when
+    // the editor is created" is exactly the moment that matters, and
+    // ``value`` changes on every source-mode keystroke -- re-serialising a
+    // large part per keystroke would be pure waste.
+    onCreate: ({ editor: ed }: { editor: CoreEditor }) => {
+      setLossyRoundTrip(getMd(ed) !== value)
+    },
+    onUpdate: ({
+      editor,
+      transaction,
+    }: {
+      editor: CoreEditor
+      transaction: Transaction
+    }) => {
+      // Emit ONLY when the transaction that started this batch carried the
+      // document change. tiptap fires ``update`` when ANY transaction in
+      // the batch touched the doc, appended plugin transactions included,
+      // so without this guard a plugin rewriting the document behind the
+      // user's back is indistinguishable from typing — and gets autosaved.
+      if (!transaction.docChanged) return
+      if (sourceOnlyRef.current) return
       const md = getMd(editor)
       lastEmittedRef.current = md
       onChange(md)
@@ -1175,7 +1236,7 @@ export function RichEditor({
     })
   }, [value, editor])
 
-  const fmt = !rawMode && editor != null
+  const fmt = !showRaw && editor != null
 
   const tb = (
     label: string,
@@ -1218,7 +1279,7 @@ export function RichEditor({
   // is available (e.g. note-create form before save) — drop/paste are
   // also gated by parentRef inside the handlers.
   const imageDisabled =
-    (!fmt && !rawMode) || uploading || !imageUploadParent
+    (!fmt && !showRaw) || uploading || !imageUploadParent
   const imageTitle = imageUploadParent
     ? t('editor.image')
     : t('editor.imageNeedsSave')
@@ -1504,12 +1565,26 @@ export function RichEditor({
           <button
             type="button"
             className="btn--ghost btn--sm"
-            onClick={() => setRawMode((v) => !v)}
+            onClick={() => {
+              // On a non-fixed-point body the WYSIWYG surface is withheld,
+              // so this button is the informed opt-in rather than a toggle.
+              if (sourceOnly) {
+                setAcceptedNormalisation(true)
+                setRawMode(false)
+                return
+              }
+              setRawMode((v) => !v)
+            }}
           >
-            {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
+            {showRaw ? t('editor.toWysiwyg') : t('editor.toRaw')}
           </button>
         </span>
       </div>
+      {sourceOnly && (
+        <p className="rte__notice">
+          {t('editor.sourceOnly')}
+        </p>
+      )}
       <input
         ref={imgInput}
         type="file"
@@ -1535,7 +1610,7 @@ export function RichEditor({
           {pdfErr}
         </p>
       )}
-      {rawMode ? (
+      {showRaw ? (
         <textarea
           ref={rawRef}
           className="rte__raw"
@@ -1576,7 +1651,7 @@ export function RichEditor({
       ) : (
         <EditorContent editor={editor} />
       )}
-      {editor && !rawMode && inlineAnnotations && (
+      {editor && !showRaw && inlineAnnotations && (
         <InlineAnnotator
           ref={annoRef}
           editor={editor}

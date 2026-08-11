@@ -347,6 +347,17 @@ async def update_part(
         values["lang"] = lang
     if not values:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    # A write that changes nothing is not a write. Without this an
+    # interactive client that re-sends the body it was given (an editor
+    # whose serializer happens to reproduce it, a retried request, a
+    # "Save" on an untouched form) bumps ``version`` and stamps a
+    # recovery-history row that says an edit happened when none did --
+    # which is exactly the noise that made the silent-rewrite incident
+    # hard to read. The version gate above has already run, so callers
+    # still get a conflict on stale writes; this only collapses the
+    # genuinely idempotent case.
+    if all(getattr(part, field) == value for field, value in values.items()):
+        return int(part.version)
     new_version = await optimistic_update(
         session,
         NotePart,

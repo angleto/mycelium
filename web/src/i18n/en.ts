@@ -1223,6 +1223,8 @@ export const en = {
     attachNeedsSave: 'Save first to attach files.',
     toRaw: 'Edit as Markdown',
     toWysiwyg: 'Rich editor',
+    sourceOnly:
+      'This is Markdown source and does not survive the rich editor unchanged (paragraph wrapping, escapes, table separators). It stays in source mode, where your edits are byte-exact. "Rich editor" rewrites it in normalised form.',
     downloadMd: 'Download markdown (.md)',
     downloadMdShort: '.md',
     exportPdf: 'Export PDF',

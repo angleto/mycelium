@@ -81,6 +81,75 @@ test('markdown table round-trips through the editor', async ({ page }) => {
   expect(back).toContain('| Alice')
 })
 
+// Markdown that is deliberately NOT a fixed point of the editor's
+// round-trip: hard-wrapped prose, a padded table separator, links whose
+// label is inline code, a relative path with a directory, bare brackets,
+// and a trailing newline. Every one of these was silently rewritten when
+// a note was merely OPENED (see the trailing-node / dirty-check chain in
+// RichEditor).
+const VERBATIM = [
+  '# Titolo',
+  '',
+  'Un paragrafo avvolto a mano attorno alle 72 colonne,',
+  'come in un file tenuto in repository.',
+  '',
+  '| File | Cosa copre |',
+  '|------|------------|',
+  '| [`00-overview.md`](00-overview.md) | stato [proven] |',
+  '',
+  '- [`sources/`](sources/): materiale originale',
+  '',
+].join('\n')
+
+test('opening a note never rewrites a verbatim markdown part', async ({ page }) => {
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+  await page.locator('textarea.rte__raw').first().fill(VERBATIM)
+  // Let the 1.2s debounced autosave land the bytes we typed.
+  await page.waitForResponse(
+    (r) => /\/notes\/[^/]+\/parts\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
+    { timeout: 15_000 },
+  )
+
+  // From here on NOTHING may write. Re-opening the note mounts a fresh
+  // editor over the stored body; that mount must not produce a PATCH.
+  const writes: string[] = []
+  page.on('request', (r) => {
+    if (r.url().includes('/parts/') && ['PATCH', 'PUT', 'POST'].includes(r.method())) {
+      writes.push(`${r.method()} ${r.url()}`)
+    }
+  })
+  await page.reload()
+  await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
+  // Well past the autosave debounce.
+  await page.waitForTimeout(3500)
+  expect(writes).toEqual([])
+
+  // The body is not a fixed point of the round-trip, so the editor withholds
+  // the WYSIWYG surface and shows the source, byte for byte.
+  const ta = page.locator('textarea.rte__raw').first()
+  await expect(ta).toBeVisible()
+  expect(await ta.inputValue()).toBe(VERBATIM)
+  await expect(page.locator('.rte__notice').first()).toBeVisible()
+})
+
+test('links keep their destination through the rich editor', async ({ page }) => {
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+  // Both arms used to lose the destination: the first because the `code`
+  // mark excluded `link`, the second because tiptap's default isAllowedUri
+  // rejects a relative path containing a directory separator.
+  const md = '[`00-overview.md`](00-overview.md) e [testo](docs/00-overview.md)'
+  await page.locator('textarea.rte__raw').first().fill(md)
+  await toggleBtn(page).click() // -> WYSIWYG
+  await expect(page.locator('.ProseMirror a').first()).toBeVisible()
+  expect(await page.locator('.ProseMirror a').count()).toBe(2)
+  await toggleBtn(page).click() // -> back to markdown
+  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(md)
+})
+
 test('in markdown mode the Attach-file block does not overlap the editor', async ({
   page,
 }) => {

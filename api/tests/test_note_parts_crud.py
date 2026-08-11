@@ -106,6 +106,49 @@ async def test_create_list_update_delete_round_trip() -> None:
         assert post[0]["ord"] == 0
 
 
+async def test_resending_the_same_body_is_not_an_edit() -> None:
+    """A PATCH that carries the body the client already had changes
+    nothing, so it must not bump ``version`` nor stamp a recovery-history
+    row.
+
+    This is the server-side half of the silent-rewrite incident: an
+    interactive editor that re-serialises a body it was handed used to
+    look, from here, exactly like a human edit. The client no longer
+    sends such a write; the server no longer records one either, so the
+    revision timeline stays a record of real edits."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "idempotent")
+        verbatim = "# Titolo\n\nUn paragrafo\navvolto a mano.\n"
+        pid = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": verbatim})).json()[
+            "id"
+        ]
+        before = (await c.get(f"/notes/{note_id}/revisions", headers=h)).json()
+
+        same = await c.patch(
+            f"/notes/{note_id}/parts/{pid}",
+            headers=h,
+            json={"expected_version": 1, "body": verbatim},
+        )
+        assert same.status_code == 200, same.text
+        assert same.json()["version"] == 1
+
+        listed = (await c.get(f"/notes/{note_id}/parts", headers=h)).json()
+        assert listed[0]["body"] == verbatim
+        after = (await c.get(f"/notes/{note_id}/revisions", headers=h)).json()
+        assert len(after) == len(before)
+
+        # A real edit still bumps, from the version the no-op reported.
+        real = await c.patch(
+            f"/notes/{note_id}/parts/{pid}",
+            headers=h,
+            json={"expected_version": 1, "body": verbatim + "\naggiunta\n"},
+        )
+        assert real.status_code == 200, real.text
+        assert real.json()["version"] == 2
+
+
 async def test_create_at_specific_ord_shifts_existing_parts() -> None:
     """Inserting at ord=0 pushes every existing part forward by one
     via a single UPDATE; the deferred unique constraint tolerates
