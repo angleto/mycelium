@@ -1,4 +1,5 @@
-import { test, expect, type Page, request as pwRequest } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+import { authedApi } from './api'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 
 // The SPA loads a note/task once on open and never polls, so an
@@ -31,23 +32,6 @@ function watch(page: Page, errors: string[]) {
     if (BENIGN.some((re) => re.test(t))) return
     errors.push(`console.error: ${t}`)
   })
-}
-
-async function authedApi() {
-  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
-  const auth = await (
-    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
-  ).json()
-  const token = auth.token as string
-  const ws = await (
-    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    'X-Workspace-Id': ws[0].id as string,
-    'Content-Type': 'application/json',
-  }
-  return { ctx, headers }
 }
 
 async function login(page: Page) {

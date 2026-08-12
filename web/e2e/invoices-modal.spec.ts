@@ -1,5 +1,6 @@
-import { test, expect, request as pwRequest, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
+import { authedApi } from './api'
 
 // The open invoice used to render inline at the BOTTOM of the /invoices page,
 // forcing a scroll to the end of a long list to read it. It now opens in a
@@ -33,20 +34,8 @@ async function login(page: Page) {
 // Seed an issuer profile + client + a one-line draft via the API so the
 // /invoices list has a row to open (mirrors the api-test seed).
 async function seedInvoice(): Promise<void> {
-  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
-  const auth = await (
-    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
-  ).json()
-  const token = auth.token as string
-  const ws = await (
-    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
   // Creating an issuer profile / client / invoice is owner-gated.
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    'X-Workspace-Id': ws[0].id,
-    'X-Workspace-Role': 'owner',
-  }
+  const { ctx, headers } = await authedApi({ 'X-Workspace-Role': 'owner' })
 
   await ctx.post('/issuer-profiles', {
     headers,

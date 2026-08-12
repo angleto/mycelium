@@ -1,5 +1,6 @@
-import { test, expect, type Page, request as pwRequest } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
+import { authedApi } from './api'
 
 // Regression for the inline annotation UX (InlineAnnotator over the
 // task-description RichEditor):
@@ -43,15 +44,7 @@ async function login(page: Page) {
 }
 
 async function createTask(description: string): Promise<string> {
-  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
-  const auth = await (
-    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
-  ).json()
-  const token = auth.token as string
-  const ws = await (
-    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
-  const headers = { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id }
+  const { ctx, headers } = await authedApi()
   const task = await (
     await ctx.post('/tasks', { headers, data: { title: `e2e anno ${Date.now()}`, description } })
   ).json()
@@ -60,40 +53,18 @@ async function createTask(description: string): Promise<string> {
 }
 
 async function createNoteWithPart(body: string): Promise<string> {
-  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
-  const auth = await (
-    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
-  ).json()
-  const token = auth.token as string
-  const ws = await (
-    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
-  const headers = { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id }
+  const { ctx, headers } = await authedApi()
   const note = await (
     await ctx.post('/notes', { headers, data: { kind: 'text', title: `e2e anno note ${Date.now()}` } })
   ).json()
-  await ctx.post(`/notes/${note.id}/parts`, {
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    data: { body },
-  })
+  await ctx.post(`/notes/${note.id}/parts`, { headers, data: { body } })
   await ctx.dispose()
   return note.id as string
 }
 
 async function fetchTaskDescription(taskId: string): Promise<string> {
-  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
-  const auth = await (
-    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
-  ).json()
-  const token = auth.token as string
-  const ws = await (
-    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
-  const task = await (
-    await ctx.get(`/tasks/${taskId}`, {
-      headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id },
-    })
-  ).json()
+  const { ctx, headers } = await authedApi()
+  const task = await (await ctx.get(`/tasks/${taskId}`, { headers })).json()
   await ctx.dispose()
   return (task.description ?? '') as string
 }
