@@ -73,6 +73,29 @@ function getMd(ed: CoreEditor): string {
   return (ed.storage as unknown as MdStorage).markdown.getMarkdown()
 }
 
+// The serializer drops whatever trailing newline the body arrived with —
+// the one round-trip difference that is pure formatting and carries no
+// information, and the one every file written by a tool (MCP, CLI, an
+// import, an editor on disk) has. Re-attaching the source's own trailing
+// run makes those bodies fixed points instead of near-misses, and stops a
+// real edit from silently eating the last byte of a file.
+//
+// Emptying the document is not "keep the newlines": an empty body is
+// empty, or the part would read as dirty forever against a stored "".
+function keepTrailingNewlines(md: string, source: string): string {
+  const body = md.replace(/\n+$/, '')
+  if (!body) return ''
+  const tail = /\n+$/.exec(source)
+  return body + (tail ? tail[0] : '')
+}
+
+// The markdown this editor would write back for ``source``. The fixed-point
+// measurement and the emit path MUST go through this same function, or the
+// editor would advertise a body it does not actually produce.
+function serializeLike(ed: CoreEditor, source: string): string {
+  return keepTrailingNewlines(getMd(ed), source)
+}
+
 // Strip characters that are unsafe or awkward in filenames across
 // macOS / Windows / Linux. Falls back to ``untitled`` for an empty
 // title so the download attribute always carries a usable name.
@@ -633,28 +656,28 @@ export function RichEditor({
   viewRef?: Ref<AnnotationViewHandle>
 }) {
   const { t } = useTranslation()
-  // Drop to a plain markdown textarea (paste long blocks, fix a bad
-  // round-trip). Both modes read/write the same `value` markdown
-  // string (bitvision EvidenceEditor pattern).
+  // The rich editor is the default view for EVERY body. This is the opt-in
+  // away from it: a plain markdown textarea, for pasting long blocks or
+  // editing a verbatim body byte-exactly. Both modes read/write the same
+  // `value` markdown string (bitvision EvidenceEditor pattern).
   const [rawMode, setRawMode] = useState(false)
   // A body that arrived from outside the app (an MCP upload, the CLI, an
-  // import) is markdown SOURCE, and the WYSIWYG surface can only ever
-  // write back what its serializer produces. That round-trip is not the
-  // identity: prosemirror-markdown re-flows paragraphs onto a single line,
-  // escapes ``[`` and ``_``, rewrites table separators as ``| --- |`` and
-  // drops the trailing newline. So the editor may replace a body only when
-  // the body it was handed is already a FIXED POINT of its own round-trip.
-  // Everything authored in the app is (the serializer produced it), so this
-  // is invisible there; verbatim content opens as source instead of being
-  // silently normalised. Measured once per editor instance, below.
+  // import) is markdown SOURCE, and the WYSIWYG surface can only ever write
+  // back what its serializer produces. That round-trip is not the identity:
+  // prosemirror-markdown re-flows a hard-wrapped paragraph onto one line,
+  // escapes ``[`` and ``_`` and rewrites table separators as ``| --- |``.
+  // So a body that is not a FIXED POINT of the round-trip gets normalised
+  // the moment somebody edits it here.
+  //
+  // The guarantee is on the WRITE, not on the view. Merely opening such a
+  // body cannot rewrite it: ``trailingNode`` is off and ``onUpdate`` emits
+  // only for a transaction that itself carried a document change, so with
+  // no human input there is no emit, hence no dirty part and no PATCH. What
+  // this flag drives is the notice below — what a real edit will cost, and
+  // where to go for a byte-exact one. Everything authored in the app is a
+  // fixed point (its serializer produced it), so the notice never shows up
+  // there. Measured once per editor instance, below.
   const [lossyRoundTrip, setLossyRoundTrip] = useState(false)
-  // The user asked for WYSIWYG on a non-fixed-point body anyway. An
-  // explicit, informed choice: the notice says what will be rewritten.
-  const [acceptedNormalisation, setAcceptedNormalisation] = useState(false)
-  const sourceOnly = lossyRoundTrip && !acceptedNormalisation
-  // Source mode is forced whenever the body cannot survive WYSIWYG, on top
-  // of the user's own toggle.
-  const showRaw = rawMode || sourceOnly
   // Collapse the formatting buttons to reclaim writing space (a single
   // tap on a phone, where the wrapped bar otherwise eats several rows).
   // Persisted so the choice sticks across editors and sessions.
@@ -684,15 +707,17 @@ export function RichEditor({
   // Latest rawMode for the scroll handle (built once, must see the live
   // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
   // to scroll to.
-  const rawModeRef = useRef(showRaw)
+  const rawModeRef = useRef(rawMode)
   useEffect(() => {
-    rawModeRef.current = showRaw
-  }, [showRaw])
-  // Same value, read from inside the editor's own onUpdate closure.
-  const sourceOnlyRef = useRef(sourceOnly)
+    rawModeRef.current = rawMode
+  }, [rawMode])
+  // Latest ``value`` for the editor's own onUpdate closure (built once):
+  // the emit path re-attaches the trailing newline the incoming body
+  // carries, so it has to read the live one, not the mount-time one.
+  const valueRef = useRef(value)
   useEffect(() => {
-    sourceOnlyRef.current = sourceOnly
-  }, [sourceOnly])
+    valueRef.current = value
+  }, [value])
   // Single coalesced timer that clears the flash decoration; a new flash
   // (repeat click or prev/next step) cancels the prior clear before
   // re-arming so the pulse always runs its full duration.
@@ -796,7 +821,7 @@ export function RichEditor({
       filename: att.filename,
       mime_type: att.mimeType,
     }
-    if (showRaw) {
+    if (rawMode) {
       insertRawSnippet(attachmentMarkdownRef(meta))
       return
     }
@@ -819,7 +844,7 @@ export function RichEditor({
       // A new file exists now; drop the cached name->id map so a later
       // `![alt](filename)` reference to it resolves.
       invalidateAttachmentManifest(parent)
-      if (showRaw) {
+      if (rawMode) {
         insertRawSnippet(`![${up.filename}](${up.url})`)
       } else if (editorRef.current) {
         editorRef.current
@@ -1012,14 +1037,15 @@ export function RichEditor({
     editorProps,
     // Is the body this editor was built on a FIXED POINT of the markdown
     // round-trip? Measured once, on the exact bytes the server handed us,
-    // before any transaction. If it is not, the WYSIWYG surface is never
-    // rendered (``sourceOnly``), so it cannot write a normalised copy over
-    // the original. Measured here rather than in an effect because "when
-    // the editor is created" is exactly the moment that matters, and
-    // ``value`` changes on every source-mode keystroke -- re-serialising a
-    // large part per keystroke would be pure waste.
+    // before any transaction, so it reports on the stored body rather than
+    // on anything the session has since done to it. If it is not, editing
+    // here normalises it, and the notice says so. Measured at create rather
+    // than in an effect because "when the editor is created" is exactly the
+    // moment that matters, and ``value`` changes on every source-mode
+    // keystroke -- re-serialising a large part per keystroke would be pure
+    // waste.
     onCreate: ({ editor: ed }: { editor: CoreEditor }) => {
-      setLossyRoundTrip(getMd(ed) !== value)
+      setLossyRoundTrip(serializeLike(ed, value) !== value)
     },
     onUpdate: ({
       editor,
@@ -1033,9 +1059,10 @@ export function RichEditor({
       // the batch touched the doc, appended plugin transactions included,
       // so without this guard a plugin rewriting the document behind the
       // user's back is indistinguishable from typing — and gets autosaved.
+      // This guard is what lets the WYSIWYG surface mount over a verbatim
+      // body at all: no human edit, no emit, no write.
       if (!transaction.docChanged) return
-      if (sourceOnlyRef.current) return
-      const md = getMd(editor)
+      const md = serializeLike(editor, valueRef.current)
       lastEmittedRef.current = md
       onChange(md)
     },
@@ -1242,7 +1269,7 @@ export function RichEditor({
     })
   }, [value, editor])
 
-  const fmt = !showRaw && editor != null
+  const fmt = !rawMode && editor != null
 
   const tb = (
     label: string,
@@ -1285,7 +1312,7 @@ export function RichEditor({
   // is available (e.g. note-create form before save) — drop/paste are
   // also gated by parentRef inside the handlers.
   const imageDisabled =
-    (!fmt && !showRaw) || uploading || !imageUploadParent
+    (!fmt && !rawMode) || uploading || !imageUploadParent
   const imageTitle = imageUploadParent
     ? t('editor.image')
     : t('editor.imageNeedsSave')
@@ -1571,24 +1598,17 @@ export function RichEditor({
           <button
             type="button"
             className="btn--ghost btn--sm"
-            onClick={() => {
-              // On a non-fixed-point body the WYSIWYG surface is withheld,
-              // so this button is the informed opt-in rather than a toggle.
-              if (sourceOnly) {
-                setAcceptedNormalisation(true)
-                setRawMode(false)
-                return
-              }
-              setRawMode((v) => !v)
-            }}
+            onClick={() => setRawMode((v) => !v)}
           >
-            {showRaw ? t('editor.toWysiwyg') : t('editor.toRaw')}
+            {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
           </button>
         </span>
       </div>
-      {sourceOnly && (
+      {/* Only while the rich surface is the one that would write: in source
+          mode the edit already is byte-exact, so the warning is noise. */}
+      {lossyRoundTrip && !rawMode && (
         <p className="rte__notice">
-          {t('editor.sourceOnly')}
+          {t('editor.normalisesOnEdit')}
         </p>
       )}
       <input
@@ -1616,7 +1636,7 @@ export function RichEditor({
           {pdfErr}
         </p>
       )}
-      {showRaw ? (
+      {rawMode ? (
         <textarea
           ref={rawRef}
           className="rte__raw"
@@ -1657,7 +1677,7 @@ export function RichEditor({
       ) : (
         <EditorContent editor={editor} />
       )}
-      {editor && !showRaw && inlineAnnotations && (
+      {editor && !rawMode && inlineAnnotations && (
         <InlineAnnotator
           ref={annoRef}
           editor={editor}

@@ -2,9 +2,9 @@
 //
 // The read side renders them via ``remarkSubSup``; without the matching
 // pair here the editor would show a formula's exponents as raw tags, and
-// the body would not be a fixed point of the markdown round-trip, so the
-// whole part would fall back to source mode (see ``RichEditor``). Two
-// marks and one DOM pass keep such notes editable in WYSIWYG.
+// the body would stop being a fixed point of the markdown round-trip, so
+// editing it in WYSIWYG would rewrite the tags away (see ``RichEditor``).
+// Two marks and one DOM pass keep such notes safely editable in WYSIWYG.
 //
 // Deliberately NOT done by flipping tiptap-markdown to ``html: true``:
 // that would hand every inline tag to markdown-it, and ProseMirror would

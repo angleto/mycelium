@@ -122,16 +122,22 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
   })
   await page.reload()
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
-  // Well past the autosave debounce.
+  // The rich editor is the default view for every body, verbatim ones
+  // included: rendering is a mode, not a property of how the bytes arrived.
+  await expect(page.locator('.ProseMirror').first()).toBeVisible()
+  await expect(page.locator('textarea.rte__raw')).toHaveCount(0)
+  // Rendering that body must still write nothing. Well past the autosave
+  // debounce.
   await page.waitForTimeout(3500)
   expect(writes).toEqual([])
 
-  // The body is not a fixed point of the round-trip, so the editor withholds
-  // the WYSIWYG surface and shows the source, byte for byte.
-  const ta = page.locator('textarea.rte__raw').first()
-  await expect(ta).toBeVisible()
-  expect(await ta.inputValue()).toBe(VERBATIM)
+  // The body is not a fixed point of the round-trip, so an edit made HERE
+  // would normalise it. Said once, in a notice; it withholds nothing.
   await expect(page.locator('.rte__notice').first()).toBeVisible()
+
+  // And the source is still the bytes we uploaded, byte for byte.
+  await enterMarkdownMode(page)
+  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(VERBATIM)
 })
 
 test('links keep their destination through the rich editor', async ({ page }) => {

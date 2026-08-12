@@ -1220,8 +1220,8 @@ export const it: Catalog = {
     attachNeedsSave: 'Salva prima di allegare file.',
     toRaw: 'Modifica come Markdown',
     toWysiwyg: 'Editor ricco',
-    sourceOnly:
-      'Questo è markdown sorgente e non sopravvive invariato all’editor ricco (a capo dei paragrafi, escape, separatori di tabella). Resta in modalità sorgente, dove le modifiche sono byte-esatte. "Editor ricco" lo riscrive in forma normalizzata.',
+    normalisesOnEdit:
+      'Questo corpo è stato scritto fuori dall’app e non sopravvive invariato all’editor ricco (a capo dei paragrafi, escape, separatori di tabella). Leggerlo qui non cambia nulla; la prima modifica lo salva in forma normalizzata. Per modifiche byte-esatte usa "Modifica come Markdown".',
     downloadMd: 'Scarica markdown (.md)',
     downloadMdShort: '.md',
     exportPdf: 'Esporta PDF',

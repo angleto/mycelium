@@ -47,24 +47,27 @@ body cannot inject markup.
 
 ## Verbatim bodies and the visual editor
 
-The visual editor stores what its serializer produces, and that
-serialization is not the identity: it re-flows a hard-wrapped paragraph
-onto one line, escapes `[` and `_` outside words, normalises table
-separators to `| --- |`, and drops the trailing newline.
+A body is stored as the markdown its author wrote. Nothing on the way in
+reformats it: MCP, the CLI and imports write the bytes they were given, and
+the SPA reads them. **The visual editor is a view mode, not a storage
+format** — it is the default one for every body, wherever the body came
+from, and opening a note in it changes nothing on the server.
 
-So the editor measures, once per body, whether that body is a **fixed
-point** of its own round-trip. If it is not, the visual surface is withheld
-and the body is shown as source, byte for byte, with a notice. Content
-authored in the app is a fixed point by construction, so this is invisible
-there; a file uploaded verbatim (MCP, CLI, an import) opens as source and
-stays exactly as uploaded. Switching to the visual editor is possible and
-explicit, and it rewrites the body in normalised form.
+What *is* asymmetric is writing. The visual editor can only save what its
+serializer produces, and that serialization is not the identity: it re-flows
+a hard-wrapped paragraph onto one line, escapes `[` and `_` outside words,
+and normalises table separators to `| --- |`. (The trailing newline is
+preserved.) So the editor measures, once per body, whether the body is a
+**fixed point** of its own round-trip, and when it is not it says so in a
+notice: reading it costs nothing, the first edit made *there* saves the
+normalised form. Content authored in the app is a fixed point by
+construction, so the notice never appears on it.
 
-Practical consequence for anything meant to stay byte-exact: write it, or
-upload it, and leave it in source mode.
+Practical consequence for anything meant to stay byte-exact: edit it under
+"Edit as Markdown", where what you type is what is stored.
 
-Things that are NOT fixed points, so they open as source: hard-wrapped
-paragraphs, a trailing newline, display maths (`$$ … $$`), an underscore
-between non-ASCII characters (`Φ_ℓ`), and any HTML other than `<sub>` /
-`<sup>`. Inline maths (`$x_0$`), tables, lists, code fences, mermaid,
-attachment references and mention chips all round-trip unchanged.
+Things that are NOT fixed points, hence carry the notice: hard-wrapped
+paragraphs, display maths (`$$ … $$`), an underscore between non-ASCII
+characters (`Φ_ℓ`), and any HTML other than `<sub>` / `<sup>`. Inline maths
+(`$x_0$`), tables, lists, code fences, mermaid, attachment references,
+mention chips and the trailing newline all round-trip unchanged.
