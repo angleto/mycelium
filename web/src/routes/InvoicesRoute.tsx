@@ -701,12 +701,23 @@ export function InvoicesRoute() {
 
   // Deep-link: ``?id=<invoice>`` opens that invoice once on load (a shareable
   // URL that lands straight on the document, no searching).
+  //
+  // The flag is consumed on the FIRST pass whether or not an id was there.
+  // It used to be set only inside the ``if (id)`` branch, which made the
+  // deep link fire on the app's OWN url writes: opening an invoice from the
+  // list calls setSearchParams('id'), ``searchParams`` changes, this effect
+  // re-runs with the flag still false and re-opens the same invoice. That
+  // second open is an async re-fetch, so closing the modal in the meantime
+  // left it to resolve afterwards and put the modal straight back on screen
+  // — the dismissal looked broken, intermittently, depending on which won
+  // the race. Deep-linking is a mount-time concern; nothing the app writes
+  // to the URL later should re-trigger it.
   const deepLinked = useRef(false)
   useEffect(() => {
     if (deepLinked.current) return
+    deepLinked.current = true
     const id = searchParams.get('id')
     if (id) {
-      deepLinked.current = true
       // Deferred so the effect body itself never triggers openInvoice's
       // synchronous setState (react-hooks/set-state-in-effect).
       queueMicrotask(() => void openInvoice(id))
