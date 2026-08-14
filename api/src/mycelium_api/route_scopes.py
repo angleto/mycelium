@@ -562,6 +562,51 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/time/running"): "time:read",
     ("POST", "/time/start"): "time:write",
     ("POST", "/time/stop"): "time:write",
+    # --- payment_connectors (ADR-0051) ---
+    # Configuring a connector mints the credential that lets an outside system
+    # emit fiscal documents in this org's name: human-only, like every other
+    # credential surface. The event list/retry are triage over those documents
+    # and stay on the same footing.
+    ("GET", "/payment-connectors/vocabulary"): HUMAN_ONLY,
+    ("GET", "/issuer-profiles/{issuer_profile_id}/payment-connectors"): HUMAN_ONLY,
+    ("POST", "/issuer-profiles/{issuer_profile_id}/payment-connectors"): HUMAN_ONLY,
+    (
+        "PATCH",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}",
+    ): HUMAN_ONLY,
+    (
+        "DELETE",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}",
+    ): HUMAN_ONLY,
+    (
+        "DELETE",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/api-key",
+    ): HUMAN_ONLY,
+    (
+        "POST",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+        "/rotate-signing-secret",
+    ): HUMAN_ONLY,
+    (
+        "POST",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/rotate-api-key",
+    ): HUMAN_ONLY,
+    (
+        "GET",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events",
+    ): HUMAN_ONLY,
+    (
+        "GET",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/deliveries",
+    ): HUMAN_ONLY,
+    (
+        "POST",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+        "/events/{event_id}/retry",
+    ): HUMAN_ONLY,
+    # The inbound provider webhook carries no bearer: its authority is the MAC
+    # over the raw body, verified inside the handler.
+    ("POST", "/api/v1/connectors/{provider}/{connector_id}"): PUBLIC,
     # --- webhook_endpoints ---
     ("GET", "/issuer-profiles/{issuer_profile_id}/webhook-endpoints"): HUMAN_ONLY,
     ("POST", "/issuer-profiles/{issuer_profile_id}/webhook-endpoints"): HUMAN_ONLY,

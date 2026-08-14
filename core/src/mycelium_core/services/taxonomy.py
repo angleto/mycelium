@@ -729,6 +729,90 @@ async def list_projects(
     return [(t, p) for t, p in rows.all()]
 
 
+#: Fields ``fill_client_gaps`` may write. Deliberately the fiscal identity and
+#: the postal address only: the billing preferences (series, IBAN, rates, PDF
+#: locale) are the org's own choices about a client and no external system gets
+#: to express an opinion on them.
+_FILLABLE_CLIENT_FIELDS = (
+    "first_name",
+    "last_name",
+    "country_code",
+    "vat_number",
+    "tax_code",
+    "address",
+    "civic_number",
+    "postal_code",
+    "city",
+    "province",
+    "country",
+    "sdi_code",
+    "pec",
+)
+
+
+async def fill_client_gaps(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    profile: ClientInput,
+) -> list[str]:
+    """Fill EMPTY fiscal/address fields on a client. Never overwrite.
+
+    The door an inbound connector uses to enrich a counterpart from a payment
+    provider's customer record, and the reason it is a separate function from
+    ``update_client`` rather than a flag on it:
+
+    - it is MEMBER level, because it cannot destroy anything. ``update_client``
+      is admin-gated precisely because it can overwrite, and a webhook must not
+      hold that power;
+    - it only ever fills a hole. A value a human curated -- a corrected address,
+      a codice destinatario typed in by hand -- always wins over whatever an
+      external system says later, so a stale provider record can never quietly
+      undo an operator's fix. That is what makes it safe to run unattended on
+      every customer event.
+
+    Returns the names of the fields it actually filled, for the audit diff.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    row = (
+        await session.execute(select(ClientProfile).where(ClientProfile.tag_id == tag_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+
+    country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
+    incoming: dict[str, object | None] = {
+        f: getattr(profile, f, None) for f in _FILLABLE_CLIENT_FIELDS
+    }
+    incoming["country_code"] = country_code
+    incoming["vat_number"] = vat_number
+
+    filled: list[str] = []
+    for field, value in incoming.items():
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        current = getattr(row, field, None)
+        if current is not None and str(current).strip():
+            continue  # a curated value always wins
+        setattr(row, field, value)
+        filled.append(field)
+    if not filled:
+        return []
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="fill_client_gaps",
+        diff={"filled": filled},
+    )
+    return filled
+
+
 async def update_client(
     session: AsyncSession,
     *,

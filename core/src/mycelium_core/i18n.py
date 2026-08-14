@@ -133,6 +133,17 @@ class MessageCode(enum.StrEnum):
     WEBHOOK_ENDPOINT_NOT_REVOKED = "webhook_endpoint.not_revoked"
     WEBHOOK_URL_INVALID = "webhook_endpoint.url_invalid"
     WEBHOOK_EVENT_TYPE_INVALID = "webhook_endpoint.event_type_invalid"
+    PAYMENT_CONNECTOR_NOT_FOUND = "payment_connector.not_found"
+    PAYMENT_CONNECTOR_NOT_REVOKED = "payment_connector.not_revoked"
+    PAYMENT_CONNECTOR_PROVIDER_INVALID = "payment_connector.provider_invalid"
+    PAYMENT_CONNECTOR_MODE_INVALID = "payment_connector.mode_invalid"
+    PAYMENT_CONNECTOR_EVENT_INVALID = "payment_connector.emission_event_invalid"
+    PAYMENT_CONNECTOR_SIGNATURE_INVALID = "payment_connector.signature_invalid"
+    PAYMENT_CONNECTOR_SECRET_REQUIRED = "payment_connector.signing_secret_required"  # noqa: S105 (message code, not a secret)
+    PAYMENT_CONNECTOR_DISABLED = "payment_connector.disabled"
+    PAYMENT_CONNECTOR_PAYLOAD_INVALID = "payment_connector.payload_invalid"
+    PAYMENT_CONNECTOR_EVENT_NOT_FOUND = "payment_connector.event_not_found"
+    PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE = "payment_connector.event_not_retryable"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
     IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
     IDEMPOTENCY_IN_PROGRESS = "idempotency.in_progress"
@@ -444,6 +455,24 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.WEBHOOK_URL_INVALID: "Invalid webhook URL: {detail}",
         MessageCode.WEBHOOK_EVENT_TYPE_INVALID: "Unknown webhook event type: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_NOT_FOUND: "Payment connector not found",
+        MessageCode.PAYMENT_CONNECTOR_NOT_REVOKED: (
+            "Revoke the connector before deleting it (only a revoked connector can be purged)"
+        ),
+        MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID: "Unknown payment provider: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_MODE_INVALID: "Unknown automation mode: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_EVENT_INVALID: "Unknown emission event: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_SIGNATURE_INVALID: "Invalid or expired webhook signature",
+        MessageCode.PAYMENT_CONNECTOR_SECRET_REQUIRED: (
+            "Provider {detail} issues its own signing secret; paste it here rather than "
+            "having one generated"
+        ),
+        MessageCode.PAYMENT_CONNECTOR_DISABLED: "This payment connector is disabled",
+        MessageCode.PAYMENT_CONNECTOR_PAYLOAD_INVALID: "Malformed webhook payload: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND: "Payment connector event not found",
+        MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE: (
+            "Only a parked or dead event can be retried"
+        ),
         MessageCode.IDEMPOTENCY_KEY_REQUIRED: "The Idempotency-Key header is required",
         MessageCode.IDEMPOTENCY_BODY_MISMATCH: (
             "This Idempotency-Key was already used with a different request"

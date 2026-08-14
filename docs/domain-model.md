@@ -69,6 +69,28 @@ Conceptual entities. The physical schema is in
   credit note.
 - **SdiMandate**: per-Org authorization to transmit on its behalf
   (scope, validity, revocation, audit).
+- **PaymentConnector**: a per-issuer-profile inbound connector that turns a
+  payment provider's events into fiscal documents (ADR-0051). It holds the
+  credentials the sender authenticates with (a signing secret, an optional
+  ingress key), the automation posture (emit and file / emit as draft /
+  record only, independently for invoices and credit notes) and the fiscal
+  defaults that complete what the provider does not say. Two providers are
+  understood: `stripe` (an adapter over someone else's event shape) and
+  `mycelium`, our own published contract
+  ([payment-connector-contract.md](payment-connector-contract.md)), so a
+  sender with no adapter can integrate against a documented format. The
+  provider's vocabulary never leaves the adapter: everything downstream
+  speaks neutral events (emit / credit / payment). Around it live three
+  ledgers, conceptually distinct: the **connector event** (one per provider
+  event, frozen payload, the durable ingress record AND the work queue,
+  ending `done` / `ignored` / quarantined in `needs_attention` / `dead`),
+  the **object link** (a provider object id -> the document emitted for it:
+  what makes emission idempotent and what lets a refund find its parent),
+  and the **delivery** (one per inbound HTTP attempt, refusals included,
+  keeping the body's digest and not the body). Beside them sits the
+  connector's own identity map, provider customer -> client tag, which
+  keeps repeat business on a single client. A connector is also an actor:
+  documents it emits are attributed to it in the audit trail.
 - **ConservationRecord**: the compliant-conservation status per invoice
   and per SdI receipt ("free AdE service" model).
 - **Budget**: an org-scoped spending envelope per period and category

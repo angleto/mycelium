@@ -11,6 +11,7 @@ import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 import { IssuerApiKeys } from './IssuerApiKeys'
 import { WebhookEndpoints } from './WebhookEndpoints'
+import { PaymentConnectors } from './PaymentConnectors'
 import { IssuerLogoConfig } from './IssuerLogoConfig'
 
 type Profile = components['schemas']['IssuerProfileOut']
@@ -291,6 +292,11 @@ export function IssuerProfiles() {
   const [showCounters, setShowCounters] = useState<string | null>(null)
   const [showApiKeys, setShowApiKeys] = useState<string | null>(null)
   const [showWebhooks, setShowWebhooks] = useState<string | null>(null)
+  // Inbound payment connectors (ADR-0051): the mirror image of the outbound
+  // webhooks above -- a provider pushes events to us and they become fiscal
+  // documents issued by THIS profile, which is why it belongs to the issuer
+  // rather than to a page of its own.
+  const [showConnectors, setShowConnectors] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   // Object URL of the currently-edited profile's logo (auth-fetched as a
@@ -583,9 +589,19 @@ export function IssuerProfiles() {
               >
                 {t('webhooks.button')}
               </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() =>
+                  setShowConnectors(showConnectors === p.id ? null : p.id)
+                }
+              >
+                {t('paymentConnectors.button')}
+              </button>
               {showCounters === p.id && <IssuerCounters profileId={p.id} />}
               {showApiKeys === p.id && <IssuerApiKeys profileId={p.id} />}
               {showWebhooks === p.id && <WebhookEndpoints profileId={p.id} />}
+              {showConnectors === p.id && <PaymentConnectors profileId={p.id} />}
             </li>
           ))}
         </ul>

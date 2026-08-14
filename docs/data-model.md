@@ -216,6 +216,58 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - `issuer_key_rate_limit(key_id, endpoint_class, org_id, window_start, count)` --
   the per-key fixed-window rate bucket (FORCE RLS).
 
+## Inbound payment connectors (ADR-0051, migration 0092)
+
+- `payment_connectors(id, org_id, issuer_profile_id FK cascade, created_by FK
+  users set-null, provider[stripe|mycelium], label, signing_secret_ciphertext,
+  previous_signing_secret_ciphertext?, previous_signing_secret_expires_at?,
+  api_key_hash?, previous_api_key_hash?, previous_api_key_expires_at?, enabled,
+  invoice_mode[transmit|draft|off], credit_note_mode[transmit|draft|off],
+  emission_event[invoice.paid|payment_intent.succeeded|
+  checkout.session.completed], payment_sync_enabled, series?,
+  default_purpose?, default_vat_rate?, default_vat_nature?,
+  default_line_description?, amounts_include_vat,
+  default_payment_conditions_code?, default_payment_method_code?,
+  default_country_code?, metadata_vat_keys text[], metadata_tax_code_keys
+  text[], metadata_sdi_keys text[], metadata_pec_keys text[], revoked_at?,
+  last_event_at?, version)` -- UNIQUE `(issuer_profile_id, label)`; the signing
+  secret is a reversible Fernet envelope, the optional ingress key a peppered
+  one-way hash. ENABLE (not FORCE) RLS, so the SECURITY DEFINER
+  `resolve_payment_connector(uuid)` reads a row with no tenant GUC; it returns
+  nothing for a revoked row and NULLs an expired grace copy.
+- `payment_connector_events(id, org_id, connector_id FK cascade,
+  provider_event_id, event_type, payload jsonb, occurred_at?,
+  status[pending|processing|done|ignored|no_billing_data|needs_attention|dead],
+  attempt_count, max_attempts, next_attempt_at, last_attempt_at?, processed_at?,
+  provider_customer_id?, last_error?, error_detail?, invoice_id? FK invoices
+  set-null)` -- the ingress ledger and the work queue. UNIQUE
+  `(connector_id, provider_event_id)`; index on `(connector_id, created_at)`
+  plus partial indexes on `next_attempt_at WHERE status='pending'`, on
+  `last_attempt_at WHERE status='processing'`, on `(connector_id, created_at)
+  WHERE status IN ('needs_attention','dead')` and on `(connector_id,
+  provider_customer_id) WHERE status='no_billing_data'` (the re-arm sweep).
+  FORCE RLS.
+- `payment_object_links(id, org_id, connector_id FK cascade, object_kind[invoice|
+  payment_intent|checkout_session|charge|credit_note|refund], object_id,
+  invoice_id FK invoices RESTRICT)` -- UNIQUE `(connector_id, object_kind,
+  object_id)`, index on `invoice_id`. FORCE RLS.
+- `payment_webhook_deliveries(id, org_id, connector_id FK cascade, provider,
+  outcome[accepted|duplicate|signature_invalid|disabled|payload_invalid|
+  too_large], http_status, event_id? FK payment_connector_events set-null,
+  provider_event_id?, body_bytes, body_sha256?, signature_present,
+  api_key_present, received_at)` -- one row per inbound delivery attempt; the
+  body is represented by its SHA-256, never stored. Index on
+  `(connector_id, received_at)` plus a partial one `WHERE outcome NOT IN
+  ('accepted','duplicate')`. FORCE RLS.
+- `payment_customer_links(id, org_id, connector_id FK cascade,
+  provider_customer_id, client_tag_id)` -- UNIQUE `(connector_id,
+  provider_customer_id)`, index on `client_tag_id`. Like
+  `invoices.client_tag_id` it is a bare UUID with no FK. Holds NO fiscal data:
+  the counterpart's fiscal identity lives in `client_profile`, fed from the
+  provider's customer events through `taxonomy.fill_client_gaps`. FORCE RLS.
+- Migration 0092 also widens the `activity_log` and `entity_revision`
+  actor-kind CHECKs with `payment_connector`.
+
 ## Notifications, collaboration, audit
 
 - `notifications(id, org_id, user_id, channel, event_type, payload,

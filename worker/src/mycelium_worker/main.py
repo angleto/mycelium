@@ -30,6 +30,7 @@ from mycelium_worker import (
     garden,
     google_calendar,
     note_search_backfill,
+    payment_connectors,
     reminders,
     revisions,
     revisions_retention,
@@ -87,6 +88,10 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
     # enabled, so an unconfigured deploy never touches the fiscal outbox.
     if get_settings().webhooks_enabled:
         jobs.append(webhooks.run_forever)
+    # Inbound payment connectors (ADR-0051): the event drain files fiscal
+    # documents, so it runs only where the feature was deliberately turned on.
+    if get_settings().payment_connectors_enabled:
+        jobs.append(payment_connectors.run_forever)
     return jobs
 
 

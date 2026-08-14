@@ -205,6 +205,44 @@ class Settings(BaseSettings):
     # durable fiscal record).
     webhook_delivery_retention_days: int = 90
 
+    # Inbound payment connectors: provider events -> FatturaPA (ADR-0051).
+    # Fail-closed like the outbound side: OFF by default, so an unconfigured
+    # deploy neither accepts a provider webhook nor runs the processing loop.
+    # Enabling requires a worker restart (the loop is registered at startup).
+    # No new secret: the signing-secret envelope is keyed by ``secret_key`` and
+    # the optional ingress API key is peppered with ``issuer_key_pepper``.
+    payment_connectors_enabled: bool = False
+    # Origin the connector's public webhook URL is advertised under, so the
+    # operator can copy it straight into the provider's dashboard. Falls back to
+    # frontend_base_url (SPA and API share a host in the OSS deploy); production
+    # overrides it with the API origin.
+    payment_connector_base_url: str = ""
+    # Replay window on the signed timestamp bound into the MAC. 300 s is
+    # Stripe's own default and is applied symmetrically (a far-future timestamp
+    # is refused too, or a captured request would replay forever).
+    payment_connector_tolerance_seconds: int = 300
+    # Hard cap on an accepted body. The MAC is computed over the raw bytes, so
+    # this bounds the work an unauthenticated caller can force before the
+    # signature is even checked.
+    payment_connector_max_body_bytes: int = 1_048_576
+    payment_connector_poll_interval_seconds: int = 10
+    # MUST exceed sdi_dispatch_timeout_seconds + sdi_dispatch_lease_seconds:
+    # an event whose lease expires is re-claimed, and re-claiming one whose SdI
+    # dispatch could still be in flight is exactly the double-filing this
+    # subsystem exists to avoid.
+    payment_connector_lease_seconds: int = 600
+    payment_connector_max_attempts: int = 10
+    payment_connector_backoff_base_seconds: int = 15
+    payment_connector_backoff_cap_seconds: int = 3600
+    payment_connector_batch: int = 20
+    # How long a rotated signing secret / ingress key keeps working, so a
+    # rotation never drops a redelivery of an event signed with the old one.
+    payment_connector_secret_grace_hours: int = 24
+    # Retention for terminal event rows. Long by default: these are the
+    # provenance of fiscal documents, and the invoice outlives any sweep.
+    # ``needs_attention`` and ``dead`` rows are never swept.
+    payment_connector_event_retention_days: int = 730
+
     # Memory embeddings (docs/adr/0005). Single embedding store at a
     # fixed fleet dim: every embedder (local or hosted) MUST emit this
     # dim. 1024 = bge-m3 native AND under pgvector's HNSW 2000-dim

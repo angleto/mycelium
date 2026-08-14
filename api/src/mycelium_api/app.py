@@ -29,6 +29,7 @@ from mycelium_api.routers import (
     buildinfo,
     calendars,
     capabilities,
+    connector_webhooks,
     dependencies,
     dispatch,
     email,
@@ -47,6 +48,7 @@ from mycelium_api.routers import (
     notifications,
     oauth,
     oauth_google,
+    payment_connectors,
     public_invoices,
     received_invoices,
     schedule,
@@ -299,6 +301,8 @@ def create_app() -> FastAPI:
     app.include_router(invoices.router)
     app.include_router(issuer_api_keys.router)
     app.include_router(webhook_endpoints.router)
+    app.include_router(payment_connectors.router)
+    app.include_router(connector_webhooks.router)
     app.include_router(public_invoices.router)
     app.include_router(received_invoices.router)
     app.include_router(notifications.router)

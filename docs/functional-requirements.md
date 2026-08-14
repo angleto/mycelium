@@ -249,6 +249,48 @@ single GUI/REST/MCP choke point).
   structured security events (`mycelium.security` logger) + the dual-pepper
   rotation window (`docs/runbooks/issuer-key-pepper.md`). Deferred: signed
   webhooks, in-app anomaly detection.
+- Inbound payment connectors (ADR-0051): a payment provider's webhooks become
+  FatturaPA documents without a third-party e-invoicing intermediary (the
+  ADR-0011 constraint: no third party sees the invoices). A connector is
+  per-issuer-profile, owner-gated, disabled until switched on, and authenticated
+  by HMAC-SHA256 over `{timestamp}.{raw_body}` under a per-connector signing
+  secret (the ADR-0047 construction, inbound) plus an optional
+  `X-Connector-Api-Key`; both rotate with a grace window. The public ingress
+  (`POST /api/v1/connectors/{provider}/{connector_id}`) only verifies,
+  persists and answers 2xx -- an SdI dispatch's 120 s budget exceeds every
+  provider's webhook timeout, so all fiscal work happens in a worker.
+  - Two providers: `stripe` (an adapter over Stripe's event shape) and
+    `mycelium`, a **published contract of our own**
+    ([payment-connector-contract.md](payment-connector-contract.md): three
+    event types, decimal-string money, HMAC signature, idempotency on the
+    sender's event id), so an unsupported sender can integrate without waiting
+    for an adapter. The engine speaks only neutral events, so a new provider is
+    one adapter module.
+  - Exactly one Stripe event type mints a document (`invoice.paid` by default);
+    the others reconcile payment state. Reversals come from
+    `credit_note.created` (exact, with per-line rates) or `charge.refunded` /
+    `refund.created` (pro-rata) as a TD04; both claim the shared refund id, so
+    the number of documents does not depend on delivery order.
+  - No double filing: `UNIQUE (connector_id, provider_event_id)` absorbs
+    at-least-once delivery, and every provider id naming the money is claimed
+    against the emitted document and COMMITTED before the SdI dispatch, so a
+    crash resumes that document instead of burning a second fiscal number. The
+    worker commits its claim before doing any work, under a lease longer than
+    the whole dispatch budget.
+  - Automation is per connector and per document class: `transmit` (compose and
+    file), `draft` (compose and stop for review) or `off`, with a separate
+    switch for payment reconciliation.
+  - A payment whose counterpart lacks the fiscal data a valid FatturaPA needs
+    (VAT/CF, codice destinatario or PEC, address, CAP, city) is QUARANTINED for
+    an operator, never emitted with a B2C fallback: a wrong document is
+    correctable only by a further TD04. Parked and dead events are the
+    operator's queue and are never swept by retention.
+  - Every inbound delivery against a resolved connector -- accepted or refused --
+    is recorded with the body's SHA-256 (never the body), so "the provider says
+    it delivered it and there is no invoice" is answerable from the database.
+  - Management is REST + GUI only, never MCP (like issuer keys): the surface
+    mints a credential that lets an outside system emit fiscal documents in the
+    workspace's name. Fail-closed on `payment_connectors_enabled`.
 
 ## FR-10 MCP server (co-equal)
 

@@ -28,7 +28,11 @@ def _jobs_with(*, garden_loop_enabled: bool, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         main,
         "get_settings",
-        lambda: SimpleNamespace(garden_loop_enabled=garden_loop_enabled, webhooks_enabled=False),
+        lambda: SimpleNamespace(
+            garden_loop_enabled=garden_loop_enabled,
+            webhooks_enabled=False,
+            payment_connectors_enabled=False,
+        ),
     )
     return list(main._enabled_jobs())
 

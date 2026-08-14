@@ -129,6 +129,13 @@ from mycelium_core.models.notification import (
 from mycelium_core.models.org_embedder_provider import EmbedderProviderKind, OrgEmbedderProvider
 from mycelium_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
 from mycelium_core.models.organization import Organization
+from mycelium_core.models.payment_connector import (
+    PaymentConnector,
+    PaymentConnectorEvent,
+    PaymentCustomerLink,
+    PaymentObjectLink,
+    PaymentWebhookDelivery,
+)
 from mycelium_core.models.precomputed_suggestion import PrecomputedSuggestion
 from mycelium_core.models.project_profile import ProjectProfile
 from mycelium_core.models.push_subscription import PushSubscription
@@ -273,7 +280,12 @@ __all__ = [
     "OrgLLMProvider",
     "Organization",
     "PasswordResetToken",
+    "PaymentConnector",
+    "PaymentConnectorEvent",
+    "PaymentCustomerLink",
+    "PaymentObjectLink",
     "PaymentStatus",
+    "PaymentWebhookDelivery",
     "PrecomputedSuggestion",
     "ProjectProfile",
     "PushSubscription",

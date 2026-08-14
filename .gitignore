@@ -59,3 +59,6 @@ web/.vite/
 # part of the project.
 *.pdf
 .claude/
+
+# Credenziali DB locali (mai committare)
+credenzialidb*.txt

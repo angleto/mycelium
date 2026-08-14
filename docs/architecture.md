@@ -23,7 +23,8 @@ Python monorepo + TypeScript frontend.
 - `cache/broker`: Redis (job queue, pub/sub for WebSocket).
 - connectors: Gmail OAuth2; Proton Bridge sidecar (arm64); generic
   IMAP; `SdiChannel`; `ConservationProvider`; `Embedder`/`LLMProvider`
-  (bitvision_phoenix pattern).
+  (bitvision_phoenix pattern); `PaymentEventMapper` (inbound payment
+  connectors, ADR-0051).
 
 ## Diagram
 
@@ -38,6 +39,7 @@ Browser → web/ ─┤          ▲                                    ▲
                 │
    sdi-inbound/ (SOAP mutual-TLS, push SdI notifications)
    connectors: Gmail · Proton Bridge · SdiChannel · Conservation · Embedder
+               · PaymentEventMapper (inbound provider webhooks -> FatturaPA)
 ```
 
 ## Architectural principles
@@ -49,10 +51,15 @@ Browser → web/ ─┤          ▲                                    ▲
   optimistic concurrency is in the service layer: it is the single
   choke point crossed by GUI, REST and MCP.
 - Pluggable abstractions (`SdiChannel`, `ConservationProvider`,
-  `Embedder`, `LLMProvider`) with a DB-driven factory and neutral DTOs,
-  reusing the bitvision_phoenix pattern (see
+  `Embedder`, `LLMProvider`, `PaymentEventMapper`) with a DB-driven
+  factory and neutral DTOs, reusing the bitvision_phoenix pattern (see
   [ADR-0012](adr/0012-llm-embedder-abstraction.md) and
-  [references.md](references.md)).
+  [references.md](references.md)). The inbound payment connector
+  (ADR-0051) is the newest boundary of this shape: a Protocol plus a
+  registry keyed on the connector's `provider` column, with a mapper per
+  provider (`stripe`) and one for Mycelium's own published contract
+  (`mycelium`, [payment-connector-contract.md](payment-connector-contract.md)),
+  so the vendor's vocabulary never reaches the fiscal code.
 - v1 deploy: Docker Compose on a cloud ARM node; K8s-ready design.
 
 ## Monorepo layout (indicative)
