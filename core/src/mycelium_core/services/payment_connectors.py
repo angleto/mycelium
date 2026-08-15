@@ -46,7 +46,7 @@ from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import Select, select, text, update
+from sqlalchemy import Select, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -838,7 +838,14 @@ async def _find_linked_invoice(
     *,
     connector_id: uuid.UUID,
     keys: Sequence[tuple[str, str]],
+    dry_run: bool = False,
 ) -> uuid.UUID | None:
+    """Resolve a provider object to the document already emitted for it.
+
+    ``dry_run`` selects the claim UNIVERSE, and the separation is the whole
+    reason a shadow run is reversible: a live lookup must never see a shadow
+    claim, or switching the mode off would resume a shadow draft and file it.
+    """
     if not keys:
         return None
     clauses = [
@@ -851,7 +858,11 @@ async def _find_linked_invoice(
     return (
         await session.execute(
             select(PaymentObjectLink.invoice_id)
-            .where(PaymentObjectLink.connector_id == connector_id, condition)
+            .where(
+                PaymentObjectLink.connector_id == connector_id,
+                PaymentObjectLink.dry_run.is_(dry_run),
+                condition,
+            )
             .limit(1)
         )
     ).scalar_one_or_none()
@@ -864,6 +875,7 @@ async def _claim_links(
     connector_id: uuid.UUID,
     keys: Sequence[tuple[str, str]],
     invoice_id: uuid.UUID,
+    dry_run: bool = False,
 ) -> None:
     for kind, ident in keys:
         await session.execute(
@@ -875,8 +887,11 @@ async def _claim_links(
                 object_kind=kind,
                 object_id=ident,
                 invoice_id=invoice_id,
+                dry_run=dry_run,
             )
-            .on_conflict_do_nothing(index_elements=["connector_id", "object_kind", "object_id"])
+            .on_conflict_do_nothing(
+                index_elements=["connector_id", "object_kind", "object_id", "dry_run"]
+            )
         )
 
 
@@ -1249,6 +1264,11 @@ async def _mark_paid_if_needed(
 ) -> None:
     if not connector.payment_sync_enabled:
         return
+    if connector.invoice_mode == "dry_run":
+        # Nothing was emitted, so there is no payment state to mirror. Writing
+        # one would put a real-looking mutation on a document that does not
+        # exist as far as the tax authority is concerned.
+        return
     if inv.payment_status is PaymentStatus.paid:
         return
     if inv.state is InvoiceState.draft:
@@ -1268,14 +1288,16 @@ async def _process_emission(
     if connector.invoice_mode == "off":
         raise QuarantineError("invoice_mode_manual")
 
+    dry_run = connector.invoice_mode == "dry_run"
+    event.dry_run = dry_run
     existing = await _find_linked_invoice(
-        session, connector_id=connector.id, keys=intent.object_keys
+        session, connector_id=connector.id, keys=intent.object_keys, dry_run=dry_run
     )
     if existing is not None:
         inv = await _settle(
             session, connector=connector, invoice_id=existing, mode=connector.invoice_mode
         )
-        if intent.paid:
+        if intent.paid and not dry_run:
             await _mark_paid_if_needed(session, connector=connector, inv=inv)
         event.invoice_id = inv.id
         return "done"
@@ -1330,9 +1352,40 @@ async def _process_emission(
         connector_id=connector.id,
         keys=intent.object_keys,
         invoice_id=inv.id,
+        dry_run=dry_run,
     )
     event.invoice_id = inv.id
     await session.flush()
+
+    if dry_run:
+        # Everything a real emission does, stopping one step before SdI: build
+        # the document and validate it against the official XSD, so the reason
+        # a shadow run fails is the same reason a real one would have.
+        # ``get_xml_preview`` allocates nothing -- the XML carries a would-be
+        # number and the ANTEPRIMA progressivo -- so shadowing can never
+        # consume a sequence a real document will need.
+        try:
+            event.dry_run_xml = await invoice_svc.get_xml_preview(
+                session, org_id=connector.org_id, invoice_id=inv.id
+            )
+        except DomainError as exc:
+            # A shadow run exists to surface exactly this. Retrying it would be
+            # pointless (the data will not change on its own) and would bury the
+            # finding under attempts; park it with the validator's own words,
+            # which name the field and the rule that rejected it.
+            raise QuarantineError("dry_run_invalid_document", str(exc)[:512]) from exc
+        # Out of the active list: a shadow document must not sit where an
+        # operator browses documents they may transmit. It stays fully
+        # inspectable (XML, PDF, totals) in the archived view.
+        await invoice_svc.archive_invoice(
+            session,
+            org_id=connector.org_id,
+            actor_id=connector.id,
+            invoice_id=inv.id,
+            archived=True,
+        )
+        return "done"
+
     await tenant_checkpoint(session)
 
     if connector.invoice_mode == "transmit":
@@ -1427,6 +1480,14 @@ async def _process_credit_note(
 ) -> str:
     if connector.credit_note_mode == "off":
         raise QuarantineError("credit_note_manual")
+    if connector.credit_note_mode == "dry_run":
+        # A TD04 corrects an EMITTED document (ADR-0009): create_credit_note
+        # refuses a parent that was never filed, and in shadow mode no parent
+        # ever is. Rather than fake a parent -- which would validate nothing
+        # real -- say so plainly. During a parallel run the incumbent is still
+        # issuing the storni anyway.
+        event.dry_run = True
+        raise QuarantineError("dry_run_credit_note_unsupported")
 
     existing = await _find_linked_invoice(
         session, connector_id=connector.id, keys=intent.object_keys
@@ -1655,6 +1716,75 @@ async def purge_expired(session: AsyncSession, *, org_id: uuid.UUID) -> tuple[in
     )
 
 
+async def discard_dry_run(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    connector_id: uuid.UUID,
+) -> int:
+    """Throw away a shadow run: its claims and the documents it composed.
+
+    Needed because the two kinds of claim have opposite lifetimes. A LIVE claim
+    must outlive everything -- it is what stops an old redelivery from filing a
+    second document for one payment -- so its FK to the invoice is RESTRICT. A
+    SHADOW claim exists only to dedup within the shadow period, and the operator
+    who is done comparing wants the drafts out of the archive. That same
+    RESTRICT then blocks deleting them, and surfaces as a raw
+    ForeignKeyViolationError rather than anything a caller can act on.
+
+    So the order matters and is the whole function: drop the shadow claims
+    first, then the drafts they were pinning. Live claims are never touched, and
+    a document that was actually transmitted is refused by ``delete_draft``
+    itself, so this cannot reach a real invoice even if one were somehow linked.
+
+    Returns the number of shadow documents discarded.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    rows = (
+        (
+            await session.execute(
+                select(PaymentObjectLink.id, PaymentObjectLink.invoice_id).where(
+                    PaymentObjectLink.connector_id == connector_id,
+                    PaymentObjectLink.dry_run.is_(True),
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    if not rows:
+        return 0
+    invoice_ids = {invoice_id for _link_id, invoice_id in rows}
+    await session.execute(
+        delete(PaymentObjectLink).where(PaymentObjectLink.id.in_([link_id for link_id, _ in rows]))
+    )
+    await session.flush()
+
+    discarded = 0
+    for invoice_id in invoice_ids:
+        # Per-document savepoint: one draft an operator has meanwhile edited
+        # into a non-deletable state must not abort the whole discard.
+        try:
+            async with session.begin_nested():
+                await invoice_svc.delete_draft(
+                    session, org_id=org_id, actor_id=actor_id, invoice_id=invoice_id
+                )
+            discarded += 1
+        except DomainError:
+            continue
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="payment_connector",
+        entity_id=connector_id,
+        action="discard_dry_run",
+        diff={"documents": discarded},
+    )
+    return discarded
+
+
 # --- operator actions ------------------------------------------------------
 
 
@@ -1735,6 +1865,7 @@ __all__ = [
     "claim_due",
     "clear_api_key",
     "create_connector",
+    "discard_dry_run",
     "generate_api_key",
     "generate_signing_secret",
     "get_connector",

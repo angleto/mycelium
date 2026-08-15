@@ -13,6 +13,10 @@ Two switches, both fail-closed, and both must be on:
 | `MYCELIUM_PAYMENT_CONNECTORS_ENABLED` | the public ingress answers 404 for every connector |
 | the connector's own `enabled` flag | the ingress answers 403 after verifying the signature |
 
+`invoice_mode` then decides what happens to an accepted event: `transmit`
+files it, `draft` composes and stops, `dry_run` composes AND builds the XML but
+never sends (see the parallel-run section below), `off` parks it.
+
 Enabling the fleet switch requires a **worker restart**: the processing loop is
 registered at startup. Events that arrive while the loop is down are not lost —
 they queue in `payment_connector_events` and drain when it comes back.
@@ -65,6 +69,44 @@ Both are per-connector and readable from the SPA.
 A request that names a connector id which does not resolve leaves **no** row in
 either: there is no tenant to attribute it to. Those appear only as
 `payment_connector.unresolved` in the security log.
+
+## Running in parallel with an incumbent provider (`dry_run`)
+
+Before cutting over, put the connector in `invoice_mode = 'dry_run'` and leave
+it there for a full billing cycle. It does everything a real emission does --
+resolves the counterpart, composes the lines, computes the totals, builds the
+FatturaPA and validates it against the official XSD -- and stops before SdI.
+
+What you get per payment: a **frozen XML** on the event, downloadable from the
+connector's event list (the `XML` button on the `Processed` tab). Diff it
+against what your current provider filed for the same payment. That is the
+whole exercise.
+
+What it costs you: nothing that cannot be undone.
+
+- **No fiscal number is spent.** The XML carries a would-be number and the
+  `ANTEPRIMA` progressivo, so the counter is untouched.
+- **Nothing is sent**, and nothing is marked paid.
+- **The shadow documents are archived**, out of the active invoice list, so
+  they cannot be transmitted by accident. They stay inspectable (XML, PDF,
+  totals) in the archived view.
+- **Switching to `transmit` later emits fresh documents.** Shadow object
+  claims live in their own `dryrun:` namespace, so a live run does not find
+  them and does not resume a shadow draft. The shadow drafts survive as
+  evidence. To clear them use **Discard shadow run**
+  (`POST .../discard-dry-run`), not a per-invoice delete: the shadow claims
+  hold a RESTRICT foreign key on their drafts, so deleting a draft directly
+  fails. The operation drops the claims first, then the drafts, and never
+  touches a live claim. The generated XMLs stay on their events.
+
+Two things it does not cover:
+
+- **credit notes.** A TD04 corrects an emitted document and in shadow mode
+  nothing is emitted, so refunds park as `dry_run_credit_note_unsupported`.
+  During a parallel run the incumbent is still issuing them.
+- a document that fails validation parks as `dry_run_invalid_document` with
+  the validator's message. That is the finding, not a fault: fix the data and
+  retry.
 
 ## The waiting room vs. the queue
 

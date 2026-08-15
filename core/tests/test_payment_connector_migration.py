@@ -383,8 +383,15 @@ def test_idempotency_unique_constraints_carry_the_right_columns() -> None:
             for conname, expected in (
                 ("uq_payment_connector_events_dedupe", ["connector_id", "provider_event_id"]),
                 (
+                    # ``dry_run`` is part of the key (migration 0093): a shadow
+                    # claim and a live claim for the same provider object must
+                    # coexist, and the discriminator has to be a column rather
+                    # than a prefix on object_id -- on the native contract that
+                    # id is the SENDER's own reference, so a reserved string
+                    # form would let a sender make a live run resolve to a
+                    # shadow document and file it.
                     "uq_payment_object_links_object",
-                    ["connector_id", "object_kind", "object_id"],
+                    ["connector_id", "object_kind", "object_id", "dry_run"],
                 ),
                 (
                     "uq_payment_customer_links_customer",
@@ -559,5 +566,62 @@ def test_object_link_invoice_fk_is_restrict_and_connector_fk_cascades() -> None:
                 )
             ).scalar_one()
             assert not_null is True, "a claim with no invoice is not a claim"
+    finally:
+        engine.dispose()
+
+
+# --- migration 0093: shadow mode -------------------------------------------
+
+
+def test_dry_run_columns_exist_with_the_right_types() -> None:
+    """0093's columns. ``dry_run`` must be NOT NULL with a false default, or an
+    existing row would be neither shadow nor live and would match neither
+    lookup."""
+    engine = _engine()
+    try:
+        with engine.connect() as conn:
+            rows = dict(
+                conn.execute(
+                    sa.text(
+                        "SELECT table_name || '.' || column_name, "
+                        "       data_type || '/' || is_nullable || '/' "
+                        "       || coalesce(column_default, 'none') "
+                        "FROM information_schema.columns "
+                        "WHERE (table_name, column_name) IN "
+                        "  (('payment_connector_events','dry_run'), "
+                        "   ('payment_connector_events','dry_run_xml'), "
+                        "   ('payment_object_links','dry_run'))"
+                    )
+                ).all()
+            )
+        assert rows["payment_connector_events.dry_run"] == "boolean/NO/false"
+        assert rows["payment_object_links.dry_run"] == "boolean/NO/false"
+        assert rows["payment_connector_events.dry_run_xml"].startswith("text/YES")
+    finally:
+        engine.dispose()
+
+
+def test_the_automation_mode_check_admits_dry_run() -> None:
+    """The CHECK is the last line of defence on a fiscal switch: a mode the
+    database does not know cannot be written by any code path.
+
+    Both constraint names carry a DOUBLED prefix, from 0092 passing an
+    already-complete name to ``sa.CheckConstraint`` under the
+    ``ck_%(table_name)s_%(constraint_name)s`` convention. The names stand;
+    asserting the real ones is what stops a later migration guessing wrong.
+    """
+    engine = _engine()
+    try:
+        with engine.connect() as conn:
+            for column in ("invoice_mode", "credit_note_mode"):
+                name = f"ck_payment_connectors_ck_payment_connectors_{column}"
+                definition = conn.execute(
+                    sa.text(
+                        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :n"
+                    ),
+                    {"n": name},
+                ).scalar_one()
+                for mode in AUTOMATION_MODES:
+                    assert f"'{mode}'" in definition, f"{name} rejects {mode}"
     finally:
         engine.dispose()

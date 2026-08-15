@@ -140,7 +140,46 @@ unauthenticated webhook and whose fiscal work happens in a worker.
 
 5. **Automation is a per-connector switch, not an always-on behaviour.**
    `invoice_mode` and `credit_note_mode` are independently `transmit` /
-   `draft` / `off`. Automating emission while keeping storni manual is a
+   `draft` / `dry_run` / `off`.
+
+   `dry_run` (migration 0093) is the shadow mode, and it exists because none
+   of the other three answers the question an operator actually has before
+   cutting over from an incumbent provider: *would the documents this thing
+   produces be correct?* `draft` composes but never builds an XML -- the
+   document is frozen at transmit (ADR-0046) -- so there is nothing to inspect
+   and nothing to diff; `transmit` answers the question by filing real
+   documents, which is the risk being avoided. `dry_run` runs the entire real
+   path -- counterpart resolution into the anagrafica, lines, totals, the
+   FatturaPA build, the official XSD validation -- and stops one step before
+   SdI, freezing the generated XML on the event so it can be downloaded and
+   compared against what the incumbent filed for the same payment.
+
+   Three properties make it genuinely reversible rather than a half-measure:
+
+   - it allocates NO fiscal number. The XML carries the would-be number and
+     the `ANTEPRIMA` progressivo that `get_xml_preview` already produces, so
+     shadowing can never consume a sequence a real document will need;
+   - its object claims live in their own key namespace (`dryrun:`). The
+     claims must exist, or a redelivery during the shadow period would
+     produce a second shadow document; but they must be invisible to a later
+     live run, or switching the flag off would find the shadow draft, resume
+     it, and file a document composed from data the shadow period existed to
+     distrust;
+   - the shadow document is ARCHIVED, out of the list an operator browses to
+     transmit from, while staying fully inspectable. The marking is
+     deliberately NOT written into `purpose` or `notes`: both become
+     `Causale` in the XML, so labelling the document there would contaminate
+     the exact artefact the shadow run exists to verify.
+
+   Credit notes are not shadowed. A TD04 corrects an EMITTED document
+   (ADR-0009) and in shadow mode nothing ever is, so `credit_note_mode =
+   dry_run` parks the event saying so rather than validating a fiction --
+   during a parallel run the incumbent is still issuing the storni anyway.
+
+   A shadow document that fails validation parks immediately with the
+   validator's own words instead of being retried: that finding IS the output
+   of a shadow run, and a condition that cannot self-resolve should not be
+   buried under attempts. Automating emission while keeping storni manual is a
    legitimate and common posture, and an operator who wants the connector
    to compose but not file (a review step before a fiscal number is spent)
    must not have to choose between "all of it" and "none of it". Both

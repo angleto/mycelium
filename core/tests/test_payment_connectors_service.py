@@ -22,6 +22,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
@@ -752,3 +753,325 @@ async def test_an_italian_counterpart_without_a_recipient_code_is_not_emitted() 
         ).scalar_one()
         assert "sdi_code|pec" in (row.error_detail or "")
         assert await inv_svc.list_invoices(s, org_id=org_id) == []
+
+
+# --- shadow mode -----------------------------------------------------------
+
+
+async def test_dry_run_builds_a_valid_xml_without_spending_a_number() -> None:
+    """The whole point: everything a real emission does, minus the send.
+
+    A `draft` connector would compose and stop, leaving nothing to inspect --
+    the XML is only built at transmit. `dry_run` builds and validates it, so a
+    parallel run against an incumbent provider has an artefact to diff.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_dry"))
+    assert event_id is not None
+
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.dry_run is True
+        assert event.dry_run_xml is not None
+        xml = event.dry_run_xml
+        # A real FatturaPA, with the real counterpart and the real amounts.
+        assert "<CodiceDestinatario>ABCDEFG</CodiceDestinatario>" in xml
+        assert "<ImportoTotaleDocumento>122.00</ImportoTotaleDocumento>" in xml
+        # ...and unmistakably not a filed one.
+        assert "<ProgressivoInvio>ANTEPRIMA</ProgressivoInvio>" in xml
+
+        inv = await inv_svc.get_invoice(s, org_id=org_id, invoice_id=event.invoice_id)
+        assert inv.state is InvoiceState.draft, "a shadow document is never transmitted"
+        assert inv.number is None, "a shadow run must not consume a fiscal number"
+        assert inv.payment_status is PaymentStatus.unpaid
+        assert inv.is_archived is True, "kept out of the list an operator transmits from"
+
+
+async def test_dry_run_does_not_block_the_real_emission_once_the_flag_comes_off() -> None:
+    """The reversibility guarantee, and the reason shadow claims are namespaced.
+
+    If a shadow run claimed the provider ids the way a real one does, switching
+    to `transmit` would find the shadow draft, resume it, and file a document
+    composed from data the shadow period existed to distrust.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    _c, shadow = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_shadow"))
+    assert shadow is not None
+    assert await _run(org_id, connector_id, shadow) == "done"
+
+    # The operator is satisfied and switches the connector live.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"invoice_mode": "transmit"},
+        )
+
+    # The same payment arrives again (a redelivery, or a replay from the
+    # dashboard). It must produce a REAL invoice, not resume the shadow one.
+    _c2, live = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_live"))
+    assert live is not None
+    assert await _run(org_id, connector_id, live) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        transmitted = [
+            i
+            for i in await inv_svc.list_invoices(s, org_id=org_id, view="active")
+            if i.state is InvoiceState.transmitted
+        ]
+        assert len(transmitted) == 1, "exactly one real document"
+        assert transmitted[0].number is not None
+        shadowed = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        assert len(shadowed) == 1, "the shadow document survives as evidence"
+        assert shadowed[0].id != transmitted[0].id
+        assert shadowed[0].number is None
+
+
+async def test_dry_run_is_idempotent_under_redelivery() -> None:
+    """A redelivery during the shadow period must not pile up shadow copies."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    for event_id in ("evt_d1", "evt_d2"):
+        _c, eid = await _ingest(org_id, connector_id, _invoice_paid(event_id=event_id))
+        assert eid is not None
+        assert await _run(org_id, connector_id, eid) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert len(await inv_svc.list_invoices(s, org_id=org_id, view="archived")) == 1
+
+
+async def test_dry_run_surfaces_an_invalid_document_instead_of_retrying_it() -> None:
+    """A shadow run exists to find bad data. An invalid province is caught by
+    the XSD/validation pass, and parking it names the field -- retrying would
+    bury the finding under attempts for a condition that cannot self-resolve."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    payload = _invoice_paid(event_id="evt_badprov")
+    obj = payload["data"]["object"]  # type: ignore[index]
+    obj["customer_address"] = {  # type: ignore[index]
+        "line1": "Via Milano 9",
+        "postal_code": "20100",
+        "city": "Milano",
+        "state": "ZZ",  # not an Italian province
+        "country": "IT",
+    }
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+
+    assert await _run(org_id, connector_id, event_id) == "needs_attention"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.last_error == "dry_run_invalid_document"
+        assert event.dry_run is True
+
+
+async def test_dry_run_refuses_to_pretend_about_credit_notes() -> None:
+    """A TD04 corrects an EMITTED document, and in shadow mode nothing is ever
+    emitted. Saying so beats validating a fiction."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="dry_run", credit_note_mode="dry_run"
+    )
+    _c, emission = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_dr_par"))
+    assert emission is not None
+    await _run(org_id, connector_id, emission)
+
+    _c2, refund = await _ingest(org_id, connector_id, _refund(event_id="evt_dr_ref", amount=12200))
+    assert refund is not None
+    assert await _run(org_id, connector_id, refund) == "needs_attention"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == refund))
+        ).scalar_one()
+        assert event.last_error == "dry_run_credit_note_unsupported"
+
+
+async def test_a_sender_cannot_reach_a_shadow_document_through_its_reference() -> None:
+    """The shadow/live separation must not be forgeable by the sender.
+
+    On the native contract the provider object id IS the sender's own
+    ``reference``. An earlier cut separated shadow claims by prefixing that id
+    with a reserved string, which meant a sender presenting the reserved form
+    could make a LIVE run resolve to a shadow document -- and file, at SdI, a
+    draft composed during the period whose whole purpose was to distrust it.
+    The discriminator is a column the sender cannot express.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row, secret, _key = await svc.create_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            issuer_profile_id=issuer_id,
+            label=f"native-{uuid.uuid4().hex[:6]}",
+            provider="mycelium",
+            enabled=True,
+            invoice_mode="dry_run",
+        )
+        connector_id = row.id
+    assert secret
+
+    def native(reference: str, event_id: str) -> dict[str, Any]:
+        return {
+            "id": event_id,
+            "type": "invoice.issue",
+            "created": 1_755_000_000,
+            "data": {
+                "reference": reference,
+                "currency": "EUR",
+                "paid": True,
+                "customer": {
+                    "legal_name": "Acme SpA",
+                    "country_code": "IT",
+                    "vat_number": "09876543210",
+                    "address": "Via Milano 9",
+                    "postal_code": "20100",
+                    "city": "Milano",
+                    "province": "MI",
+                    "country": "IT",
+                    "sdi_code": "ABCDEFG",
+                },
+                "lines": [{"description": "Canone", "quantity": "1", "unit_price": "100.00"}],
+            },
+        }
+
+    _c, shadow = await _ingest(org_id, connector_id, native("ORDER-1", "evt_s"))
+    assert shadow is not None
+    assert await _run(org_id, connector_id, shadow) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"invoice_mode": "transmit"},
+        )
+
+    # The sender now presents the reserved form. Under the old prefix scheme
+    # this resolved to the shadow draft and transmitted it.
+    _c2, forged = await _ingest(org_id, connector_id, native("dryrun:ORDER-1", "evt_f"))
+    assert forged is not None
+    assert await _run(org_id, connector_id, forged) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        archived = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        assert len(archived) == 1, "the shadow document is untouched"
+        assert archived[0].state is InvoiceState.draft
+        assert archived[0].number is None, "the shadow document was never filed"
+        active = await inv_svc.list_invoices(s, org_id=org_id, view="active")
+        assert len(active) == 1, "the forged reference emitted its OWN document"
+        assert active[0].id != archived[0].id
+
+
+async def test_a_shadow_run_can_actually_be_thrown_away() -> None:
+    """The documented cleanup has to work.
+
+    A shadow claim holds a RESTRICT foreign key on its draft -- the same FK that
+    stops a live claim from ever dangling -- so deleting the draft directly
+    fails with a raw ForeignKeyViolationError. ``discard_dry_run`` drops the
+    claims first, which is the only order that works.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_discard"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow = (await inv_svc.list_invoices(s, org_id=org_id, view="archived"))[0]
+        # The direct route is genuinely blocked; that is WHY the operation exists.
+        with pytest.raises(Exception):  # noqa: B017 (a driver-level FK violation)
+            async with s.begin_nested():
+                await inv_svc.delete_draft(s, org_id=org_id, actor_id=user_id, invoice_id=shadow.id)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        discarded = await svc.discard_dry_run(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id
+        )
+        assert discarded == 1
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert await inv_svc.list_invoices(s, org_id=org_id, view="archived") == []
+        links = (
+            (
+                await s.execute(
+                    select(PaymentObjectLink).where(PaymentObjectLink.connector_id == connector_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert links == [], "the shadow claims went with the documents"
+        # The evidence survives: the XML is on the event, which now points at
+        # no invoice (the FK is SET NULL) but still carries what was generated.
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.dry_run_xml is not None
+
+
+async def test_discarding_a_shadow_run_never_touches_a_live_document() -> None:
+    """A connector that shadowed and then went live must keep its real
+    invoices when the shadow run is cleared."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, shadow = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_ds"))
+    assert shadow is not None
+    await _run(org_id, connector_id, shadow)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"invoice_mode": "transmit"},
+        )
+    _c2, live = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_dl"))
+    assert live is not None
+    assert await _run(org_id, connector_id, live) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert (
+            await svc.discard_dry_run(s, org_id=org_id, actor_id=user_id, connector_id=connector_id)
+            == 1
+        )
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        active = await inv_svc.list_invoices(s, org_id=org_id, view="active")
+        assert len(active) == 1, "the real invoice is untouched"
+        assert active[0].state is InvoiceState.transmitted
+        live_links = (
+            (
+                await s.execute(
+                    select(PaymentObjectLink).where(
+                        PaymentObjectLink.connector_id == connector_id,
+                        PaymentObjectLink.dry_run.is_(False),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert live_links, "the live claims survive, or a redelivery would re-emit"

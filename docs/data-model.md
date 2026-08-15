@@ -222,7 +222,8 @@ org-scoped entity. Memory is partitioned by `org_id`.
   users set-null, provider[stripe|mycelium], label, signing_secret_ciphertext,
   previous_signing_secret_ciphertext?, previous_signing_secret_expires_at?,
   api_key_hash?, previous_api_key_hash?, previous_api_key_expires_at?, enabled,
-  invoice_mode[transmit|draft|off], credit_note_mode[transmit|draft|off],
+  invoice_mode[transmit|draft|dry_run|off],
+  credit_note_mode[transmit|draft|dry_run|off],
   emission_event[invoice.paid|payment_intent.succeeded|
   checkout.session.completed], payment_sync_enabled, series?,
   default_purpose?, default_vat_rate?, default_vat_nature?,
@@ -239,7 +240,8 @@ org-scoped entity. Memory is partitioned by `org_id`.
   provider_event_id, event_type, payload jsonb, occurred_at?,
   status[pending|processing|done|ignored|no_billing_data|needs_attention|dead],
   attempt_count, max_attempts, next_attempt_at, last_attempt_at?, processed_at?,
-  provider_customer_id?, last_error?, error_detail?, invoice_id? FK invoices
+  provider_customer_id?, dry_run, dry_run_xml?, last_error?, error_detail?,
+  invoice_id? FK invoices
   set-null)` -- the ingress ledger and the work queue. UNIQUE
   `(connector_id, provider_event_id)`; index on `(connector_id, created_at)`
   plus partial indexes on `next_attempt_at WHERE status='pending'`, on

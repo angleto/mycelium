@@ -68,6 +68,8 @@ type EventRow = {
   last_error: string | null
   error_detail: string | null
   invoice_id: string | null
+  dry_run: boolean
+  has_dry_run_xml: boolean
 }
 
 type DeliveryRow = {
@@ -84,7 +86,7 @@ type DeliveryRow = {
 // (and must not silently offer an empty select) when one request out of two
 // does not land. They mirror models/payment_connector.py.
 const FALLBACK_PROVIDERS = ['stripe', 'mycelium']
-const FALLBACK_MODES = ['transmit', 'draft', 'off']
+const FALLBACK_MODES = ['transmit', 'draft', 'dry_run', 'off']
 const FALLBACK_EMISSION_EVENTS = ['invoice.paid']
 
 // The automation modes are a CLOSED fiscal vocabulary, so each one gets a real
@@ -94,6 +96,7 @@ const FALLBACK_EMISSION_EVENTS = ['invoice.paid']
 const MODE_KEYS: Record<string, string> = {
   transmit: 'paymentConnectors.modeTransmit',
   draft: 'paymentConnectors.modeDraft',
+  dry_run: 'paymentConnectors.modeDryRun',
   off: 'paymentConnectors.modeOff',
 }
 
@@ -351,9 +354,9 @@ function ConnectorEvents({
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
-  const [status, setStatus] = useState<'no_billing_data' | 'needs_attention' | 'dead'>(
-    'no_billing_data',
-  )
+  const [status, setStatus] = useState<
+    'no_billing_data' | 'needs_attention' | 'dead' | 'done'
+  >('no_billing_data')
 
   useEffect(() => {
     let active = true
@@ -378,6 +381,28 @@ function ConnectorEvents({
       active = false
     }
   }, [profileId, connectorId, status, tick])
+
+  async function onDownloadXml(eventId: string) {
+    // authFetch, not a plain link: the route needs the tenant + auth headers,
+    // and the sandboxed viewer cannot follow a download the page starts itself.
+    setErr(null)
+    try {
+      const res = await authFetch(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+          `/events/${eventId}/dry-run-xml`,
+      )
+      if (!res.ok) throw new Error(String(res.status))
+      const xml = await res.text()
+      const url = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dryrun-${eventId}.xml`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
 
   async function onRetry(eventId: string) {
     setErr(null)
@@ -419,6 +444,13 @@ function ConnectorEvents({
         >
           {t('paymentConnectors.statusDead')}
         </button>
+        <button
+          type="button"
+          className={status === 'done' ? 'btn--sm' : 'btn--sm btn--ghost'}
+          onClick={() => setStatus('done')}
+        >
+          {t('paymentConnectors.statusDone')}
+        </button>
       </div>
       {err && <p className="err">{err}</p>}
       {loading && <p>{t('home.loading')}</p>}
@@ -457,13 +489,26 @@ function ConnectorEvents({
                 </td>
                 <td>{stamp(r.created_at)}</td>
                 <td>
-                  <button
-                    type="button"
-                    className="btn--sm"
-                    onClick={() => void onRetry(r.id)}
-                  >
-                    {t('paymentConnectors.retry')}
-                  </button>
+                  {/* In shadow mode the XML is the deliverable: this is the
+                      artefact you diff against the incumbent provider. */}
+                  {r.has_dry_run_xml && (
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() => void onDownloadXml(r.id)}
+                    >
+                      {t('paymentConnectors.downloadXml')}
+                    </button>
+                  )}
+                  {r.status !== 'done' && (
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost"
+                      onClick={() => void onRetry(r.id)}
+                    >
+                      {t('paymentConnectors.retry')}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

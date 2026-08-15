@@ -545,9 +545,21 @@ Event lifecycle, visible in the connector's event list:
 | `processing` | A worker holds the lease. |
 | `done` | Produced its document, or was a settled no-op. |
 | `ignored` | Recognised but not actionable under this configuration (unknown type, payment for money we did not invoice). |
+| `done` | Produced its document. In shadow mode (`dry_run`) that document was composed and validated but never sent; its XML is downloadable from the connector. |
 | `no_billing_data` | **Waiting room**: the counterpart has not supplied a complete billing block. Nobody has to act -- it re-arms itself when the data arrives. |
 | `needs_attention` | **Operator queue**: a decision is pending (manual mode, malformed body, a parent that will never settle). Re-runnable from the UI once resolved. |
 | `dead` | Exhausted its attempts (`payment_connector_max_attempts`, 10 by default, with exponential backoff). |
 
 `no_billing_data`, `needs_attention` and `dead` rows are never swept by
 retention.
+
+### Shadow mode
+
+A connector may be configured to accept your events, compose the documents
+and validate them against the official FatturaPA schema **without sending
+anything** -- so an integration can be verified against a live one before it
+takes over. From the sender's side nothing changes: the endpoint, the
+signature and the responses are identical, and a `200` still means the event
+was accepted. The difference is only in what the receiving org does with it.
+Refunds (`invoice.credit`) are not shadowed: a credit note corrects an
+emitted document, and in shadow mode nothing is emitted.

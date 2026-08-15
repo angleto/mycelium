@@ -92,7 +92,17 @@ PROVIDERS = ("stripe", "mycelium")
 #: parks it for a fully manual decision. Emission and credit notes carry the
 #: switch independently: automating invoices while keeping storni manual is a
 #: legitimate and common posture.
-AUTOMATION_MODES = ("transmit", "draft", "off")
+#: ``dry_run`` is the shadow mode: it does EVERYTHING a real emission does --
+#: resolves the counterpart into the anagrafica, composes the lines, computes
+#: the totals, builds the FatturaPA XML and validates it against the official
+#: XSD -- and then stops, one step before SdI. It is not `draft` with a label:
+#: a draft never builds an XML at all (the document is frozen at transmit), so
+#: there would be nothing to verify. Nothing is transmitted, NO fiscal number
+#: is allocated (the XML carries a would-be number and the ``ANTEPRIMA``
+#: progressivo), and the emitted document is archived out of the active list so
+#: it cannot be mistaken for a live one. Its purpose is running in parallel
+#: with an incumbent e-invoicing provider long enough to diff the two XMLs.
+AUTOMATION_MODES = ("transmit", "draft", "dry_run", "off")
 
 #: The single event family that triggers an emission. Exactly one per connector:
 #: Stripe fires several events for the same money (an ``invoice.paid`` is also a
@@ -367,6 +377,16 @@ class PaymentConnectorEvent(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     #: the retry decision, and it is what an operator triages on.
     last_error: Mapped[str | None] = mapped_column(String(160), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: True when this event was processed in shadow mode. Recorded ON THE EVENT
+    #: rather than read from the connector, because the mode is a setting that
+    #: changes: an event processed while shadowing must stay identifiable as
+    #: such after the flag is switched off.
+    dry_run: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    #: The FatturaPA the connector WOULD have sent, frozen at the moment it was
+    #: generated. Stored rather than re-derived on demand because the point of a
+    #: shadow run is to compare a fixed artefact against the incumbent's output;
+    #: a preview regenerated later would silently reflect data edited since.
+    dry_run_xml: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The provider customer this event is about, recorded when the event is
     #: parked. It is what lets a later customer event re-arm exactly the
     #: payments that were waiting on THAT customer's data, instead of retrying
@@ -387,7 +407,11 @@ class PaymentObjectLink(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
         # INSERT ... ON CONFLICT DO NOTHING before the document is filed, so a
         # crash between the link and the dispatch resumes instead of re-emitting.
         UniqueConstraint(
-            "connector_id", "object_kind", "object_id", name="uq_payment_object_links_object"
+            "connector_id",
+            "object_kind",
+            "object_id",
+            "dry_run",
+            name="uq_payment_object_links_object",
         ),
         CheckConstraint(
             f"object_kind IN {_sql_in(OBJECT_KINDS)}", name="ck_payment_object_links_kind"
@@ -410,6 +434,11 @@ class PaymentObjectLink(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
         ForeignKey("invoices.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    #: Separates a shadow claim from a live one. A COLUMN and not a prefix on
+    #: ``object_id``: on the native contract that id is the sender's own
+    #: reference, so a reserved string form would let a sender make a live run
+    #: resolve to a shadow document. This discriminator is ours alone.
+    dry_run: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
 
 class PaymentWebhookDelivery(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):

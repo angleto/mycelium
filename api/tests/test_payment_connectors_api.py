@@ -831,3 +831,64 @@ async def test_retry_of_an_unknown_event_is_404() -> None:
         )
         assert r.status_code == 404, r.text
         assert r.json()["code"] == "payment_connector.event_not_found"
+
+
+# --- shadow mode over HTTP -------------------------------------------------
+
+
+async def test_dry_run_xml_download_is_issuer_scoped_and_404s_when_absent() -> None:
+    """The generated XML is the deliverable of a shadow run, and it carries the
+    counterpart's fiscal data: it must be reachable only through the connector
+    that produced it."""
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer, invoice_mode="dry_run")
+        cid = made["id"]
+
+        # A connector under a SIBLING issuer profile of the same org must not
+        # be a path to it: 404, never 403.
+        other = await _issuer(c, owner, label="Secondo", vat="09876543210")
+        r = await c.get(
+            f"/issuer-profiles/{other}/payment-connectors/{cid}/events/{uuid.uuid4()}/dry-run-xml",
+            headers=owner,
+        )
+        assert r.status_code == 404, r.text
+
+        # An event id that does not exist, or one with no shadow document, is
+        # the same 404 -- the surface is not an event-existence oracle.
+        r = await c.get(f"{_base(issuer)}/{cid}/events/{uuid.uuid4()}/dry-run-xml", headers=owner)
+        assert r.status_code == 404, r.text
+
+
+async def test_discard_dry_run_is_owner_gated_and_reports_what_it_removed() -> None:
+    """Discarding a shadow run deletes documents. It is a mutation, so it is
+    owner-gated like every other mutation on this surface."""
+    async with _client() as c:
+        owner, member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer, invoice_mode="dry_run")
+        cid = made["id"]
+
+        r = await c.post(f"{_base(issuer)}/{cid}/discard-dry-run", headers=member)
+        assert r.status_code == 403, r.text
+
+        r = await c.post(f"{_base(issuer)}/{cid}/discard-dry-run", headers=owner)
+        assert r.status_code == 200, r.text
+        # Nothing was shadowed yet, so nothing is discarded -- and the call is
+        # a clean no-op rather than an error, so it stays safe to repeat.
+        assert r.json() == {"discarded": 0}
+
+        r = await c.post(
+            f"/issuer-profiles/{uuid.uuid4()}/payment-connectors/{cid}/discard-dry-run",
+            headers=owner,
+        )
+        assert r.status_code == 404, r.text
+
+
+async def test_the_vocabulary_advertises_dry_run() -> None:
+    """The SPA renders the modes from the backend, so a widened set must reach
+    it without a frontend release."""
+    async with _client() as c:
+        owner, _member, _org, _issuer = await _setup(c)
+        r = await c.get("/payment-connectors/vocabulary", headers=owner)
+        assert r.status_code == 200, r.text
+        assert "dry_run" in r.json()["automation_modes"]

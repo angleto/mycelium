@@ -29,7 +29,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -204,6 +204,11 @@ class PaymentConnectorEventOut(BaseModel):
     last_error: str | None
     error_detail: str | None
     invoice_id: uuid.UUID | None
+    dry_run: bool
+    #: Whether a shadow document was produced and can be downloaded. The XML
+    #: itself is not projected here: it is large and carries the counterpart's
+    #: data, so it has its own route.
+    has_dry_run_xml: bool
 
 
 class PaymentWebhookDeliveryOut(BaseModel):
@@ -261,6 +266,17 @@ def _create_out(
 ) -> PaymentConnectorCreateOut:
     return PaymentConnectorCreateOut(
         **_out(row).model_dump(), signing_secret=signing_secret, api_key=api_key
+    )
+
+
+def _event_out(row: PaymentConnectorEvent) -> PaymentConnectorEventOut:
+    return PaymentConnectorEventOut(
+        **{
+            f: getattr(row, f)
+            for f in PaymentConnectorEventOut.model_fields
+            if f != "has_dry_run_xml"
+        },
+        has_dry_run_xml=row.dry_run_xml is not None,
     )
 
 
@@ -473,7 +489,7 @@ async def list_events(
         status=event_status,
         limit=limit,
     )
-    return [PaymentConnectorEventOut.model_validate(r) for r in rows]
+    return [_event_out(r) for r in rows]
 
 
 @router.get(
@@ -520,6 +536,66 @@ async def list_deliveries(
     ]
 
 
+class DiscardDryRunOut(BaseModel):
+    discarded: int
+
+
+@router.post(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/discard-dry-run",
+    response_model=DiscardDryRunOut,
+)
+async def discard_dry_run(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> DiscardDryRunOut:
+    """Throw away everything a shadow run composed: its claims and its drafts.
+
+    The shadow claims have to go first: their FK to the invoice is RESTRICT (it
+    is what stops a live claim from ever dangling), so the drafts cannot be
+    deleted while the claims pin them.
+    """
+    ensure_role(ctx.role, Role.owner)
+    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    discarded = await svc.discard_dry_run(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, connector_id=connector_id
+    )
+    return DiscardDryRunOut(discarded=discarded)
+
+
+@router.get(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+    "/events/{event_id}/dry-run-xml"
+)
+async def download_dry_run_xml(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> Response:
+    """The FatturaPA a shadow run WOULD have sent, exactly as generated.
+
+    This is the artefact a parallel run exists to produce: download it and diff
+    it against what the incumbent provider filed for the same payment.
+    """
+    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    row = (
+        await ctx.session.execute(
+            select(PaymentConnectorEvent).where(
+                PaymentConnectorEvent.id == event_id,
+                PaymentConnectorEvent.connector_id == connector_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or row.dry_run_xml is None:
+        raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
+    return Response(
+        content=row.dry_run_xml,
+        media_type="application/xml",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post(
     "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/retry",
     response_model=PaymentConnectorEventOut,
@@ -539,4 +615,4 @@ async def retry_event(
         connector_id=connector_id,
         event_id=event_id,
     )
-    return PaymentConnectorEventOut.model_validate(row)
+    return _event_out(row)
