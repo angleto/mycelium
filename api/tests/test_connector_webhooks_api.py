@@ -98,9 +98,14 @@ def _ingress_on(**overrides: str) -> Iterator[None]:
     not a bare ``monkeypatch.setenv``.
 
     Restoring in a ``finally`` (and clearing the cache AGAIN) is equally
-    load-bearing: the setting is fail-closed by design, and a test module that
-    leaked it as globally ON would silently arm an unauthenticated route for
-    every test that ran afterwards.
+    load-bearing: a module that leaked an override would silently change the
+    shape of the unauthenticated route for every test that ran afterwards.
+
+    The subsystem ships ENABLED (the fail-closed guarantee lives per connector:
+    one is created disabled and cannot exist without the provider's signing
+    secret), so a test that wants the fleet kill switch OFF has to say so with
+    ``_ingress_on(MYCELIUM_PAYMENT_CONNECTORS_ENABLED="false")`` rather than
+    rely on a default.
     """
     env = {"MYCELIUM_PAYMENT_CONNECTORS_ENABLED": "true", **overrides}
     saved = {key: os.environ.get(key) for key in env}
@@ -309,17 +314,22 @@ async def _org_delivery_count(org: str, user: str) -> int:
 
 
 async def test_feature_switch_off_is_404_and_writes_nothing() -> None:
-    """Fail closed: with the subsystem off the route must be indistinguishable
-    from one that never existed, and must not leave evidence of the attempt."""
+    """The fleet kill switch: with it off the route must be indistinguishable
+    from one that never existed, and must not leave evidence of the attempt.
+
+    It is not the shipped default any more -- a connector is armed per issuer
+    profile -- but it stays the lever that takes the whole ingress down without
+    editing a single connector, so it has to keep working.
+    """
     async with _client() as c:
         h, issuer, org, user = await _setup(c)
         cid, secret, _key = await _connector(c, h, issuer)
         body = _event()
 
-        # No _ingress_on() here: this is the shipped default.
-        r = await c.post(_url("stripe", cid), content=body, headers=_signed(secret, body))
-        assert r.status_code == 404, r.text
-        assert r.json()["code"] == "payment_connector.not_found"
+        with _ingress_on(MYCELIUM_PAYMENT_CONNECTORS_ENABLED="false"):
+            r = await c.post(_url("stripe", cid), content=body, headers=_signed(secret, body))
+            assert r.status_code == 404, r.text
+            assert r.json()["code"] == "payment_connector.not_found"
 
         assert await _events(org, user, cid) == []
         assert await _deliveries(org, user, cid) == []

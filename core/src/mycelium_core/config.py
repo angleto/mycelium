@@ -211,7 +211,17 @@ class Settings(BaseSettings):
     # Enabling requires a worker restart (the loop is registered at startup).
     # No new secret: the signing-secret envelope is keyed by ``secret_key`` and
     # the optional ingress API key is peppered with ``issuer_key_pepper``.
-    payment_connectors_enabled: bool = False
+    # ON by default, unlike its outbound sibling ``webhooks_enabled``. The
+    # fail-closed guarantee this subsystem needs does not live here: a connector
+    # is created ``enabled = false``, it cannot exist without the provider's own
+    # signing secret, and what it may do is decided per issuer profile by
+    # ``invoice_mode`` / ``credit_note_mode``. A fleet-wide switch on top of
+    # those adds no safety -- nothing can be emitted without a connector row
+    # somebody deliberately created and armed -- while costing a worker restart
+    # to flip and making a correctly-configured connector silently inert.
+    # Turning it OFF remains the kill switch: the ingress 404s and the worker
+    # loop is not registered.
+    payment_connectors_enabled: bool = True
     # Origin the connector's public webhook URL is advertised under, so the
     # operator can copy it straight into the provider's dashboard. Falls back to
     # frontend_base_url (SPA and API share a host in the OSS deploy); production

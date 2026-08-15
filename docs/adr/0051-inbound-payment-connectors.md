@@ -312,10 +312,14 @@ unauthenticated webhook and whose fiscal work happens in a worker.
 
 ## Consequences
 
-- Enabling is two steps and fails closed: `payment_connectors_enabled` plus
-  a worker restart (the loop is registered at startup). While disabled, the
-  ingress answers 404 -- an unconfigured deploy is indistinguishable from
-  one that never had this connector.
+- Arming is per issuer profile, not fleet-wide. `payment_connectors_enabled`
+  ships ON and is an emergency lever (ingress 404s, worker loop unregistered,
+  a worker restart to flip it either way); the fail-closed guarantee lives on
+  the connector row, which is created `enabled = false` and cannot exist
+  without the provider's own signing secret. A fleet flag on top of that adds
+  no safety -- nothing is emitted by a connector nobody deliberately created
+  and armed -- while being able to leave a correctly configured connector
+  silently inert.
 - A connector is a new **non-user principal**: migration 0092 widens the
   `activity_log` and `entity_revision` actor-kind CHECKs with
   `payment_connector`, so a document emitted by an integration is

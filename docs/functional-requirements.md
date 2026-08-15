@@ -290,7 +290,10 @@ single GUI/REST/MCP choke point).
     it delivered it and there is no invoice" is answerable from the database.
   - Management is REST + GUI only, never MCP (like issuer keys): the surface
     mints a credential that lets an outside system emit fiscal documents in the
-    workspace's name. Fail-closed on `payment_connectors_enabled`.
+    workspace's name. Armed per issuer profile: a connector is created disabled
+    and needs the provider's own signing secret, so nothing is emitted by one
+    nobody deliberately created. `payment_connectors_enabled` is the
+    deployment-wide kill switch, on by default.
 
 ## FR-10 MCP server (co-equal)
 
