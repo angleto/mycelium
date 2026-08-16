@@ -6,24 +6,34 @@ for the published event format see `docs/payment-connector-contract.md`.
 
 ## Enabling the subsystem
 
-Two switches, both fail-closed, and both must be on:
+Nothing is fleet-wide. What a connector may do is decided **per issuer
+profile**, on the connector row itself:
 
-| Setting | Effect when off |
-| --- | --- |
-| `MYCELIUM_PAYMENT_CONNECTORS_ENABLED` | the public ingress answers 404 for every connector |
-| the connector's own `enabled` flag | the ingress answers 403 after verifying the signature |
+| Setting | Scope | Effect |
+| --- | --- | --- |
+| the connector's `enabled` flag | one connector | off = the ingress answers 403 after verifying the signature |
+| `invoice_mode` | one connector | `transmit` files it, `dry_run` composes AND builds the XML but never sends, `draft` composes and stops, `off` parks it |
+| `credit_note_mode` | one connector | the same four, independently: automating invoices while keeping storni manual is a normal posture |
+| `MYCELIUM_PAYMENT_CONNECTORS_ENABLED` | the whole deployment | **on by default**; the kill switch, see below |
 
-`invoice_mode` then decides what happens to an accepted event: `transmit`
-files it, `draft` composes and stops, `dry_run` composes AND builds the XML but
-never sends (see the parallel-run section below), `off` parks it.
+A connector is created **disabled**, and it cannot exist without the provider's
+own signing secret, so nothing can be emitted by a connector nobody
+deliberately created and armed. That is where the fail-closed guarantee lives —
+not in a fleet-wide flag that costs a worker restart to flip and can leave a
+correctly configured connector silently inert, answering 404 as if it had never
+been created.
 
-Enabling the fleet switch requires a **worker restart**: the processing loop is
-registered at startup. Events that arrive while the loop is down are not lost —
-they queue in `payment_connector_events` and drain when it comes back.
+`MYCELIUM_PAYMENT_CONNECTORS_ENABLED=false` remains the emergency lever: the
+ingress 404s for every connector and the worker loop is not registered.
+Flipping it either way requires a **worker restart** (the loop is registered at
+startup). Events that arrive while the loop is down are not lost — they queue
+in `payment_connector_events` and drain when it comes back.
 
 `MYCELIUM_PAYMENT_CONNECTOR_BASE_URL` is the origin the connector's webhook URL
-is advertised under. Set it to the API origin in production; it falls back to
-`frontend_base_url`, which is only correct where the SPA and the API share a host.
+is advertised under — the address an operator pastes into the provider's
+dashboard, so it must be the API origin. It falls back to `frontend_base_url`,
+which is correct only where the SPA and the API share a host; set it
+explicitly rather than relying on that coincidence.
 
 ## Wiring a Stripe account
 
@@ -121,6 +131,27 @@ there is nothing for you to decide. **These re-arm themselves**: the moment a
 fiscal identity, every payment waiting on that customer goes back to `pending`
 with a fresh attempt budget, and the invoice is emitted without anyone pressing
 anything. Subscribe to the customer events in the provider or this never fires.
+
+**When the data arrives outside the provider.** The self-service path only
+fires when the provider tells us: a `customer.created` / `customer.updated`
+event carrying the fiscal identity fills the client record and wakes the
+payments waiting on it. If the customer emails you their VAT number instead,
+fixing the anagrafica is *not* enough — nothing ties that mycelium client to
+the provider's customer id, so **Retry alone will park the payment again**, for
+the same reason as the first time: it re-derives the counterpart from the
+frozen event payload.
+
+Use **Assign client** on the parked row instead:
+
+1. make sure the client exists in Clients and is complete (VAT number or
+   codice fiscale, full address, and a codice destinatario or PEC);
+2. press *Assign client* on the parked payment and give it the client's tag id.
+
+The association is refused if the client is still incomplete, and it names what
+is missing — so the failure lands on the record you are looking at rather than
+on a retry later. On success every payment waiting on that customer is queued
+again with a fresh attempt budget, and future payments from the same customer
+resolve straight through.
 
 `error_detail` names the missing fields:
 

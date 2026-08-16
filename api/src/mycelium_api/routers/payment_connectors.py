@@ -204,6 +204,10 @@ class PaymentConnectorEventOut(BaseModel):
     last_error: str | None
     error_detail: str | None
     invoice_id: uuid.UUID | None
+    #: The provider customer a parked payment is waiting on. It is what the
+    #: operator associates with a client to unblock it, so it has to be visible
+    #: on the row rather than buried in the frozen payload.
+    provider_customer_id: str | None
     dry_run: bool
     #: Whether a shadow document was produced and can be downloaded. The XML
     #: itself is not projected here: it is large and carries the counterpart's
@@ -536,8 +540,53 @@ async def list_deliveries(
     ]
 
 
+class AssignCustomerClientIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_customer_id: str = Field(min_length=1, max_length=255)
+    client_tag_id: uuid.UUID
+
+
+class AssignCustomerClientOut(BaseModel):
+    #: Payments this association just returned to the queue.
+    rearmed: int
+
+
 class DiscardDryRunOut(BaseModel):
     discarded: int
+
+
+@router.post(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/assign-customer",
+    response_model=AssignCustomerClientOut,
+)
+async def assign_customer_client(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    body: AssignCustomerClientIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> AssignCustomerClientOut:
+    """Point a provider customer at an existing client, by hand.
+
+    The manual half of "the customer supplied their billing data late". The
+    automatic half needs the data to arrive THROUGH the provider; when it
+    arrives any other way there is nothing tying the mycelium client to the
+    provider's customer id, so a retry alone can never unblock those payments.
+
+    Refuses a client that is not yet invoiceable, naming what is missing, so
+    the failure lands on the record the operator is looking at rather than on
+    a retry later.
+    """
+    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    rearmed = await svc.assign_customer_client(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        connector_id=connector_id,
+        provider_customer_id=body.provider_customer_id,
+        client_tag_id=body.client_tag_id,
+    )
+    return AssignCustomerClientOut(rearmed=rearmed)
 
 
 @router.post(

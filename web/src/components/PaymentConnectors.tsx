@@ -68,6 +68,7 @@ type EventRow = {
   last_error: string | null
   error_detail: string | null
   invoice_id: string | null
+  provider_customer_id: string | null
   dry_run: boolean
   has_dry_run_xml: boolean
 }
@@ -353,6 +354,7 @@ function ConnectorEvents({
   const [rows, setRows] = useState<EventRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [status, setStatus] = useState<
     'no_billing_data' | 'needs_attention' | 'dead' | 'done'
@@ -381,6 +383,38 @@ function ConnectorEvents({
       active = false
     }
   }, [profileId, connectorId, status, tick])
+
+  async function onAssignClient(r: EventRow) {
+    // The manual half of "the customer sent their billing data late". When the
+    // data arrives outside the provider there is nothing tying the mycelium
+    // client to the provider's customer id, so Retry alone can never unblock
+    // the payment -- it re-derives the counterpart from the frozen payload.
+    if (!r.provider_customer_id) return
+    const tagId = window.prompt(
+      t('paymentConnectors.assignPrompt', { customer: r.provider_customer_id }),
+      '',
+    )
+    if (tagId === null || !tagId.trim()) return
+    setErr(null)
+    setMsg(null)
+    try {
+      const out = await send<{ rearmed: number }>(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}/assign-customer`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider_customer_id: r.provider_customer_id,
+            client_tag_id: tagId.trim(),
+          }),
+        },
+      )
+      setMsg(t('paymentConnectors.assignDone', { count: out.rearmed }))
+      setTick((n) => n + 1)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
 
   async function onDownloadXml(eventId: string) {
     // authFetch, not a plain link: the route needs the tenant + auth headers,
@@ -453,6 +487,7 @@ function ConnectorEvents({
         </button>
       </div>
       {err && <p className="err">{err}</p>}
+      {msg && <p className="ok">{msg}</p>}
       {loading && <p>{t('home.loading')}</p>}
       {!loading && rows.length === 0 && (
         <p className="ok">{t('paymentConnectors.quarantineEmpty')}</p>
@@ -477,6 +512,11 @@ function ConnectorEvents({
                 </td>
                 <td>
                   <code>{r.provider_event_id}</code>
+                  {r.provider_customer_id && (
+                    <div className="muted">
+                      <code>{r.provider_customer_id}</code>
+                    </div>
+                  )}
                 </td>
                 <td>
                   <code>{r.last_error ?? '—'}</code>
@@ -498,6 +538,15 @@ function ConnectorEvents({
                       onClick={() => void onDownloadXml(r.id)}
                     >
                       {t('paymentConnectors.downloadXml')}
+                    </button>
+                  )}
+                  {r.status === 'no_billing_data' && r.provider_customer_id && (
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() => void onAssignClient(r)}
+                    >
+                      {t('paymentConnectors.assignClient')}
                     </button>
                   )}
                   {r.status !== 'done' && (

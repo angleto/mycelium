@@ -73,6 +73,7 @@ from mycelium_core.models.payment_connector import (
     PaymentObjectLink,
     PaymentWebhookDelivery,
 )
+from mycelium_core.models.tag import TagKind
 from mycelium_core.services import audit, taxonomy
 from mycelium_core.services import invoice as invoice_svc
 from mycelium_core.services.payment_events import (
@@ -990,6 +991,19 @@ async def rearm_waiting_events(
     """
     if not (party.vat_number or party.tax_code):
         return 0
+    return await _rearm_customer(session, connector_id=connector_id, customer_key=customer_key)
+
+
+async def _rearm_customer(
+    session: AsyncSession, *, connector_id: uuid.UUID, customer_key: str
+) -> int:
+    """Return every payment parked on this customer's missing data to the queue.
+
+    Resets the attempt budget: the spent attempts measured a condition that no
+    longer holds. A re-armed event re-validates from scratch, so anything still
+    incomplete simply parks again -- a premature wake costs one attempt, never a
+    wrong document.
+    """
     result = await session.execute(
         update(PaymentConnectorEvent)
         .where(
@@ -1806,6 +1820,87 @@ async def list_events(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def assign_customer_client(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    provider_customer_id: str,
+    client_tag_id: uuid.UUID,
+) -> int:
+    """Point a provider customer at an existing client, by hand.
+
+    The manual half of "the customer supplied their billing data late". The
+    automatic half already works: a provider customer event carrying the data
+    fills the client record and re-arms the payments waiting on it. But that
+    only helps when the data arrives THROUGH the provider. When it arrives any
+    other way -- the customer emails their VAT number, an accountant fills the
+    anagrafica in -- there is nothing tying that mycelium client to the
+    provider's customer id, so a retry re-derives the counterpart from the
+    frozen event payload, finds it just as empty as the first time, and parks
+    again. Fixing the anagrafica alone can never unblock those payments.
+
+    This is the missing edge. It refuses a client that is not yet invoiceable
+    rather than accepting the association and letting the retry fail for a
+    second, less obvious reason: the caller is told which fields are still
+    missing, on the record they are actually looking at.
+
+    Returns the number of parked payments re-armed by the association.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    connector = await get_connector(session, org_id=org_id, connector_id=connector_id)
+    tag = await taxonomy.get_tag(session, org_id=org_id, tag_id=client_tag_id)
+    if tag.kind is not TagKind.client:
+        raise UnprocessableError(MessageCode.TAG_KIND_MISMATCH, detail="client")
+    # Fail here, not on the retry: the operator is holding the client record.
+    #
+    # ``MissingBillingDataError`` is INTERNAL control flow for the runner (it
+    # decides which parked state an event lands in) and is not a DomainError,
+    # so letting it escape a request would surface as an opaque 500 with none
+    # of the field list an operator needs. Convert it at the boundary.
+    try:
+        await _assert_client_invoiceable(
+            session, org_id=org_id, tag_id=client_tag_id, customer_key=provider_customer_id
+        )
+    except MissingBillingDataError as exc:
+        raise UnprocessableError(
+            MessageCode.PAYMENT_CONNECTOR_CLIENT_INCOMPLETE, detail=exc.missing
+        ) from exc
+
+    await session.execute(
+        pg_insert(PaymentCustomerLink)
+        .values(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            connector_id=connector.id,
+            provider_customer_id=provider_customer_id,
+            client_tag_id=client_tag_id,
+        )
+        .on_conflict_do_update(
+            index_elements=["connector_id", "provider_customer_id"],
+            set_={"client_tag_id": client_tag_id, "updated_at": _now()},
+        )
+    )
+    rearmed = await _rearm_customer(
+        session, connector_id=connector.id, customer_key=provider_customer_id
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="payment_connector",
+        entity_id=connector.id,
+        action="assign_customer_client",
+        diff={
+            "provider_customer_id": provider_customer_id,
+            "client_tag_id": str(client_tag_id),
+            "rearmed": rearmed,
+        },
+    )
+    return rearmed
+
+
 async def retry_event(
     session: AsyncSession,
     *,
@@ -1860,6 +1955,7 @@ __all__ = [
     "RetryLaterError",
     "allocate_partial",
     "apply_addressing_rules",
+    "assign_customer_client",
     "backoff_seconds",
     "body_digest",
     "claim_due",

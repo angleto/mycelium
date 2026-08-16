@@ -892,3 +892,82 @@ async def test_the_vocabulary_advertises_dry_run() -> None:
         r = await c.get("/payment-connectors/vocabulary", headers=owner)
         assert r.status_code == 200, r.text
         assert "dry_run" in r.json()["automation_modes"]
+
+
+async def test_assigning_an_incomplete_client_is_a_422_that_names_the_fields() -> None:
+    """The refusal has to reach the operator as something they can act on.
+
+    ``MissingBillingDataError`` is the runner's INTERNAL control flow and is not
+    a DomainError, so letting it escape a request surfaces as an opaque 500 with
+    none of the field list. The service-level test could not see that -- it
+    asserted the exception, which is exactly the shape the HTTP layer cannot
+    render. This one drives the real route.
+    """
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer)
+        cid = made["id"]
+
+        # A client with a VAT number and an address but no way to deliver to it.
+        r = await c.post(
+            "/clients",
+            headers=owner,
+            json={
+                "name": "Incompleta Srl",
+                "legal_name": "Incompleta Srl",
+                "country_code": "IT",
+                "vat_number": "09876543210",
+                "address": "Via Milano 9",
+                "postal_code": "20100",
+                "city": "Milano",
+                "province": "MI",
+                "country": "IT",
+            },
+        )
+        assert r.status_code in (200, 201), r.text
+        client_tag_id = r.json()["id"]
+
+        r = await c.post(
+            f"{_base(issuer)}/{cid}/assign-customer",
+            headers=owner,
+            json={"provider_customer_id": "cus_probe", "client_tag_id": client_tag_id},
+        )
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body["code"] == "payment_connector.client_incomplete"
+        assert "sdi_code|pec" in body["detail"], body
+
+
+async def test_assigning_a_complete_client_reports_what_it_rearmed() -> None:
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer)
+        cid = made["id"]
+
+        r = await c.post(
+            "/clients",
+            headers=owner,
+            json={
+                "name": "Acme SpA",
+                "legal_name": "Acme SpA",
+                "country_code": "IT",
+                "vat_number": "09876543210",
+                "address": "Via Milano 9",
+                "postal_code": "20100",
+                "city": "Milano",
+                "province": "MI",
+                "country": "IT",
+                "sdi_code": "ABCDEFG",
+            },
+        )
+        assert r.status_code in (200, 201), r.text
+
+        r = await c.post(
+            f"{_base(issuer)}/{cid}/assign-customer",
+            headers=owner,
+            json={"provider_customer_id": "cus_ok", "client_tag_id": r.json()["id"]},
+        )
+        assert r.status_code == 200, r.text
+        # Nothing was waiting on this customer, so the association is a clean
+        # no-op rather than an error: it stays safe to do ahead of time.
+        assert r.json() == {"rearmed": 0}

@@ -26,6 +26,7 @@ import pytest
 from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import DocumentType, InvoiceState, PaymentStatus
 from mycelium_core.models.membership import Role
@@ -34,9 +35,12 @@ from mycelium_core.models.payment_connector import (
     PaymentCustomerLink,
     PaymentObjectLink,
 )
+from mycelium_core.models.tag import TagKind
 from mycelium_core.services import invoice as inv_svc
 from mycelium_core.services import payment_connectors as svc
+from mycelium_core.services import taxonomy
 from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 async def _org_and_issuer() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
@@ -1075,3 +1079,157 @@ async def test_discarding_a_shadow_run_never_touches_a_live_document() -> None:
             .all()
         )
         assert live_links, "the live claims survive, or a redelivery would re-emit"
+
+
+# --- the customer supplied their billing data late -------------------------
+
+
+async def test_billing_data_entered_in_mycelium_unblocks_the_payment() -> None:
+    """The scenario this exists for, end to end.
+
+    A customer pays before completing their billing details, so the payment
+    parks. The data then arrives OUTSIDE the provider -- by email, from an
+    accountant -- and is entered in mycelium. Fixing the anagrafica alone can
+    never unblock the payment: nothing ties that client to the provider's
+    customer id, so a retry re-derives the counterpart from the frozen payload
+    and finds it just as empty. The association is the missing edge, and it
+    re-arms the waiting payments itself.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    _c, payment = await _ingest(
+        org_id, connector_id, _invoice_paid(event_id="evt_late", metadata={})
+    )
+    assert payment is not None
+    assert await _run(org_id, connector_id, payment) == "no_billing_data"
+
+    # A retry changes nothing while the association does not exist: the payload
+    # is frozen and still carries no fiscal identity.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.retry_event(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            event_id=payment,
+        )
+    assert await _run(org_id, connector_id, payment) == "no_billing_data"
+
+    # The operator creates the client in mycelium from what the customer sent.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        tag = await taxonomy.resolve_or_create_client(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            name="Acme SpA",
+            profile=ClientInput(
+                legal_name="Acme SpA",
+                country_code="IT",
+                vat_number="09876543210",
+                address="Via Milano 9",
+                postal_code="20100",
+                city="Milano",
+                province="MI",
+                country="IT",
+                sdi_code="ABCDEFG",
+            ),
+        )
+        client_tag_id = tag.id
+
+    # ...and points the provider customer at it.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        rearmed = await svc.assign_customer_client(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            provider_customer_id="cus_1",
+            client_tag_id=client_tag_id,
+        )
+        assert rearmed == 1, "the association woke the payment waiting on it"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == payment)
+            )
+        ).scalar_one()
+        assert row.status == "pending"
+        assert row.attempt_count == 0
+
+    assert await _run(org_id, connector_id, payment) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        invoices = await inv_svc.list_invoices(s, org_id=org_id)
+        assert len(invoices) == 1
+        assert invoices[0].state is InvoiceState.transmitted
+        assert invoices[0].client_tag_id == client_tag_id
+
+
+async def test_assigning_a_client_that_is_still_incomplete_is_refused() -> None:
+    """The refusal lands where the operator is looking.
+
+    Accepting the association and letting the retry fail afterwards would move
+    the error to a screen they are not on, for a reason they cannot see.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        tag = await taxonomy.resolve_or_create_client(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            name="Senza Recapito Srl",
+            profile=ClientInput(
+                legal_name="Senza Recapito Srl",
+                country_code="IT",
+                vat_number="09876543210",
+                address="Via Milano 9",
+                postal_code="20100",
+                city="Milano",
+                province="MI",
+                country="IT",
+                # no sdi_code and no pec: not deliverable
+            ),
+        )
+        incomplete = tag.id
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        with pytest.raises(svc.MissingBillingDataError) as exc:
+            await svc.assign_customer_client(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                connector_id=connector_id,
+                provider_customer_id="cus_x",
+                client_tag_id=incomplete,
+            )
+        assert "sdi_code|pec" in exc.value.missing
+
+
+async def test_a_non_client_tag_cannot_be_assigned_as_a_counterpart() -> None:
+    """Only a client tag names a counterpart. A project or a generic tag has no
+    ClientProfile behind it and would produce an undeliverable document."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        generic = await taxonomy.create_tag(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            kind=TagKind.generic,
+            name=f"tag-{uuid.uuid4().hex[:6]}",
+        )
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        with pytest.raises(DomainError):
+            await svc.assign_customer_client(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                connector_id=connector_id,
+                provider_customer_id="cus_y",
+                client_tag_id=generic.id,
+            )

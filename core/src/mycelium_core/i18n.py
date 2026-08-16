@@ -142,6 +142,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_SECRET_REQUIRED = "payment_connector.signing_secret_required"  # noqa: S105 (message code, not a secret)
     PAYMENT_CONNECTOR_DISABLED = "payment_connector.disabled"
     PAYMENT_CONNECTOR_PAYLOAD_INVALID = "payment_connector.payload_invalid"
+    PAYMENT_CONNECTOR_CLIENT_INCOMPLETE = "payment_connector.client_incomplete"
     PAYMENT_CONNECTOR_EVENT_NOT_FOUND = "payment_connector.event_not_found"
     PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE = "payment_connector.event_not_retryable"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
@@ -469,6 +470,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.PAYMENT_CONNECTOR_DISABLED: "This payment connector is disabled",
         MessageCode.PAYMENT_CONNECTOR_PAYLOAD_INVALID: "Malformed webhook payload: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_CLIENT_INCOMPLETE: (
+            "This client cannot be invoiced yet, it is missing: {detail}"
+        ),
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND: "Payment connector event not found",
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE: (
             "Only a parked or dead event can be retried"
