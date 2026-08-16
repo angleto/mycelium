@@ -26,7 +26,8 @@ import pytest
 from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import DomainError, UnprocessableError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import DocumentType, InvoiceState, PaymentStatus
 from mycelium_core.models.membership import Role
@@ -1196,7 +1197,7 @@ async def test_assigning_a_client_that_is_still_incomplete_is_refused() -> None:
         incomplete = tag.id
 
     async with tenant_session(str(org_id), str(user_id)) as s:
-        with pytest.raises(svc.MissingBillingDataError) as exc:
+        with pytest.raises(UnprocessableError) as exc:
             await svc.assign_customer_client(
                 s,
                 org_id=org_id,
@@ -1205,7 +1206,13 @@ async def test_assigning_a_client_that_is_still_incomplete_is_refused() -> None:
                 provider_customer_id="cus_x",
                 client_tag_id=incomplete,
             )
-        assert "sdi_code|pec" in exc.value.missing
+    # A DomainError, deliberately, and not the runner's internal
+    # MissingBillingDataError: only a DomainError is in the exception->status
+    # map, so only a DomainError reaches the operator as a 422 naming the
+    # fields. Raising the internal signal here surfaced as an opaque 500.
+    assert isinstance(exc.value, DomainError)
+    assert exc.value.code is MessageCode.PAYMENT_CONNECTOR_CLIENT_INCOMPLETE
+    assert "sdi_code|pec" in str(exc.value)
 
 
 async def test_a_non_client_tag_cannot_be_assigned_as_a_counterpart() -> None:
