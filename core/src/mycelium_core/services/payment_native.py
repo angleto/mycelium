@@ -53,6 +53,8 @@ from mycelium_core.services.payment_events import (
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
+    ProviderEvent,
+    SubscriptionContext,
     VerificationSecrets,
     as_decimal,
     as_mapping,
@@ -203,6 +205,21 @@ class NativeMapper:
         # The contract defines exactly one emission type, so unlike Stripe there
         # is nothing ambiguous to configure and ``emission_event`` is ignored.
         return event_type == EVENT_ISSUE
+
+    def subscription(self, ctx: SubscriptionContext) -> tuple[ProviderEvent, ...]:
+        # This contract was designed rather than reverse-engineered, so there is
+        # exactly one event per outcome and nothing to choose: ``ctx`` only
+        # decides which of them the connector will act on. There is no customer
+        # event because the counterpart's fiscal block travels INSIDE the issue
+        # event -- the whole asymmetry with Stripe in one line.
+        events: list[ProviderEvent] = []
+        if ctx.emits:
+            events.append(ProviderEvent(EVENT_ISSUE, "emission"))
+        if ctx.credit_notes:
+            events.append(ProviderEvent(EVENT_CREDIT, "credit_note"))
+        if ctx.payment_sync:
+            events.append(ProviderEvent(EVENT_PAYMENT, "payment_sync", required=False))
+        return tuple(events)
 
     def to_intent(self, payload: Mapping[str, Any], *, config: MapperConfig) -> Intent:
         identity = self.identify(payload)

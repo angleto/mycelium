@@ -6425,6 +6425,313 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/payment-connectors/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vocabulary */
+        get: operations["vocabulary_payment_connectors_vocabulary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connectors */
+        get: operations["list_connectors_issuer_profiles__issuer_profile_id__payment_connectors_get"];
+        put?: never;
+        /**
+         * Create Connector
+         * @description Create a connector and return its credentials ONCE.
+         */
+        post: operations["create_connector_issuer_profiles__issuer_profile_id__payment_connectors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Connector
+         * @description Revoke (default) or purge an already-revoked connector (``?hard=true``).
+         *
+         *     Two-stage like every other credential here: revoking stops the ingress
+         *     immediately while the event history stays readable for reconciliation.
+         */
+        delete: operations["delete_connector_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Connector */
+        patch: operations["update_connector_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__patch"];
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/rotate-signing-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Signing Secret
+         * @description Install a new signing secret; the old one keeps verifying for the grace
+         *     window so events already queued at the provider are not lost.
+         */
+        post: operations["rotate_signing_secret_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__rotate_signing_secret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/rotate-api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Api Key */
+        post: operations["rotate_api_key_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__rotate_api_key_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Clear Api Key */
+        delete: operations["clear_api_key_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__api_key_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Events
+         * @description The triage list. Filter by ``status=needs_attention`` for the quarantine.
+         *
+         *     The raw provider payload is deliberately NOT projected: it carries the
+         *     counterpart's personal data and is only needed by the runner.
+         */
+        get: operations["list_events_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deliveries
+         * @description The delivery ledger: every inbound request this connector received.
+         *
+         *     ``refused_only=true`` is the security view (bad signature, disabled,
+         *     malformed). This is what answers "the provider says it delivered it".
+         */
+        get: operations["list_deliveries_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/assign-customer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Customer Client
+         * @description Point a provider customer at an existing client, by hand.
+         *
+         *     The manual half of "the customer supplied their billing data late". The
+         *     automatic half needs the data to arrive THROUGH the provider; when it
+         *     arrives any other way there is nothing tying the mycelium client to the
+         *     provider's customer id, so a retry alone can never unblock those payments.
+         *
+         *     Refuses a client that is not yet invoiceable, naming what is missing, so
+         *     the failure lands on the record the operator is looking at rather than on
+         *     a retry later.
+         */
+        post: operations["assign_customer_client_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__assign_customer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/discard-dry-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard Dry Run
+         * @description Throw away everything a shadow run composed: its claims and its drafts.
+         *
+         *     The shadow claims have to go first: their FK to the invoice is RESTRICT (it
+         *     is what stops a live claim from ever dangling), so the drafts cannot be
+         *     deleted while the claims pin them.
+         */
+        post: operations["discard_dry_run_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__discard_dry_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote Dry Run
+         * @description Turn one shadow document into a real, sendable draft.
+         *
+         *     The counterpart of ``discard-dry-run``, per document rather than per
+         *     connector: discard is for the payments the incumbent provider invoiced,
+         *     this is for the ones Mycelium has to invoice after all. It moves the claim
+         *     rows out of the shadow universe with the document, so a later redelivery of
+         *     the same payment resolves to it instead of composing a second invoice, and
+         *     it refuses outright when a real document already covers that payment.
+         *
+         *     Owner-only. It converts a comparison artefact into something that can be
+         *     filed in the workspace's name, which is a different decision from reading
+         *     the ledger.
+         */
+        post: operations["promote_dry_run_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/dry-run-xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Dry Run Xml
+         * @description The FatturaPA a shadow run WOULD have sent, exactly as generated.
+         *
+         *     This is the artefact a parallel run exists to produce: download it and diff
+         *     it against what the incumbent provider filed for the same payment.
+         */
+        get: operations["download_dry_run_xml_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__dry_run_xml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Event
+         * @description Re-arm a parked or dead event once the operator fixed what blocked it.
+         */
+        post: operations["retry_event_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{provider}/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive */
+        post: operations["receive_api_v1_connectors__provider___connector_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices": {
         parameters: {
             query?: never;
@@ -7401,6 +7708,21 @@ export interface components {
             /** Appended Chars */
             appended_chars: number;
         };
+        /** AssignCustomerClientIn */
+        AssignCustomerClientIn: {
+            /** Provider Customer Id */
+            provider_customer_id: string;
+            /**
+             * Client Tag Id
+             * Format: uuid
+             */
+            client_tag_id: string;
+        };
+        /** AssignCustomerClientOut */
+        AssignCustomerClientOut: {
+            /** Rearmed */
+            rearmed: number;
+        };
         /** AssigneeIn */
         AssigneeIn: {
             /**
@@ -7899,6 +8221,41 @@ export interface components {
             /** Instructions Md */
             instructions_md: string;
         };
+        /**
+         * ConnectorReceiptOut
+         * @description Deliberately opaque. A provider needs to know we took custody, nothing
+         *     else; echoing what we decided would leak tenant state to an endpoint whose
+         *     only credential is a shared secret.
+         */
+        ConnectorReceiptOut: {
+            /**
+             * Received
+             * @default true
+             */
+            received?: boolean;
+            /**
+             * Duplicate
+             * @default false
+             */
+            duplicate?: boolean;
+        };
+        /**
+         * ConnectorVocabularyOut
+         * @description The closed vocabularies, served rather than duplicated in the SPA, so a
+         *     widening is a backend change only.
+         */
+        ConnectorVocabularyOut: {
+            /** Providers */
+            providers: string[];
+            /** Automation Modes */
+            automation_modes: string[];
+            /** Emission Events */
+            emission_events: string[];
+            /** Refund Events */
+            refund_events: string[];
+            /** Delivery Outcomes */
+            delivery_outcomes: string[];
+        };
         /** ConservationAdhesionIn */
         ConservationAdhesionIn: {
             /** Adhesion */
@@ -8040,6 +8397,11 @@ export interface components {
              */
             task_id: string;
             link: components["schemas"]["NoteTaskLinkOut"];
+        };
+        /** DiscardDryRunOut */
+        DiscardDryRunOut: {
+            /** Discarded */
+            discarded: number;
         };
         /** DispatchDecisionIn */
         DispatchDecisionIn: {
@@ -9584,6 +9946,11 @@ export interface components {
             deleted_at: string | null;
             /** Is Archived */
             is_archived: boolean;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run?: boolean;
             /** Version */
             version: number;
         };
@@ -11184,10 +11551,405 @@ export interface components {
             duration_minutes: number;
         };
         /**
+         * PaymentConnectorCreateOut
+         * @description The only shape that ever carries plaintext credentials.
+         */
+        PaymentConnectorCreateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Provider */
+            provider: string;
+            /** Label */
+            label: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Invoice Mode */
+            invoice_mode: string;
+            /** Credit Note Mode */
+            credit_note_mode: string;
+            /** Emission Event */
+            emission_event: string;
+            /** Payment Sync Enabled */
+            payment_sync_enabled: boolean;
+            /** Series */
+            series: string | null;
+            /** Default Purpose */
+            default_purpose: string | null;
+            /** Default Vat Rate */
+            default_vat_rate: string | null;
+            /** Default Vat Nature */
+            default_vat_nature: string | null;
+            /** Default Line Description */
+            default_line_description: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code: string | null;
+            /** Default Country Code */
+            default_country_code: string | null;
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /** Metadata Vat Keys */
+            metadata_vat_keys: string[];
+            /** Metadata Tax Code Keys */
+            metadata_tax_code_keys: string[];
+            /** Metadata Sdi Keys */
+            metadata_sdi_keys: string[];
+            /** Metadata Pec Keys */
+            metadata_pec_keys: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Version */
+            version: number;
+            /** Refund Event */
+            refund_event: string;
+            /** Has Api Key */
+            has_api_key: boolean;
+            /** Webhook Url */
+            webhook_url: string;
+            /** Subscription */
+            subscription: components["schemas"]["SubscriptionEventOut"][];
+            /** Signing Secret */
+            signing_secret: string;
+            /** Api Key */
+            api_key?: string | null;
+        };
+        /** PaymentConnectorEventOut */
+        PaymentConnectorEventOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider Event Id */
+            provider_event_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Status */
+            status: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Occurred At */
+            occurred_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Processed At */
+            processed_at: string | null;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /** Last Error */
+            last_error: string | null;
+            /** Error Detail */
+            error_detail: string | null;
+            /** Invoice Id */
+            invoice_id: string | null;
+            /** Provider Customer Id */
+            provider_customer_id: string | null;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Has Dry Run Xml */
+            has_dry_run_xml: boolean;
+        };
+        /** PaymentConnectorIn */
+        PaymentConnectorIn: {
+            /** Label */
+            label: string;
+            /**
+             * Provider
+             * @default stripe
+             */
+            provider?: string;
+            /** Signing Secret */
+            signing_secret?: string | null;
+            /**
+             * With Api Key
+             * @default false
+             */
+            with_api_key?: boolean;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled?: boolean;
+            /**
+             * Invoice Mode
+             * @default transmit
+             */
+            invoice_mode?: string;
+            /**
+             * Credit Note Mode
+             * @default transmit
+             */
+            credit_note_mode?: string;
+            /**
+             * Emission Event
+             * @default invoice.paid
+             */
+            emission_event?: string;
+            /**
+             * Refund Event
+             * @default refund.created
+             */
+            refund_event?: string;
+            /**
+             * Payment Sync Enabled
+             * @default true
+             */
+            payment_sync_enabled?: boolean;
+            /** Series */
+            series?: string | null;
+            /** Default Purpose */
+            default_purpose?: string | null;
+            /** Default Vat Rate */
+            default_vat_rate?: number | string | null;
+            /** Default Vat Nature */
+            default_vat_nature?: string | null;
+            /** Default Line Description */
+            default_line_description?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
+            /** Default Country Code */
+            default_country_code?: string | null;
+            /**
+             * Amounts Include Vat
+             * @default false
+             */
+            amounts_include_vat?: boolean;
+            /**
+             * Metadata Vat Keys
+             * @default [
+             *       "vatId",
+             *       "vat_number",
+             *       "partita_iva"
+             *     ]
+             */
+            metadata_vat_keys?: string[];
+            /**
+             * Metadata Tax Code Keys
+             * @default [
+             *       "fiscal_code",
+             *       "tax_code",
+             *       "codice_fiscale"
+             *     ]
+             */
+            metadata_tax_code_keys?: string[];
+            /**
+             * Metadata Sdi Keys
+             * @default [
+             *       "codice_destinatario",
+             *       "sdi_code",
+             *       "sdi"
+             *     ]
+             */
+            metadata_sdi_keys?: string[];
+            /**
+             * Metadata Pec Keys
+             * @default [
+             *       "pec"
+             *     ]
+             */
+            metadata_pec_keys?: string[];
+        };
+        /** PaymentConnectorOut */
+        PaymentConnectorOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Provider */
+            provider: string;
+            /** Label */
+            label: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Invoice Mode */
+            invoice_mode: string;
+            /** Credit Note Mode */
+            credit_note_mode: string;
+            /** Emission Event */
+            emission_event: string;
+            /** Payment Sync Enabled */
+            payment_sync_enabled: boolean;
+            /** Series */
+            series: string | null;
+            /** Default Purpose */
+            default_purpose: string | null;
+            /** Default Vat Rate */
+            default_vat_rate: string | null;
+            /** Default Vat Nature */
+            default_vat_nature: string | null;
+            /** Default Line Description */
+            default_line_description: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code: string | null;
+            /** Default Country Code */
+            default_country_code: string | null;
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /** Metadata Vat Keys */
+            metadata_vat_keys: string[];
+            /** Metadata Tax Code Keys */
+            metadata_tax_code_keys: string[];
+            /** Metadata Sdi Keys */
+            metadata_sdi_keys: string[];
+            /** Metadata Pec Keys */
+            metadata_pec_keys: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Version */
+            version: number;
+            /** Refund Event */
+            refund_event: string;
+            /** Has Api Key */
+            has_api_key: boolean;
+            /** Webhook Url */
+            webhook_url: string;
+            /** Subscription */
+            subscription: components["schemas"]["SubscriptionEventOut"][];
+        };
+        /**
+         * PaymentConnectorPatchIn
+         * @description Every field optional; only the ones present are written, so two admins
+         *     editing different settings do not clobber each other's.
+         *
+         *     ``extra="forbid"`` is load-bearing rather than tidy: without it a PATCH of
+         *     ``{"invoicemode": "draft"}`` answers 200 OK having written nothing, and the
+         *     operator believes the connector stopped transmitting while it keeps filing
+         *     documents with SdI on every payment. It also makes the service's own
+         *     unknown-field guard reachable instead of dead code.
+         */
+        PaymentConnectorPatchIn: {
+            /** Label */
+            label?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Invoice Mode */
+            invoice_mode?: string | null;
+            /** Credit Note Mode */
+            credit_note_mode?: string | null;
+            /** Emission Event */
+            emission_event?: string | null;
+            /** Refund Event */
+            refund_event?: string | null;
+            /** Payment Sync Enabled */
+            payment_sync_enabled?: boolean | null;
+            /** Series */
+            series?: string | null;
+            /** Default Purpose */
+            default_purpose?: string | null;
+            /** Default Vat Rate */
+            default_vat_rate?: number | string | null;
+            /** Default Vat Nature */
+            default_vat_nature?: string | null;
+            /** Default Line Description */
+            default_line_description?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
+            /** Default Country Code */
+            default_country_code?: string | null;
+            /** Amounts Include Vat */
+            amounts_include_vat?: boolean | null;
+            /** Metadata Vat Keys */
+            metadata_vat_keys?: string[] | null;
+            /** Metadata Tax Code Keys */
+            metadata_tax_code_keys?: string[] | null;
+            /** Metadata Sdi Keys */
+            metadata_sdi_keys?: string[] | null;
+            /** Metadata Pec Keys */
+            metadata_pec_keys?: string[] | null;
+        };
+        /**
          * PaymentStatus
          * @enum {string}
          */
         PaymentStatus: "unpaid" | "paid";
+        /**
+         * PaymentWebhookDeliveryOut
+         * @description One inbound delivery attempt. The body is represented by its digest, not
+         *     reproduced: a refused delivery's bytes are unauthenticated input.
+         */
+        PaymentWebhookDeliveryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider */
+            provider: string;
+            /** Outcome */
+            outcome: string;
+            /** Http Status */
+            http_status: number;
+            /** Provider Event Id */
+            provider_event_id: string | null;
+            /** Event Id */
+            event_id: string | null;
+            /** Body Bytes */
+            body_bytes: number;
+            /** Body Sha256 Hex */
+            body_sha256_hex: string | null;
+            /** Signature Present */
+            signature_present: boolean;
+            /** Api Key Present */
+            api_key_present: boolean;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+        };
         /**
          * PdfExportIn
          * @description Inbound payload for /export/pdf.
@@ -11259,6 +12021,23 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /**
+         * PromoteDryRunOut
+         * @description The promoted document, identified enough to open it in the invoice list.
+         */
+        PromoteDryRunOut: {
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Series */
+            series: string;
+            /** Year */
+            year: number;
+            /** Number */
+            number: number | null;
         };
         /** PublicBatchIn */
         PublicBatchIn: {
@@ -11837,6 +12616,21 @@ export interface components {
             /** Summary */
             summary?: string | null;
         };
+        /**
+         * RotateSigningSecretIn
+         * @description The new signing secret, in the BODY.
+         *
+         *     A query string is logged verbatim by ordinary access logging (nginx's
+         *     combined format records ``$request``) and is the part of a request that
+         *     routinely reaches proxy logs, APM traces and browser history. Every other
+         *     credential here is deliberately hardened -- Fernet at rest, peppered hash
+         *     for the ingress key, never echoed by a read route -- so carrying this one in
+         *     a URL would be the single weak link.
+         */
+        RotateSigningSecretIn: {
+            /** Signing Secret */
+            signing_secret?: string | null;
+        };
         /** ScalewayModelsOut */
         ScalewayModelsOut: {
             /** Models */
@@ -12168,6 +12962,22 @@ export interface components {
             kind: components["schemas"]["StorageKind"];
             /** Credits Per Gb Month */
             credits_per_gb_month: number | string;
+        };
+        /**
+         * SubscriptionEventOut
+         * @description One event the provider must be configured to deliver.
+         *
+         *     ``purpose`` is a stable key, not prose: the SPA owns the wording, so the
+         *     explanation exists once per language instead of once in English here and
+         *     again in every translation.
+         */
+        SubscriptionEventOut: {
+            /** Event Type */
+            event_type: string;
+            /** Purpose */
+            purpose: string;
+            /** Required */
+            required: boolean;
         };
         /** SuggestionIn */
         SuggestionIn: {
@@ -28073,6 +28883,616 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebhookDeliveryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vocabulary_payment_connectors_vocabulary_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorVocabularyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connectors_issuer_profiles__issuer_profile_id__payment_connectors_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_connector_issuer_profiles__issuer_profile_id__payment_connectors_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentConnectorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_connector_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__delete: {
+        parameters: {
+            query?: {
+                hard?: boolean;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_connector_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentConnectorPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_signing_secret_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__rotate_signing_secret_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RotateSigningSecretIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_api_key_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__rotate_api_key_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_api_key_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__api_key_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_events_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deliveries_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__deliveries_get: {
+        parameters: {
+            query?: {
+                refused_only?: boolean;
+                outcome?: string | null;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentWebhookDeliveryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_customer_client_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__assign_customer_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignCustomerClientIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignCustomerClientOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_dry_run_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__discard_dry_run_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscardDryRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_dry_run_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__promote_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoteDryRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_dry_run_xml_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__dry_run_xml_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_event_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorEventOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    receive_api_v1_connectors__provider___connector_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Connector-Api-Key"?: string | null;
+            };
+            path: {
+                provider: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorReceiptOut"];
                 };
             };
             /** @description Validation Error */

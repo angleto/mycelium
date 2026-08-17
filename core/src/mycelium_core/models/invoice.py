@@ -378,6 +378,22 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    #: Composed by a payment connector running in shadow mode (ADR-0051): every
+    #: step of a real emission happened EXCEPT the transmission to SdI.
+    #:
+    #: A third visibility axis, and it has to be its own column rather than
+    #: "an archived draft", because the question an operator asks during a
+    #: parallel run is "was this not sent because we are shadowing, or for some
+    #: other reason?" -- and a draft is not sent for many reasons (incomplete,
+    #: waiting for review, rejected and being redone). Conflating them makes a
+    #: shadow document indistinguishable from work in progress, on the one
+    #: surface where mistaking the two means either filing a duplicate or
+    #: never filing at all.
+    #:
+    #: Cleared by ``promote_dry_run`` when an operator decides a shadow should
+    #: become a real document; the claim rows move to the live universe in the
+    #: same transaction, so the flag and the ledger cannot disagree.
+    dry_run: Mapped[bool] = mapped_column(nullable=False, server_default="false")
 
 
 class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):

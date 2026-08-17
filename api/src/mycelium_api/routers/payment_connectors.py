@@ -43,6 +43,7 @@ from mycelium_core.models.payment_connector import (
     DELIVERY_OUTCOMES,
     EMISSION_EVENTS,
     PROVIDERS,
+    REFUND_EVENTS,
     PaymentConnector,
     PaymentConnectorEvent,
     PaymentWebhookDelivery,
@@ -54,6 +55,15 @@ router = APIRouter(tags=["payment-connectors"])
 
 
 # --- request / response models ---------------------------------------------
+
+
+#: A supplied signing secret is the ENTIRE authority of a public unauthenticated
+#: endpoint, so it has a floor. 16 characters admits every real provider secret
+#: (Stripe's ``whsec_`` values are far longer) while refusing the hand-typed
+#: short string an operator might otherwise reach for now that pasting your own
+#: key is an offered path on the native contract, where Mycelium would
+#: otherwise have minted 32 bytes of entropy.
+_MIN_SIGNING_SECRET = 16
 
 
 class PaymentConnectorIn(BaseModel):
@@ -69,13 +79,14 @@ class PaymentConnectorIn(BaseModel):
     #: Stripe's own ``whsec_...``, copied from the Stripe dashboard when the
     #: endpoint is created there. Omitted for the native contract, where
     #: Mycelium is the authority and mints one.
-    signing_secret: str | None = Field(default=None, max_length=200)
+    signing_secret: str | None = Field(default=None, min_length=_MIN_SIGNING_SECRET, max_length=200)
     #: Mint the optional second ingress factor as well.
     with_api_key: bool = False
     enabled: bool = False
     invoice_mode: str = "transmit"
     credit_note_mode: str = "transmit"
     emission_event: str = "invoice.paid"
+    refund_event: str = "refund.created"
     payment_sync_enabled: bool = True
     series: str | None = Field(default=None, max_length=20)
     default_purpose: str | None = Field(default=None, max_length=200)
@@ -113,6 +124,7 @@ class PaymentConnectorPatchIn(BaseModel):
     invoice_mode: str | None = None
     credit_note_mode: str | None = None
     emission_event: str | None = None
+    refund_event: str | None = None
     payment_sync_enabled: bool | None = None
     series: str | None = Field(default=None, max_length=20)
     default_purpose: str | None = Field(default=None, max_length=200)
@@ -127,6 +139,19 @@ class PaymentConnectorPatchIn(BaseModel):
     metadata_tax_code_keys: list[str] | None = None
     metadata_sdi_keys: list[str] | None = None
     metadata_pec_keys: list[str] | None = None
+
+
+class SubscriptionEventOut(BaseModel):
+    """One event the provider must be configured to deliver.
+
+    ``purpose`` is a stable key, not prose: the SPA owns the wording, so the
+    explanation exists once per language instead of once in English here and
+    again in every translation.
+    """
+
+    event_type: str
+    purpose: str
+    required: bool
 
 
 class PaymentConnectorOut(BaseModel):
@@ -159,10 +184,16 @@ class PaymentConnectorOut(BaseModel):
     revoked_at: datetime.datetime | None
     last_event_at: datetime.datetime | None
     version: int
+    refund_event: str
     #: Never the secret itself -- only whether the second factor is armed.
     has_api_key: bool
     #: The URL to paste into the provider's dashboard.
     webhook_url: str
+    #: The events to enable alongside that URL, derived from THIS connector's
+    #: settings by the mapper that will receive them. Served with the connector
+    #: rather than written down in a runbook because the answer changes with the
+    #: configuration, and a checklist that has drifted is worse than none.
+    subscription: list[SubscriptionEventOut]
 
 
 class PaymentConnectorCreateOut(PaymentConnectorOut):
@@ -185,7 +216,7 @@ class RotateSigningSecretIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    signing_secret: str | None = Field(default=None, max_length=200)
+    signing_secret: str | None = Field(default=None, min_length=_MIN_SIGNING_SECRET, max_length=200)
 
 
 class PaymentConnectorEventOut(BaseModel):
@@ -241,6 +272,7 @@ class ConnectorVocabularyOut(BaseModel):
     providers: list[str]
     automation_modes: list[str]
     emission_events: list[str]
+    refund_events: list[str]
     delivery_outcomes: list[str]
 
 
@@ -253,15 +285,25 @@ def _webhook_url(connector: PaymentConnector) -> str:
     return f"{base}/api/v1/connectors/{connector.provider}/{connector.id}"
 
 
+#: Fields of the DTO that are computed here rather than copied off the row.
+_DERIVED_FIELDS = frozenset({"has_api_key", "webhook_url", "subscription"})
+
+
 def _out(row: PaymentConnector) -> PaymentConnectorOut:
     return PaymentConnectorOut(
         **{
             field: getattr(row, field)
             for field in PaymentConnectorOut.model_fields
-            if field not in {"has_api_key", "webhook_url"}
+            if field not in _DERIVED_FIELDS
         },
         has_api_key=row.api_key_hash is not None,
         webhook_url=_webhook_url(row),
+        subscription=[
+            SubscriptionEventOut(
+                event_type=event.event_type, purpose=event.purpose, required=event.required
+            )
+            for event in svc.subscription_for(row)
+        ],
     )
 
 
@@ -313,6 +355,7 @@ async def vocabulary(
         providers=list(PROVIDERS),
         automation_modes=list(AUTOMATION_MODES),
         emission_events=list(EMISSION_EVENTS),
+        refund_events=list(REFUND_EVENTS),
         delivery_outcomes=list(DELIVERY_OUTCOMES),
     )
 
@@ -610,6 +653,66 @@ async def discard_dry_run(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, connector_id=connector_id
     )
     return DiscardDryRunOut(discarded=discarded)
+
+
+class PromoteDryRunOut(BaseModel):
+    """The promoted document, identified enough to open it in the invoice list."""
+
+    invoice_id: uuid.UUID
+    series: str
+    year: int
+    #: NULL until the document is really transmitted: promotion deliberately
+    #: does not allocate a fiscal number, so a document takes its number when it
+    #: is filed and not a moment earlier.
+    number: int | None
+
+
+@router.post(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+    "/events/{event_id}/promote",
+    response_model=PromoteDryRunOut,
+)
+async def promote_dry_run(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> PromoteDryRunOut:
+    """Turn one shadow document into a real, sendable draft.
+
+    The counterpart of ``discard-dry-run``, per document rather than per
+    connector: discard is for the payments the incumbent provider invoiced,
+    this is for the ones Mycelium has to invoice after all. It moves the claim
+    rows out of the shadow universe with the document, so a later redelivery of
+    the same payment resolves to it instead of composing a second invoice, and
+    it refuses outright when a real document already covers that payment.
+
+    Owner-only. It converts a comparison artefact into something that can be
+    filed in the workspace's name, which is a different decision from reading
+    the ledger.
+    """
+    ensure_role(ctx.role, Role.owner)
+    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    # Scoped by connector, like every other by-event route here: an event id
+    # from another connector must read as absent, not as forbidden.
+    event = (
+        await ctx.session.execute(
+            select(PaymentConnectorEvent).where(
+                PaymentConnectorEvent.id == event_id,
+                PaymentConnectorEvent.connector_id == connector_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if event is None or event.invoice_id is None:
+        raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
+    inv = await svc.promote_dry_run(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        connector_id=connector_id,
+        invoice_id=event.invoice_id,
+    )
+    return PromoteDryRunOut(invoice_id=inv.id, series=inv.series, year=inv.year, number=inv.number)
 
 
 @router.get(

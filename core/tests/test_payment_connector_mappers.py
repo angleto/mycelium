@@ -29,9 +29,10 @@ Covered:
 - the money primitives: minor-unit conversion for 2-, 0- and 3-decimal
   currencies, the largest-remainder allocator, and the gross -> net division.
 
-THREE tests are marked KNOWN BUG. They assert a guarantee the modules document
-but do not keep, and are deliberately left failing rather than weakened; see the
-comment on each for the failure mode and the report that accompanies this file.
+Three tests carry a "Regression guard" docstring. Each was written failing,
+against a guarantee the modules documented but did not keep; the guarantee was
+then implemented rather than the assertion weakened, and the docstring records
+the failure mode so a future edit cannot quietly reintroduce it.
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ from mycelium_core.services.payment_events import (
     MapperConfig,
     PayloadError,
     PaymentSyncIntent,
+    SubscriptionContext,
     VerificationSecrets,
     get_mapper,
     minor_to_decimal,
@@ -236,18 +238,19 @@ def test_a_missing_or_garbled_signature_header_is_refused_not_raised() -> None:
 
 
 def test_a_non_ascii_signature_is_refused_not_raised() -> None:
-    """KNOWN BUG (left failing on purpose).
+    """Regression guard (this WAS a bug; ``signature_matches`` now compares bytes).
 
     A header value reaches us latin-1 decoded (that is what the HTTP spec and
     Starlette do), so any byte >= 0x80 in the signature header arrives as a
-    non-ASCII ``str``. ``hmac.compare_digest`` raises TypeError on non-ASCII
-    strings, and ``payment_events.signature_matches`` compares without guarding
-    for it, so the exception escapes ``verify`` -- on the PUBLIC unauthenticated
-    ingress, where it becomes a 500 (and, because the handler only records a
-    refusal on the paths it controls, no ``payment_webhook_deliveries`` row).
+    non-ASCII ``str``, and ``hmac.compare_digest`` raises TypeError on those.
+    Comparing as strings let the exception escape ``verify`` -- on the PUBLIC
+    unauthenticated ingress, where it became a 500 with no
+    ``payment_webhook_deliveries`` row, because the handler only records a
+    refusal on the paths it controls.
 
     A garbled signature is not a special case here: it is the single most likely
-    thing an unauthenticated caller sends.
+    thing an unauthenticated caller sends, which is why the refusal has to be a
+    refusal and never an exception.
     """
     garbled = "é" * 64
     assert _verify("stripe", {payment_stripe.SIGNATURE_HEADER: f"t={_TS},v1={garbled}"}) is False
@@ -810,7 +813,9 @@ def test_stripe_charge_refunded_keys_on_the_newest_refund_only() -> None:
             ]
         },
     }
-    intent = _as_credit_note(_to_intent(_event("charge.refunded", obj)))
+    intent = _as_credit_note(
+        _to_intent(_event("charge.refunded", obj), refund_event="charge.refunded")
+    )
 
     assert intent.object_keys == (("refund", "re_2"),), "Stripe lists refunds newest first"
     assert intent.amount == Decimal("20.00"), "this refund, not the cumulative 50.00"
@@ -825,7 +830,13 @@ def test_stripe_charge_refunded_keys_on_the_newest_refund_only() -> None:
 def test_stripe_charge_refunded_without_refund_detail_keys_on_the_charge() -> None:
     """Documented fallback: with nothing expanded there is no refund id to key
     on, so the cumulative figure and a charge-derived key at least keep a
-    redelivery of this event from reversing twice."""
+    redelivery of this event from reversing twice.
+
+    This key is also the reason ``refund_event`` exists. It deliberately does
+    NOT match the key ``refund.created`` derives for the very same refund (see
+    the test below), so a connector honouring both announcements would file two
+    TD04. The narrowing is enforced one level up, in ``to_intent``.
+    """
     obj = {
         "id": "ch_7",
         "object": "charge",
@@ -834,11 +845,71 @@ def test_stripe_charge_refunded_without_refund_detail_keys_on_the_charge() -> No
         "amount_refunded": 4500,
         "refunds": {"data": []},
     }
-    intent = _as_credit_note(_to_intent(_event("charge.refunded", obj)))
+    intent = _as_credit_note(
+        _to_intent(_event("charge.refunded", obj), refund_event="charge.refunded")
+    )
 
     assert intent.object_keys == (("refund", "ch_7:refunded"),)
     assert intent.amount == Decimal("45.00")
     assert ("charge", "ch_7") in intent.parent_keys
+
+
+def test_stripe_honours_exactly_one_refund_announcement() -> None:
+    """Stripe announces one refund twice. Acting on both would reverse it twice,
+    so the connector acts on the configured announcement and ignores the other
+    BY NAME -- an ignored event with a reason is auditable, silence is not."""
+    charge = {
+        "id": "ch_9",
+        "object": "charge",
+        "currency": "eur",
+        "amount_refunded": 1000,
+        "refunds": {"data": []},
+    }
+    refund = {"id": "re_9", "object": "refund", "currency": "eur", "amount": 1000, "charge": "ch_9"}
+
+    # The default configuration listens to refund.created.
+    assert isinstance(_to_intent(_event("refund.created", refund)), CreditNoteIntent)
+    ignored = _to_intent(_event("charge.refunded", charge))
+    assert isinstance(ignored, IgnoreIntent)
+    assert ignored.reason == "refund_event_not_selected"
+
+    # ... and the choice reverses cleanly for an endpoint on the older event.
+    assert isinstance(
+        _to_intent(_event("charge.refunded", charge), refund_event="charge.refunded"),
+        CreditNoteIntent,
+    )
+    ignored = _to_intent(_event("refund.created", refund), refund_event="charge.refunded")
+    assert isinstance(ignored, IgnoreIntent)
+    assert ignored.reason == "refund_event_not_selected"
+
+
+def test_stripe_two_refund_announcements_would_not_have_deduplicated() -> None:
+    """The concrete hazard the gate removes, pinned so nobody relaxes the gate
+    believing the claim keys would have caught the duplicate.
+
+    A Stripe API version that does not expand ``refunds.data`` leaves
+    ``charge.refunded`` with no refund id, so the two announcements of ONE
+    refund key on different objects -- and the emission-idempotency unique is
+    per object key.
+    """
+    charge = {
+        "id": "ch_9",
+        "object": "charge",
+        "currency": "eur",
+        "amount_refunded": 1000,
+        "refunds": {"data": []},
+    }
+    refund = {"id": "re_9", "object": "refund", "currency": "eur", "amount": 1000, "charge": "ch_9"}
+
+    from_charge = _as_credit_note(
+        _to_intent(_event("charge.refunded", charge), refund_event="charge.refunded")
+    )
+    from_refund = _as_credit_note(_to_intent(_event("refund.created", refund)))
+
+    assert not set(from_charge.object_keys) & set(from_refund.object_keys), (
+        "if these ever converge the gate could be relaxed; while they do not, "
+        "honouring both announcements files the same refund twice"
+    )
 
 
 def test_stripe_refund_created_keys_on_the_refund() -> None:
@@ -1066,20 +1137,19 @@ def test_native_refuses_a_float_unit_price() -> None:
 
 
 def test_native_float_amount_on_a_credit_is_refused() -> None:
-    """KNOWN BUG (left failing on purpose).
+    """Regression guard (this WAS a bug; ``_decimal_field`` now refuses).
 
     ``payment_native`` documents "A float amount is refused rather than
-    rounded". For a line's ``unit_price`` it is (test above). For the CREDIT
-    NOTE's ``amount`` it is not: ``as_decimal`` returns None for a float and the
-    None is then indistinguishable from an absent amount, which the runner reads
-    as "reverse the whole parent" (``_apply_partial``: ``if intent.amount is
-    None ... return  # full reversal``).
+    rounded". It held for a line's ``unit_price`` (test above) and not for the
+    CREDIT NOTE's ``amount``: ``as_decimal`` returns None for a float, and that
+    None was indistinguishable from an absent amount, which the runner reads as
+    "reverse the whole parent" (``_apply_partial``: ``if intent.amount is None
+    ... return  # full reversal``).
 
     So a sender asking to credit 61.00 of a 12200.00 invoice with a JSON number
-    instead of a string gets a TD04 for the ENTIRE invoice. The sender's
-    precision bug does not get absorbed, it gets amplified into a full reversal,
-    which is the worst available outcome and the exact opposite of what the
-    module promises.
+    instead of a string got a TD04 for the ENTIRE invoice: the sender's
+    precision slip was not absorbed but amplified into a full reversal, the
+    worst available outcome and the exact opposite of what the module promises.
     """
     data = {"reference": "NC-1", "parent_reference": "ORD-1", "amount": 61.00}
     with pytest.raises(PayloadError):
@@ -1087,11 +1157,11 @@ def test_native_float_amount_on_a_credit_is_refused() -> None:
 
 
 def test_native_float_line_fields_are_not_silently_absorbed() -> None:
-    """KNOWN BUG (left failing on purpose).
+    """Regression guard (this WAS a bug; ``_decimal_field`` now refuses).
 
     Same root cause as the credit ``amount``: ``as_decimal`` returns None for a
-    float, and every caller reads None as "the sender said nothing" instead of
-    "the sender said something we refuse to use".
+    float, and callers read None as "the sender said nothing" instead of "the
+    sender said something we refuse to use".
 
     - ``quantity: 2.5`` silently becomes 1, so a 250.00 sale is invoiced at
       100.00;
@@ -1373,3 +1443,219 @@ def test_net_unit_price_leaves_a_gross_price_alone_without_a_rate() -> None:
     )
     assert svc.net_unit_price(zero, fallback_rate=Decimal(22)) == Decimal("122.00")
     assert svc.net_unit_price(line, fallback_rate=Decimal(0)) == Decimal("122.00")
+
+
+# --- the setup instructions, checked against the code that receives them ----
+#
+# ``subscription()`` tells an operator which events to enable in the provider's
+# dashboard. That answer is only worth anything if it agrees with what the
+# mapper actually does with an event, and the two live in different functions,
+# so nothing but a test keeps them together. Both directions are checked: an
+# advertised event that ``to_intent`` drops sends the operator to configure
+# something inert, and a handled event that is never advertised is a capability
+# nobody will ever switch on.
+
+
+def _minimal_stripe_object(event_type: str) -> dict[str, Any]:
+    """The smallest well-formed ``data.object`` for a Stripe event type."""
+    if event_type.startswith("invoice."):
+        return {
+            "id": "in_1",
+            "object": "invoice",
+            "currency": "eur",
+            "customer": "cus_1",
+            "total": 1000,
+        }
+    if event_type.startswith("payment_intent."):
+        return {"id": "pi_1", "object": "payment_intent", "currency": "eur", "amount": 1000}
+    if event_type.startswith("checkout.session."):
+        return {"id": "cs_1", "object": "checkout.session", "currency": "eur", "amount_total": 1000}
+    if event_type.startswith("charge."):
+        return {
+            "id": "ch_1",
+            "object": "charge",
+            "currency": "eur",
+            "amount": 1000,
+            "amount_refunded": 1000,
+            "refunds": {"data": [{"id": "re_1", "amount": 1000}]},
+        }
+    if event_type.startswith("credit_note."):
+        return {"id": "cn_1", "object": "credit_note", "currency": "eur", "invoice": "in_1"}
+    if event_type.startswith("refund."):
+        return {
+            "id": "re_1",
+            "object": "refund",
+            "currency": "eur",
+            "amount": 1000,
+            "charge": "ch_1",
+        }
+    if event_type.startswith("customer."):
+        return {"id": "cus_1", "object": "customer", "email": "a@b.test"}
+    raise AssertionError(f"no fixture for {event_type}: add one rather than skipping it")
+
+
+def _payload_for(provider: str, event_type: str) -> dict[str, Any]:
+    if provider == "stripe":
+        return _event(event_type, _minimal_stripe_object(event_type))
+    data = {
+        "reference": "ORD-1",
+        "parent_reference": "ORD-1",
+        "customer": _native_customer(),
+        "lines": [{"description": "Consulenza", "unit_price": "100.00"}],
+        "amount": "10.00",
+    }
+    return _native(event_type, data)
+
+
+#: Event types a mapper acts on but deliberately never asks for. Stripe emits
+#: several signals for one payment; the subscription requests ONE of them, and
+#: the others are honoured if an endpoint already delivers them (an account
+#: migrating from another tool, an endpoint configured years ago) without being
+#: recommended, because asking for both would be redundant traffic.
+_TOLERATED_UNADVERTISED = {
+    # The subscription asks for ``charge.succeeded`` as the reconciliation
+    # signal; this one reports the same payment and is honoured if an endpoint
+    # already delivers it. Asking for both would be redundant traffic against
+    # one document. Kept deliberately minimal -- every other handled type is
+    # advertised under some configuration, which is what the test below checks.
+    "stripe": {"invoice.payment_succeeded"},
+    "mycelium": set[str](),
+}
+
+
+def _all_subscriptions(provider: str) -> dict[str, set[str]]:
+    """Every event the provider is ever asked for, keyed by configuration."""
+    out: dict[str, set[str]] = {}
+    for emission in ("invoice.paid", "payment_intent.succeeded", "checkout.session.completed"):
+        for refund in ("refund.created", "charge.refunded"):
+            for switches in (
+                {},
+                {"emits": False},
+                {"credit_notes": False},
+                {"payment_sync": False},
+            ):
+                ctx = SubscriptionContext(
+                    emission_event=emission,
+                    refund_event=refund,
+                    **switches,  # type: ignore[arg-type]
+                )
+                key = f"{emission}/{refund}/{sorted(switches)}"
+                out[key] = {e.event_type for e in get_mapper(provider).subscription(ctx)}
+    return out
+
+
+@pytest.mark.parametrize("provider", _PROVIDERS)
+def test_every_advertised_event_is_one_the_mapper_acts_on(provider: str) -> None:
+    """Direction one: the instructions never send an operator to enable an event
+    this connector would silently drop."""
+    for config_key, events in _all_subscriptions(provider).items():
+        for event_type in events:
+            payload = _payload_for(provider, event_type)
+            emission = event_type if provider == "stripe" else "invoice.paid"
+            intent = _to_intent(
+                payload,
+                provider=provider,
+                emission_event=emission if event_type in _EMISSION_CANDIDATES else "invoice.paid",
+                refund_event=event_type if event_type in _REFUND_CANDIDATES else "refund.created",
+            )
+            assert not isinstance(intent, IgnoreIntent), (
+                f"{provider} advertises {event_type} under {config_key} but drops it: {intent!r}"
+            )
+
+
+_EMISSION_CANDIDATES = frozenset(
+    {"invoice.paid", "payment_intent.succeeded", "checkout.session.completed", "invoice.issue"}
+)
+_REFUND_CANDIDATES = frozenset({"refund.created", "charge.refunded"})
+
+
+@pytest.mark.parametrize("provider", _PROVIDERS)
+def test_every_handled_event_is_advertised_or_explicitly_tolerated(provider: str) -> None:
+    """Direction two: a capability the mapper grew but nothing asks for.
+
+    Adding an event to a mapper without adding it here fails the test, which
+    forces the choice to be made explicitly -- advertise it, or record it as
+    tolerated-not-requested with a reason.
+    """
+    advertised: set[str] = set()
+    for events in _all_subscriptions(provider).values():
+        advertised |= events
+    handled = _handled_event_types(provider)
+
+    unadvertised = handled - advertised - _TOLERATED_UNADVERTISED[provider]
+    assert not unadvertised, (
+        f"{provider} acts on {sorted(unadvertised)} but no configuration asks the provider "
+        "to deliver them: either advertise them in subscription() or add them to "
+        "_TOLERATED_UNADVERTISED with the reason"
+    )
+
+
+def _handled_event_types(provider: str) -> set[str]:
+    if provider == "stripe":
+        return (
+            set(payment_stripe._PAYMENT_EVENTS)
+            | set(payment_stripe._REFUND_EVENTS)
+            | set(payment_stripe._CREDIT_NOTE_EVENTS)
+            | set(payment_stripe._CUSTOMER_EVENTS)
+            | set(_EMISSION_CANDIDATES - {"invoice.issue"})
+        )
+    return set(payment_native.EVENT_TYPES)
+
+
+def test_stripe_always_asks_for_the_customer_events() -> None:
+    """The least obvious entry on the list, and the one whose omission is
+    hardest to diagnose: a Stripe webhook payload cannot be expanded, so an
+    invoice event names its customer by bare id and the fiscal identity travels
+    ONLY on these two events. Without them the connector verifies, ingests and
+    parks nearly everything as ``no_billing_data`` -- looking healthy while
+    emitting almost nothing."""
+    for events in _all_subscriptions("stripe").values():
+        assert {"customer.created", "customer.updated"} <= events
+
+
+def test_subscription_follows_the_connector_switches() -> None:
+    """The list is derived, not transcribed: switch an automation off and the
+    events that fed it stop being requested."""
+    stripe = get_mapper("stripe")
+    full = {
+        e.event_type
+        for e in stripe.subscription(
+            SubscriptionContext(emission_event="invoice.paid", refund_event="refund.created")
+        )
+    }
+    assert {"invoice.paid", "refund.created", "credit_note.created", "charge.succeeded"} <= full
+
+    no_credits = {
+        e.event_type
+        for e in stripe.subscription(
+            SubscriptionContext(
+                emission_event="invoice.paid", refund_event="refund.created", credit_notes=False
+            )
+        )
+    }
+    assert not {"refund.created", "credit_note.created"} & no_credits
+    assert "invoice.paid" in no_credits, "emission is unaffected by the credit-note switch"
+
+    other_trigger = {
+        e.event_type
+        for e in stripe.subscription(
+            SubscriptionContext(
+                emission_event="checkout.session.completed", refund_event="charge.refunded"
+            )
+        )
+    }
+    assert "checkout.session.completed" in other_trigger and "invoice.paid" not in other_trigger
+    assert "charge.refunded" in other_trigger and "refund.created" not in other_trigger
+
+
+def test_native_contract_asks_for_no_customer_event() -> None:
+    """The asymmetry with Stripe in one assertion: our own contract carries the
+    counterpart's fiscal block INSIDE the issue event, so there is no identity
+    to harvest out of band."""
+    events = {
+        e.event_type
+        for e in get_mapper("mycelium").subscription(
+            SubscriptionContext(emission_event="invoice.issue", refund_event="refund.created")
+        )
+    }
+    assert events == {"invoice.issue", "invoice.credit", "invoice.payment"}

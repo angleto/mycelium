@@ -24,6 +24,7 @@ type Connector = {
   invoice_mode: string
   credit_note_mode: string
   emission_event: string
+  refund_event: string
   payment_sync_enabled: boolean
   series: string | null
   default_purpose: string | null
@@ -37,6 +38,20 @@ type Connector = {
   // Never the key itself -- only whether the optional second factor is armed.
   has_api_key: boolean
   webhook_url: string
+  /** The events to enable in the provider alongside that URL, derived by the
+   * backend from THIS connector's settings. Never hard-coded here: the answer
+   * changes with the configuration, and a checklist copied into the SPA would
+   * keep recommending yesterday's events after a switch is flipped. */
+  subscription: SubscriptionEvent[]
+}
+
+/** One event the provider has to be told to deliver. ``purpose`` is a stable
+ * key and the wording lives in the translations, so the backend never ships
+ * user-facing prose in one language. */
+type SubscriptionEvent = {
+  event_type: string
+  purpose: string
+  required: boolean
 }
 
 /** The only shape that ever carries plaintext credentials. ``signing_secret``
@@ -54,6 +69,7 @@ type Vocabulary = {
   providers: string[]
   automation_modes: string[]
   emission_events: string[]
+  refund_events: string[]
   delivery_outcomes: string[]
 }
 
@@ -89,6 +105,17 @@ type DeliveryRow = {
 const FALLBACK_PROVIDERS = ['stripe', 'mycelium']
 const FALLBACK_MODES = ['transmit', 'draft', 'dry_run', 'off']
 const FALLBACK_EMISSION_EVENTS = ['invoice.paid']
+const FALLBACK_REFUND_EVENTS = ['refund.created', 'charge.refunded']
+
+/** Why each subscribed event is needed. A closed set mirrored from
+ * ``EVENT_PURPOSES`` in the backend; an unknown value renders a neutral line
+ * rather than a blank, so widening the set server-side is never a silent gap. */
+const PURPOSE_KEYS: Record<string, string> = {
+  emission: 'paymentConnectors.purposeEmission',
+  customer: 'paymentConnectors.purposeCustomer',
+  credit_note: 'paymentConnectors.purposeCreditNote',
+  payment_sync: 'paymentConnectors.purposePaymentSync',
+}
 
 // The automation modes are a CLOSED fiscal vocabulary, so each one gets a real
 // sentence rather than its slug. Unknown values (a backend that widened the set
@@ -157,6 +184,7 @@ type Defaults = {
   invoice_mode: string
   credit_note_mode: string
   emission_event: string
+  refund_event: string
   default_vat_rate: string
   amounts_include_vat: boolean
   series: string
@@ -168,6 +196,7 @@ const EMPTY_DEFAULTS: Defaults = {
   invoice_mode: 'transmit',
   credit_note_mode: 'transmit',
   emission_event: 'invoice.paid',
+  refund_event: 'refund.created',
   default_vat_rate: '',
   amounts_include_vat: false,
   series: '',
@@ -180,6 +209,7 @@ function defaultsOf(c: Connector): Defaults {
     invoice_mode: c.invoice_mode,
     credit_note_mode: c.credit_note_mode,
     emission_event: c.emission_event,
+    refund_event: c.refund_event,
     default_vat_rate: c.default_vat_rate == null ? '' : String(c.default_vat_rate),
     amounts_include_vat: c.amounts_include_vat,
     series: c.series ?? '',
@@ -198,12 +228,196 @@ function defaultsBody(d: Defaults): Record<string, unknown> {
     invoice_mode: d.invoice_mode,
     credit_note_mode: d.credit_note_mode,
     emission_event: d.emission_event,
+    refund_event: d.refund_event,
     default_vat_rate: d.default_vat_rate.trim() || null,
     amounts_include_vat: d.amounts_include_vat,
     series: d.series.trim() || null,
     default_purpose: d.default_purpose.trim() || null,
     default_payment_method_code: d.default_payment_method_code || null,
   }
+}
+
+/** Floor enforced by the API on a supplied signing secret. Mirrored here so the
+ * form refuses before the round trip; the API is still the authority. */
+const MIN_SIGNING_SECRET = 16
+
+/** A credential input that is not readable over a shoulder.
+ *
+ * Masked by default with an explicit reveal, because a signing secret is the
+ * entire authority of a public unauthenticated endpoint and these forms get
+ * filled in on shared screens. Reveal stays available: a mistyped secret is
+ * indistinguishable from a correct one until deliveries start failing, so
+ * "check what I pasted" has to be possible.
+ */
+function MaskedInput({
+  value,
+  onChange,
+  required,
+  minLength,
+  placeholder,
+}: {
+  value: string
+  onChange: (next: string) => void
+  required?: boolean
+  minLength?: number
+  placeholder?: string
+}) {
+  const { t } = useTranslation()
+  const [shown, setShown] = useState(false)
+  return (
+    <span className="row">
+      <input
+        type={shown ? 'text' : 'password'}
+        required={required}
+        minLength={minLength}
+        maxLength={200}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button type="button" className="btn--sm btn--ghost" onClick={() => setShown(!shown)}>
+        {shown ? t('paymentConnectors.hide') : t('paymentConnectors.show')}
+      </button>
+    </span>
+  )
+}
+
+/** A credential shown exactly once, at the moment it is minted.
+ *
+ * It has to be readable (the sender needs it) without being on screen by
+ * default: copy works while masked, so the common path never displays it at
+ * all. */
+function SecretReveal({
+  label,
+  value,
+  token,
+  copy,
+  copied,
+}: {
+  label: string
+  value: string
+  token: string
+  copy: (text: string, token: string) => void
+  copied: string | null
+}) {
+  const { t } = useTranslation()
+  const [shown, setShown] = useState(false)
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <textarea
+        readOnly
+        value={shown ? value : '•'.repeat(Math.min(value.length, 48))}
+        rows={2}
+        onFocus={(e) => shown && e.currentTarget.select()}
+        style={{ width: '100%', fontFamily: 'monospace' }}
+      />
+      <div className="row">
+        <button type="button" className="btn--sm" onClick={() => copy(value, token)}>
+          {copied === token ? 'OK' : t('paymentConnectors.copy')}
+        </button>
+        <button type="button" className="btn--sm btn--ghost" onClick={() => setShown(!shown)}>
+          {shown ? t('paymentConnectors.hide') : t('paymentConnectors.show')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** What to do in the provider's dashboard, for THIS connector.
+ *
+ * The list of events is the part an operator cannot derive and cannot verify:
+ * subscribing too few is silent (documents that never appear, refunds that
+ * never reverse) and subscribing the wrong refund announcement files the same
+ * refund twice. It is therefore served by the backend, generated from the
+ * mapper that will receive the traffic, rather than transcribed here.
+ *
+ * Open by default until the connector has actually received something: that is
+ * exactly the window where the instructions matter, and it gets out of the way
+ * on its own afterwards.
+ */
+function SetupGuide({
+  connector,
+  copy,
+  copied,
+}: {
+  connector: Connector
+  copy: (text: string, token: string) => void
+  copied: string | null
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(connector.last_event_at === null)
+  const events = connector.subscription
+  const token = `events:${connector.id}`
+  // On our own contract there is no dashboard and no vendor-issued secret: the
+  // counterpart is whoever implements the contract, and the key is ours to
+  // hand out. Two of the four steps are therefore a different instruction, not
+  // the same instruction with the word "provider" swapped.
+  const native = connector.provider === 'mycelium'
+
+  return (
+    <div className="card card--quiet">
+      <button type="button" className="btn--sm btn--ghost" onClick={() => setOpen(!open)}>
+        {open ? '▾' : '▸'} {t('paymentConnectors.setupTitle', { provider: connector.provider })}
+      </button>
+      {open && (
+        <>
+          <ol className="setup-steps">
+            <li>
+              {native
+                ? t('paymentConnectors.setupStepEndpointNative')
+                : t('paymentConnectors.setupStepEndpoint')}
+            </li>
+            <li>
+              {t('paymentConnectors.setupStepEvents')}
+              {events.length > 0 && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="btn--sm"
+                    onClick={() => copy(events.map((e) => e.event_type).join('\n'), token)}
+                  >
+                    {copied === token ? 'OK' : t('paymentConnectors.copyEvents')}
+                  </button>
+                  <ul className="setup-events">
+                    {events.map((e) => (
+                      <li key={e.event_type}>
+                        <code>{e.event_type}</code>{' '}
+                        <span className="hint">
+                          {t(PURPOSE_KEYS[e.purpose] ?? 'paymentConnectors.purposeUnknown')}
+                        </span>
+                        {!e.required && (
+                          <span className="hint"> {t('paymentConnectors.purposeOptional')}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </li>
+            <li>
+              {native
+                ? t('paymentConnectors.setupStepSecretNative')
+                : t('paymentConnectors.setupStepSecret')}
+            </li>
+            <li>{t('paymentConnectors.setupStepDryRun')}</li>
+          </ol>
+          {/* The one instruction that is a refusal rather than a step. Stripe's
+              event picker makes "select all" a single click, and the two refund
+              announcements describe the SAME refund without deduplicating
+              against each other. */}
+          {connector.provider === 'stripe' && (
+            <p className="hint">
+              {t('paymentConnectors.setupNoExtraEvents', { refundEvent: connector.refund_event })}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 /** The fiscal settings, shared by the create form and the per-connector edit
@@ -214,15 +428,22 @@ function defaultsBody(d: Defaults): Record<string, unknown> {
 function DefaultsFields({
   value,
   vocab,
+  provider,
   onChange,
 }: {
   value: Defaults
   vocab: Vocabulary | null
+  /** Which dialect this connector speaks. The event selectors below are a
+   * VENDOR problem: our own contract defines exactly one event per outcome, so
+   * offering a choice there would be a control that changes nothing. */
+  provider: string
   onChange: (next: Defaults) => void
 }) {
   const { t } = useTranslation()
   const modes = vocab?.automation_modes ?? FALLBACK_MODES
   const emissionEvents = vocab?.emission_events ?? FALLBACK_EMISSION_EVENTS
+  const refundEvents = vocab?.refund_events ?? FALLBACK_REFUND_EVENTS
+  const native = provider === 'mycelium'
   const modeLabel = (m: string) => (MODE_KEYS[m] ? t(MODE_KEYS[m]) : m)
 
   return (
@@ -254,22 +475,47 @@ function DefaultsFields({
             ))}
           </select>
         </label>
-        <label>
-          {t('paymentConnectors.emissionEvent')}
-          <select
-            value={value.emission_event}
-            onChange={(e) => onChange({ ...value, emission_event: e.target.value })}
-          >
-            {emissionEvents.map((ev) => (
-              <option key={ev} value={ev}>
-                {ev}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!native && (
+          <>
+            <label>
+              {t('paymentConnectors.emissionEvent')}
+              <select
+                value={value.emission_event}
+                onChange={(e) => onChange({ ...value, emission_event: e.target.value })}
+              >
+                {emissionEvents.map((ev) => (
+                  <option key={ev} value={ev}>
+                    {ev}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* One of the two refund announcements, never both: see the hint. */}
+            <label>
+              {t('paymentConnectors.refundEvent')}
+              <select
+                value={value.refund_event}
+                onChange={(e) => onChange({ ...value, refund_event: e.target.value })}
+              >
+                {refundEvents.map((ev) => (
+                  <option key={ev} value={ev}>
+                    {ev}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
       </div>
       <p className="hint">{t('paymentConnectors.modeHint')}</p>
-      <p className="hint">{t('paymentConnectors.emissionEventHint')}</p>
+      {native ? (
+        <p className="hint">{t('paymentConnectors.nativeEventsHint')}</p>
+      ) : (
+        <>
+          <p className="hint">{t('paymentConnectors.emissionEventHint')}</p>
+          <p className="hint">{t('paymentConnectors.refundEventHint')}</p>
+        </>
+      )}
       <div className="row">
         <label>
           {t('paymentConnectors.vatRate')}
@@ -357,7 +603,7 @@ function ConnectorEvents({
   const [msg, setMsg] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [status, setStatus] = useState<
-    'no_billing_data' | 'needs_attention' | 'dead' | 'done'
+    'no_billing_data' | 'needs_attention' | 'ignored' | 'dead' | 'done'
   >('no_billing_data')
 
   useEffect(() => {
@@ -438,6 +684,27 @@ function ConnectorEvents({
     }
   }
 
+  async function onPromote(eventId: string) {
+    // Confirmed because it converts a comparison artefact into a document that
+    // can be filed in the workspace's name: the opposite of the shadow run's
+    // whole promise, and the one action here that is not reversible by
+    // discarding.
+    if (!window.confirm(t('paymentConnectors.promoteConfirm'))) return
+    setErr(null)
+    setMsg(null)
+    try {
+      await send<{ invoice_id: string }>(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+          `/events/${eventId}/promote`,
+        { method: 'POST' },
+      )
+      setMsg(t('paymentConnectors.promoted'))
+      setTick((n) => n + 1)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
+
   async function onRetry(eventId: string) {
     setErr(null)
     try {
@@ -470,6 +737,18 @@ function ConnectorEvents({
           onClick={() => setStatus('needs_attention')}
         >
           {t('paymentConnectors.statusNeedsAttention')}
+        </button>
+        {/* Recognised, verified, and deliberately not acted on: the refund
+            announcement this connector does not listen to, an event type the
+            mapper has no rule for. Reachable because "nothing happened" needs
+            somewhere to be read -- an operator who subscribed the other refund
+            event finds the reason here and nowhere else. */}
+        <button
+          type="button"
+          className={status === 'ignored' ? 'btn--sm' : 'btn--sm btn--ghost'}
+          onClick={() => setStatus('ignored')}
+        >
+          {t('paymentConnectors.statusIgnored')}
         </button>
         <button
           type="button"
@@ -538,6 +817,21 @@ function ConnectorEvents({
                       onClick={() => void onDownloadXml(r.id)}
                     >
                       {t('paymentConnectors.downloadXml')}
+                    </button>
+                  )}
+                  {/* The other exit from a parallel run. Discard throws every
+                      shadow away; this promotes ONE, for the payment the
+                      incumbent provider did not invoice after all. It moves the
+                      claim with the document, so a later redelivery cannot
+                      compose a second invoice for the same money, and it
+                      refuses if a real document already covers it. */}
+                  {r.has_dry_run_xml && (
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() => void onPromote(r.id)}
+                    >
+                      {t('paymentConnectors.promote')}
                     </button>
                   )}
                   {r.status === 'no_billing_data' && r.provider_customer_id && (
@@ -658,6 +952,13 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
   const [label, setLabel] = useState('')
   const [provider, setProvider] = useState('stripe')
   const [signingSecret, setSigningSecret] = useState('')
+  // Only meaningful for the native contract; a vendor provider always
+  // supplies its own, so the vendor form forces this false on switch.
+  const [mintSecret, setMintSecret] = useState(true)
+  // Which connector's signing secret is being rotated, and the value typed
+  // for it. Held here rather than in a prompt so it can be masked.
+  const [rotating, setRotating] = useState<string | null>(null)
+  const [rotateSecret, setRotateSecret] = useState('')
   const [withApiKey, setWithApiKey] = useState(false)
   const [form, setForm] = useState<Defaults>(EMPTY_DEFAULTS)
 
@@ -727,6 +1028,11 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
     }
   }
 
+  // Minting is a native-contract option only, so the choice is DERIVED
+  // rather than remembered: switching the provider to a vendor cannot leave
+  // a stale "mint one" behind, which the backend would refuse anyway.
+  const minting = provider === 'mycelium' && mintSecret
+
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     setErr(null)
@@ -736,11 +1042,11 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
         jsonInit('POST', {
           label: label.trim(),
           provider,
-          // Empty means "mint one", which is only correct for the native
-          // contract; the form makes the field required for a vendor provider
-          // so a connector can never be born with a secret its provider has
-          // never heard of.
-          signing_secret: signingSecret.trim() || null,
+          // Null means "mint one", which the backend allows ONLY for the
+          // native contract; the vendor form makes the field required so a
+          // connector can never be born with a secret its provider never
+          // issued -- it would refuse every delivery as signature_invalid.
+          signing_secret: minting ? null : signingSecret.trim() || null,
           with_api_key: withApiKey,
           // Always born disabled, whatever the modes say: the operator still
           // has to paste the webhook URL into the provider and re-read the
@@ -753,6 +1059,7 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
       setShowForm(false)
       setLabel('')
       setSigningSecret('')
+      setMintSecret(true)
       setWithApiKey(false)
       setForm(EMPTY_DEFAULTS)
       reload()
@@ -802,13 +1109,12 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
     if (ok) setEditing(null)
   }
 
-  async function onRotateSigning(c: Connector) {
-    // A prompt, not a confirm: for Stripe the new secret is not ours to choose
-    // -- it is the whsec_... the dashboard shows after a roll -- so the operator
-    // must be able to paste it. Cancel returns null and aborts; an empty answer
-    // mints one, which only makes sense for the native contract.
-    const input = window.prompt(t('paymentConnectors.rotateSigningPrompt'), '')
-    if (input === null) return
+  async function onRotateSigning(c: Connector, secret: string | null) {
+    // An inline masked form rather than window.prompt: a prompt renders what is
+    // typed in clear text, and the new secret is not ours to choose for a
+    // vendor -- it is the whsec_... the dashboard shows after a roll -- so it
+    // gets pasted here. ``null`` asks the backend to mint one, which it accepts
+    // only on the native contract.
     setErr(null)
     // The secret travels in the BODY, never in the query string: a query is
     // logged verbatim by ordinary access logging and reaches proxy logs, APM
@@ -819,10 +1125,12 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ signing_secret: input.trim() || null }),
+          body: JSON.stringify({ signing_secret: secret }),
         },
       )
       setCreated(data)
+      setRotating(null)
+      setRotateSecret('')
       reload()
     } catch (e) {
       setErr(message(e))
@@ -893,46 +1201,22 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
           {/* rotate-api-key answers with an empty signing secret on purpose:
               rotating one credential must never re-expose the other. */}
           {created.signing_secret && (
-            <>
-              <span>{t('paymentConnectors.secretShown')}</span>
-              <textarea
-                readOnly
-                value={created.signing_secret}
-                rows={2}
-                onFocus={(e) => e.currentTarget.select()}
-                style={{ width: '100%', fontFamily: 'monospace' }}
-              />
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn--sm"
-                  onClick={() => void copy(created.signing_secret, 'secret')}
-                >
-                  {copied === 'secret' ? 'OK' : t('paymentConnectors.copy')}
-                </button>
-              </div>
-            </>
+            <SecretReveal
+              label={t('paymentConnectors.secretShown')}
+              value={created.signing_secret}
+              token="secret"
+              copy={(text, token) => void copy(text, token)}
+              copied={copied}
+            />
           )}
           {created.api_key && (
-            <>
-              <span>{t('paymentConnectors.apiKeyShown')}</span>
-              <textarea
-                readOnly
-                value={created.api_key}
-                rows={2}
-                onFocus={(e) => e.currentTarget.select()}
-                style={{ width: '100%', fontFamily: 'monospace' }}
-              />
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn--sm"
-                  onClick={() => void copy(created.api_key ?? '', 'apikey')}
-                >
-                  {copied === 'apikey' ? 'OK' : t('paymentConnectors.copy')}
-                </button>
-              </div>
-            </>
+            <SecretReveal
+              label={t('paymentConnectors.apiKeyShown')}
+              value={created.api_key}
+              token="apikey"
+              copy={(text, token) => void copy(text, token)}
+              copied={copied}
+            />
           )}
           <p className="hint">
             {t('paymentConnectors.webhookUrl')}: <code>{created.webhook_url}</code>
@@ -1011,7 +1295,10 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                   <button
                     type="button"
                     className="btn--sm btn--ghost"
-                    onClick={() => void onRotateSigning(c)}
+                    onClick={() => {
+                      setRotateSecret('')
+                      setRotating(rotating === c.id ? null : c.id)
+                    }}
                   >
                     {t('paymentConnectors.rotateSigning')}
                   </button>{' '}
@@ -1076,6 +1363,59 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                 <p className="err">{t('paymentConnectors.webhookUrlUnset')}</p>
               )}
               <p className="hint">{t('paymentConnectors.webhookUrlHint')}</p>
+              <SetupGuide connector={c} copy={(text, token) => void copy(text, token)} copied={copied} />
+              {rotating === c.id && (
+                <form
+                  className="card card--quiet"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void onRotateSigning(c, rotateSecret.trim() || null)
+                  }}
+                >
+                  <h4>{t('paymentConnectors.rotateSigning')}</h4>
+                  <p className="hint">
+                    {c.provider === 'mycelium'
+                      ? t('paymentConnectors.rotateSigningNativeHint')
+                      : t('paymentConnectors.rotateSigningVendorHint')}
+                  </p>
+                  <div className="row">
+                    <label className="lbl--wide">
+                      {t('paymentConnectors.signingSecret')}
+                      <MaskedInput
+                        // Required for a vendor: an empty submission would ask
+                        // us to mint a secret the provider never issued, which
+                        // the backend refuses -- better to say so in the form.
+                        required={c.provider !== 'mycelium'}
+                        minLength={MIN_SIGNING_SECRET}
+                        value={rotateSecret}
+                        onChange={setRotateSecret}
+                        placeholder={c.provider === 'mycelium' ? '' : 'whsec_…'}
+                      />
+                    </label>
+                  </div>
+                  <div className="row">
+                    <button type="submit" className="btn--sm">
+                      {t('paymentConnectors.save')}
+                    </button>
+                    {c.provider === 'mycelium' && (
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        onClick={() => void onRotateSigning(c, null)}
+                      >
+                        {t('paymentConnectors.secretMint')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost"
+                      onClick={() => setRotating(null)}
+                    >
+                      {t('paymentConnectors.cancel')}
+                    </button>
+                  </div>
+                </form>
+              )}
               {editing === c.id && (
                 <form
                   onSubmit={(e) => void onSaveEdit(e, c.id)}
@@ -1093,7 +1433,12 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                       />
                     </label>
                   </div>
-                  <DefaultsFields value={editForm} vocab={vocab} onChange={setEditForm} />
+                  <DefaultsFields
+                    value={editForm}
+                    vocab={vocab}
+                    provider={c.provider}
+                    onChange={setEditForm}
+                  />
                   <div className="row">
                     <button type="submit" className="btn--sm">
                       {t('paymentConnectors.save')}
@@ -1149,25 +1494,71 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
             </label>
           </div>
           <p className="hint">{t('paymentConnectors.labelHint')}</p>
-          <div className="row">
-            <label className="lbl--wide">
-              {t('paymentConnectors.signingSecret')}
-              {/* Required for every provider EXCEPT our own contract: a Stripe
-                  connector holding a secret Stripe never issued would refuse
-                  every delivery with signature_invalid, and the operator would
-                  see an empty invoice list with no error anywhere. */}
-              <input
-                required={provider !== 'mycelium'}
-                maxLength={200}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="whsec_…"
-                value={signingSecret}
-                onChange={(e) => setSigningSecret(e.target.value)}
-              />
-            </label>
-          </div>
-          <p className="hint">{t('paymentConnectors.signingSecretHint')}</p>
+          {/* The credential question is genuinely DIFFERENT per provider, so it
+              is a different form rather than one form with a conditional
+              asterisk. For a vendor the secret is issued elsewhere and must be
+              copied in; on our own contract Mycelium is the authority, so
+              minting is the default and pasting a key the sender already uses
+              is the alternative. */}
+          {provider === 'mycelium' ? (
+            <>
+              <div className="row">
+                <label>
+                  <input
+                    type="radio"
+                    name="secret-source"
+                    checked={mintSecret}
+                    onChange={() => setMintSecret(true)}
+                  />
+                  {t('paymentConnectors.secretMint')}
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="secret-source"
+                    checked={!mintSecret}
+                    onChange={() => setMintSecret(false)}
+                  />
+                  {t('paymentConnectors.secretProvide')}
+                </label>
+              </div>
+              {!mintSecret && (
+                <div className="row">
+                  <label className="lbl--wide">
+                    {t('paymentConnectors.signingSecret')}
+                    <MaskedInput
+                      required
+                      minLength={MIN_SIGNING_SECRET}
+                      value={signingSecret}
+                      onChange={setSigningSecret}
+                      placeholder={t('paymentConnectors.secretPlaceholder')}
+                    />
+                  </label>
+                </div>
+              )}
+              <p className="hint">{t('paymentConnectors.nativeSecretHint')}</p>
+            </>
+          ) : (
+            <>
+              <div className="row">
+                <label className="lbl--wide">
+                  {t('paymentConnectors.signingSecret')}
+                  {/* Required: a Stripe connector holding a secret Stripe never
+                      issued would refuse every delivery with signature_invalid,
+                      and the operator would see an empty invoice list with no
+                      error anywhere. */}
+                  <MaskedInput
+                    required
+                    minLength={MIN_SIGNING_SECRET}
+                    value={signingSecret}
+                    onChange={setSigningSecret}
+                    placeholder="whsec_…"
+                  />
+                </label>
+              </div>
+              <p className="hint">{t('paymentConnectors.signingSecretHint')}</p>
+            </>
+          )}
           <label className="row">
             <input
               type="checkbox"
@@ -1177,7 +1568,7 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
             {t('paymentConnectors.withApiKey')}
           </label>
           <p className="hint">{t('paymentConnectors.withApiKeyHint')}</p>
-          <DefaultsFields value={form} vocab={vocab} onChange={setForm} />
+          <DefaultsFields value={form} vocab={vocab} provider={provider} onChange={setForm} />
           <div className="row">
             <button type="submit" className="btn--sm">
               {t('paymentConnectors.confirmCreate')}

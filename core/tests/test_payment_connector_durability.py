@@ -207,18 +207,26 @@ def _invoice_paid(
 
 
 def _refund(*, event_id: str, amount: int, refund_id: str = "re_1") -> dict[str, Any]:
+    """A refund the way the DEFAULT configuration hears about it.
+
+    ``refund.created``, not ``charge.refunded``: a connector honours exactly one
+    of Stripe's two refund announcements (``refund_event``), because the pair
+    does not reliably deduplicate and acting on both would file two TD04 for one
+    refund. The legacy announcement has its own test below.
+    """
     return {
         "id": event_id,
-        "type": "charge.refunded",
+        "type": "refund.created",
         "created": 1_755_000_200,
         "data": {
             "object": {
-                "id": "ch_1",
-                "object": "charge",
+                "id": refund_id,
+                "object": "refund",
                 "currency": "eur",
+                "charge": "ch_1",
                 "payment_intent": "pi_1",
-                "amount_refunded": amount,
-                "refunds": {"data": [{"id": refund_id, "amount": amount, "reason": "requested"}]},
+                "amount": amount,
+                "reason": "requested",
             }
         },
     }

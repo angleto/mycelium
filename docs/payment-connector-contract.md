@@ -96,9 +96,16 @@ Rules that matter:
   buffer.
 
 The signing secret is shown **once**, when the connector is created or the
-secret is rotated. For provider `mycelium` Mycelium mints it (it looks like
-`whsec_…`); it is stored encrypted, because verifying a MAC requires
-recovering it.
+secret is rotated. On this contract Mycelium is the authority, so it can mint
+one (it looks like `whsec_…`) — or you can supply a key the sender already
+uses, at creation or at rotation; a supplied key must be at least 16
+characters, since it is the entire authority of a public unauthenticated
+endpoint. Either way it is stored encrypted (verifying a MAC requires
+recovering it), never echoed by a read route, and the SPA keeps it masked
+behind an explicit reveal so it is not left on screen.
+
+For a vendor provider the choice does not exist: the secret is issued there and
+Mycelium refuses to mint one, at creation and at rotation alike.
 
 This is the same construction as Mycelium's *outbound* webhook signature
 (ADR-0047) and as Stripe's: implement one and you have implemented all

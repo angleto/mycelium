@@ -125,6 +125,10 @@ def _invoice_paid(
     event_id: str = "evt_1",
     invoice_id: str = "in_1",
     charge_id: str = "ch_1",
+    # Overridable because it is one of the ids the connector CLAIMS: two events
+    # that share it are two announcements of one payment, and resolve to the
+    # same document. A test that wants two distinct payments has to vary it.
+    payment_intent_id: str = "pi_1",
     amount: int = 10000,
     vat_amount: int = 2200,
     metadata: dict[str, str] | None = None,
@@ -144,7 +148,7 @@ def _invoice_paid(
                 "customer_email": cust["email"],
                 "customer_address": cust["address"],
                 "charge": charge_id,
-                "payment_intent": "pi_1",
+                "payment_intent": payment_intent_id,
                 "description": "Abbonamento marzo",
                 # A real codice destinatario: 0000000 cannot be used to send, so a
                 # counterpart is only addressable with a real code or a PEC.
@@ -370,18 +374,26 @@ async def test_payment_event_for_unknown_money_is_ignored() -> None:
 
 
 def _refund(*, event_id: str, amount: int, refund_id: str = "re_1") -> dict[str, Any]:
+    """A refund the way the DEFAULT configuration hears about it.
+
+    ``refund.created``, not ``charge.refunded``: a connector honours exactly one
+    of Stripe's two refund announcements (``refund_event``), because the pair
+    does not reliably deduplicate and acting on both would file two TD04 for one
+    refund. The legacy announcement has its own test below.
+    """
     return {
         "id": event_id,
-        "type": "charge.refunded",
+        "type": "refund.created",
         "created": 1_755_000_200,
         "data": {
             "object": {
-                "id": "ch_1",
-                "object": "charge",
+                "id": refund_id,
+                "object": "refund",
                 "currency": "eur",
+                "charge": "ch_1",
                 "payment_intent": "pi_1",
-                "amount_refunded": amount,
-                "refunds": {"data": [{"id": refund_id, "amount": amount, "reason": "requested"}]},
+                "amount": amount,
+                "reason": "requested",
             }
         },
     }
@@ -434,9 +446,92 @@ async def test_partial_refund_scales_the_credit_note() -> None:
         assert notes[0].total == Decimal("61.00")
 
 
+def _legacy_refund(*, event_id: str, amount: int) -> dict[str, Any]:
+    """The older announcement, for an endpoint that predates ``refund.created``."""
+    return {
+        "id": event_id,
+        "type": "charge.refunded",
+        "created": 1_755_000_200,
+        "data": {
+            "object": {
+                "id": "ch_1",
+                "object": "charge",
+                "currency": "eur",
+                "payment_intent": "pi_1",
+                "amount_refunded": amount,
+                "refunds": {"data": [{"id": "re_1", "amount": amount, "reason": "requested"}]},
+            }
+        },
+    }
+
+
+async def test_a_connector_acts_on_one_refund_announcement_and_files_the_other() -> None:
+    """The two announcements of one refund are configuration, not both-and.
+
+    Checked end to end rather than only at the mapper, because what matters
+    operationally is the LEDGER: the announcement that is not honoured has to
+    land as a recorded ``ignored`` event, so an operator who subscribed the
+    wrong one in Stripe can see why no credit note appeared. A silent drop would
+    look exactly like a delivery that never arrived.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+    await _emit_parent(org_id, connector_id)
+
+    _c, ignored_id = await _ingest(org_id, connector_id, _legacy_refund(event_id="evt_x", amount=1))
+    assert ignored_id is not None
+    assert await _run(org_id, connector_id, ignored_id) == "ignored"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = await s.get(PaymentConnectorEvent, ignored_id)
+        assert row is not None
+        assert row.status == "ignored"
+        assert row.last_error == "refund_event_not_selected", (
+            "the reason has to survive into the ledger, or an operator who "
+            "subscribed the other event has nothing to go on"
+        )
+        notes = [
+            i
+            for i in await inv_svc.list_invoices(s, org_id=org_id)
+            if i.document_type is DocumentType.TD04
+        ]
+        assert not notes, "the unselected announcement must not reverse anything"
+
+
+async def test_the_legacy_refund_announcement_works_when_selected() -> None:
+    """An endpoint configured years ago only delivers ``charge.refunded``.
+    Selecting it has to be enough: the guard narrows to ONE announcement, it
+    does not deprecate the older one."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, refund_event="charge.refunded")
+    await _emit_parent(org_id, connector_id)
+
+    _c, event_id = await _ingest(
+        org_id, connector_id, _legacy_refund(event_id="evt_l", amount=6100)
+    )
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        notes = [
+            i
+            for i in await inv_svc.list_invoices(s, org_id=org_id)
+            if i.document_type is DocumentType.TD04
+        ]
+        assert len(notes) == 1
+        assert notes[0].total == Decimal("61.00")
+
+    # ... and the newer announcement for the SAME refund is now the ignored one,
+    # which is the whole point: exactly one of the pair is ever honoured.
+    _c2, other = await _ingest(org_id, connector_id, _refund(event_id="evt_l2", amount=6100))
+    assert other is not None
+    assert await _run(org_id, connector_id, other) == "ignored"
+
+
 async def test_refund_is_not_reversed_twice() -> None:
-    """A dashboard refund fires both charge.refunded and credit_note.created;
-    they share the refund id, so whichever lands first claims it."""
+    """A dashboard refund fires both refund.created and credit_note.created;
+    they share the refund id, so whichever lands first claims it and the other
+    settles onto the same document."""
     org_id, user_id, issuer_id = await _org_and_issuer()
     connector_id = await _connector(org_id, user_id, issuer_id)
     await _emit_parent(org_id, connector_id)
@@ -841,6 +936,203 @@ async def test_dry_run_does_not_block_the_real_emission_once_the_flag_comes_off(
         assert len(shadowed) == 1, "the shadow document survives as evidence"
         assert shadowed[0].id != transmitted[0].id
         assert shadowed[0].number is None
+
+
+async def test_a_shadow_document_says_why_it_was_not_sent() -> None:
+    """The marker an operator reads during a parallel run.
+
+    A shadow document is a draft, archived out of the active list -- which is
+    also what an incomplete draft, a document waiting for review, and one
+    rejected by SdI and being redone all look like. During a parallel run the
+    only question that matters about an unsent document is "was it held back
+    because we are shadowing, or for some other reason?", so the document
+    carries the answer rather than requiring a join through the ingress ledger.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid())
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow = (await inv_svc.list_invoices(s, org_id=org_id, view="archived"))[0]
+        assert shadow.dry_run is True
+        assert shadow.state is InvoiceState.draft
+        assert shadow.number is None, "a shadow run spends no fiscal number"
+
+    # ... and a document composed with the flag OFF never carries the marker,
+    # or it would say "not sent because we were shadowing" about a real one.
+    live_connector = await _connector(org_id, user_id, issuer_id, invoice_mode="transmit")
+    _c2, live_event = await _ingest(
+        org_id, live_connector, _invoice_paid(event_id="evt_live", invoice_id="in_live")
+    )
+    assert live_event is not None
+    assert await _run(org_id, live_connector, live_event) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        real = [
+            i
+            for i in await inv_svc.list_invoices(s, org_id=org_id, view="active")
+            if i.state is InvoiceState.transmitted
+        ]
+        assert len(real) == 1
+        assert real[0].dry_run is False
+
+
+async def test_promoting_a_shadow_makes_it_sendable_and_moves_its_claim() -> None:
+    """The manual exit: this payment has to be invoiced by US after all.
+
+    The claim moving with the document is the part that is not obvious and the
+    part that matters. A promoted document whose claim stayed in the shadow
+    universe would be invisible to a live lookup, so the next redelivery of the
+    same payment would compose a SECOND invoice for money already invoiced --
+    the exact duplication the whole ledger exists to prevent.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    _c, shadow_event = await _ingest(org_id, connector_id, _invoice_paid())
+    assert shadow_event is not None
+    assert await _run(org_id, connector_id, shadow_event) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow = (await inv_svc.list_invoices(s, org_id=org_id, view="archived"))[0]
+        promoted = await svc.promote_dry_run(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            invoice_id=shadow.id,
+        )
+        assert promoted.dry_run is False
+        assert promoted.is_archived is False, "back where sendable drafts are read"
+        assert promoted.state is InvoiceState.draft
+        assert promoted.number is None, "the number is allocated at transmit, not here"
+
+    # The claim moved: the connector goes live, the same payment is redelivered,
+    # and it must resolve to the promoted document instead of composing another.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"invoice_mode": "transmit"},
+        )
+    _c2, live = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_again"))
+    assert live is not None
+    assert await _run(org_id, connector_id, live) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        everything = await inv_svc.list_invoices(s, org_id=org_id, view="all")
+        assert len(everything) == 1, "one payment, one document -- promoted then transmitted"
+        assert everything[0].state is InvoiceState.transmitted
+        assert everything[0].number is not None, "the number arrives with the real filing"
+
+
+async def test_promoting_is_refused_when_a_real_document_already_covers_it() -> None:
+    """The other order of events: the connector went live first, so a real
+    document already exists for this payment. Promoting the leftover shadow
+    would invoice it twice, so it is refused rather than filed."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    _c, shadow_event = await _ingest(org_id, connector_id, _invoice_paid())
+    assert shadow_event is not None
+    assert await _run(org_id, connector_id, shadow_event) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"invoice_mode": "transmit"},
+        )
+    _c2, live = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_real"))
+    assert live is not None
+    assert await _run(org_id, connector_id, live) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow = (await inv_svc.list_invoices(s, org_id=org_id, view="archived"))[0]
+        with pytest.raises(DomainError) as err:
+            await svc.promote_dry_run(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                connector_id=connector_id,
+                invoice_id=shadow.id,
+            )
+        assert err.value.code is MessageCode.PAYMENT_CONNECTOR_ALREADY_EMITTED
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        still = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        assert still[0].dry_run is True, "the refusal changed nothing"
+
+
+async def test_promoting_a_document_that_was_never_shadowed_is_refused() -> None:
+    """Promotion exists to undo the ONE reason a document was held back. Applied
+    to anything else it would be an unaudited way to un-archive a document."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="transmit")
+
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid())
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        real = (await inv_svc.list_invoices(s, org_id=org_id, view="active"))[0]
+        with pytest.raises(DomainError) as err:
+            await svc.promote_dry_run(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                connector_id=connector_id,
+                invoice_id=real.id,
+            )
+        assert err.value.code is MessageCode.PAYMENT_CONNECTOR_NOT_DRY_RUN
+
+
+async def test_discard_leaves_a_promoted_document_alone() -> None:
+    """Discard is "throw away what we were only comparing". A document an
+    operator deliberately promoted is no longer that, and deleting it would
+    destroy a document meant to be filed."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    _c, keep = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_keep"))
+    _c2, drop = await _ingest(
+        org_id,
+        connector_id,
+        _invoice_paid(
+            event_id="evt_drop",
+            invoice_id="in_drop",
+            charge_id="ch_drop",
+            payment_intent_id="pi_drop",
+        ),
+    )
+    assert keep is not None and drop is not None
+    assert await _run(org_id, connector_id, keep) == "done"
+    assert await _run(org_id, connector_id, drop) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadows = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        assert len(shadows) == 2
+        kept = next(i for i in shadows if i.id)  # promote one of them
+        await svc.promote_dry_run(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id, invoice_id=kept.id
+        )
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        discarded = await svc.discard_dry_run(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id
+        )
+        assert discarded == 1, "only the document still marked as a shadow"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        left = await inv_svc.list_invoices(s, org_id=org_id, view="all")
+        assert [i.id for i in left] == [kept.id]
+        assert left[0].dry_run is False
 
 
 async def test_dry_run_is_idempotent_under_redelivery() -> None:

@@ -135,9 +135,12 @@ class MessageCode(enum.StrEnum):
     WEBHOOK_EVENT_TYPE_INVALID = "webhook_endpoint.event_type_invalid"
     PAYMENT_CONNECTOR_NOT_FOUND = "payment_connector.not_found"
     PAYMENT_CONNECTOR_NOT_REVOKED = "payment_connector.not_revoked"
+    PAYMENT_CONNECTOR_NOT_DRY_RUN = "payment_connector.not_dry_run"
+    PAYMENT_CONNECTOR_ALREADY_EMITTED = "payment_connector.already_emitted"
     PAYMENT_CONNECTOR_PROVIDER_INVALID = "payment_connector.provider_invalid"
     PAYMENT_CONNECTOR_MODE_INVALID = "payment_connector.mode_invalid"
     PAYMENT_CONNECTOR_EVENT_INVALID = "payment_connector.emission_event_invalid"
+    PAYMENT_CONNECTOR_REFUND_EVENT_INVALID = "payment_connector.refund_event_invalid"
     PAYMENT_CONNECTOR_SIGNATURE_INVALID = "payment_connector.signature_invalid"
     PAYMENT_CONNECTOR_SECRET_REQUIRED = "payment_connector.signing_secret_required"  # noqa: S105 (message code, not a secret)
     PAYMENT_CONNECTOR_DISABLED = "payment_connector.disabled"
@@ -457,12 +460,20 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WEBHOOK_URL_INVALID: "Invalid webhook URL: {detail}",
         MessageCode.WEBHOOK_EVENT_TYPE_INVALID: "Unknown webhook event type: {detail}",
         MessageCode.PAYMENT_CONNECTOR_NOT_FOUND: "Payment connector not found",
+        MessageCode.PAYMENT_CONNECTOR_NOT_DRY_RUN: (
+            "This document was not composed in shadow mode, so there is nothing to promote"
+        ),
+        MessageCode.PAYMENT_CONNECTOR_ALREADY_EMITTED: (
+            "A real document already covers this payment ({detail}); promoting the shadow "
+            "would invoice it twice"
+        ),
         MessageCode.PAYMENT_CONNECTOR_NOT_REVOKED: (
             "Revoke the connector before deleting it (only a revoked connector can be purged)"
         ),
         MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID: "Unknown payment provider: {detail}",
         MessageCode.PAYMENT_CONNECTOR_MODE_INVALID: "Unknown automation mode: {detail}",
         MessageCode.PAYMENT_CONNECTOR_EVENT_INVALID: "Unknown emission event: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_REFUND_EVENT_INVALID: "Unknown refund event: {detail}",
         MessageCode.PAYMENT_CONNECTOR_SIGNATURE_INVALID: "Invalid or expired webhook signature",
         MessageCode.PAYMENT_CONNECTOR_SECRET_REQUIRED: (
             "Provider {detail} issues its own signing secret; paste it here rather than "

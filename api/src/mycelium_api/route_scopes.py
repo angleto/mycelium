@@ -610,6 +610,11 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ): HUMAN_ONLY,
     (
         "POST",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+        "/events/{event_id}/promote",
+    ): HUMAN_ONLY,
+    (
+        "POST",
         "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/assign-customer",
     ): HUMAN_ONLY,
     (

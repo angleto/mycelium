@@ -391,6 +391,47 @@ unauthenticated webhook and whose fiscal work happens in a worker.
   `payment_intent.succeeded`); a set of triggers would file three invoices
   for one sale. Exactly one type mints a document and the others are
   demoted to payment reconciliation.
+- **Honouring both refund announcements** (`refund.created` and
+  `charge.refunded`). The symmetric mistake on the reversal side, and a
+  subtler one: the pair looks self-deduplicating because both key the claim
+  on the refund id, so the emission-idempotency unique appears to cover it.
+  It only holds while the charge payload carries expanded `refunds.data`.
+  Recent API versions do not expand it, and `charge.refunded` cannot invent
+  an id it was not sent — it falls back to a key derived from the charge,
+  which collides with nothing, so one refund becomes two TD04. Ticking both
+  boxes in a provider's event picker is one click, and the damage is a
+  fiscal document. `refund_event` therefore names ONE announcement
+  (migration 0094) and the connector ignores the other with
+  `refund_event_not_selected` recorded on the event, rather than dropping it
+  silently: an operator who subscribed the wrong one has to be able to see
+  why nothing was reversed.
+- **Leaving a shadow document indistinguishable from any other draft.** Shadow
+  mode recorded the run on the EVENT and archived the document it composed,
+  which made it look exactly like an incomplete draft, one waiting for review,
+  or one rejected by SdI and being redone. During a parallel run that is the
+  single question worth asking about an unsent document, so it became a column
+  on the document itself (`invoices.dry_run`, migration 0095) rather than a
+  join through the ingress ledger -- and an orphaned shadow, its claim already
+  discarded, would have read as an ordinary draft.
+- **Discard as the only exit from a parallel run.** Throwing the shadows away
+  is right for every payment the incumbent provider invoiced, and wrong for the
+  one it missed: that document has to be filed by us, and re-emitting it means
+  waiting for a provider redelivery that will never come (the event is `done`).
+  So `promote_dry_run` turns ONE shadow into a sendable draft. It moves the
+  claim rows into the live universe with the document, because a promoted
+  document whose claim stayed in the shadow universe would be invisible to a
+  live lookup and the next redelivery would file a second invoice for the same
+  money; and it refuses when a live document already covers that payment. The
+  fiscal number is still allocated at transmit, so promotion commits nothing.
+- **Documenting the events to subscribe in the runbook.** The list depends on
+  the connector's own settings (which trigger, whether credit notes are
+  automated, which refund announcement), so a written checklist is wrong for
+  some connectors the day it is written and wrong for more of them after any
+  setting changes. Both failure modes are silent. The mapper that receives
+  the traffic therefore GENERATES the list (`subscription()`), the API serves
+  it with the connector and the SPA renders it next to the webhook URL; a
+  test asserts the two directions agree, so an event a mapper grows cannot
+  stay unadvertised and an advertised event cannot be one the mapper drops.
 - **A B2C fallback when the counterpart's fiscal data is missing.** An
   invoice to a business emitted as B2C is correctable only by a TD04: a
   wrong document is more expensive than a parked event.

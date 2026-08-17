@@ -41,11 +41,13 @@ from sqlalchemy import text
 
 from mycelium_api.main import app
 from mycelium_core.db import tenant_session
+from mycelium_core.models.membership import Role
 from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
     DELIVERY_OUTCOMES,
     EMISSION_EVENTS,
     PROVIDERS,
+    REFUND_EVENTS,
 )
 from mycelium_core.services import payment_connectors as svc
 
@@ -192,10 +194,78 @@ async def _delivery(
 
 
 async def _run(org_id: uuid.UUID, connector_id: str, event_uuid: str) -> str:
-    """Process one event the way the worker does, in the connector's own context."""
+    """Process one event the way the worker does, in the connector's own context.
+
+    The role has to be pinned as well: a connector principal has no membership
+    row, so ``require_role`` authorizes it from ``app.current_role`` alone.
+    Without this every emission parks as ``client_rejected`` ("Not a member of
+    this workspace"), which reads like a data problem and is not one.
+    """
     cid = uuid.UUID(connector_id)
-    async with tenant_session(str(org_id), str(cid), actor_kind="payment_connector") as s:
+    async with tenant_session(
+        str(org_id),
+        str(cid),
+        actor_kind="payment_connector",
+        actor_subject_id=str(cid),
+    ) as s:
+        await s.execute(
+            text("SELECT set_config('app.current_role', :r, true)"), {"r": Role.member.value}
+        )
         return await svc.process_event(s, org_id=org_id, event_id=uuid.UUID(event_uuid))
+
+
+def _invoice_paid(event_id: str) -> dict[str, Any]:
+    """A Stripe payload complete enough to become a real FatturaPA.
+
+    Local to this module and minimal on purpose: the mapping itself is covered
+    in ``core/tests``, what is under test here is the HTTP surface around a
+    document that already exists. The counterpart carries a VAT number and a
+    real codice destinatario, because a payload without them parks as
+    ``no_billing_data`` and never produces the document these tests promote.
+    """
+    return {
+        "id": event_id,
+        "type": "invoice.paid",
+        "created": 1_755_000_000,
+        "data": {
+            "object": {
+                "id": "in_promote",
+                "object": "invoice",
+                "currency": "eur",
+                "customer": "cus_promote",
+                "customer_name": "Acme SpA",
+                "customer_email": "amministrazione@acme.test",
+                "customer_address": {
+                    "line1": "Via Milano 9",
+                    "postal_code": "20100",
+                    "city": "Milano",
+                    "state": "MI",
+                    "country": "IT",
+                },
+                "charge": "ch_promote",
+                "payment_intent": "pi_promote",
+                "description": "Abbonamento",
+                "metadata": {"vat_number": "IT09876543210", "sdi_code": "ABCDEFG"},
+                "total": 12200,
+                "lines": {
+                    "data": [
+                        {
+                            "description": "Piano Pro",
+                            "quantity": 1,
+                            "amount": 10000,
+                            "tax_amounts": [
+                                {
+                                    "amount": 2200,
+                                    "inclusive": False,
+                                    "tax_rate": {"percentage": 22.0},
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        },
+    }
 
 
 async def _force_status(org_id: uuid.UUID, connector_id: str, event_uuid: str, status: str) -> None:
@@ -276,9 +346,16 @@ async def test_list_never_returns_secret_material() -> None:
 
 
 async def test_rotate_signing_secret_issues_a_new_one_without_reshowing_the_key() -> None:
+    """Minting on rotation is a NATIVE-contract path: we are the authority there.
+
+    The same connector shape as the create test, so the "rotating one credential
+    never re-exposes the other" property is asserted where minting is legal.
+    """
     async with _client() as c:
         owner, _member, _org, issuer = await _setup(c)
-        made = await _create(c, owner, issuer, with_api_key=True)
+        made = await _create(
+            c, owner, issuer, provider="mycelium", signing_secret=None, with_api_key=True
+        )
         cid = made["id"]
 
         r = await c.post(f"{_base(issuer)}/{cid}/rotate-signing-secret", headers=owner)
@@ -291,6 +368,51 @@ async def test_rotate_signing_secret_issues_a_new_one_without_reshowing_the_key(
         assert made["api_key"] not in r.text
         # The second factor is untouched by a signing-secret rotation.
         assert rotated["has_api_key"] is True
+
+
+async def test_rotating_a_vendor_connector_refuses_to_mint_a_secret() -> None:
+    """The failure this refusal prevents is silent and self-inflicted.
+
+    An operator rolling the endpoint secret in Stripe, who submits the rotation
+    without pasting the new value, would install a secret Stripe has never
+    heard of. The connector stays enabled and reports nothing, while every
+    delivery is refused as an invalid signature -- and the working secret has
+    already been demoted to the grace copy, so it heals itself only until that
+    expires. ``create_connector`` refuses the same thing; rotation is the more
+    likely way to reach it.
+    """
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer)
+        cid = made["id"]
+
+        r = await c.post(f"{_base(issuer)}/{cid}/rotate-signing-secret", headers=owner)
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "payment_connector.signing_secret_required"
+
+        # The refusal is total: the live secret is untouched, so the connector
+        # keeps verifying the traffic already in flight.
+        r = await c.post(
+            f"{_base(issuer)}/{cid}/rotate-signing-secret",
+            headers=owner,
+            json={"signing_secret": "whsec_the_operator_pasted_it"},
+        )
+        assert r.status_code == 200, r.text
+
+
+async def test_a_supplied_signing_secret_has_a_floor() -> None:
+    """A pasted secret is the whole authority of a public endpoint, and pasting
+    your own is now an offered path on the native contract, so a hand-typed
+    short string is refused rather than accepted as a MAC key."""
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        r = await c.post(
+            _base(issuer),
+            headers=owner,
+            json={"label": f"short-{uuid.uuid4().hex[:6]}", "signing_secret": "whsec_x"},
+        )
+        assert r.status_code == 422, r.text
+        assert (await c.get(_base(issuer), headers=owner)).json() == []
 
 
 async def test_rotate_signing_secret_accepts_an_explicit_secret() -> None:
@@ -491,6 +613,9 @@ async def test_create_refuses_every_closed_vocabulary_violation() -> None:
             "payment_connector.provider_invalid": {"provider": "paypal"},
             "payment_connector.mode_invalid": {"invoice_mode": "sometimes"},
             "payment_connector.emission_event_invalid": {"emission_event": "invoice.exploded"},
+            # The refund announcement is the same kind of closed choice, and
+            # rejecting it here rather than at the CHECK keeps it a 422.
+            "payment_connector.refund_event_invalid": {"refund_event": "refund.exploded"},
         }
         for code, over in cases.items():
             body: dict[str, Any] = {"label": f"bad-{uuid.uuid4().hex[:6]}", **over}
@@ -546,7 +671,66 @@ async def test_vocabulary_route_serves_the_closed_sets() -> None:
         assert body["providers"] == list(PROVIDERS)
         assert body["automation_modes"] == list(AUTOMATION_MODES)
         assert body["emission_events"] == list(EMISSION_EVENTS)
+        assert body["refund_events"] == list(REFUND_EVENTS)
         assert body["delivery_outcomes"] == list(DELIVERY_OUTCOMES)
+
+
+async def test_a_connector_carries_the_events_to_enable_in_the_provider() -> None:
+    """The setup instructions travel WITH the connector, not in a runbook.
+
+    An operator pastes ``webhook_url`` into the provider's dashboard and then has
+    to tick a list of events; getting that list wrong is silent (nothing arrives,
+    or a document is never reversed), so the connector serves the list that its
+    own configuration implies. Asserting it here is what keeps the SPA from
+    inventing a static copy that drifts.
+    """
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer)
+        events = {e["event_type"]: e for e in made["subscription"]}
+
+        assert "invoice.paid" in events, "the configured emission trigger"
+        assert events["invoice.paid"]["purpose"] == "emission"
+        # The entry an operator would never guess: a Stripe payload cannot be
+        # expanded, so this is the only channel the fiscal identity travels on.
+        assert {"customer.created", "customer.updated"} <= set(events)
+        assert all(events[e]["required"] for e in ("customer.created", "customer.updated"))
+        assert "refund.created" in events and "charge.refunded" not in events
+
+        # Switching an automation off withdraws the events that fed it, so the
+        # instructions cannot outlive the configuration that justified them.
+        cid = made["id"]
+        r = await c.patch(
+            f"{_base(issuer)}/{cid}",
+            headers=owner,
+            json={"credit_note_mode": "off", "refund_event": "charge.refunded"},
+        )
+        assert r.status_code == 200, r.text
+        after = {e["event_type"] for e in r.json()["subscription"]}
+        assert not {"refund.created", "charge.refunded", "credit_note.created"} & after
+        assert "invoice.paid" in after
+
+        # ... and turning it back on restores them, now naming the OTHER
+        # announcement, because that is what the connector will act on.
+        r = await c.patch(
+            f"{_base(issuer)}/{cid}", headers=owner, json={"credit_note_mode": "transmit"}
+        )
+        assert r.status_code == 200, r.text
+        back = {e["event_type"] for e in r.json()["subscription"]}
+        assert "charge.refunded" in back and "refund.created" not in back
+
+
+async def test_the_native_contract_advertises_its_own_events() -> None:
+    """The published contract is reachable from the same surface: a connector on
+    provider ``mycelium`` documents ITS three event types, not Stripe's."""
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer, provider="mycelium", signing_secret=None)
+        assert {e["event_type"] for e in made["subscription"]} == {
+            "invoice.issue",
+            "invoice.credit",
+            "invoice.payment",
+        }
 
 
 # --- lifecycle -------------------------------------------------------------
@@ -882,6 +1066,54 @@ async def test_discard_dry_run_is_owner_gated_and_reports_what_it_removed() -> N
             headers=owner,
         )
         assert r.status_code == 404, r.text
+
+
+async def test_promote_turns_a_shadow_into_a_sendable_draft() -> None:
+    """The manual send path for a document held back by shadow mode.
+
+    Owner-gated and issuer-scoped like every other mutation here, because it
+    converts a comparison artefact into something filable in the workspace's
+    name.
+    """
+    async with _client() as c:
+        owner, member, org, issuer = await _setup(c)
+        made = await _create(c, owner, issuer, invoice_mode="dry_run", enabled=True)
+        cid = made["id"]
+
+        await _ingest(org, cid, event_id="evt_shadow", payload=_invoice_paid("evt_shadow"))
+        pending = (
+            await c.get(f"{_base(issuer)}/{cid}/events?status=pending", headers=owner)
+        ).json()
+        assert len(pending) == 1, pending
+        event_id = pending[0]["id"]
+        assert await _run(org, cid, event_id) == "done"
+
+        r = await c.post(f"{_base(issuer)}/{cid}/events/{event_id}/promote", headers=member)
+        assert r.status_code == 403, r.text
+
+        r = await c.post(
+            f"/issuer-profiles/{uuid.uuid4()}/payment-connectors/{cid}/events/{event_id}/promote",
+            headers=owner,
+        )
+        assert r.status_code == 404, r.text
+
+        r = await c.post(f"{_base(issuer)}/{cid}/events/{event_id}/promote", headers=owner)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["number"] is None, "the number is allocated at transmit, not at promotion"
+
+        # It is now an ordinary sendable draft: no longer flagged, no longer
+        # archived, and it reaches the invoice list where it can be transmitted.
+        inv = (await c.get(f"/invoices/{body['invoice_id']}", headers=owner)).json()
+        assert inv["dry_run"] is False
+        assert inv["is_archived"] is False
+        assert inv["state"] == "draft"
+
+        # Promoting twice is refused rather than silently repeated: the second
+        # call has nothing left to promote.
+        r = await c.post(f"{_base(issuer)}/{cid}/events/{event_id}/promote", headers=owner)
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == "payment_connector.not_dry_run"
 
 
 async def test_the_vocabulary_advertises_dry_run() -> None:

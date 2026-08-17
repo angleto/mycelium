@@ -214,6 +214,9 @@ class MapperConfig:
     """
 
     emission_event: str = "invoice.paid"
+    #: Which of the provider's refund announcements to honour. One, not a set,
+    #: for the same reason ``emission_event`` is one: see ``REFUND_EVENTS``.
+    refund_event: str = "refund.created"
     #: Ordered candidate key names per fiscal field: first present wins. A list
     #: rather than one name because a real provider account accumulates
     #: spellings -- a migration away from another e-invoicing vendor leaves its
@@ -280,6 +283,46 @@ def checked_identity(
     return EventIdentity(event_id=event_id, event_type=event_type, occurred_at=occurred_at)
 
 
+#: What a subscribed event is FOR. The SPA renders one explanation per purpose,
+#: so the vocabulary lives here (a backend that shipped English prose would have
+#: to be translated in two places).
+EVENT_PURPOSES = ("emission", "customer", "credit_note", "payment_sync")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderEvent:
+    """One event the provider must be told to deliver, and why.
+
+    Derived from a connector's own settings rather than transcribed into a
+    document, because the two drift: an operator who changes ``emission_event``
+    or switches credit notes to manual would otherwise keep reading yesterday's
+    checklist. ``required`` marks the events without which the connector cannot
+    do the job it is configured for; the rest are useful but survivable.
+    """
+
+    event_type: str
+    purpose: str
+    required: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class SubscriptionContext:
+    """The connector switches that decide which events are worth delivering.
+
+    Separate from :class:`MapperConfig` on purpose: that one is the projection a
+    mapper may consult while MAPPING a payload, and these switches are enforced
+    by the service, above the mapper. Passing them into ``to_intent`` would
+    invite a mapper to start deciding policy.
+    """
+
+    emission_event: str
+    refund_event: str
+    #: ``invoice_mode``/``credit_note_mode`` are not ``off``.
+    emits: bool = True
+    credit_notes: bool = True
+    payment_sync: bool = True
+
+
 @runtime_checkable
 class PaymentEventMapper(Protocol):
     """One provider's event dialect."""
@@ -308,6 +351,16 @@ class PaymentEventMapper(Protocol):
 
     def to_intent(self, payload: Mapping[str, Any], *, config: MapperConfig) -> Intent:
         """Translate a recognised event into a neutral intent."""
+        ...
+
+    def subscription(self, ctx: SubscriptionContext) -> tuple[ProviderEvent, ...]:
+        """Exactly the events this configuration needs the provider to deliver.
+
+        The setup instructions an operator follows, generated from the mapper
+        that will actually receive the traffic. A test asserts the two agree in
+        both directions: nothing advertised here may be dropped as unmapped, and
+        nothing ``to_intent`` acts on may be missing from every subscription.
+        """
         ...
 
 
@@ -445,6 +498,7 @@ def as_sequence(value: Any) -> list[Any]:
 
 
 __all__ = [
+    "EVENT_PURPOSES",
     "CreditNoteIntent",
     "CustomerProfileIntent",
     "EmissionIntent",
@@ -458,6 +512,8 @@ __all__ = [
     "PayloadError",
     "PaymentEventMapper",
     "PaymentSyncIntent",
+    "ProviderEvent",
+    "SubscriptionContext",
     "VerificationSecrets",
     "as_decimal",
     "as_mapping",

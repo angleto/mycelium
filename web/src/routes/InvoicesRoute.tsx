@@ -1285,6 +1285,16 @@ export function InvoicesRoute() {
                 {t('invoices.open')}
               </button>{' '}
               {i.series}/{i.year}/{i.number ?? '–'}{' '}
+              {/* Why this one is unsent, when the reason is not the document.
+                  A draft is unsent for many reasons; a shadow document was
+                  held back on purpose while a payment connector runs in
+                  parallel with an incumbent provider, and telling the two
+                  apart is the entire point of that run. */}
+              {i.dry_run && (
+                <span className="badge badge--dry-run">
+                  {t('invoices.dryRunBadge')}
+                </span>
+              )}{' '}
               <span className="muted">
                 · {clientName(i.client_tag_id)} ·{' '}
                 {t(`invoices.stateLabel.${i.state}`)} · {i.total} · sdi{' '}

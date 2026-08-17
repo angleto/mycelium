@@ -37,33 +37,88 @@ explicitly rather than relying on that coincidence.
 
 ## Wiring a Stripe account
 
-1. Create the connector in Settings → issuer profile → Payment connectors.
-   Copy the `webhook_url` it shows.
-2. In Stripe: Developers → Webhooks → Add endpoint, paste the URL, and subscribe
-   to the events you actually need:
-   - the emission trigger (`invoice.paid` by default — **exactly one**, see below),
-   - `credit_note.created`, `charge.refunded`, `refund.created` for reversals,
-   - `charge.succeeded` if you want payment reconciliation on documents the
-     connector composed as drafts.
-3. Stripe shows a signing secret (`whsec_…`). Paste it into the connector.
-4. Nothing to set for the codice destinatario. `0000000` cannot be used to
+1. Create the connector in Settings → issuer profile → Payment connectors. Pick
+   the provider in the create form; the fields differ per provider, because for
+   Stripe the signing secret is issued by Stripe and has to be pasted in, while
+   on the native contract Mycelium can mint one.
+2. Copy the `webhook_url` the connector shows and paste it into Stripe:
+   Developers → Webhooks → Add endpoint.
+3. Subscribe to **exactly the events the connector lists** under *How to
+   configure stripe*, next to the URL.
+
+   That list is generated from the connector's own settings by the same mapper
+   that will receive the traffic — it is not transcribed here on purpose. A
+   checklist in a runbook drifts from the code that reads the events, and both
+   ways of being wrong are silent: too few events and documents never appear,
+   the wrong refund event and one refund becomes two credit notes. The API
+   serves it as `subscription` on the connector, so `GET
+   /issuer-profiles/{id}/payment-connectors` answers the same question outside
+   the SPA.
+4. Stripe shows a signing secret (`whsec_…`). Paste it into the connector. Until
+   it matches, every delivery is refused as `signature_invalid` and lands in the
+   delivery ledger — a connector with no signing secret of Stripe's is not a
+   connector that is "not receiving", it is one refusing everything.
+5. Nothing to set for the codice destinatario. `0000000` cannot be used to
    deliver, so there is deliberately no connector-wide default: a document is
    emittable when the customer supplied a real 7-character code or a PEC. A
    counterpart outside Italy is addressed by the standard's `XXXXXXX`, which
    the connector applies by rule.
-5. Turn `enabled` on and send a test event from Stripe.
+6. Turn `enabled` on and send a test event from Stripe.
 
-### Never subscribe to two emission triggers
+### The customer events are not optional
 
-Stripe fires several events for one payment: an `invoice.paid` is also a
-`charge.succeeded` and a `payment_intent.succeeded`. The connector treats exactly
-one type as the trigger (`emission_event`) and demotes the others to payment
-reconciliation, so subscribing to all of them is safe. But changing
+`customer.created` and `customer.updated` are on the generated list for every
+Stripe configuration, and they are the entry an operator is most likely to skip
+because nothing about them mentions invoices.
+
+A Stripe webhook payload **cannot be expanded**. An `invoice.paid` names its
+customer by bare id, so the VAT number, codice fiscale, codice destinatario and
+PEC that live on the Stripe customer never travel with the money. These two
+events are the only channel that carries them. Omit them and the connector
+verifies, ingests and queues normally, then parks nearly everything as
+`no_billing_data` — healthy-looking, and emitting almost nothing.
+
+### One emission trigger, one refund announcement
+
+Stripe announces the same money more than once, in both directions, and the
+connector deliberately acts on ONE announcement of each.
+
+**Emission.** An `invoice.paid` is also a `charge.succeeded` and a
+`payment_intent.succeeded`. `emission_event` names the trigger and the others
+are demoted to payment reconciliation, so subscribing several is safe. Changing
 `emission_event` while events for the same payment are still in the provider's
-retry queue can produce an invoice from the old trigger and a second claim
+retry queue can still produce an invoice from the old trigger and a second claim
 attempt from the new one — the object links stop the second document, but the
 event lands in the ledger as a duplicate. Change the trigger during a quiet
 window.
+
+**Reversal.** `refund.created` and `charge.refunded` describe the same refund,
+and unlike the emission family they do **not** always deduplicate: they agree
+only while the charge payload carries expanded `refunds.data`. Recent API
+versions do not expand it, and `charge.refunded` cannot then know the refund id,
+so it claims a key derived from the charge, which collides with nothing. Acting
+on both would file two TD04 for one refund.
+
+So `refund_event` selects one, and the connector ignores the other with
+`refund_event_not_selected` recorded on the event. `refund.created` is the
+default and the right choice; pick `charge.refunded` only for an endpoint that
+predates the newer event. If refunds are not reversing, check this field before
+anything else: the ignored events are listed under *Ignored* in the connector's
+event tabs, with the reason on each row.
+
+**Fixing it later does not replay them.** `ignored` is deliberately not a
+retryable state, and a Stripe "Resend" does not help either — the redelivery
+carries the same event id, which the ingress dedups. So refunds that arrived
+while the wrong announcement was selected have to be credited by hand
+(Invoices → the parent document → credit note).
+
+That is the conservative answer on purpose. Re-arming them automatically is
+only safe when nothing reversed those refunds already, and the system cannot
+tell: the two announcements claim DIFFERENT keys for one refund — which is the
+whole reason this setting exists — so the emission-idempotency ledger would not
+catch a second TD04 for a refund the other announcement had already reversed.
+Getting the field right before traffic starts is much cheaper than either
+outcome; the connector's setup guide lists the announcement it expects.
 
 ## The two ledgers
 
@@ -100,20 +155,55 @@ What it costs you: nothing that cannot be undone.
 - **The shadow documents are archived**, out of the active invoice list, so
   they cannot be transmitted by accident. They stay inspectable (XML, PDF,
   totals) in the archived view.
-- **Switching to `transmit` later emits fresh documents.** Shadow object
-  claims live in their own `dryrun:` namespace, so a live run does not find
+- **Each one says why it was not sent.** The document carries `dry_run`, shown
+  in the invoice list as *not sent: dry run*. A draft is unsent for many
+  reasons -- incomplete, waiting for review, rejected by SdI and being redone --
+  and during a parallel run the only question that matters is which ones were
+  held back because you are shadowing. That is a property of the document, not
+  something to reconstruct from the ingress ledger.
+- **Switching to `transmit` later emits fresh documents.** Shadow claims are
+  separated by a column on `payment_object_links`, so a live lookup does not see
   them and does not resume a shadow draft. The shadow drafts survive as
-  evidence. To clear them use **Discard shadow run**
-  (`POST .../discard-dry-run`), not a per-invoice delete: the shadow claims
-  hold a RESTRICT foreign key on their drafts, so deleting a draft directly
-  fails. The operation drops the claims first, then the drafts, and never
-  touches a live claim. The generated XMLs stay on their events.
+  evidence.
 
-Two things it does not cover:
+### The two exits
+
+When the comparison is done, every shadow document leaves shadow state one of
+two ways. Nothing expires on its own.
+
+**Discard** -- *Discard shadow run* (`POST .../discard-dry-run`), per connector.
+The right answer for everything the incumbent provider already invoiced: it
+throws away the claims and the drafts together. Not a per-invoice delete: the
+shadow claims hold a RESTRICT foreign key on their drafts, so deleting a draft
+directly fails. The operation drops the claims first, then the drafts, never
+touches a live claim, and leaves the generated XMLs on their events.
+
+**Promote** -- *Make sendable* (`POST .../events/{id}/promote`), per document.
+The right answer for a payment Mycelium has to invoice after all: the incumbent
+missed it, or you are cutting over without waiting for the next event. The
+document leaves the archive, loses the `dry_run` marker and returns to the
+sendable drafts, where you transmit it with the ordinary action.
+
+Promotion moves the claim rows with the document, out of the shadow universe
+and into the live one, in the same transaction. That part is not cosmetic: a
+promoted document whose claim stayed in the shadow universe would be invisible
+to a live lookup, so the next redelivery of that payment would compose a
+**second** invoice for money already invoiced. For the same reason, promotion is
+refused (`payment_connector.already_emitted`) when a live document already
+covers that payment -- switch the connector to `transmit` first and you may find
+the leftover shadow is exactly that case.
+
+The fiscal number is **not** allocated at promotion. It is allocated when the
+document is really transmitted, so a promoted document that you decide against
+after all has still spent nothing.
+
+Two things shadow mode does not cover:
 
 - **credit notes.** A TD04 corrects an emitted document and in shadow mode
   nothing is emitted, so refunds park as `dry_run_credit_note_unsupported`.
-  During a parallel run the incumbent is still issuing them.
+  During a parallel run the incumbent is still issuing them. To keep the
+  parked events out of your triage list, set `credit_note_mode = 'off'` for
+  the duration of the trial.
 - a document that fails validation parks as `dry_run_invalid_document` with
   the validator's message. That is the finding, not a fault: fix the data and
   retry.
@@ -193,7 +283,13 @@ in the provider's retry queue keep verifying under the old secret.
 **Signing secret.** Rotate at the provider first, then paste the new value into
 the connector — in that order, or the window covers nothing. Stripe supports two
 live signing secrets during a rollover, which is the same window from the other
-side.
+side. Submitting the rotation WITHOUT a value is refused for a vendor provider
+(`payment_connector.signing_secret_required`): minting there would install a
+secret the provider never issued, leaving a connector that looks healthy while
+refusing every delivery, with the working secret already demoted to the grace
+copy. On the native contract the same empty submission is legitimate — Mycelium
+is the authority — and mints one; a key agreed with the sender can be pasted
+instead.
 
 **Ingress API key.** Rotate in Mycelium, then update the sender within the grace
 window. Clearing it removes the second factor entirely; the MAC remains mandatory.

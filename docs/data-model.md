@@ -216,7 +216,7 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - `issuer_key_rate_limit(key_id, endpoint_class, org_id, window_start, count)` --
   the per-key fixed-window rate bucket (FORCE RLS).
 
-## Inbound payment connectors (ADR-0051, migration 0092)
+## Inbound payment connectors (ADR-0051, migrations 0092-0095)
 
 - `payment_connectors(id, org_id, issuer_profile_id FK cascade, created_by FK
   users set-null, provider[stripe|mycelium], label, signing_secret_ciphertext,
@@ -225,13 +225,19 @@ org-scoped entity. Memory is partitioned by `org_id`.
   invoice_mode[transmit|draft|dry_run|off],
   credit_note_mode[transmit|draft|dry_run|off],
   emission_event[invoice.paid|payment_intent.succeeded|
-  checkout.session.completed], payment_sync_enabled, series?,
+  checkout.session.completed], refund_event[refund.created|charge.refunded],
+  payment_sync_enabled, series?,
   default_purpose?, default_vat_rate?, default_vat_nature?,
   default_line_description?, amounts_include_vat,
   default_payment_conditions_code?, default_payment_method_code?,
   default_country_code?, metadata_vat_keys text[], metadata_tax_code_keys
   text[], metadata_sdi_keys text[], metadata_pec_keys text[], revoked_at?,
-  last_event_at?, version)` -- UNIQUE `(issuer_profile_id, label)`; the signing
+  last_event_at?, version)` -- UNIQUE `(issuer_profile_id, label)`;
+  `emission_event` and `refund_event` are each ONE value rather than a set,
+  because a provider announces the same money several times in both directions
+  and honouring every announcement would double-invoice (emission) or file two
+  credit notes for one refund (reversal: the two Stripe announcements only
+  deduplicate while the charge carries expanded `refunds.data`). The signing
   secret is a reversible Fernet envelope, the optional ingress key a peppered
   one-way hash. ENABLE (not FORCE) RLS, so the SECURITY DEFINER
   `resolve_payment_connector(uuid)` reads a row with no tenant GUC; it returns

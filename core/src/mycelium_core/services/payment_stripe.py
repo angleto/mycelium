@@ -45,6 +45,8 @@ from mycelium_core.services.payment_events import (
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
+    ProviderEvent,
+    SubscriptionContext,
     VerificationSecrets,
     as_decimal,
     as_mapping,
@@ -308,6 +310,33 @@ class StripeMapper:
     def is_emission_trigger(self, event_type: str, config: MapperConfig) -> bool:
         return event_type == config.emission_event
 
+    def subscription(self, ctx: SubscriptionContext) -> tuple[ProviderEvent, ...]:
+        events: list[ProviderEvent] = []
+        if ctx.emits:
+            events.append(ProviderEvent(ctx.emission_event, "emission"))
+        # Not optional, and the least obvious entry on the list. A Stripe webhook
+        # payload cannot be expanded, so an invoice event names its customer by
+        # bare id: the VAT number, codice fiscale, codice destinatario and PEC
+        # sitting on the Stripe customer never travel with the money. These two
+        # events are the ONLY channel through which a counterpart's fiscal
+        # identity reaches us. Omit them and the connector still verifies, still
+        # ingests, still queues -- and parks nearly everything as
+        # ``no_billing_data`` for reasons no log will explain.
+        events.append(ProviderEvent("customer.created", "customer"))
+        events.append(ProviderEvent("customer.updated", "customer"))
+        if ctx.credit_notes:
+            events.append(ProviderEvent("credit_note.created", "credit_note"))
+            events.append(ProviderEvent(ctx.refund_event, "credit_note"))
+        if ctx.payment_sync:
+            # Only worth delivering when it is not already the emission trigger:
+            # that one arrives anyway, and the emission path marks the document
+            # paid itself.
+            for candidate in ("charge.succeeded", "invoice.payment_succeeded"):
+                if candidate != ctx.emission_event:
+                    events.append(ProviderEvent(candidate, "payment_sync", required=False))
+                    break
+        return tuple(events)
+
     def to_intent(self, payload: Mapping[str, Any], *, config: MapperConfig) -> Intent:
         identity = self.identify(payload)
         event_type = identity.event_type
@@ -322,6 +351,15 @@ class StripeMapper:
         if event_type in _CREDIT_NOTE_EVENTS:
             return self._credit_note(obj, config=config)
         if event_type in _REFUND_EVENTS:
+            # One refund, two announcements. Honour only the configured one:
+            # they agree while the charge carries expanded ``refunds.data`` (both
+            # key the claim on the refund id) and diverge when it does not, which
+            # would file the same refund twice. Ignoring by NAME rather than
+            # silently keeps the reason visible in the ingress ledger, so an
+            # operator who subscribed the other event sees why nothing happened
+            # instead of an empty credit-note list.
+            if event_type != config.refund_event:
+                return IgnoreIntent(reason="refund_event_not_selected")
             return self._refund(event_type, obj)
         if event_type in _PAYMENT_EVENTS:
             return PaymentSyncIntent(parent_keys=self._money_keys(event_type, obj))

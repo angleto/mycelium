@@ -113,6 +113,21 @@ EMISSION_EVENTS = (
     "checkout.session.completed",
 )
 
+#: The single event family that reverses a document, for the SAME reason there
+#: is exactly one emission trigger: Stripe announces one refund twice, as
+#: ``refund.created`` and as ``charge.refunded``, and the two do NOT always
+#: dedup against each other. They agree only while the charge payload carries
+#: expanded ``refunds.data``; when it does not (recent API versions stopped
+#: expanding it) ``charge.refunded`` cannot know the refund id and falls back to
+#: a key derived from the charge, which collides with nothing. Subscribing both
+#: in the provider would then file TWO credit notes for one refund, so the
+#: connector honours the configured one and ignores the other.
+#:
+#: ``refund.created`` is the better default: it always carries the refund id, and
+#: it fires per refund, so partials stay one document each. ``charge.refunded``
+#: exists for accounts whose webhook endpoint predates the newer event.
+REFUND_EVENTS = ("refund.created", "charge.refunded")
+
 #: Lifecycle of an ingested event.
 #: ``pending`` due for a processing attempt; ``processing`` a worker holds the
 #: lease; ``done`` produced its document (or was a settled no-op); ``ignored``
@@ -184,6 +199,10 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
             name="ck_payment_connectors_emission_event",
         ),
         CheckConstraint(
+            f"refund_event IN {_sql_in(REFUND_EVENTS)}",
+            name="ck_payment_connectors_refund_event",
+        ),
+        CheckConstraint(
             "length(label) >= 1 AND length(label) <= 120", name="ck_payment_connectors_label_len"
         ),
         UniqueConstraint("issuer_profile_id", "label", name="uq_payment_connectors_label"),
@@ -230,6 +249,11 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
     )
     emission_event: Mapped[str] = mapped_column(
         String(40), nullable=False, server_default="invoice.paid"
+    )
+    #: Which of the provider's two refund announcements this connector listens
+    #: to. See :data:`REFUND_EVENTS`: honouring both would file one refund twice.
+    refund_event: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default="refund.created"
     )
     #: Mirror a provider "payment succeeded" signal onto ``payment_status``.
     #: Independent of emission: with ``invoice_mode='draft'`` the document is
@@ -550,6 +574,7 @@ __all__ = [
     "EVENT_STATUSES",
     "OBJECT_KINDS",
     "PROVIDERS",
+    "REFUND_EVENTS",
     "PaymentConnector",
     "PaymentConnectorEvent",
     "PaymentCustomerLink",

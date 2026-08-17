@@ -751,8 +751,14 @@ async def test_previous_signing_secret_still_verifies_in_the_grace_window() -> N
         h, issuer, org, user = await _setup(c)
         cid, old_secret, _key = await _connector(c, h, issuer)
 
+        # The new value is PASTED, the way a real Stripe rotation works: the
+        # dashboard rolls the endpoint secret and shows it once. Mycelium
+        # refuses to mint one for a vendor provider, because a secret Stripe
+        # never issued would make every delivery fail its signature check.
         rotated = await c.post(
-            f"/issuer-profiles/{issuer}/payment-connectors/{cid}/rotate-signing-secret", headers=h
+            f"/issuer-profiles/{issuer}/payment-connectors/{cid}/rotate-signing-secret",
+            headers=h,
+            json={"signing_secret": f"whsec_rolled_in_stripe_{uuid.uuid4().hex}"},
         )
         assert rotated.status_code == 200, rotated.text
         new_secret = rotated.json()["signing_secret"]
@@ -785,8 +791,14 @@ async def test_expired_grace_window_stops_honouring_the_old_secret() -> None:
         h, issuer, org, user = await _setup(c)
         cid, old_secret, _key = await _connector(c, h, issuer)
 
+        # The new value is PASTED, the way a real Stripe rotation works: the
+        # dashboard rolls the endpoint secret and shows it once. Mycelium
+        # refuses to mint one for a vendor provider, because a secret Stripe
+        # never issued would make every delivery fail its signature check.
         rotated = await c.post(
-            f"/issuer-profiles/{issuer}/payment-connectors/{cid}/rotate-signing-secret", headers=h
+            f"/issuer-profiles/{issuer}/payment-connectors/{cid}/rotate-signing-secret",
+            headers=h,
+            json={"signing_secret": f"whsec_rolled_in_stripe_{uuid.uuid4().hex}"},
         )
         assert rotated.status_code == 200, rotated.text
         new_secret = rotated.json()["signing_secret"]

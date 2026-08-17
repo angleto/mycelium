@@ -67,6 +67,7 @@ from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
     EMISSION_EVENTS,
     PROVIDERS,
+    REFUND_EVENTS,
     PaymentConnector,
     PaymentConnectorEvent,
     PaymentCustomerLink,
@@ -87,6 +88,8 @@ from mycelium_core.services.payment_events import (
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
+    ProviderEvent,
+    SubscriptionContext,
     VerificationSecrets,
     get_mapper,
 )
@@ -222,9 +225,29 @@ class ResolvedConnector:
         return ok
 
 
+def subscription_for(connector: PaymentConnector) -> tuple[ProviderEvent, ...]:
+    """The events this connector's provider has to be configured to deliver.
+
+    Read straight off the row, so the instructions an operator follows cannot
+    disagree with the connector they are configuring: flip ``credit_note_mode``
+    to ``off`` and the refund events drop out of the list on the next render.
+    """
+    mapper = get_mapper(connector.provider)
+    return mapper.subscription(
+        SubscriptionContext(
+            emission_event=connector.emission_event,
+            refund_event=connector.refund_event,
+            emits=connector.invoice_mode != "off",
+            credit_notes=connector.credit_note_mode != "off",
+            payment_sync=connector.payment_sync_enabled,
+        )
+    )
+
+
 def mapper_config(connector: PaymentConnector) -> MapperConfig:
     return MapperConfig(
         emission_event=connector.emission_event,
+        refund_event=connector.refund_event,
         metadata_vat_keys=tuple(connector.metadata_vat_keys),
         metadata_tax_code_keys=tuple(connector.metadata_tax_code_keys),
         metadata_sdi_keys=tuple(connector.metadata_sdi_keys),
@@ -242,7 +265,12 @@ def mapper_config(connector: PaymentConnector) -> MapperConfig:
 
 
 def _validate_vocabulary(
-    *, provider: str, invoice_mode: str, credit_note_mode: str, emission_event: str
+    *,
+    provider: str,
+    invoice_mode: str,
+    credit_note_mode: str,
+    emission_event: str,
+    refund_event: str,
 ) -> None:
     if provider not in PROVIDERS:
         raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID, detail=provider)
@@ -251,6 +279,10 @@ def _validate_vocabulary(
             raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_MODE_INVALID, detail=mode)
     if emission_event not in EMISSION_EVENTS:
         raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_EVENT_INVALID, detail=emission_event)
+    if refund_event not in REFUND_EVENTS:
+        raise UnprocessableError(
+            MessageCode.PAYMENT_CONNECTOR_REFUND_EVENT_INVALID, detail=refund_event
+        )
 
 
 #: Fields a PATCH may touch. An explicit whitelist, like ``_PROFILE_FIELDS``:
@@ -262,6 +294,7 @@ PATCHABLE_FIELDS = frozenset(
         "invoice_mode",
         "credit_note_mode",
         "emission_event",
+        "refund_event",
         "payment_sync_enabled",
         "series",
         "default_purpose",
@@ -308,11 +341,13 @@ async def create_connector(
     invoice_mode = str(fields.get("invoice_mode", "transmit"))
     credit_note_mode = str(fields.get("credit_note_mode", "transmit"))
     emission_event = str(fields.get("emission_event", "invoice.paid"))
+    refund_event = str(fields.get("refund_event", "refund.created"))
     _validate_vocabulary(
         provider=provider,
         invoice_mode=invoice_mode,
         credit_note_mode=credit_note_mode,
         emission_event=emission_event,
+        refund_event=refund_event,
     )
 
     if signing_secret is None and provider != "mycelium":
@@ -395,12 +430,14 @@ async def update_connector(
         "invoice_mode": values.get("invoice_mode", row.invoice_mode),
         "credit_note_mode": values.get("credit_note_mode", row.credit_note_mode),
         "emission_event": values.get("emission_event", row.emission_event),
+        "refund_event": values.get("refund_event", row.refund_event),
     }
     _validate_vocabulary(
         provider=str(merged["provider"]),
         invoice_mode=str(merged["invoice_mode"]),
         credit_note_mode=str(merged["credit_note_mode"]),
         emission_event=str(merged["emission_event"]),
+        refund_event=str(merged["refund_event"]),
     )
     if not values:
         # A write that writes nothing is not a write: bumping the concurrency
@@ -435,6 +472,15 @@ async def rotate_signing_secret(
     window so events already in the provider's retry queue still verify."""
     await require_role(session, org_id, actor_id, Role.owner)
     row = await get_connector(session, org_id=org_id, connector_id=connector_id)
+    if signing_secret is None and row.provider != "mycelium":
+        # The same rule ``create_connector`` enforces, and rotation is the more
+        # likely way to trip it: an operator rolling a Stripe endpoint secret who
+        # submits an empty value would otherwise install a secret Stripe has
+        # never heard of. The connector would stay enabled, report no error, and
+        # refuse every delivery as signature_invalid -- with the previous secret
+        # already demoted to the grace copy, so it recovers on its own only until
+        # that expires.
+        raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_SECRET_REQUIRED, detail=row.provider)
     raw = signing_secret or generate_signing_secret()
     grace = get_settings().payment_connector_secret_grace_hours
     row.previous_signing_secret_ciphertext = row.signing_secret_ciphertext
@@ -1388,6 +1434,12 @@ async def _process_emission(
             # finding under attempts; park it with the validator's own words,
             # which name the field and the rule that rejected it.
             raise QuarantineError("dry_run_invalid_document", str(exc)[:512]) from exc
+        # The document says WHY it was not sent. Without this it is an archived
+        # draft like any other, and "held back because we are shadowing" reads
+        # the same as "incomplete" or "rejected and being redone" -- on the one
+        # surface where confusing the two means filing a duplicate or never
+        # filing at all.
+        inv.dry_run = True
         # Out of the active list: a shadow document must not sit where an
         # operator browses documents they may transmit. It stays fully
         # inspectable (XML, PDF, totals) in the archived view.
@@ -1799,6 +1851,97 @@ async def discard_dry_run(
     return discarded
 
 
+async def promote_dry_run(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+) -> Invoice:
+    """Turn ONE shadow document into a real, sendable draft.
+
+    The other exit from a parallel run. ``discard_dry_run`` throws the shadows
+    away, which is right when an incumbent provider filed the real documents;
+    this is for the payment that has to be invoiced by US after all -- the
+    incumbent missed it, or the operator decides to cut over without waiting
+    for the next event.
+
+    Promotion is NOT "un-archive it and press send". The shadow's claim rows
+    live in the shadow universe (``payment_object_links.dry_run``), where a live
+    lookup cannot see them; leaving them there and transmitting the document
+    would mean the next redelivery of that same payment finds no live claim and
+    composes a SECOND document for money already invoiced. So the claims move
+    with the document, in one transaction, and the unique index is what makes
+    the move safe: if a live claim already exists for any of these objects,
+    something real already covers this payment and the promotion is refused
+    rather than filed.
+
+    The document is left as a DRAFT, deliberately. Transmission stays the
+    operator's existing, audited action -- which is also where the fiscal number
+    is allocated, so a promoted document takes its number when it is really
+    filed and not a moment earlier.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    inv = await invoice_svc.get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    if not inv.dry_run:
+        raise ConflictError(MessageCode.PAYMENT_CONNECTOR_NOT_DRY_RUN, detail=str(invoice_id))
+
+    links = (
+        (
+            await session.execute(
+                select(PaymentObjectLink).where(
+                    PaymentObjectLink.connector_id == connector_id,
+                    PaymentObjectLink.invoice_id == invoice_id,
+                    PaymentObjectLink.dry_run.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Checked before writing, so the refusal is a DomainError the caller can
+    # render rather than a unique-violation surfacing as a 500. The index still
+    # backs it: this check and the constraint agree, and the constraint is the
+    # one that holds under a concurrent promotion.
+    for link in links:
+        clash = (
+            await session.execute(
+                select(PaymentObjectLink.id).where(
+                    PaymentObjectLink.connector_id == connector_id,
+                    PaymentObjectLink.object_kind == link.object_kind,
+                    PaymentObjectLink.object_id == link.object_id,
+                    PaymentObjectLink.dry_run.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if clash is not None:
+            raise ConflictError(
+                MessageCode.PAYMENT_CONNECTOR_ALREADY_EMITTED,
+                detail=f"{link.object_kind}:{link.object_id}",
+            )
+    for link in links:
+        link.dry_run = False
+
+    inv.dry_run = False
+    # Back into the active list: it is now a document waiting to be sent, and
+    # the archive is where an operator does NOT look for those.
+    await invoice_svc.archive_invoice(
+        session, org_id=org_id, actor_id=actor_id, invoice_id=invoice_id, archived=False
+    )
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="payment_connector",
+        entity_id=connector_id,
+        action="promote_dry_run",
+        diff={"invoice_id": str(invoice_id), "claims_moved": len(links)},
+    )
+    return inv
+
+
 # --- operator actions ------------------------------------------------------
 
 
@@ -1972,6 +2115,7 @@ __all__ = [
     "mapper_config",
     "net_unit_price",
     "process_event",
+    "promote_dry_run",
     "purge_connector",
     "purge_expired",
     "rearm_waiting_events",

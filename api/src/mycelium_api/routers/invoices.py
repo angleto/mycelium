@@ -96,6 +96,7 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         conservation_status=i.conservation_status,
         deleted_at=i.deleted_at,
         is_archived=i.is_archived,
+        dry_run=i.dry_run,
         version=i.version,
     )
 

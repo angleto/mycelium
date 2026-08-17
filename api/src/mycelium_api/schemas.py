@@ -3224,6 +3224,10 @@ class InvoiceOut(BaseModel):
     conservation_status: ConservationStatus
     deleted_at: datetime.datetime | None
     is_archived: bool
+    #: Composed by a payment connector in shadow mode and deliberately not sent
+    #: (ADR-0051). Distinct from every other reason a draft is unsent, which is
+    #: the whole point during a parallel run with an incumbent provider.
+    dry_run: bool = False
     version: int
 
 
