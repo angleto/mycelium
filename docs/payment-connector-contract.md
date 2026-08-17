@@ -236,6 +236,7 @@ Every field is optional at parse time; what is *fiscally* required is in
 | `country` | Falls back to `country_code`. |
 | `sdi_code` | Codice destinatario, exactly 7 characters. **`0000000` is not accepted as a way to make a document emittable**: it cannot be used to deliver. Send the recipient's real code, or send `pec` instead. A counterpart outside Italy needs neither -- the connector applies the standard's `XXXXXXX` by rule. |
 | `pec` | The counterpart's PEC. |
+> The Stripe adapter reads the codice destinatario from the customer's **metadata** only. It deliberately does not interpret `address.line2`, where customers sometimes type it: a second address line is an address line, and guessing otherwise would decide invoice delivery from a street field.
 | `email` | Ordinary email; carried for reference, not a FatturaPA field. |
 
 The name is resolved as: `legal_name`, else `"{first_name} {last_name}"`,

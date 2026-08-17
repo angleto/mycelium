@@ -97,6 +97,15 @@ does not travel with an invoice event. So "the customer plainly has it and
 Mycelium says it is missing" is the expected symptom of the missing
 subscription, not a bug in the reading.
 
+Only the METADATA is read for it. In particular `address.line2` is **not**:
+customers do type a codice destinatario there, because it is the only free
+field the checkout offers them, but a second address line is an address line.
+Reading it would mean deciding that a 7-character string in a street field is a
+fiscal routing code — a guess about somebody else's data, on the field that
+decides where an invoice is delivered. The cost is that a legitimate `line2`
+("Interno 3", "Scala B") is dropped rather than appended, which is the safer of
+the two errors.
+
 The key it is stored under is configurable per connector
 (`metadata_sdi_keys`, default `codice_destinatario`, `sdi_code`, `sdi`) and
 matching ignores case and separators, so `Codice Destinatario`,
