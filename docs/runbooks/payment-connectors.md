@@ -199,6 +199,13 @@ What it costs you: nothing that cannot be undone.
 - **The shadow documents are archived**, out of the active invoice list, so
   they cannot be transmitted by accident. They stay inspectable (XML, PDF,
   totals) in the archived view.
+- **Nothing can send them, not even by mistake.** The three places a connector
+  can transmit are each guarded by its mode, and a test drives the whole shadow
+  surface (emission, redelivery, payment reconciliation, refund) through an SdI
+  channel that fails the test if it is called at all. On top of that, the single
+  function that files refuses any document still marked `dry_run`
+  (`invoice.dry_run_not_sendable`), so the SPA's transmit button and the public
+  issuer-key API cannot file one either. Promotion is the only way out.
 - **Each one says why it was not sent.** The document carries `dry_run`, shown
   in the invoice list as *not sent: dry run*. A draft is unsent for many
   reasons -- incomplete, waiting for review, rejected by SdI and being redone --

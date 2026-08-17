@@ -2007,6 +2007,10 @@ export const en = {
     tabSuggestions: 'Suggestions',
   },
   invoices: {
+    section: {
+      invoices: 'Documents',
+      connectors: 'Automated collections',
+    },
     dryRunBadge: 'not sent: dry run',
     nav: 'Invoices',
     title: 'Invoices I issue (electronic, SDI)',
@@ -2473,6 +2477,8 @@ export const en = {
     triageNone: 'No payment connector configured. Create one in Settings → issuer profile → Payment connectors.',
     triagePick: 'Connector',
     triageLoadError: 'Could not load the connectors.',
+    credentials: 'Credentials',
+    setSigning: 'Set signing secret',
     purposeEmission: 'mints the invoice',
     purposeCustomer: "carries the customer's fiscal data (the only channel: a Stripe invoice payload cannot be expanded and names its customer by id alone)",
     purposeCreditNote: 'mints the credit note',

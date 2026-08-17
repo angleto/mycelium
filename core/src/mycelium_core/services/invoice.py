@@ -1705,6 +1705,15 @@ def _require_transmittable(inv: Invoice) -> bool:
     invoice (409); cleared -> the attempt settled (a manual-export transmit
     also ends ident-less but with the lease cleared, so it is NOT retryable).
     Returns True on the retry leg."""
+    # A shadow document is not transmittable BY ANYONE, checked here rather than
+    # in each caller. Shadow mode's promise is "nothing is sent", and the three
+    # guards that keep the connector from filing are in the connector; this is
+    # the single function that actually files, so a document composed while
+    # shadowing is refused whatever route reaches it -- the SPA, the public
+    # issuer-key API, a future caller nobody has written yet. ``promote_dry_run``
+    # is the one way out, and it is deliberately an operator's decision.
+    if inv.dry_run:
+        raise ConflictError(MessageCode.INVOICE_DRY_RUN_NOT_SENDABLE)
     if inv.state is InvoiceState.draft:
         return False
     if inv.state is InvoiceState.transmitted and inv.identificativo_sdi is None:

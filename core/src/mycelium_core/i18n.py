@@ -136,6 +136,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_NOT_FOUND = "payment_connector.not_found"
     PAYMENT_CONNECTOR_NOT_REVOKED = "payment_connector.not_revoked"
     PAYMENT_CONNECTOR_NOT_DRY_RUN = "payment_connector.not_dry_run"
+    INVOICE_DRY_RUN_NOT_SENDABLE = "invoice.dry_run_not_sendable"
     PAYMENT_CONNECTOR_SECRET_MISSING = "payment_connector.signing_secret_missing"  # noqa: S105 (message code, not a secret)
     PAYMENT_CONNECTOR_KEY_UNSUPPORTED = "payment_connector.ingress_key_unsupported"
     PAYMENT_CONNECTOR_ALREADY_EMITTED = "payment_connector.already_emitted"
@@ -470,6 +471,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "This connector has no signing secret yet, so it could not verify a single "
             "delivery. Register the webhook URL at {detail} and paste the secret it "
             "shows, then enable it"
+        ),
+        MessageCode.INVOICE_DRY_RUN_NOT_SENDABLE: (
+            "This document was composed in shadow mode and is not sendable. Promote it "
+            "first if it really has to be filed"
         ),
         MessageCode.PAYMENT_CONNECTOR_NOT_DRY_RUN: (
             "This document was not composed in shadow mode, so there is nothing to promote"

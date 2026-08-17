@@ -52,7 +52,8 @@ from sqlalchemy import select, text, update
 
 from mycelium_core.config import get_settings
 from mycelium_core.db import ActorKind, admin_session, tenant_session
-from mycelium_core.errors import ConflictError
+from mycelium_core.errors import ConflictError, DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import DocumentType, Invoice, InvoiceState, PaymentStatus
 from mycelium_core.models.membership import Role
@@ -399,6 +400,147 @@ class _ExplodingChannel:
 
     async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
         raise RuntimeError("sdi unreachable")
+
+
+class _ForbiddenChannel:
+    """An SdI channel that must never be reached.
+
+    Distinct from ``_ExplodingChannel``: that one models an outage, this one
+    models a PROMISE. It counts and refuses, so a test does not have to infer
+    "nothing was sent" from the absence of a side effect -- it can assert on the
+    only thing that actually sends.
+    """
+
+    name = "forbidden"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @property
+    def intermediary(self) -> IntermediaryIdentity | None:
+        return None
+
+    async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
+        self.calls += 1
+        raise AssertionError(f"shadow mode reached SdI for invoice {invoice_id}")
+
+
+async def test_shadow_mode_never_reaches_sdi_on_any_path() -> None:
+    """THE guarantee a parallel run is bought with, asserted at the only place
+    that can break it.
+
+    Three code paths can transmit: a fresh emission, a redelivery that finds an
+    existing claim and settles it, and a credit note. Each is guarded by its own
+    mode switch, in three different functions, and reading them is not the same
+    as knowing. So the SdI channel itself is replaced by one that fails the test
+    if it is called at all, and the whole dry-run surface is driven through it:
+    emit, redeliver the same payment, reconcile a payment, and refund.
+
+    An operator running in parallel with an incumbent provider is trusting
+    exactly this. A future edit that moves a transmit outside its guard has to
+    fail here.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id,
+        user_id,
+        issuer_id,
+        invoice_mode="dry_run",
+        credit_note_mode="dry_run",
+        payment_sync_enabled=True,
+    )
+    channel = _ForbiddenChannel()
+    set_channel_override(lambda: channel)
+    try:
+        payload = _invoice_paid(event_id="evt_shadow")
+        first = await _ingest(org_id, connector_id, payload)
+        assert await _run(org_id, connector_id, first) == "done"
+
+        # The redelivery path: the claim exists, so this goes through _settle,
+        # which is the transmit site that does NOT re-compose and could quietly
+        # file the shadow document.
+        again = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_shadow_again"))
+        assert await _run(org_id, connector_id, again) == "done"
+
+        # Payment reconciliation is independent of the emission switch, so it
+        # has to be exercised under shadow mode too.
+        paid = await _ingest(
+            org_id,
+            connector_id,
+            {
+                "id": "evt_charge",
+                "type": "charge.succeeded",
+                "created": 1_755_000_100,
+                "data": {
+                    "object": {
+                        "id": "ch_1",
+                        "object": "charge",
+                        "currency": "eur",
+                        "invoice": "in_1",
+                        "payment_intent": "pi_1",
+                        "amount": 12200,
+                    }
+                },
+            },
+        )
+        await _run(org_id, connector_id, paid)
+
+        # And the reversal path, whose transmit site is a third function.
+        refunded = await _ingest(org_id, connector_id, _refund(event_id="evt_refund", amount=12200))
+        await _run(org_id, connector_id, refunded)
+    finally:
+        set_channel_override(None)
+
+    assert channel.calls == 0, "shadow mode called the SdI channel"
+
+    # ``archived``, not the default: a shadow document is filed OUT of the
+    # active list, so reading the active one would report an empty workspace and
+    # this assertion would pass for the wrong reason. (There is no "all" view --
+    # anything the service does not recognise falls back to active.)
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        invoices = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        assert not await inv_svc.list_invoices(s, org_id=org_id, view="active"), (
+            "a shadow document must never sit where an operator transmits"
+        )
+    assert invoices, "the shadow run must still COMPOSE, or it verifies nothing"
+    assert all(i.dry_run for i in invoices), "every document here was composed while shadowing"
+    for inv in invoices:
+        assert inv.state is InvoiceState.draft, f"{inv.id} left draft state under shadow mode"
+        assert inv.identificativo_sdi is None
+        assert inv.number is None, "no fiscal number may be spent while shadowing"
+
+
+async def test_a_shadow_document_cannot_be_transmitted_by_any_caller() -> None:
+    """The belt to the connector's braces.
+
+    The connector's three transmit sites are each guarded by a mode switch, and
+    the test above proves shadow mode never reaches them. This one proves the
+    document itself is refused at the ONE function that files, so a route that
+    does not know about connectors at all -- the SPA's transmit button, the
+    public issuer-key API, something not written yet -- cannot file a shadow
+    document either. Promotion is the only way out, and it is a decision.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    event_id = await _ingest(org_id, connector_id, _invoice_paid())
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow = (await inv_svc.list_invoices(s, org_id=org_id, view="archived"))[0]
+        assert shadow.dry_run is True
+        with pytest.raises(DomainError) as err:
+            await inv_svc.transmit(s, org_id=org_id, actor_id=user_id, invoice_id=shadow.id)
+        assert err.value.code is MessageCode.INVOICE_DRY_RUN_NOT_SENDABLE
+
+    # After promotion it is an ordinary draft again, and the refusal lifts.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.promote_dry_run(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id, invoice_id=shadow.id
+        )
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        filed = await inv_svc.transmit(s, org_id=org_id, actor_id=user_id, invoice_id=shadow.id)
+        assert filed.state is InvoiceState.transmitted
+        assert filed.number is not None, "the number is spent HERE, at the real filing"
 
 
 # --- claiming and the lease ------------------------------------------------

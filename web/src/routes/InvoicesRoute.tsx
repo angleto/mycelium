@@ -68,6 +68,12 @@ const DEFAULT_FILTER_STATES: InvoiceState[] = ['draft', 'transmitted']
 type InvView = 'active' | 'archived' | 'trashed'
 const INV_VIEWS: readonly InvView[] = ['active', 'archived', 'trashed']
 
+// The route's two sections: the documents themselves, and what the inbound
+// payment connectors did to them. Not persisted -- a reload lands on the
+// documents, which is what /invoices means.
+type InvSection = 'invoices' | 'connectors'
+const INV_SECTIONS: readonly InvSection[] = ['invoices', 'connectors']
+
 // The view persists, but never restores INTO the recycle bin: a reload
 // always lands on the active list (or archived, if that was chosen), so
 // you don't reopen the app stuck in the bin.
@@ -454,9 +460,10 @@ export function InvoicesRoute() {
   const activeId = session?.workspaceId
 
   const [profiles, setProfiles] = useState<Profile[]>([])
-  // Collapsed by default: the connector panels fetch on mount, and an
-  // operator with no connectors must pay nothing for the section existing.
-  const [showConnectors, setShowConnectors] = useState(false)
+  // Which SECTION of this route is on screen. Deliberately not folded into
+  // ``view``: that value is a query parameter the API validates, and
+  // "connectors" is not a way of looking at invoices.
+  const [section, setSection] = useState<InvSection>('invoices')
   const [clients, setClients] = useState<Client[]>([])
   const [list, setList] = useState<Invoice[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -1210,23 +1217,29 @@ export function InvoicesRoute() {
       <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
-      {/* Inbound payment connectors: what they produced and what they turned
-          away. Deliberately NOT a fourth visibility band -- the bands are bands
-          of invoices and this is a different object -- and deliberately not in
-          Settings, where you go once to configure and never again. A panel of
-          its own, collapsed by default, so nothing about the existing list
-          changes for anyone who does not use connectors. */}
+      {/* Two SECTIONS, not a fourth visibility band: the bands (active,
+          archived, bin) are bands of invoices, and what a payment connector
+          produced or turned away is a different object. Kept out of Settings
+          on purpose -- that is a page you visit once to configure -- and kept
+          out of the band selector so nothing about the existing list changes.
+          The section is separate state from ``view``: ``view`` is sent to the
+          API, and there is no such thing as a "connectors" view of invoices. */}
       <div className="row">
-        <button
-          type="button"
-          className={`btn--sm ${showConnectors ? '' : 'btn--ghost'}`}
-          aria-pressed={showConnectors}
-          onClick={() => setShowConnectors(!showConnectors)}
-        >
-          {t('paymentConnectors.triageTitle')}
-        </button>
+        {INV_SECTIONS.map((sct) => (
+          <button
+            key={sct}
+            type="button"
+            className={`btn--sm ${section === sct ? '' : 'btn--ghost'}`}
+            aria-pressed={section === sct}
+            onClick={() => setSection(sct)}
+          >
+            {t(`invoices.section.${sct}`)}
+          </button>
+        ))}
       </div>
-      {showConnectors && <ConnectorTriage profiles={profiles} />}
+      {section === 'connectors' && <ConnectorTriage profiles={profiles} />}
+      {section === 'invoices' && (
+        <>
       {/* Visibility band selector (Active | Archived | Trash). */}
       <div className="row">
         {INV_VIEWS.map((v) => (
@@ -1382,6 +1395,8 @@ export function InvoicesRoute() {
         </ul>
       )}
 
+        </>
+      )}
       {sel && (() => {
         // On a draft the persisted ``sel.number`` is null until SdI
         // transmit; the resolved progressive lives on preview.number

@@ -1024,7 +1024,12 @@ async def test_promoting_a_shadow_makes_it_sendable_and_moves_its_claim() -> Non
     assert await _run(org_id, connector_id, live) == "done"
 
     async with tenant_session(str(org_id), str(user_id)) as s:
-        everything = await inv_svc.list_invoices(s, org_id=org_id, view="all")
+        # Both bands, explicitly: a promoted document leaves the archive, so
+        # counting only one band could miss a second document rather than prove
+        # there is none.
+        active = await inv_svc.list_invoices(s, org_id=org_id, view="active")
+        archived = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        everything = active + archived
         assert len(everything) == 1, "one payment, one document -- promoted then transmitted"
         assert everything[0].state is InvoiceState.transmitted
         assert everything[0].number is not None, "the number arrives with the real filing"
@@ -1130,7 +1135,9 @@ async def test_discard_leaves_a_promoted_document_alone() -> None:
         assert discarded == 1, "only the document still marked as a shadow"
 
     async with tenant_session(str(org_id), str(user_id)) as s:
-        left = await inv_svc.list_invoices(s, org_id=org_id, view="all")
+        active = await inv_svc.list_invoices(s, org_id=org_id, view="active")
+        archived = await inv_svc.list_invoices(s, org_id=org_id, view="archived")
+        left = active + archived
         assert [i.id for i in left] == [kept.id]
         assert left[0].dry_run is False
 

@@ -898,6 +898,23 @@ button.btn--ghost {
   color: var(--fg);
   white-space: nowrap;
 }
+/* One connector, read top to bottom: what it is and whether it works, then
+   how it behaves, then what it can do. The previous single wrapped paragraph
+   put six buttons and three status words in the same visual run. */
+.pc-row__head {
+  margin-bottom: 0.15rem;
+}
+.pc-row__meta {
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+/* Rare, consequential actions: indented under the row they belong to, so it
+   is obvious they are a group and not more of the same. */
+.pc-row__creds {
+  margin: 0.4rem 0 0.2rem 0.9rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
 /* Payment-connector setup guide: the provider-side checklist that travels with
    a connector. Quieter than .card--running because it is reference material
    sitting inside an already-highlighted card, not a second call to action. */

@@ -1020,6 +1020,9 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
   // Which connector's signing secret is being rotated, and the value typed
   // for it. Held here rather than in a prompt so it can be masked.
   const [rotating, setRotating] = useState<string | null>(null)
+  // Which connector has its credential group open. Rare, consequential
+  // actions do not belong in the row an operator scans every day.
+  const [creds, setCreds] = useState<string | null>(null)
   const [rotateSecret, setRotateSecret] = useState('')
   const [withApiKey, setWithApiKey] = useState(false)
   const [form, setForm] = useState<Defaults>(EMPTY_DEFAULTS)
@@ -1308,29 +1311,32 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
         <ul className="list">
           {rows.map((c) => (
             <li key={c.id}>
-              <strong>{c.label}</strong> <code>{c.provider}</code>{' '}
-              <span className={c.enabled ? 'tag' : 'tag tag--muted'}>
-                {c.enabled ? t('paymentConnectors.enabled') : t('paymentConnectors.disabled')}
-              </span>{' '}
-              {/* The state between "created" and "usable". Named, because
-                  otherwise it presents as an ordinary disabled connector and
-                  the operator has no way to know what it is waiting for. */}
-              {!c.has_signing_secret && (
-                <span className="badge badge--dry-run">
-                  {t('paymentConnectors.secretMissing')}
-                </span>
-              )}{' '}
-              <span className="muted">
-                {t('paymentConnectors.invoiceMode')}: {modeLabel(c.invoice_mode)} |{' '}
-                {t('paymentConnectors.creditNoteMode')}: {modeLabel(c.credit_note_mode)}
-              </span>{' '}
-              <span className="muted">
-                | {t('paymentConnectors.lastEvent')}:{' '}
+              {/* Identity and state on one line, settings on the next. The
+                  previous single run put the label, the provider, three status
+                  words, two modes, a timestamp and six buttons in one wrapped
+                  paragraph, where the one thing an operator looks for -- is
+                  this thing on, and can it work -- was the hardest to find. */}
+              <div className="pc-row__head">
+                <strong>{c.label}</strong> <code>{c.provider}</code>{' '}
+                <span className={c.enabled ? 'tag' : 'tag tag--muted'}>
+                  {c.enabled ? t('paymentConnectors.enabled') : t('paymentConnectors.disabled')}
+                </span>{' '}
+                {/* The state between "created" and "usable". Named, because
+                    otherwise it presents as an ordinary disabled connector and
+                    the operator has no way to know what it is waiting for. */}
+                {!c.has_signing_secret && (
+                  <span className="badge badge--dry-run">
+                    {t('paymentConnectors.secretMissing')}
+                  </span>
+                )}
+              </div>
+              <div className="pc-row__meta muted">
+                {t('paymentConnectors.invoiceMode')}: {modeLabel(c.invoice_mode)} ·{' '}
+                {t('paymentConnectors.creditNoteMode')}: {modeLabel(c.credit_note_mode)} ·{' '}
+                {t('paymentConnectors.lastEvent')}:{' '}
                 {c.last_event_at ? stamp(c.last_event_at) : t('paymentConnectors.never')}
-              </span>{' '}
-              {c.has_api_key && (
-                <span className="muted">| {t('paymentConnectors.apiKeyArmed')}</span>
-              )}{' '}
+                {c.has_api_key && <> · {t('paymentConnectors.apiKeyArmed')}</>}
+              </div>
               {c.revoked_at ? (
                 <>
                   <em>({t('paymentConnectors.revoked')})</em>{' '}
@@ -1369,38 +1375,19 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                   >
                     {t('paymentConnectors.edit')}
                   </button>{' '}
+                  {/* Credential work is rare and consequential, so it stops
+                      competing for attention with the two buttons used daily.
+                      One click away, never a click by accident. Missing the
+                      signing secret is the exception: then this IS the next
+                      thing to do, so the group opens itself. */}
                   <button
                     type="button"
                     className="btn--sm btn--ghost"
-                    onClick={() => {
-                      setRotateSecret('')
-                      setRotating(rotating === c.id ? null : c.id)
-                    }}
+                    aria-expanded={creds === c.id || !c.has_signing_secret}
+                    onClick={() => setCreds(creds === c.id ? null : c.id)}
                   >
-                    {t('paymentConnectors.rotateSigning')}
+                    {t('paymentConnectors.credentials')}
                   </button>{' '}
-                  {/* Offered only where the sender can present it; the
-                      backend refuses the rest. CLEARING stays available for
-                      every provider, because a key armed before that rule
-                      existed is exactly what has to be removable. */}
-                  {c.provider === 'mycelium' && (
-                    <button
-                      type="button"
-                      className="btn--sm btn--ghost"
-                      onClick={() => void onRotateApiKey(c.id)}
-                    >
-                      {t('paymentConnectors.rotateApiKey')}
-                    </button>
-                  )}{' '}
-                  {c.has_api_key && (
-                    <button
-                      type="button"
-                      className="btn--sm btn--ghost"
-                      onClick={() => void onClearApiKey(c.id)}
-                    >
-                      {t('paymentConnectors.clearApiKey')}
-                    </button>
-                  )}{' '}
                   <button
                     type="button"
                     className="btn--sm btn--danger"
@@ -1408,10 +1395,49 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                   >
                     {t('paymentConnectors.revoke')}
                   </button>
+                  {(creds === c.id || !c.has_signing_secret) && (
+                    <div className="pc-row__creds">
+                      <button
+                        type="button"
+                        className="btn--sm"
+                        onClick={() => {
+                          setRotateSecret('')
+                          setRotating(rotating === c.id ? null : c.id)
+                        }}
+                      >
+                        {c.has_signing_secret
+                          ? t('paymentConnectors.rotateSigning')
+                          : t('paymentConnectors.setSigning')}
+                      </button>{' '}
+                      {/* Offered only where the sender can present it; the
+                          backend refuses the rest. CLEARING stays available for
+                          every provider, because a key armed before that rule
+                          existed is exactly what has to be removable. */}
+                      {c.provider === 'mycelium' && (
+                        <button
+                          type="button"
+                          className="btn--sm btn--ghost"
+                          onClick={() => void onRotateApiKey(c.id)}
+                        >
+                          {t('paymentConnectors.rotateApiKey')}
+                        </button>
+                      )}{' '}
+                      {c.has_api_key && (
+                        <button
+                          type="button"
+                          className="btn--sm btn--ghost"
+                          onClick={() => void onClearApiKey(c.id)}
+                        >
+                          {t('paymentConnectors.clearApiKey')}
+                        </button>
+                      )}
+                      {!c.has_signing_secret && (
+                        <p className="hint">{t('paymentConnectors.secretMissingHint')}</p>
+                      )}
+                    </div>
+                  )}
                 </>
-              )}{' '}
-              {/* History stays reachable on a revoked connector: that is when
-                  somebody is reconciling what it did before it was stopped. */}
+              )}
 
               {/* The address the operator pastes into the provider dashboard. */}
               <div className="row">

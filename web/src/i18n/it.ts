@@ -2000,6 +2000,10 @@ export const it: Catalog = {
     tabSuggestions: 'Suggerimenti',
   },
   invoices: {
+    section: {
+      invoices: 'Documenti',
+      connectors: 'Incassi automatici',
+    },
     dryRunBadge: 'non inviata: prova a vuoto',
     nav: 'Fatture',
     title: 'Fatture che emetto (elettroniche, SDI)',
@@ -2463,6 +2467,8 @@ export const it: Catalog = {
     triageNone: 'Nessun connettore di pagamento configurato. Si creano da Impostazioni → profilo emittente → Connettori di pagamento.',
     triagePick: 'Connettore',
     triageLoadError: 'Impossibile caricare i connettori.',
+    credentials: 'Credenziali',
+    setSigning: 'Imposta chiave di firma',
     purposeEmission: 'genera la fattura',
     purposeCustomer: 'porta i dati fiscali del cliente (unico canale: il payload di una fattura Stripe non è espandibile e nomina il cliente solo per id)',
     purposeCreditNote: 'genera la nota di credito',
