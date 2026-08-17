@@ -49,6 +49,7 @@ from mycelium_core.services import payment_connectors as svc
 from mycelium_core.services import payment_native, payment_stripe
 from mycelium_core.services.payment_events import (
     CreditNoteIntent,
+    CustomerProfileIntent,
     EmissionIntent,
     IgnoreIntent,
     Intent,
@@ -58,6 +59,7 @@ from mycelium_core.services.payment_events import (
     PaymentSyncIntent,
     SubscriptionContext,
     VerificationSecrets,
+    first_present,
     get_mapper,
     minor_to_decimal,
     timestamped_mac,
@@ -421,26 +423,31 @@ def test_stripe_invoice_with_inclusive_tax_yields_a_gross_line() -> None:
     assert svc.net_unit_price(line, fallback_rate=None) == Decimal("100.00")
 
 
-def test_stripe_invoice_without_tax_amounts_follows_the_connector_switch() -> None:
-    """No tax breakdown at all: only the integrator knows how their catalogue
-    is quoted, so the connector's explicit switch decides -- never a guess."""
+def test_stripe_invoice_without_tax_amounts_reads_the_amount_as_collected() -> None:
+    """No tax breakdown at all -- and the default must not inflate the invoice.
+
+    This used to follow a boolean that defaulted to "the figure is net", so
+    122.00 collected became a 148.84 document. For a payment connector the
+    figure is money already taken, so under ``auto`` it IS the total; only an
+    explicit ``net`` says otherwise.
+    """
     obj = _invoice_obj(
         lines={"data": [{"description": "Consulenza", "quantity": 1, "amount": 12200}]}
     )
     event = _event("invoice.paid", obj)
 
-    inclusive = _as_emission(
-        _to_intent(event, amounts_include_vat=True, default_vat_rate=Decimal(22))
-    ).lines[0]
-    assert inclusive.price_includes_vat is True
-    assert inclusive.vat_rate == Decimal(22), "the connector default fills the missing rate"
-    assert svc.net_unit_price(inclusive, fallback_rate=Decimal(22)) == Decimal("100.00")
+    auto = _as_emission(_to_intent(event, vat_pricing="auto", default_vat_rate=Decimal(22))).lines[
+        0
+    ]
+    assert auto.price_includes_vat is True, "silence means the amount is the total collected"
+    assert auto.vat_rate == Decimal(22), "the connector default fills the missing rate"
+    assert svc.net_unit_price(auto, fallback_rate=Decimal(22)) == Decimal("100.00")
 
-    exclusive = _as_emission(
-        _to_intent(event, amounts_include_vat=False, default_vat_rate=Decimal(22))
+    forced_net = _as_emission(
+        _to_intent(event, vat_pricing="net", default_vat_rate=Decimal(22))
     ).lines[0]
-    assert exclusive.price_includes_vat is False
-    assert svc.net_unit_price(exclusive, fallback_rate=Decimal(22)) == Decimal("122.00")
+    assert forced_net.price_includes_vat is False
+    assert svc.net_unit_price(forced_net, fallback_rate=Decimal(22)) == Decimal("122.00")
 
 
 def test_stripe_invoice_claims_every_object_that_names_the_money() -> None:
@@ -1085,7 +1092,10 @@ def test_native_issue_maps_to_an_emission() -> None:
     assert intent.lines[0].quantity == Decimal(2)
     assert intent.lines[0].unit_price == Decimal("100.00")
     assert intent.lines[0].vat_rate == Decimal(22)
-    assert intent.lines[0].price_includes_vat is False
+    # This line does not state a tax treatment, and under ``auto`` that means
+    # the unit price is what was collected. A sender quoting net says so
+    # explicitly (``price_includes_vat: false``); see the dedicated test.
+    assert intent.lines[0].price_includes_vat is True
 
 
 def test_native_credit_maps_to_a_credit_note() -> None:
@@ -1443,6 +1453,136 @@ def test_net_unit_price_leaves_a_gross_price_alone_without_a_rate() -> None:
     )
     assert svc.net_unit_price(zero, fallback_rate=Decimal(22)) == Decimal("122.00")
     assert svc.net_unit_price(line, fallback_rate=Decimal(0)) == Decimal("122.00")
+
+
+def test_metadata_keys_match_however_they_were_typed() -> None:
+    """The candidate list handles different NAMES for a field. This handles the
+    same name typed differently, which is not a decision anybody made.
+
+    Provider metadata is written by humans and by several integrations at once,
+    so one account carries ``codice_destinatario``, ``Codice Destinatario`` and
+    ``codiceDestinatario`` for the same thing. Missing one of those spellings
+    costs an invoice: the counterpart looks unaddressable, the payment parks as
+    ``no_billing_data``, and the operator is looking at a customer that plainly
+    HAS the value.
+    """
+    keys = ("codice_destinatario", "sdi_code", "sdi")
+    for spelling in (
+        "codice_destinatario",
+        "Codice_Destinatario",
+        "CODICE_DESTINATARIO",
+        "codice destinatario",
+        "codiceDestinatario",
+        "codice-destinatario",
+    ):
+        assert first_present({spelling: "ABCDEFG"}, keys) == "ABCDEFG", spelling
+
+    # Precedence still belongs to the configured ORDER, not to the dict: an
+    # exact hit on a later candidate must not beat a folded hit on an earlier
+    # one, and vice versa the first configured key wins when both are present.
+    both = {"sdi_code": "SECOND", "CodiceDestinatario": "FIRST"}
+    assert first_present(both, keys) == "FIRST"
+
+    # A key that is not a spelling of any candidate is still not a match.
+    assert first_present({"destinatario": "X"}, keys) is None
+    assert first_present({}, keys) is None
+
+
+def test_a_customer_metadata_spelling_reaches_the_party() -> None:
+    """The same rule end to end, through the mapper an operator actually hits:
+    a Stripe customer whose codice destinatario is spelled with capitals must
+    produce an addressable counterpart, not a parked payment."""
+    event = _event(
+        "customer.updated",
+        {
+            "id": "cus_1",
+            "object": "customer",
+            "name": "Acme SpA",
+            "email": "amministrazione@acme.test",
+            "address": {
+                "line1": "Via Milano 9",
+                "postal_code": "20100",
+                "city": "Milano",
+                "state": "MI",
+                "country": "IT",
+            },
+            "metadata": {
+                "Codice Destinatario": "ABCDEFG",
+                "Partita IVA": "IT09876543210",
+            },
+        },
+    )
+    intent = _to_intent(event)
+    assert isinstance(intent, CustomerProfileIntent)
+    assert intent.party.sdi_code == "ABCDEFG"
+    assert intent.party.vat_number == "IT09876543210", (
+        "the same folding has to serve every metadata field, not just the one "
+        "that happened to be reported"
+    )
+
+
+def test_the_payload_decides_whether_an_amount_contains_vat() -> None:
+    """Reading a provider amount is not a connector preference.
+
+    When the payload states a tax behaviour it is describing money that
+    actually moved, so it wins under ``auto``. When it states NOTHING the
+    amount is money already collected -- so it is the document total, and
+    reading it as net would add VAT on top and invoice more than the customer
+    paid. That inflation was reachable on live traffic, which is why the
+    silent case defaults to inclusive rather than to the old ``False``.
+    """
+    inclusive_line = {
+        "amount": 2500,
+        "quantity": 1,
+        "description": "Piano",
+        "taxes": [
+            {"amount": 451, "tax_behavior": "inclusive", "taxable_amount": 2049},
+        ],
+    }
+    exclusive_line = {
+        "amount": 2049,
+        "quantity": 1,
+        "description": "Piano",
+        "taxes": [
+            {"amount": 451, "tax_behavior": "exclusive", "taxable_amount": 2049},
+        ],
+    }
+    silent_line = {"amount": 2500, "quantity": 1, "description": "Piano"}
+
+    def line_of(raw: dict[str, Any], pricing: str) -> LineIn:
+        obj = _invoice_obj(lines={"data": [raw]})
+        intent = _to_intent(_event("invoice.paid", obj), vat_pricing=pricing)
+        return _as_emission(intent).lines[0]
+
+    # auto: the payload is obeyed in both directions...
+    assert line_of(inclusive_line, "auto").price_includes_vat is True
+    assert line_of(exclusive_line, "auto").price_includes_vat is False
+    # ...and silence is read as the total collected.
+    assert line_of(silent_line, "auto").price_includes_vat is True
+
+    # The forcing modes override even an explicit statement, which is what
+    # makes them a last resort rather than a default.
+    assert line_of(exclusive_line, "gross").price_includes_vat is True
+    assert line_of(inclusive_line, "net").price_includes_vat is False
+
+
+def test_the_native_contract_can_state_it_per_line() -> None:
+    """A sender implementing our contract says it outright, per line, and is
+    believed under ``auto``; omitting it falls back to the connector rule."""
+
+    def native_line(**extra: Any) -> LineIn:
+        data = {
+            "reference": "ORD-1",
+            "customer": _native_customer(),
+            "lines": [{"description": "Consulenza", "unit_price": "100.00", **extra}],
+        }
+        return _as_emission(
+            _to_intent(_native("invoice.issue", data), provider="mycelium", vat_pricing="auto")
+        ).lines[0]
+
+    assert native_line(price_includes_vat=True).price_includes_vat is True
+    assert native_line(price_includes_vat=False).price_includes_vat is False
+    assert native_line().price_includes_vat is True, "silence follows the connector rule"
 
 
 # --- the setup instructions, checked against the code that receives them ----

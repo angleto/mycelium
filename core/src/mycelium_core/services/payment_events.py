@@ -70,6 +70,23 @@ def minor_to_decimal(amount: int, currency: str) -> Decimal:
     return Decimal(amount).scaleb(-exponent)
 
 
+def resolve_inclusive(stated: bool | None, vat_pricing: str) -> bool:
+    """Does this amount already contain VAT?
+
+    ``stated`` is what the PAYLOAD said, or None when it said nothing. The
+    distinction matters: a provider reporting a tax behaviour is describing
+    money that actually moved, so obeying it is not a preference. Only silence
+    is a judgement call, and under ``auto`` the judgement is "the amount is what
+    was collected, therefore it is the total" -- assuming otherwise invoices
+    more than the customer paid.
+    """
+    if vat_pricing == "gross":
+        return True
+    if vat_pricing == "net":
+        return False
+    return True if stated is None else stated
+
+
 # --- neutral DTOs ----------------------------------------------------------
 
 
@@ -231,12 +248,11 @@ class MapperConfig:
     default_vat_rate: Decimal | None = None
     default_vat_nature: str | None = None
     default_purpose: str | None = None
-    #: How to read a provider amount that carries no explicit tax breakdown.
-    #: True = the figure already contains VAT (the usual setup for a shop that
-    #: advertises tax-inclusive prices); False = it is net and VAT is added.
-    #: Amounts that ARE unambiguous (a charged card total, an explicit tax
-    #: line) ignore this and are read for what they are.
-    amounts_include_vat: bool = False
+    #: ``auto`` | ``gross`` | ``net`` -- see ``VAT_PRICING``. Under ``auto`` the
+    #: payload decides and silence means VAT-inclusive; the other two force.
+    #: Amounts that are unambiguous by arithmetic (a charged card total) are
+    #: gross whatever this says.
+    vat_pricing: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,15 +465,44 @@ def get_mapper(provider: str) -> PaymentEventMapper:
 # --- small parsing helpers shared by the mappers ---------------------------
 
 
+def _normalise_key(key: str) -> str:
+    """Fold a metadata key to what it MEANS, not how it was typed.
+
+    Provider metadata is written by humans and by half a dozen integrations, so
+    one field arrives as ``codice_destinatario``, ``Codice Destinatario``,
+    ``codiceDestinatario`` and ``CODICE-DESTINATARIO`` in the same account. The
+    candidate list already handles genuinely different NAMES (``sdi_code`` vs
+    ``codice_destinatario``); this handles the same name typed differently,
+    which is not a naming decision anybody made and should not cost an invoice.
+    """
+    return "".join(ch for ch in key.lower() if ch.isalnum())
+
+
 def first_present(bag: Mapping[str, str], keys: Sequence[str]) -> str | None:
-    """First non-empty value among ``keys``, in order.
+    """First non-empty value among ``keys``, in order, matched insensitively.
 
     The order IS the precedence: put the spelling currently written first and
     keep legacy ones as a tail, so a record nobody has re-saved still resolves
     while a freshly written one wins.
+
+    Matching ignores case and separators (see ``_normalise_key``). An exact hit
+    is still preferred, so a bag holding both ``sdi_code`` and ``sdiCode``
+    resolves to the one the configuration actually names rather than to
+    whichever the dict happens to yield first.
     """
+    folded: dict[str, str] | None = None
     for key in keys:
         value = as_str(bag.get(key))
+        if value is not None:
+            return value
+        if folded is None:
+            # Built once, and only when an exact match has already failed: the
+            # common case pays nothing. First occurrence wins, so a bag with two
+            # spellings of one key is resolved deterministically.
+            folded = {}
+            for raw, raw_value in bag.items():
+                folded.setdefault(_normalise_key(raw), raw_value)
+        value = as_str(folded.get(_normalise_key(key)))
         if value is not None:
             return value
     return None
@@ -524,6 +569,7 @@ __all__ = [
     "get_mapper",
     "minor_to_decimal",
     "register_mapper",
+    "resolve_inclusive",
     "signature_matches",
     "timestamped_mac",
     "within_tolerance",

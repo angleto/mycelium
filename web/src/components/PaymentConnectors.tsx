@@ -32,7 +32,7 @@ type Connector = {
   // must not bet the render on that: both shapes go through String().
   default_vat_rate: string | number | null
   default_payment_method_code: string | null
-  amounts_include_vat: boolean
+  vat_pricing: string
   revoked_at: string | null
   last_event_at: string | null
   // Never the key itself -- only whether the optional second factor is armed.
@@ -73,6 +73,7 @@ type Vocabulary = {
   automation_modes: string[]
   emission_events: string[]
   refund_events: string[]
+  vat_pricings: string[]
   delivery_outcomes: string[]
 }
 
@@ -109,6 +110,7 @@ const FALLBACK_PROVIDERS = ['stripe', 'mycelium']
 const FALLBACK_MODES = ['transmit', 'draft', 'dry_run', 'off']
 const FALLBACK_EMISSION_EVENTS = ['invoice.paid']
 const FALLBACK_REFUND_EVENTS = ['refund.created', 'charge.refunded']
+const FALLBACK_VAT_PRICINGS = ['auto', 'gross', 'net']
 
 /** Why each subscribed event is needed. A closed set mirrored from
  * ``EVENT_PURPOSES`` in the backend; an unknown value renders a neutral line
@@ -189,7 +191,7 @@ type Defaults = {
   emission_event: string
   refund_event: string
   default_vat_rate: string
-  amounts_include_vat: boolean
+  vat_pricing: string
   series: string
   default_purpose: string
   default_payment_method_code: string
@@ -201,7 +203,7 @@ const EMPTY_DEFAULTS: Defaults = {
   emission_event: 'invoice.paid',
   refund_event: 'refund.created',
   default_vat_rate: '',
-  amounts_include_vat: false,
+  vat_pricing: 'auto',
   series: '',
   default_purpose: '',
   default_payment_method_code: '',
@@ -214,7 +216,7 @@ function defaultsOf(c: Connector): Defaults {
     emission_event: c.emission_event,
     refund_event: c.refund_event,
     default_vat_rate: c.default_vat_rate == null ? '' : String(c.default_vat_rate),
-    amounts_include_vat: c.amounts_include_vat,
+    vat_pricing: c.vat_pricing,
     series: c.series ?? '',
     default_purpose: c.default_purpose ?? '',
     default_payment_method_code: c.default_payment_method_code ?? '',
@@ -233,7 +235,7 @@ function defaultsBody(d: Defaults): Record<string, unknown> {
     emission_event: d.emission_event,
     refund_event: d.refund_event,
     default_vat_rate: d.default_vat_rate.trim() || null,
-    amounts_include_vat: d.amounts_include_vat,
+    vat_pricing: d.vat_pricing,
     series: d.series.trim() || null,
     default_purpose: d.default_purpose.trim() || null,
     default_payment_method_code: d.default_payment_method_code || null,
@@ -506,6 +508,7 @@ function DefaultsFields({
   const emissionEvents = vocab?.emission_events ?? FALLBACK_EMISSION_EVENTS
   const refundEvents = vocab?.refund_events ?? FALLBACK_REFUND_EVENTS
   const native = provider === 'mycelium'
+  const vatPricings = vocab?.vat_pricings ?? FALLBACK_VAT_PRICINGS
   const modeLabel = (m: string) => (MODE_KEYS[m] ? t(MODE_KEYS[m]) : m)
 
   return (
@@ -617,15 +620,26 @@ function DefaultsFields({
       </div>
       <p className="hint">{t('paymentConnectors.vatRateHint')}</p>
       <p className="hint">{t('paymentConnectors.seriesHint')}</p>
-      <label className="row">
-        <input
-          type="checkbox"
-          checked={value.amounts_include_vat}
-          onChange={(e) => onChange({ ...value, amounts_include_vat: e.target.checked })}
-        />
-        {t('paymentConnectors.amountsIncludeVat')}
-      </label>
-      <p className="hint">{t('paymentConnectors.amountsIncludeVatHint')}</p>
+      {/* Not a yes/no. The payload usually STATES whether an amount includes
+          VAT, and when it does that is a fact about money that moved; this
+          decides what to do when it says nothing, and the two forcing values
+          exist for a feed whose own flags are known to be wrong. */}
+      <div className="row">
+        <label className="lbl--wide">
+          {t('paymentConnectors.vatPricing')}
+          <select
+            value={value.vat_pricing}
+            onChange={(e) => onChange({ ...value, vat_pricing: e.target.value })}
+          >
+            {vatPricings.map((v) => (
+              <option key={v} value={v}>
+                {t(`paymentConnectors.vatPricingLabel.${v}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="hint">{t('paymentConnectors.vatPricingHint')}</p>
       <div className="row">
         <label className="lbl--wide">
           {t('paymentConnectors.purpose')}
@@ -978,6 +992,15 @@ export function ConnectorEvents({
       {loading && <p>{t('home.loading')}</p>}
       {!loading && rows.length === 0 && (
         <p className="ok">{t('paymentConnectors.quarantineEmpty')}</p>
+      )}
+      {/* The commonest cause of a full waiting room, and the one an operator
+          cannot deduce: Stripe has no field for a codice destinatario, so it
+          lives in the customer's metadata -- and a customer's metadata travels
+          ONLY on customer.* events, never on the invoice event, because a
+          Stripe payload cannot be expanded. Without those two subscriptions
+          the data is right there in Stripe and unreachable from here. */}
+      {status === 'no_billing_data' && rows.length > 0 && (
+        <p className="hint">{t('paymentConnectors.noBillingDataHint')}</p>
       )}
       {!loading && rows.length > 0 && (
         <table className="tbl">

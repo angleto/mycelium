@@ -145,6 +145,27 @@ EMISSION_EVENTS = (
 #: exists for accounts whose webhook endpoint predates the newer event.
 REFUND_EVENTS = ("refund.created", "charge.refunded")
 
+#: How to read a provider amount that has no explicit tax breakdown.
+#:
+#: This is NOT the same question as "does the payload say inclusive or
+#: exclusive". When the payload says, the payload wins -- a Stripe line carrying
+#: ``tax_behavior``/``inclusive`` is stating a fact about money that moved, and
+#: overriding it invoices a different figure than was collected.
+#:
+#: - ``auto`` (the default, and correct for essentially everyone): obey the
+#:   payload; when it is SILENT about tax, treat the amount as VAT-inclusive.
+#:   Silence is the common case for a merchant not using Stripe Tax, and the
+#:   figure is money already collected -- so it is the document total. Assuming
+#:   it net would add VAT on top and invoice MORE than the customer paid, which
+#:   is a wrong fiscal document, not a rounding preference.
+#: - ``gross`` / ``net``: force, ignoring what the payload says. A blunt
+#:   instrument for a feed whose own tax flags are known to be wrong; wrong by
+#:   construction otherwise, and never the default.
+#:
+#: A charge or payment-intent amount stays gross under every setting: the card
+#: was debited exactly that, which is arithmetic rather than convention.
+VAT_PRICING = ("auto", "gross", "net")
+
 #: Lifecycle of an ingested event.
 #: ``pending`` due for a processing attempt; ``processing`` a worker holds the
 #: lease; ``done`` produced its document (or was a settled no-op); ``ignored``
@@ -218,6 +239,10 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
         CheckConstraint(
             f"refund_event IN {_sql_in(REFUND_EVENTS)}",
             name="ck_payment_connectors_refund_event",
+        ),
+        CheckConstraint(
+            f"vat_pricing IN {_sql_in(VAT_PRICING)}",
+            name="ck_payment_connectors_vat_pricing",
         ),
         CheckConstraint(
             "length(label) >= 1 AND length(label) <= 120", name="ck_payment_connectors_label_len"
@@ -294,11 +319,11 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
     default_vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     default_vat_nature: Mapped[str | None] = mapped_column(String(4), nullable=True)
     default_line_description: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    #: How to read a provider amount that carries no explicit tax breakdown:
-    #: True = the figure already contains VAT, False = VAT is added on top.
-    #: Getting this wrong is a systematically wrong invoice, so it is an
-    #: explicit switch rather than a heuristic.
-    amounts_include_vat: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    #: See :data:`VAT_PRICING`. Not a yes/no: the payload usually STATES the
+    #: answer, and this only decides what to do when it does not (or, in the two
+    #: forcing modes, overrides it). Getting it wrong is a systematically wrong
+    #: invoice rather than a rounding preference.
+    vat_pricing: Mapped[str] = mapped_column(String(8), nullable=False, server_default="auto")
     default_payment_conditions_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     #: MP08 (carta di pagamento) is the honest default for a card processor, but
     #: DatiPagamento is only emitted when the invoice carries it, so it stays
@@ -600,6 +625,7 @@ __all__ = [
     "PROVIDERS",
     "PROVIDERS_WITH_INGRESS_KEY",
     "REFUND_EVENTS",
+    "VAT_PRICING",
     "PaymentConnector",
     "PaymentConnectorEvent",
     "PaymentCustomerLink",

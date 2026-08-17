@@ -45,6 +45,7 @@ from mycelium_core.models.payment_connector import (
     EMISSION_EVENTS,
     PROVIDERS,
     REFUND_EVENTS,
+    VAT_PRICING,
     PaymentConnector,
     PaymentConnectorEvent,
     PaymentWebhookDelivery,
@@ -97,7 +98,7 @@ class PaymentConnectorIn(BaseModel):
     default_payment_conditions_code: str | None = Field(default=None, max_length=4)
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_country_code: str | None = Field(default=None, max_length=2)
-    amounts_include_vat: bool = False
+    vat_pricing: str = "auto"
     # Ordered candidate key names per field, not one name: a real provider
     # account accumulates spellings for the same field. First present wins, so
     # the order is the precedence -- current spelling first, legacy as a tail.
@@ -135,7 +136,7 @@ class PaymentConnectorPatchIn(BaseModel):
     default_payment_conditions_code: str | None = Field(default=None, max_length=4)
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_country_code: str | None = Field(default=None, max_length=2)
-    amounts_include_vat: bool | None = None
+    vat_pricing: str | None = None
     metadata_vat_keys: list[str] | None = None
     metadata_tax_code_keys: list[str] | None = None
     metadata_sdi_keys: list[str] | None = None
@@ -175,7 +176,7 @@ class PaymentConnectorOut(BaseModel):
     default_payment_conditions_code: str | None
     default_payment_method_code: str | None
     default_country_code: str | None
-    amounts_include_vat: bool
+    vat_pricing: str
     metadata_vat_keys: list[str]
     metadata_tax_code_keys: list[str]
     metadata_sdi_keys: list[str]
@@ -283,6 +284,7 @@ class ConnectorVocabularyOut(BaseModel):
     automation_modes: list[str]
     emission_events: list[str]
     refund_events: list[str]
+    vat_pricings: list[str]
     delivery_outcomes: list[str]
 
 
@@ -367,6 +369,7 @@ async def vocabulary(
         automation_modes=list(AUTOMATION_MODES),
         emission_events=list(EMISSION_EVENTS),
         refund_events=list(REFUND_EVENTS),
+        vat_pricings=list(VAT_PRICING),
         delivery_outcomes=list(DELIVERY_OUTCOMES),
     )
 

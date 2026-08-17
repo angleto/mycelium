@@ -423,6 +423,19 @@ unauthenticated webhook and whose fiscal work happens in a worker.
   live lookup and the next redelivery would file a second invoice for the same
   money; and it refuses when a live document already covers that payment. The
   fiscal number is still allocated at transmit, so promotion commits nothing.
+- **Reading "does the amount include VAT" as a connector preference.** It was
+  a boolean consulted whenever the payload carried no tax breakdown, defaulting
+  to "net, add VAT on top". That default is not conservative for a payment
+  connector, it is wrong: the figure is money already collected, so it IS the
+  document total, and a 25.00 charge with no breakdown became a 30.50 invoice.
+  Reachable on live traffic, because an account on the 2026-07-29 Stripe API
+  reports line tax under `taxes`/`tax_behavior` and an adapter reading only
+  `tax_amounts`/`inclusive` sees no tax at all. So the payload decides whenever
+  it states anything (`vat_pricing = auto`, migration 0098), silence means
+  inclusive, and the two forcing values are a documented last resort. The
+  aliquota, which the newer payload identifies only by id, is recovered by
+  finding the statutory rate that reproduces the reported tax rather than by
+  dividing (451/2049 = 22.0107, which no Italian invoice may carry).
 - **Requiring the signing secret to create a vendor connector.** It reads as
   fail-closed and is actually a deadlock: the webhook URL carries the connector
   id, so the connector must exist before the URL does, and the provider issues

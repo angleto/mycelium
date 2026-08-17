@@ -69,6 +69,7 @@ from mycelium_core.models.payment_connector import (
     PROVIDERS,
     PROVIDERS_WITH_INGRESS_KEY,
     REFUND_EVENTS,
+    VAT_PRICING,
     PaymentConnector,
     PaymentConnectorEvent,
     PaymentCustomerLink,
@@ -272,7 +273,7 @@ def mapper_config(connector: PaymentConnector) -> MapperConfig:
         default_vat_rate=connector.default_vat_rate,
         default_vat_nature=connector.default_vat_nature,
         default_purpose=connector.default_purpose,
-        amounts_include_vat=connector.amounts_include_vat,
+        vat_pricing=connector.vat_pricing,
     )
 
 
@@ -286,6 +287,7 @@ def _validate_vocabulary(
     credit_note_mode: str,
     emission_event: str,
     refund_event: str,
+    vat_pricing: str,
 ) -> None:
     if provider not in PROVIDERS:
         raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID, detail=provider)
@@ -297,6 +299,10 @@ def _validate_vocabulary(
     if refund_event not in REFUND_EVENTS:
         raise UnprocessableError(
             MessageCode.PAYMENT_CONNECTOR_REFUND_EVENT_INVALID, detail=refund_event
+        )
+    if vat_pricing not in VAT_PRICING:
+        raise UnprocessableError(
+            MessageCode.PAYMENT_CONNECTOR_VAT_PRICING_INVALID, detail=vat_pricing
         )
 
 
@@ -319,7 +325,7 @@ PATCHABLE_FIELDS = frozenset(
         "default_payment_conditions_code",
         "default_payment_method_code",
         "default_country_code",
-        "amounts_include_vat",
+        "vat_pricing",
         "metadata_vat_keys",
         "metadata_tax_code_keys",
         "metadata_sdi_keys",
@@ -357,12 +363,14 @@ async def create_connector(
     credit_note_mode = str(fields.get("credit_note_mode", "transmit"))
     emission_event = str(fields.get("emission_event", "invoice.paid"))
     refund_event = str(fields.get("refund_event", "refund.created"))
+    vat_pricing = str(fields.get("vat_pricing", "auto"))
     _validate_vocabulary(
         provider=provider,
         invoice_mode=invoice_mode,
         credit_note_mode=credit_note_mode,
         emission_event=emission_event,
         refund_event=refund_event,
+        vat_pricing=vat_pricing,
     )
 
     # Minting is only meaningful where WE are the authority. For a vendor adapter
@@ -457,6 +465,7 @@ async def update_connector(
         "credit_note_mode": values.get("credit_note_mode", row.credit_note_mode),
         "emission_event": values.get("emission_event", row.emission_event),
         "refund_event": values.get("refund_event", row.refund_event),
+        "vat_pricing": values.get("vat_pricing", row.vat_pricing),
     }
     _validate_vocabulary(
         provider=str(merged["provider"]),
@@ -464,6 +473,7 @@ async def update_connector(
         credit_note_mode=str(merged["credit_note_mode"]),
         emission_event=str(merged["emission_event"]),
         refund_event=str(merged["refund_event"]),
+        vat_pricing=str(merged["vat_pricing"]),
     )
     if values.get("enabled") and row.signing_secret_ciphertext is None:
         # THE gate that replaced "you must supply a secret to create it".

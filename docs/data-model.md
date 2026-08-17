@@ -216,7 +216,7 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - `issuer_key_rate_limit(key_id, endpoint_class, org_id, window_start, count)` --
   the per-key fixed-window rate bucket (FORCE RLS).
 
-## Inbound payment connectors (ADR-0051, migrations 0092-0097)
+## Inbound payment connectors (ADR-0051, migrations 0092-0098)
 
 - `payment_connectors(id, org_id, issuer_profile_id FK cascade, created_by FK
   users set-null, provider[stripe|mycelium], label, signing_secret_ciphertext,
@@ -234,7 +234,7 @@ org-scoped entity. Memory is partitioned by `org_id`.
   default_purpose?, default_vat_rate?, default_vat_nature?,
   default_line_description?, amounts_include_vat,
   default_payment_conditions_code?, default_payment_method_code?,
-  default_country_code?, metadata_vat_keys text[], metadata_tax_code_keys
+  default_country_code?, vat_pricing[auto|gross|net], metadata_vat_keys text[], metadata_tax_code_keys
   text[], metadata_sdi_keys text[], metadata_pec_keys text[], revoked_at?,
   last_event_at?, version)` -- UNIQUE `(issuer_profile_id, label)`;
   `emission_event` and `refund_event` are each ONE value rather than a set,

@@ -61,6 +61,7 @@ from mycelium_core.services.payment_events import (
     as_sequence,
     as_str,
     checked_identity,
+    resolve_inclusive,
     signature_matches,
     within_tolerance,
 )
@@ -122,7 +123,15 @@ def _lines(raw: Any, *, config: MapperConfig) -> tuple[LineIn, ...]:
                 unit_price=unit_price,
                 vat_rate=vat_rate if vat_rate is not None else config.default_vat_rate,
                 vat_nature=as_str(node.get("vat_nature")) or config.default_vat_nature,
-                price_includes_vat=bool(node.get("price_includes_vat", config.amounts_include_vat)),
+                # The contract lets a sender STATE it per line; absent means
+                # the connector's own rule decides (``auto`` reads the amount
+                # as the total, since it is money already collected).
+                price_includes_vat=resolve_inclusive(
+                    node.get("price_includes_vat")
+                    if isinstance(node.get("price_includes_vat"), bool)
+                    else None,
+                    config.vat_pricing,
+                ),
             )
         )
     return tuple(out)

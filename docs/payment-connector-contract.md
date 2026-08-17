@@ -300,7 +300,7 @@ create a second client for the same counterpart.
 | `description` | string | no | Falls back to the connector's `default_line_description`, then to `Servizio`. Truncated at 1000 characters. |
 | `vat_rate` | decimal string | no | A **percentage**: `"22"` means 22%. Falls back to the connector's `default_vat_rate`, then to the issuer's regime default. |
 | `vat_nature` | string | no | FatturaPA `Natura` (e.g. `N2.2`) for a line with no VAT. Falls back to the connector's `default_vat_nature`. |
-| `price_includes_vat` | boolean | no | Default = the connector's `amounts_include_vat` switch. |
+| `price_includes_vat` | boolean | no | Whether `unit_price` already contains the VAT. **State it** if you know: it is believed. Omitted, the connector's `vat_pricing` decides, and under its default (`auto`) an unstated price is read as VAT-**inclusive** — the amount is money already collected, so adding VAT on top would invoice more than was paid. |
 
 `price_includes_vat` decides how `unit_price` is read:
 

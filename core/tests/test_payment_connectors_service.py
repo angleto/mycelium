@@ -439,6 +439,95 @@ async def test_an_ignored_event_always_says_why() -> None:
         assert row.last_error == "payment_sync_off"
 
 
+def _invoice_paid_2026_api(event_id: str = "evt_new_api") -> dict[str, Any]:
+    """A real ``invoice.paid`` as the 2026-07-29 API sends it.
+
+    Reduced from an actual production delivery. The tax breakdown is the part
+    that matters: ``taxes`` instead of ``tax_amounts``, ``tax_behavior``
+    instead of ``inclusive``, and the rate identified only by id -- with the
+    percentage nowhere in the payload.
+    """
+    return {
+        "id": event_id,
+        "type": "invoice.paid",
+        "created": 1_786_967_554,
+        "api_version": "2026-07-29.dahlia",
+        "data": {
+            "object": {
+                "id": "in_new_api",
+                "object": "invoice",
+                "currency": "eur",
+                "customer": "cus_new_api",
+                "customer_name": "AIR CONSULTING GROUP SRL",
+                "customer_email": "amministrazione@acme.test",
+                "customer_address": {
+                    "city": "Roma",
+                    "country": "IT",
+                    "line1": "Via Donatello, 67",
+                    "postal_code": "00196",
+                    "state": "RM",
+                },
+                "customer_tax_ids": [{"type": "eu_vat", "value": "IT11278231003"}],
+                "metadata": {"codice_destinatario": "ABCDEFG"},
+                "total": 2500,
+                "subtotal_excluding_tax": 2049,
+                "lines": {
+                    "data": [
+                        {
+                            "id": "il_new_api",
+                            "object": "line_item",
+                            "amount": 2500,
+                            "currency": "eur",
+                            "description": "MrCall Business",
+                            "quantity": 1,
+                            "subtotal": 2049,
+                            "taxes": [
+                                {
+                                    "amount": 451,
+                                    "tax_behavior": "inclusive",
+                                    "taxable_amount": 2049,
+                                    "tax_rate_details": {"tax_rate": "txr_1N5pXm"},
+                                    "type": "tax_rate_details",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        },
+    }
+
+
+async def test_the_2026_stripe_tax_shape_does_not_inflate_the_invoice() -> None:
+    """A live account moved to the 2026-07-29 API and the money changed meaning.
+
+    The tax moved from ``tax_amounts`` (expanded rate, boolean ``inclusive``) to
+    ``taxes`` (``tax_behavior``, rate by id only). Reading just the old name is
+    not a missing feature, it is a WRONG DOCUMENT: the line looks untaxed, its
+    GROSS amount is taken for a net one, and the connector default is added on
+    top -- 25.00 collected, 30.50 invoiced, filed with SdI.
+
+    The rate is nowhere in the payload, so it is recovered from the amounts by
+    finding the statutory rate that reproduces the reported tax: 2049 x 22% =
+    450.78 -> 451. That is a verification, not a guess, and it avoids the
+    22.0107 the raw quotient would give.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid_2026_api())
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id, view="active"))[0]
+        assert inv.total == Decimal("25.00"), (
+            "the document must be for the money that was actually collected"
+        )
+        assert inv.taxable == Decimal("20.49")
+        assert inv.vat == Decimal("4.51")
+
+
 # --- credit notes ----------------------------------------------------------
 
 

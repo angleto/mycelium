@@ -6672,6 +6672,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event Payload
+         * @description The provider event exactly as it arrived.
+         *
+         *     Not projected onto the event LIST, and served per event instead: the list is
+         *     a triage surface read many rows at a time, and a Stripe event is a large
+         *     nested object carrying the counterpart's fiscal identity. Fetching one on
+         *     demand keeps the common read small and makes looking at a customer's data a
+         *     deliberate act rather than a side effect of opening a page.
+         *
+         *     Safe to serve, and this is the line that matters: an EVENT is authenticated
+         *     -- it exists only because a MAC computed with the connector's signing secret
+         *     verified over these exact bytes -- so its payload is provider-authored. The
+         *     delivery ledger, which records what we turned AWAY, is attacker-controlled
+         *     and therefore keeps a digest and never the body.
+         */
+        get: operations["event_payload_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__payload_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/dry-run-xml": {
         parameters: {
             query?: never;
@@ -8253,6 +8285,8 @@ export interface components {
             emission_events: string[];
             /** Refund Events */
             refund_events: string[];
+            /** Vat Pricings */
+            vat_pricings: string[];
             /** Delivery Outcomes */
             delivery_outcomes: string[];
         };
@@ -11599,8 +11633,8 @@ export interface components {
             default_payment_method_code: string | null;
             /** Default Country Code */
             default_country_code: string | null;
-            /** Amounts Include Vat */
-            amounts_include_vat: boolean;
+            /** Vat Pricing */
+            vat_pricing: string;
             /** Metadata Vat Keys */
             metadata_vat_keys: string[];
             /** Metadata Tax Code Keys */
@@ -11747,10 +11781,10 @@ export interface components {
             /** Default Country Code */
             default_country_code?: string | null;
             /**
-             * Amounts Include Vat
-             * @default false
+             * Vat Pricing
+             * @default auto
              */
-            amounts_include_vat?: boolean;
+            vat_pricing?: string;
             /**
              * Metadata Vat Keys
              * @default [
@@ -11828,8 +11862,8 @@ export interface components {
             default_payment_method_code: string | null;
             /** Default Country Code */
             default_country_code: string | null;
-            /** Amounts Include Vat */
-            amounts_include_vat: boolean;
+            /** Vat Pricing */
+            vat_pricing: string;
             /** Metadata Vat Keys */
             metadata_vat_keys: string[];
             /** Metadata Tax Code Keys */
@@ -11907,8 +11941,8 @@ export interface components {
             default_payment_method_code?: string | null;
             /** Default Country Code */
             default_country_code?: string | null;
-            /** Amounts Include Vat */
-            amounts_include_vat?: boolean | null;
+            /** Vat Pricing */
+            vat_pricing?: string | null;
             /** Metadata Vat Keys */
             metadata_vat_keys?: string[] | null;
             /** Metadata Tax Code Keys */
@@ -29391,6 +29425,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PromoteDryRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    event_payload_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__payload_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

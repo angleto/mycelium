@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Mapping, Sequence
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from mycelium_core.services.payment_events import (
@@ -55,6 +55,7 @@ from mycelium_core.services.payment_events import (
     checked_identity,
     first_present,
     minor_to_decimal,
+    resolve_inclusive,
     signature_matches,
     within_tolerance,
 )
@@ -173,10 +174,61 @@ def _party(
     )
 
 
+#: Rates that reproduce a reported tax EXACTLY are preferred over the raw
+#: quotient. Stripe's newer payloads report a tax amount and its taxable base
+#: but identify the rate only by id (``txr_...``), and 451 / 2049 is 22.0107 --
+#: an aliquota that is arithmetically defensible and fiscally wrong. Italy's
+#: statutory rates plus the zero case cover every document this connector can
+#: legitimately produce; anything else falls back to the quotient.
+_CANDIDATE_RATES = (Decimal(22), Decimal(10), Decimal(5), Decimal(4), Decimal(0))
+
+
+def _rate_from_amounts(tax_minor: Decimal, taxable_minor: Decimal) -> Decimal | None:
+    """Recover the aliquota from a tax and its base.
+
+    Prefers the statutory rate that REPRODUCES the reported tax after rounding
+    -- that is a verification, not a guess: 2049 x 22% = 450.78 -> 451, so 22 is
+    the rate Stripe applied. Only when no statutory rate reproduces it (a
+    foreign rate, a bespoke one) does it fall back to the quotient, rounded to
+    the two decimals FatturaPA allows.
+    """
+    if taxable_minor <= 0:
+        return None
+    for candidate in _CANDIDATE_RATES:
+        if (taxable_minor * candidate / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP) == (
+            tax_minor
+        ):
+            return candidate
+    return (tax_minor / taxable_minor * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _tax_entries(node: Mapping[str, Any]) -> Sequence[Any]:
+    """The line's tax breakdown, under whichever name this API version uses.
+
+    ``tax_amounts`` up to the 2026-07-29 API, ``taxes`` from it. Reading only
+    the old name does not degrade gracefully: the line looks untaxed, its gross
+    amount is taken for a net one, and the connector default is added on top --
+    a 25.00 charge becomes a 30.50 invoice.
+    """
+    entries = as_sequence(node.get("tax_amounts"))
+    return entries if entries else as_sequence(node.get("taxes"))
+
+
 def _line_tax(
     tax_amounts: Sequence[Any], *, config: MapperConfig
-) -> tuple[Decimal | None, Decimal, bool]:
+) -> tuple[Decimal | None, Decimal, bool | None]:
     """Resolve (rate, tax_amount_minor, inclusive) for one line.
+
+    Handles BOTH shapes Stripe uses. The older one carries an expanded
+    ``tax_rate`` with a ``percentage`` and a boolean ``inclusive``; the one
+    introduced with the 2026-07-29 API carries ``tax_behavior`` and identifies
+    the rate only by id, giving ``amount`` against ``taxable_amount`` instead.
+
+    Reading only the old shape is not a missing feature, it is a WRONG INVOICE:
+    a 25.00 charge with 22% inclusive tax comes through as "25.00 net, no rate",
+    the connector default is then added on top, and the document says 30.50 for
+    money that was 25.00. So the newer shape is read for what it states, and the
+    aliquota is recovered from the amounts it does state.
 
     Only the FIRST rate is used when a line carries several: FatturaPA has one
     aliquota per line, and a genuinely multi-rate line has to be split by the
@@ -194,10 +246,23 @@ def _line_tax(
             rate = Decimal(str(percentage))
         amount = node.get("amount")
         tax_minor = Decimal(amount) if isinstance(amount, int) else Decimal(0)
-        inclusive = bool(node.get("inclusive"))
+        # ``inclusive`` (old) or ``tax_behavior`` (2026-07-29+), as a TRI-STATE:
+        # an entry stating neither has said nothing about the behaviour, which
+        # is not the same as saying "exclusive". The caller resolves silence,
+        # and under ``auto`` silence means the amount is the total collected.
+        stated: bool | None = None
+        if isinstance(node.get("inclusive"), bool):
+            stated = bool(node.get("inclusive"))
+        behaviour = as_str(node.get("tax_behavior"))
+        if behaviour in {"inclusive", "exclusive"}:
+            stated = behaviour == "inclusive"
+        if rate is None:
+            taxable = node.get("taxable_amount")
+            if isinstance(taxable, int):
+                rate = _rate_from_amounts(tax_minor, Decimal(taxable))
         if rate is not None:
-            return rate, tax_minor, inclusive
-    return config.default_vat_rate, Decimal(0), config.amounts_include_vat
+            return rate, tax_minor, stated
+    return config.default_vat_rate, Decimal(0), None
 
 
 def _invoice_lines(invoice: Mapping[str, Any], *, config: MapperConfig) -> tuple[LineIn, ...]:
@@ -211,13 +276,13 @@ def _invoice_lines(invoice: Mapping[str, Any], *, config: MapperConfig) -> tuple
             continue
         quantity = node.get("quantity")
         qty = Decimal(quantity) if isinstance(quantity, int) and quantity > 0 else Decimal(1)
-        rate, tax_minor, inclusive = _line_tax(as_sequence(node.get("tax_amounts")), config=config)
+        rate, _tax_minor, stated = _line_tax(_tax_entries(node), config=config)
         # A Stripe line amount is net under exclusive tax and gross under
-        # inclusive tax. When Stripe reported no tax at all the connector's
-        # own switch decides, because only the integrator knows how their
-        # catalogue prices are quoted.
-        has_explicit_tax = tax_minor != 0
-        includes_vat = inclusive if has_explicit_tax else config.amounts_include_vat
+        # inclusive tax, and the payload says which whenever tax was computed.
+        # When it says nothing, ``auto`` reads the figure as the total
+        # collected -- adding VAT on top of money already taken would invoice
+        # more than the customer paid.
+        includes_vat = resolve_inclusive(stated, config.vat_pricing)
         gross_or_net = minor_to_decimal(amount, currency)
         description = (
             as_str(node.get("description"))
@@ -527,10 +592,8 @@ class StripeMapper:
                 continue
             quantity = node.get("quantity")
             qty = Decimal(quantity) if isinstance(quantity, int) and quantity > 0 else Decimal(1)
-            rate, tax_minor, inclusive = _line_tax(
-                as_sequence(node.get("tax_amounts")), config=config
-            )
-            includes_vat = inclusive if tax_minor != 0 else config.amounts_include_vat
+            rate, _tax_minor, stated = _line_tax(_tax_entries(node), config=config)
+            includes_vat = resolve_inclusive(stated, config.vat_pricing)
             lines.append(
                 LineIn(
                     description=(

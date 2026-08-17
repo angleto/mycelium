@@ -91,6 +91,23 @@ events are the only channel that carries them. Omit them and the connector
 verifies, ingests and queues normally, then parks nearly everything as
 `no_billing_data` — healthy-looking, and emitting almost nothing.
 
+This bites hardest on the codice destinatario, because Stripe has no field for
+one: it has to go in the customer's **metadata**, which is exactly the part that
+does not travel with an invoice event. So "the customer plainly has it and
+Mycelium says it is missing" is the expected symptom of the missing
+subscription, not a bug in the reading.
+
+The key it is stored under is configurable per connector
+(`metadata_sdi_keys`, default `codice_destinatario`, `sdi_code`, `sdi`) and
+matching ignores case and separators, so `Codice Destinatario`,
+`codiceDestinatario` and `CODICE_DESTINATARIO` all resolve. The same holds for
+the VAT number, the codice fiscale and the PEC.
+
+Subscribing the two events afterwards is enough: parked payments re-arm
+themselves the moment a `customer.*` event arrives carrying what they were
+waiting for. Stripe does not replay old customer events, so touch the customer
+(any edit fires `customer.updated`) or wait for the next change.
+
 ### One emission trigger, one refund announcement
 
 Stripe announces the same money more than once, in both directions, and the
@@ -132,6 +149,34 @@ whole reason this setting exists — so the emission-idempotency ledger would no
 catch a second TD04 for a refund the other announcement had already reversed.
 Getting the field right before traffic starts is much cheaper than either
 outcome; the connector's setup guide lists the announcement it expects.
+
+## Amounts and VAT
+
+`vat_pricing` decides how a provider figure is read. It is **not** a yes/no,
+because the payload usually answers the question itself:
+
+- **`auto`** (default). When the provider states a tax behaviour — Stripe does
+  whenever it computed tax, as `tax_behavior` (2026-07-29 API) or `inclusive`
+  (before it) — that statement wins. It describes money that actually moved.
+  When the payload states **nothing**, the amount is read as VAT-**inclusive**:
+  it is money already collected, so it is the document total, and reading it as
+  net would add VAT on top and invoice more than the customer paid.
+- **`gross` / `net`**: force, ignoring the payload. Only for a feed whose own
+  tax flags are known to be wrong; wrong by construction otherwise.
+
+A `charge` or `payment_intent` amount is gross under every setting: the card was
+debited exactly that, which is arithmetic and not a convention.
+
+On the native contract a sender states it per line with `price_includes_vat`,
+and is believed under `auto`.
+
+**If your Stripe account is on the 2026-07-29 API or later**, note that the line
+tax moved from `tax_amounts`/`inclusive` to `taxes`/`tax_behavior`, with the
+rate identified only by id. Both shapes are read, and the aliquota is recovered
+from the reported tax and its taxable base by finding the statutory rate that
+reproduces it (2049 x 22% = 450.78 -> 451). That is a verification, not a guess:
+the raw quotient would give 22.0107, which is arithmetically defensible and
+fiscally wrong.
 
 ## Where to read what a connector did
 
