@@ -136,6 +136,7 @@ from mycelium_core.models.payment_connector import (
     PaymentObjectLink,
     PaymentWebhookDelivery,
 )
+from mycelium_core.models.payment_connector_refusal import PaymentConnectorRefusalBucket
 from mycelium_core.models.precomputed_suggestion import PrecomputedSuggestion
 from mycelium_core.models.project_profile import ProjectProfile
 from mycelium_core.models.push_subscription import PushSubscription
@@ -282,6 +283,7 @@ __all__ = [
     "PasswordResetToken",
     "PaymentConnector",
     "PaymentConnectorEvent",
+    "PaymentConnectorRefusalBucket",
     "PaymentCustomerLink",
     "PaymentObjectLink",
     "PaymentStatus",

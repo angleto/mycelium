@@ -60,6 +60,7 @@ from mycelium_core.models.payment_connector import (
     PaymentConnectorEvent,
     PaymentWebhookDelivery,
 )
+from mycelium_core.services import payment_native
 from mycelium_core.services.payment_events import timestamped_mac
 
 
@@ -225,6 +226,47 @@ def _signed(secret: str, body: bytes, *, timestamp: int | None = None) -> dict[s
         "Stripe-Signature": f"t={t},v1={timestamped_mac(secret, t, body)}",
         "Content-Type": "application/json",
     }
+
+
+def _signed_native(secret: str, body: bytes, *, timestamp: int | None = None) -> dict[str, str]:
+    """The same MAC, in the header shape OUR published contract defines.
+
+    Same construction as Stripe's (that symmetry is deliberate, see ADR-0051),
+    split across two headers instead of one packed value.
+    """
+    t = str(int(time.time()) if timestamp is None else timestamp)
+    return {
+        payment_native.TIMESTAMP_HEADER: t,
+        payment_native.SIGNATURE_HEADER: f"v1={timestamped_mac(secret, t, body)}",
+        "Content-Type": "application/json",
+    }
+
+
+def _native_event(event_id: str = "ev-1") -> bytes:
+    """One event of the published contract, serialised ONCE (see ``_event``)."""
+    return json.dumps(
+        {
+            "id": event_id,
+            "type": "invoice.issue",
+            "created": 1_755_000_000,
+            "data": {
+                "reference": f"ORD-{event_id}",
+                "customer": {
+                    "legal_name": "Acme SpA",
+                    "country_code": "IT",
+                    "vat_number": "IT09876543210",
+                    "address": "Via Milano",
+                    "civic_number": "9",
+                    "postal_code": "20100",
+                    "city": "Milano",
+                    "province": "MI",
+                    "sdi_code": "ABCDEFG",
+                },
+                "lines": [{"description": "Consulenza", "unit_price": "100.00"}],
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
 
 
 def _event(event_id: str = "evt_1") -> bytes:
@@ -664,28 +706,102 @@ async def test_body_over_the_cap_is_refused_as_too_large() -> None:
 # --- the optional second factor ---------------------------------------------
 
 
+async def test_a_connector_without_a_secret_verifies_nothing() -> None:
+    """A vendor connector exists before its provider has issued a secret, so
+    "cannot verify yet" is a normal state -- and it must FAIL CLOSED. Anything
+    else would put an empty or guessable value on the one path that has no
+    other authority."""
+    async with _client() as c:
+        h, issuer, org, user = await _setup(c)
+        r = await c.post(
+            f"/issuer-profiles/{issuer}/payment-connectors",
+            headers=h,
+            json={"label": f"pc-{uuid.uuid4().hex[:6]}"},
+        )
+        assert r.status_code == 200, r.text
+        cid = r.json()["id"]
+        assert r.json()["signing_secret"] is None
+
+        with _ingress_on():
+            body = _event("evt_nosecret")
+            # Signed with something -- anything -- since there is nothing to
+            # sign with. The point is that no presented signature can pass.
+            res = await c.post(
+                _url("stripe", cid),
+                content=body,
+                headers=_signed("whsec_attacker_guess", body),
+            )
+        assert res.status_code == 401, res.text
+        assert res.json()["code"] == "payment_connector.signature_invalid"
+        assert await _events(org, user, cid) == []
+
+
+async def test_the_delivery_ledger_stops_growing_under_a_flood() -> None:
+    """What an unauthenticated caller who learned the URL can make us WRITE.
+
+    Refusing costs nothing; recording the refusal costs a row, and rows are
+    unbounded. Past the window's budget the refusal is unchanged -- same 401,
+    nothing learned about a limit -- and only the append stops, so the ledger
+    keeps the beginning of the flood (which is what an operator reads) instead
+    of all of it.
+    """
+    async with _client() as c:
+        h, issuer, org, user = await _setup(c)
+        cid, secret, _key = await _connector(c, h, issuer)
+
+        budget = 3
+        with _ingress_on(MYCELIUM_PAYMENT_CONNECTOR_REFUSAL_BUDGET=str(budget)):
+            for i in range(budget + 4):
+                body = _event(f"evt_flood_{i}")
+                res = await c.post(
+                    _url("stripe", cid),
+                    content=body,
+                    headers=_signed("whsec_wrong_secret_entirely", body),
+                )
+                assert res.status_code == 401, res.text
+
+        deliveries = await _deliveries(org, user, cid)
+        assert len(deliveries) == budget, (
+            "the ledger must stop at the budget, not grow with the flood"
+        )
+        assert all(d.outcome == "signature_invalid" for d in deliveries)
+
+        # And the connector still works: the cap counts REFUSALS, so whoever
+        # holds the signing secret is never affected by someone else's noise.
+        with _ingress_on(MYCELIUM_PAYMENT_CONNECTOR_REFUSAL_BUDGET=str(budget)):
+            good = _event("evt_legit")
+            res = await c.post(_url("stripe", cid), content=good, headers=_signed(secret, good))
+        assert res.status_code == 200, res.text
+        assert [e.provider_event_id for e in await _events(org, user, cid)] == ["evt_legit"]
+
+
 async def test_ingress_api_key_is_mandatory_once_configured() -> None:
     """With a key armed, a valid signature alone is no longer enough. The
     refusal is collapsed onto the signature answer on purpose: a caller must
     not learn WHICH factor failed, nor that a key is required at all."""
     async with _client() as c:
         h, issuer, org, user = await _setup(c)
-        cid, secret, key = await _connector(c, h, issuer, with_api_key=True)
+        cid, secret, key = await _connector(c, h, issuer, provider="mycelium", with_api_key=True)
         assert key is not None and key.startswith("mycelium_pc_")
 
         with _ingress_on():
-            body = _event("evt_nokey")
-            missing = await c.post(_url("stripe", cid), content=body, headers=_signed(secret, body))
-            wrong = await c.post(
-                _url("stripe", cid),
-                content=body,
-                headers={**_signed(secret, body), "X-Connector-Api-Key": "mycelium_pc_wrong"},
+            body = _native_event("evt_nokey")
+            missing = await c.post(
+                _url("mycelium", cid), content=body, headers=_signed_native(secret, body)
             )
-            good_body = _event("evt_withkey")
+            wrong = await c.post(
+                _url("mycelium", cid),
+                content=body,
+                headers={
+                    **_signed_native(secret, body),
+                    "X-Connector-Api-Key": "mycelium_pc_wrong",
+                },
+            )
+            good_body = _native_event("evt_withkey")
             good = await c.post(
-                _url("stripe", cid),
+                _url("mycelium", cid),
                 content=good_body,
-                headers={**_signed(secret, good_body), "X-Connector-Api-Key": key},
+                headers={**_signed_native(secret, good_body), "X-Connector-Api-Key": key},
             )
 
         assert missing.status_code == 401, missing.text
@@ -714,7 +830,9 @@ async def test_rotated_api_key_accepts_both_keys_in_the_grace_window() -> None:
     keeps working until its window expires."""
     async with _client() as c:
         h, issuer, org, user = await _setup(c)
-        cid, secret, old_key = await _connector(c, h, issuer, with_api_key=True)
+        cid, secret, old_key = await _connector(
+            c, h, issuer, provider="mycelium", with_api_key=True
+        )
         assert old_key is not None
 
         rotated = await c.post(
@@ -725,17 +843,17 @@ async def test_rotated_api_key_accepts_both_keys_in_the_grace_window() -> None:
         assert new_key is not None and new_key != old_key
 
         with _ingress_on():
-            with_old = _event("evt_old_key")
+            with_old = _native_event("evt_old_key")
             r_old = await c.post(
-                _url("stripe", cid),
+                _url("mycelium", cid),
                 content=with_old,
-                headers={**_signed(secret, with_old), "X-Connector-Api-Key": old_key},
+                headers={**_signed_native(secret, with_old), "X-Connector-Api-Key": old_key},
             )
-            with_new = _event("evt_new_key")
+            with_new = _native_event("evt_new_key")
             r_new = await c.post(
-                _url("stripe", cid),
+                _url("mycelium", cid),
                 content=with_new,
-                headers={**_signed(secret, with_new), "X-Connector-Api-Key": new_key},
+                headers={**_signed_native(secret, with_new), "X-Connector-Api-Key": new_key},
             )
 
         assert r_old.status_code == 200, r_old.text

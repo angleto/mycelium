@@ -36,6 +36,9 @@ type Connector = {
   revoked_at: string | null
   last_event_at: string | null
   // Never the key itself -- only whether the optional second factor is armed.
+  /** False = created but not yet able to verify anything: the normal state
+   * between creating a connector and registering its URL at the provider. */
+  has_signing_secret: boolean
   has_api_key: boolean
   webhook_url: string
   /** The events to enable in the provider alongside that URL, derived by the
@@ -58,7 +61,7 @@ type SubscriptionEvent = {
  * comes back empty from rotate-api-key (rotating one credential must not
  * re-expose the other) and ``api_key`` is null unless one was just minted. */
 type ConnectorCreated = Connector & {
-  signing_secret: string
+  signing_secret: string | null
   api_key: string | null
 }
 
@@ -326,6 +329,65 @@ function SecretReveal({
   )
 }
 
+/** The one-time credential panel, shown only when there IS a credential.
+ *
+ * Separate from the "here is your URL" panel because the two are different
+ * moments: a vendor connector is born with no secret and its next step is to
+ * register the URL, while a minted credential must be copied now or never. */
+function CreatedCredentials({
+  created,
+  copy,
+  copied,
+  onDismiss,
+}: {
+  created: ConnectorCreated
+  copy: (text: string, token: string) => void
+  copied: string | null
+  onDismiss: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <>
+      <p className="err">{t('paymentConnectors.secretWarning')}</p>
+      {/* rotate-api-key answers with an empty signing secret on purpose:
+          rotating one credential must never re-expose the other. */}
+      {created.signing_secret && (
+        <SecretReveal
+          label={t('paymentConnectors.secretShown')}
+          value={created.signing_secret}
+          token="secret"
+          copy={copy}
+          copied={copied}
+        />
+      )}
+      {created.api_key && (
+        <SecretReveal
+          label={t('paymentConnectors.apiKeyShown')}
+          value={created.api_key}
+          token="apikey"
+          copy={copy}
+          copied={copied}
+        />
+      )}
+      <p className="hint">
+        {t('paymentConnectors.webhookUrl')}: <code>{created.webhook_url}</code>
+      </p>
+      <div className="row">
+        <button
+          type="button"
+          className="btn--sm"
+          onClick={() => copy(created.webhook_url, 'created-url')}
+        >
+          {copied === 'created-url' ? 'OK' : t('paymentConnectors.copyUrl')}
+        </button>
+        <button type="button" className="btn--sm btn--ghost" onClick={onDismiss}>
+          {t('paymentConnectors.dismiss')}
+        </button>
+      </div>
+    </>
+  )
+}
+
 /** What to do in the provider's dashboard, for THIS connector.
  *
  * The list of events is the part an operator cannot derive and cannot verify:
@@ -589,7 +651,7 @@ function DefaultsFields({
  * waiting for a human decision, ``dead`` is one that exhausted its attempts.
  * Both are shown -- a dead event with no surface would be a payment that
  * silently never became a document. */
-function ConnectorEvents({
+export function ConnectorEvents({
   profileId,
   connectorId,
 }: {
@@ -866,7 +928,7 @@ function ConnectorEvents({
  * what has no other trace is a delivery we turned away (bad signature, revoked
  * connector, malformed body), and that is exactly the case where the provider
  * insists it delivered. */
-function ConnectorDeliveries({
+export function ConnectorDeliveries({
   profileId,
   connectorId,
 }: {
@@ -973,8 +1035,6 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
   // flag without all of them lighting up at once.
   const [copied, setCopied] = useState<string | null>(null)
 
-  const [showEvents, setShowEvents] = useState<string | null>(null)
-  const [showDeliveries, setShowDeliveries] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -1192,54 +1252,54 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
     <div className="card card--running">
       <h3>{t('paymentConnectors.title')}</h3>
       <p className="hint">{t('paymentConnectors.hint')}</p>
+      {/* Configuration lives here; reading what the connector PRODUCED does
+          not. The event triage and the delivery ledger are day-to-day work on
+          documents, so they sit with the documents. */}
+      <p className="hint">{t('paymentConnectors.triageMovedHint')}</p>
       {err && <p className="err">{err}</p>}
       {loading && <p>{t('home.loading')}</p>}
 
       {created && (
         <div className="field">
-          <p className="err">{t('paymentConnectors.secretWarning')}</p>
-          {/* rotate-api-key answers with an empty signing secret on purpose:
-              rotating one credential must never re-expose the other. */}
-          {created.signing_secret && (
-            <SecretReveal
-              label={t('paymentConnectors.secretShown')}
-              value={created.signing_secret}
-              token="secret"
+          {/* The URL FIRST when there is no secret to show. That is the state a
+              vendor connector is born in, and copying this address into the
+              provider is literally the next thing to do -- the provider will
+              not issue a signing secret until it has it. Leading with a
+              "copy your credentials now" warning that has no credentials under
+              it would bury the one actionable line. */}
+          {!created.signing_secret && !created.api_key ? (
+            <>
+              <p className="ok">{t('paymentConnectors.createdNextStep')}</p>
+              <p>
+                {t('paymentConnectors.webhookUrl')}: <code>{created.webhook_url}</code>
+              </p>
+              <div className="row">
+                <button
+                  type="button"
+                  className="btn--sm"
+                  onClick={() => void copy(created.webhook_url, 'created-url')}
+                >
+                  {copied === 'created-url' ? 'OK' : t('paymentConnectors.copyUrl')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => setCreated(null)}
+                >
+                  {t('paymentConnectors.dismiss')}
+                </button>
+              </div>
+            </>
+          ) : (
+            <CreatedCredentials
+              created={created}
               copy={(text, token) => void copy(text, token)}
               copied={copied}
+              onDismiss={() => setCreated(null)}
             />
           )}
-          {created.api_key && (
-            <SecretReveal
-              label={t('paymentConnectors.apiKeyShown')}
-              value={created.api_key}
-              token="apikey"
-              copy={(text, token) => void copy(text, token)}
-              copied={copied}
-            />
-          )}
-          <p className="hint">
-            {t('paymentConnectors.webhookUrl')}: <code>{created.webhook_url}</code>
-          </p>
-          <div className="row">
-            <button
-              type="button"
-              className="btn--sm"
-              onClick={() => void copy(created.webhook_url, 'created-url')}
-            >
-              {copied === 'created-url' ? 'OK' : t('paymentConnectors.copyUrl')}
-            </button>
-            <button
-              type="button"
-              className="btn--sm btn--ghost"
-              onClick={() => setCreated(null)}
-            >
-              {t('paymentConnectors.dismiss')}
-            </button>
-          </div>
         </div>
       )}
-
       {!loading && rows.length === 0 && !created && (
         <p className="muted">{t('paymentConnectors.empty')}</p>
       )}
@@ -1252,6 +1312,14 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
               <span className={c.enabled ? 'tag' : 'tag tag--muted'}>
                 {c.enabled ? t('paymentConnectors.enabled') : t('paymentConnectors.disabled')}
               </span>{' '}
+              {/* The state between "created" and "usable". Named, because
+                  otherwise it presents as an ordinary disabled connector and
+                  the operator has no way to know what it is waiting for. */}
+              {!c.has_signing_secret && (
+                <span className="badge badge--dry-run">
+                  {t('paymentConnectors.secretMissing')}
+                </span>
+              )}{' '}
               <span className="muted">
                 {t('paymentConnectors.invoiceMode')}: {modeLabel(c.invoice_mode)} |{' '}
                 {t('paymentConnectors.creditNoteMode')}: {modeLabel(c.credit_note_mode)}
@@ -1276,9 +1344,18 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                 </>
               ) : (
                 <>
+                  {/* Enabling without a secret is refused by the backend --
+                      the connector could not verify one delivery -- so the
+                      button says so instead of offering a click that fails. */}
                   <button
                     type="button"
                     className="btn--sm"
+                    disabled={!c.enabled && !c.has_signing_secret}
+                    title={
+                      !c.enabled && !c.has_signing_secret
+                        ? t('paymentConnectors.secretMissingHint')
+                        : undefined
+                    }
                     onClick={() => void onToggleEnabled(c)}
                   >
                     {c.enabled
@@ -1302,13 +1379,19 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                   >
                     {t('paymentConnectors.rotateSigning')}
                   </button>{' '}
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    onClick={() => void onRotateApiKey(c.id)}
-                  >
-                    {t('paymentConnectors.rotateApiKey')}
-                  </button>{' '}
+                  {/* Offered only where the sender can present it; the
+                      backend refuses the rest. CLEARING stays available for
+                      every provider, because a key armed before that rule
+                      existed is exactly what has to be removable. */}
+                  {c.provider === 'mycelium' && (
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost"
+                      onClick={() => void onRotateApiKey(c.id)}
+                    >
+                      {t('paymentConnectors.rotateApiKey')}
+                    </button>
+                  )}{' '}
                   {c.has_api_key && (
                     <button
                       type="button"
@@ -1329,20 +1412,7 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
               )}{' '}
               {/* History stays reachable on a revoked connector: that is when
                   somebody is reconciling what it did before it was stopped. */}
-              <button
-                type="button"
-                className="btn--sm btn--ghost"
-                onClick={() => setShowEvents(showEvents === c.id ? null : c.id)}
-              >
-                {t('paymentConnectors.quarantine')}
-              </button>{' '}
-              <button
-                type="button"
-                className="btn--sm btn--ghost"
-                onClick={() => setShowDeliveries(showDeliveries === c.id ? null : c.id)}
-              >
-                {t('paymentConnectors.deliveries')}
-              </button>
+
               {/* The address the operator pastes into the provider dashboard. */}
               <div className="row">
                 <code>{c.webhook_url}</code>
@@ -1453,12 +1523,7 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                   </div>
                 </form>
               )}
-              {showEvents === c.id && (
-                <ConnectorEvents profileId={profileId} connectorId={c.id} />
-              )}
-              {showDeliveries === c.id && (
-                <ConnectorDeliveries profileId={profileId} connectorId={c.id} />
-              )}
+
             </li>
           ))}
         </ul>
@@ -1543,12 +1608,14 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
               <div className="row">
                 <label className="lbl--wide">
                   {t('paymentConnectors.signingSecret')}
-                  {/* Required: a Stripe connector holding a secret Stripe never
-                      issued would refuse every delivery with signature_invalid,
-                      and the operator would see an empty invoice list with no
-                      error anywhere. */}
+                  {/* NOT required, and that is the whole setup order: the
+                      provider issues its secret only once the webhook URL is
+                      registered there, and that URL contains this connector's
+                      id -- so the connector must exist first. Leave it empty,
+                      save, copy the URL, and come back with the secret. It
+                      cannot be ENABLED until then, which is the gate that
+                      matters. */}
                   <MaskedInput
-                    required
                     minLength={MIN_SIGNING_SECRET}
                     value={signingSecret}
                     onChange={setSigningSecret}
@@ -1557,17 +1624,26 @@ export function PaymentConnectors({ profileId }: { profileId: string }) {
                 </label>
               </div>
               <p className="hint">{t('paymentConnectors.signingSecretHint')}</p>
+              <p className="hint">{t('paymentConnectors.vendorOrderHint')}</p>
             </>
           )}
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={withApiKey}
-              onChange={(e) => setWithApiKey(e.target.checked)}
-            />
-            {t('paymentConnectors.withApiKey')}
-          </label>
-          <p className="hint">{t('paymentConnectors.withApiKeyHint')}</p>
+          {/* Only where the sender can actually present it. A Stripe
+              webhook endpoint sends what Stripe decides to send: arming a key
+              it cannot carry does not harden the endpoint, it makes every
+              delivery be refused. */}
+          {provider === 'mycelium' && (
+            <>
+              <label className="row">
+                <input
+                  type="checkbox"
+                  checked={withApiKey}
+                  onChange={(e) => setWithApiKey(e.target.checked)}
+                />
+                {t('paymentConnectors.withApiKey')}
+              </label>
+              <p className="hint">{t('paymentConnectors.withApiKeyHint')}</p>
+            </>
+          )}
           <DefaultsFields value={form} vocab={vocab} provider={provider} onChange={setForm} />
           <div className="row">
             <button type="submit" className="btn--sm">

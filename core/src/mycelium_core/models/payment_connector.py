@@ -86,6 +86,23 @@ def _sql_in(values: tuple[str, ...]) -> str:
 #: vendor adapters are then a convenience, not the only door.
 PROVIDERS = ("stripe", "mycelium")
 
+#: Providers whose sender can put a CUSTOM HEADER on the delivery, which is the
+#: only way the optional second ingress factor can travel.
+#:
+#: Stripe cannot: a Stripe webhook endpoint sends what Stripe decides to send,
+#: and there is no field for an extra header anywhere in its configuration. So
+#: arming an ingress key on a Stripe connector does not harden it, it BREAKS it
+#: -- the key is configured, no delivery presents it, and every event is refused
+#: as an invalid signature (the two factors are collapsed on purpose, so the
+#: refusal does not even say which one failed). The offer is therefore a
+#: property of the provider rather than a free checkbox.
+#:
+#: Note what this does NOT weaken: authority on this endpoint has always been
+#: the HMAC over the raw body, which a caller without the signing secret cannot
+#: produce. The second factor was only ever defence in depth for senders able to
+#: carry it.
+PROVIDERS_WITH_INGRESS_KEY = ("mycelium",)
+
 #: What the connector is allowed to do on its own when an event arrives.
 #: ``transmit`` composes AND files with SdI, ``draft`` composes and stops (an
 #: operator reviews and transmits from the SPA), ``off`` records the event and
@@ -227,7 +244,14 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
     # --- credentials -------------------------------------------------------
     #: Fernet ciphertext of the provider's webhook signing secret (Stripe
     #: ``whsec_...``). Reversible because verification recomputes the MAC.
-    signing_secret_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    #: NULL until the provider's own secret is installed. A vendor connector
+    #: MUST be created before that secret can exist: its id is what makes the
+    #: webhook URL, and the provider mints the secret only once that URL is
+    #: registered there. Requiring the secret up front made the two a circle
+    #: with no entry point. Enabling is what stays gated (see
+    #: ``PAYMENT_CONNECTOR_SECRET_MISSING``), because that is the state in which
+    #: a connector actually receives money events.
+    signing_secret_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     previous_signing_secret_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     previous_signing_secret_expires_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -574,6 +598,7 @@ __all__ = [
     "EVENT_STATUSES",
     "OBJECT_KINDS",
     "PROVIDERS",
+    "PROVIDERS_WITH_INGRESS_KEY",
     "REFUND_EVENTS",
     "PaymentConnector",
     "PaymentConnectorEvent",

@@ -136,6 +136,8 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_NOT_FOUND = "payment_connector.not_found"
     PAYMENT_CONNECTOR_NOT_REVOKED = "payment_connector.not_revoked"
     PAYMENT_CONNECTOR_NOT_DRY_RUN = "payment_connector.not_dry_run"
+    PAYMENT_CONNECTOR_SECRET_MISSING = "payment_connector.signing_secret_missing"  # noqa: S105 (message code, not a secret)
+    PAYMENT_CONNECTOR_KEY_UNSUPPORTED = "payment_connector.ingress_key_unsupported"
     PAYMENT_CONNECTOR_ALREADY_EMITTED = "payment_connector.already_emitted"
     PAYMENT_CONNECTOR_PROVIDER_INVALID = "payment_connector.provider_invalid"
     PAYMENT_CONNECTOR_MODE_INVALID = "payment_connector.mode_invalid"
@@ -460,6 +462,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WEBHOOK_URL_INVALID: "Invalid webhook URL: {detail}",
         MessageCode.WEBHOOK_EVENT_TYPE_INVALID: "Unknown webhook event type: {detail}",
         MessageCode.PAYMENT_CONNECTOR_NOT_FOUND: "Payment connector not found",
+        MessageCode.PAYMENT_CONNECTOR_KEY_UNSUPPORTED: (
+            "Provider {detail} cannot send a custom header, so an ingress key would "
+            "only make every delivery be refused. The signature is the authority here"
+        ),
+        MessageCode.PAYMENT_CONNECTOR_SECRET_MISSING: (
+            "This connector has no signing secret yet, so it could not verify a single "
+            "delivery. Register the webhook URL at {detail} and paste the secret it "
+            "shows, then enable it"
+        ),
         MessageCode.PAYMENT_CONNECTOR_NOT_DRY_RUN: (
             "This document was not composed in shadow mode, so there is nothing to promote"
         ),

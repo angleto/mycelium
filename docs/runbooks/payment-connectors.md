@@ -54,10 +54,23 @@ explicitly rather than relying on that coincidence.
    serves it as `subscription` on the connector, so `GET
    /issuer-profiles/{id}/payment-connectors` answers the same question outside
    the SPA.
-4. Stripe shows a signing secret (`whsec_…`). Paste it into the connector. Until
-   it matches, every delivery is refused as `signature_invalid` and lands in the
-   delivery ledger — a connector with no signing secret of Stripe's is not a
-   connector that is "not receiving", it is one refusing everything.
+4. Stripe shows a signing secret (`whsec_…`). Paste it into the connector with
+   *Rotate signing secret*. Until then the connector **cannot be enabled**
+   (`payment_connector.signing_secret_missing`) and refuses every delivery: a
+   connector with no secret is not one that is "not receiving", it is one that
+   cannot verify anything.
+
+   This order is forced by the provider and is why the secret is **not** asked
+   for at creation: the URL contains the connector id, so the connector has to
+   exist before the URL does, and Stripe issues the secret only once that URL is
+   registered as an endpoint.
+
+   Do **not** arm an *ingress API key* on a Stripe connector — the option is not
+   offered, and the API refuses it (`payment_connector.ingress_key_unsupported`).
+   A Stripe webhook endpoint sends what Stripe decides to send and has no field
+   for a custom header, so the key would be configured, never presented, and
+   every delivery refused. The second factor exists for senders that can carry
+   it, which today means our own contract.
 5. Nothing to set for the codice destinatario. `0000000` cannot be used to
    deliver, so there is deliberately no connector-wide default: a document is
    emittable when the customer supplied a real 7-character code or a PEC. A
@@ -119,6 +132,37 @@ whole reason this setting exists — so the emission-idempotency ledger would no
 catch a second TD04 for a refund the other announcement had already reversed.
 Getting the field right before traffic starts is much cheaper than either
 outcome; the connector's setup guide lists the announcement it expects.
+
+## Where to read what a connector did
+
+Configuration lives in Settings → issuer profile → Payment connectors: create,
+credentials, modes, defaults, and the generated event list.
+
+Everything the connector PRODUCED is read from **Invoices → Automated
+collections**: events waiting for billing data, events needing a decision,
+ignored events with their reason, and the inbound delivery ledger. That is daily
+work on fiscal documents, so it sits with the documents rather than in a
+settings page you visit once.
+
+## What an unauthenticated caller can cost you
+
+The ingress is public by construction: a provider posts to it with no bearer and
+the authority is the HMAC over the raw body. Nobody without the signing secret
+can get a single event ingested, and that has always been true.
+
+What is bounded now is the WRITE. Every refused delivery appended a row to the
+delivery ledger, so anyone who learned a connector URL could grow that table
+without limit (the URL is a v4 UUID — unguessable, but pasted into dashboards
+and read off screens, so not a secret). A fixed-window counter caps how many
+refusals per connector get recorded
+(`MYCELIUM_PAYMENT_CONNECTOR_REFUSAL_BUDGET`, default 120 per
+`..._REFUSAL_WINDOW_SECONDS`, default 60). Past the budget the caller still gets
+the same 401 — it learns nothing about a limit existing — and only the ledger
+append stops.
+
+It counts refusals, never requests, so a legitimate burst is never affected: to
+be accepted you must already hold the signing secret, and whoever holds it is
+the provider.
 
 ## The two ledgers
 

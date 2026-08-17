@@ -67,6 +67,7 @@ from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
     EMISSION_EVENTS,
     PROVIDERS,
+    PROVIDERS_WITH_INGRESS_KEY,
     REFUND_EVENTS,
     PaymentConnector,
     PaymentConnectorEvent,
@@ -195,12 +196,26 @@ class ResolvedConnector:
     issuer_profile_id: uuid.UUID
     provider: str
     enabled: bool
-    signing_secret: str
+    #: NULL while a vendor connector is waiting for the secret its provider
+    #: issues. Creating the connector has to come FIRST -- its id is what makes
+    #: the webhook URL, and the provider only mints a secret once you have
+    #: registered that URL -- so "exists but cannot verify yet" is a real state
+    #: and not an anomaly.
+    signing_secret: str | None
     previous_signing_secret: str | None
     api_key_hash: bytes | None
     previous_api_key_hash: bytes | None
 
-    def secrets(self) -> VerificationSecrets:
+    def secrets(self) -> VerificationSecrets | None:
+        """The live secrets, or None when none is installed yet.
+
+        None means the ingress CANNOT verify, which is a refusal and never a
+        pass: the caller is turned away exactly like a bad signature. Returning
+        an empty secret instead would put an attacker-guessable value on the
+        one path that has no other authority.
+        """
+        if self.signing_secret is None:
+            return None
         return VerificationSecrets(
             current=self.signing_secret, previous=self.previous_signing_secret
         )
@@ -324,7 +339,7 @@ async def create_connector(
     signing_secret: str | None = None,
     with_api_key: bool = False,
     **fields: Any,
-) -> tuple[PaymentConnector, str, str | None]:
+) -> tuple[PaymentConnector, str | None, str | None]:
     """Create a connector. Returns ``(row, signing_secret, api_key)``.
 
     Both plaintexts are returned EXACTLY here and at rotation, and never stored
@@ -350,14 +365,25 @@ async def create_connector(
         refund_event=refund_event,
     )
 
-    if signing_secret is None and provider != "mycelium":
-        # Minting is only meaningful where WE are the authority. For a vendor
-        # adapter the secret belongs to the vendor: inventing one produces a
-        # connector that looks healthy (enabled, no error, no events) while
-        # refusing every delivery, because the MAC can never match. Fail at
-        # configuration time, where the operator can still read the message.
-        raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_SECRET_REQUIRED, detail=provider)
-    raw_secret = signing_secret or generate_signing_secret()
+    # Minting is only meaningful where WE are the authority. For a vendor adapter
+    # the secret belongs to the vendor, so an omitted one is NOT minted -- a
+    # secret the provider never issued produces a connector that looks healthy
+    # (enabled, no error, no events) while refusing every delivery, because the
+    # MAC can never match.
+    #
+    # It is also not refused. The provider only issues a secret once the webhook
+    # URL is registered as an endpoint, and that URL contains this connector's
+    # id, so the connector has to exist FIRST. Demanding the secret here closed a
+    # circle with no entry point. The connector is instead born without one, and
+    # cannot be ENABLED until a real secret is installed -- the gate sits on the
+    # state that actually receives money events rather than on the paperwork.
+    raw_secret = (
+        signing_secret
+        if signing_secret is not None
+        else (generate_signing_secret() if provider == "mycelium" else None)
+    )
+    if with_api_key:
+        _assert_ingress_key_supported(provider)
     raw_key = generate_api_key() if with_api_key else None
     row = PaymentConnector(
         org_id=org_id,
@@ -365,7 +391,7 @@ async def create_connector(
         created_by=actor_id,
         provider=provider,
         label=label,
-        signing_secret_ciphertext=encrypt_secret(raw_secret),
+        signing_secret_ciphertext=encrypt_secret(raw_secret) if raw_secret else None,
         api_key_hash=_hash_key(raw_key) if raw_key else None,
     )
     for key, value in fields.items():
@@ -439,6 +465,14 @@ async def update_connector(
         emission_event=str(merged["emission_event"]),
         refund_event=str(merged["refund_event"]),
     )
+    if values.get("enabled") and row.signing_secret_ciphertext is None:
+        # THE gate that replaced "you must supply a secret to create it".
+        # Enabling is the moment a connector starts accepting money events, and
+        # one with no secret cannot verify a single delivery: it would refuse
+        # everything while presenting as live, which is the failure mode the
+        # old creation-time refusal existed to prevent. Here it costs nothing,
+        # because by now the operator HAS the URL and can fetch the secret.
+        raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_SECRET_MISSING, detail=row.provider)
     if not values:
         # A write that writes nothing is not a write: bumping the concurrency
         # counter would fail a concurrent editor's version check for no reason,
@@ -499,6 +533,18 @@ async def rotate_signing_secret(
     return row, raw
 
 
+def _assert_ingress_key_supported(provider: str) -> None:
+    """Refuse the second factor where the sender cannot present it.
+
+    Arming a key a provider has no way to send does not harden the endpoint, it
+    silences it: the key is configured, no delivery carries it, and every event
+    is refused. The refusal is collapsed with a bad signature on purpose, so the
+    symptom an operator sees is "nothing arrives" with no cause attached.
+    """
+    if provider not in PROVIDERS_WITH_INGRESS_KEY:
+        raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_KEY_UNSUPPORTED, detail=provider)
+
+
 async def rotate_api_key(
     session: AsyncSession,
     *,
@@ -508,6 +554,7 @@ async def rotate_api_key(
 ) -> tuple[PaymentConnector, str]:
     await require_role(session, org_id, actor_id, Role.owner)
     row = await get_connector(session, org_id=org_id, connector_id=connector_id)
+    _assert_ingress_key_supported(row.provider)
     raw = generate_api_key()
     grace = get_settings().payment_connector_secret_grace_hours
     if row.api_key_hash is not None:
@@ -623,7 +670,11 @@ async def resolve_for_ingress(
         issuer_profile_id=row["out_issuer_profile_id"],
         provider=row["out_provider"],
         enabled=bool(row["out_enabled"]),
-        signing_secret=decrypt_secret(row["out_signing_secret_ciphertext"]),
+        signing_secret=(
+            decrypt_secret(row["out_signing_secret_ciphertext"])
+            if row["out_signing_secret_ciphertext"]
+            else None
+        ),
         previous_signing_secret=decrypt_secret(previous_ct) if previous_ct else None,
         api_key_hash=row["out_api_key_hash"],
         previous_api_key_hash=row["out_previous_api_key_hash"],
@@ -685,6 +736,50 @@ def body_digest(raw: bytes) -> bytes:
     original body can prove it produced this row.
     """
     return hashlib.sha256(raw).digest()
+
+
+_REFUSAL_BUDGET_SQL = text(
+    """
+    INSERT INTO payment_connector_refusals (connector_id, org_id, window_start, count)
+    VALUES (:cid, :oid, now(), 1)
+    ON CONFLICT (connector_id) DO UPDATE SET
+      window_start = CASE
+        WHEN payment_connector_refusals.window_start < now() - make_interval(secs => :w)
+        THEN now() ELSE payment_connector_refusals.window_start END,
+      count = CASE
+        WHEN payment_connector_refusals.window_start < now() - make_interval(secs => :w)
+        THEN 1 ELSE payment_connector_refusals.count + 1 END
+    RETURNING count
+    """
+)
+
+
+async def note_refusal(
+    session: AsyncSession, *, org_id: uuid.UUID, connector_id: uuid.UUID
+) -> bool:
+    """Count one refused delivery. False once the window's budget is spent.
+
+    A single atomic upsert, because this runs on the path whose whole purpose is
+    to be cheaper than the work it is protecting: the caller uses the answer to
+    decide whether to APPEND to the delivery ledger, and appending is the cost an
+    unauthenticated flood would otherwise impose without bound.
+
+    Counting refusals rather than requests is what keeps this invisible to real
+    traffic: producing a valid signature requires the secret, so a signed burst
+    is the provider and is never throttled however it spikes.
+    """
+    settings = get_settings()
+    count = (
+        await session.execute(
+            _REFUSAL_BUDGET_SQL,
+            {
+                "cid": str(connector_id),
+                "oid": str(org_id),
+                "w": settings.payment_connector_refusal_window_seconds,
+            },
+        )
+    ).scalar_one()
+    return int(count) <= settings.payment_connector_refusal_budget
 
 
 async def record_delivery(
@@ -2114,6 +2209,7 @@ __all__ = [
     "list_events",
     "mapper_config",
     "net_unit_price",
+    "note_refusal",
     "process_event",
     "promote_dry_run",
     "purge_connector",

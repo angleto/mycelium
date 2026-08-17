@@ -90,6 +90,16 @@ async def _record_refusal(
             actor_kind="payment_connector",
             actor_subject_id=str(resolved.connector_id),
         ) as session:
+            # The ledger is the cost an unauthenticated caller can impose: one
+            # appended row per refused request, for anyone who learned the URL.
+            # Past the window's budget the refusal still happens -- the caller is
+            # turned away exactly as before -- but it stops being written down.
+            # The first refusals of the window are what an operator would read
+            # anyway; the thousandth adds nothing but storage.
+            if not await svc.note_refusal(
+                session, org_id=resolved.org_id, connector_id=resolved.connector_id
+            ):
+                return
             await svc.record_delivery(
                 session,
                 org_id=resolved.org_id,
@@ -157,10 +167,15 @@ async def receive(
         )
         raise DomainError(MessageCode.PAYMENT_CONNECTOR_PAYLOAD_INVALID, detail="body too large")
 
-    verified = mapper.verify(
+    # No secret installed yet (a vendor connector created before its endpoint
+    # was registered) means we cannot verify, which is a refusal. Collapsed into
+    # the same branch as a bad signature on purpose: an unauthenticated caller
+    # must not be able to tell a misconfigured connector from a wrong key.
+    secrets = resolved.secrets()
+    verified = secrets is not None and mapper.verify(
         headers=headers,
         raw_body=raw,
-        secrets=resolved.secrets(),
+        secrets=secrets,
         tolerance_seconds=settings.payment_connector_tolerance_seconds,
         now=datetime.datetime.now(tz=datetime.UTC),
     )

@@ -185,6 +185,10 @@ class PaymentConnectorOut(BaseModel):
     last_event_at: datetime.datetime | None
     version: int
     refund_event: str
+    #: Never the secret itself -- only whether one is installed at all. False
+    #: means the connector exists but cannot verify a delivery yet, which is the
+    #: normal state between creating it and registering its URL at the provider.
+    has_signing_secret: bool
     #: Never the secret itself -- only whether the second factor is armed.
     has_api_key: bool
     #: The URL to paste into the provider's dashboard.
@@ -197,9 +201,14 @@ class PaymentConnectorOut(BaseModel):
 
 
 class PaymentConnectorCreateOut(PaymentConnectorOut):
-    """The only shape that ever carries plaintext credentials."""
+    """The only shape that ever carries plaintext credentials.
 
-    signing_secret: str
+    ``signing_secret`` is NULL when there is nothing to show: a vendor connector
+    is created before its provider has issued one, and the SPA's next
+    instruction is to register the webhook URL rather than to copy a secret.
+    """
+
+    signing_secret: str | None = None
     api_key: str | None = None
 
 
@@ -286,7 +295,7 @@ def _webhook_url(connector: PaymentConnector) -> str:
 
 
 #: Fields of the DTO that are computed here rather than copied off the row.
-_DERIVED_FIELDS = frozenset({"has_api_key", "webhook_url", "subscription"})
+_DERIVED_FIELDS = frozenset({"has_signing_secret", "has_api_key", "webhook_url", "subscription"})
 
 
 def _out(row: PaymentConnector) -> PaymentConnectorOut:
@@ -296,6 +305,7 @@ def _out(row: PaymentConnector) -> PaymentConnectorOut:
             for field in PaymentConnectorOut.model_fields
             if field not in _DERIVED_FIELDS
         },
+        has_signing_secret=row.signing_secret_ciphertext is not None,
         has_api_key=row.api_key_hash is not None,
         webhook_url=_webhook_url(row),
         subscription=[
@@ -308,7 +318,7 @@ def _out(row: PaymentConnector) -> PaymentConnectorOut:
 
 
 def _create_out(
-    row: PaymentConnector, signing_secret: str, api_key: str | None
+    row: PaymentConnector, signing_secret: str | None, api_key: str | None
 ) -> PaymentConnectorCreateOut:
     return PaymentConnectorCreateOut(
         **_out(row).model_dump(), signing_secret=signing_secret, api_key=api_key

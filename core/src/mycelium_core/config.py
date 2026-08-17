@@ -247,6 +247,15 @@ class Settings(BaseSettings):
     payment_connector_batch: int = 20
     # How long a rotated signing secret / ingress key keeps working, so a
     # rotation never drops a redelivery of an event signed with the old one.
+    #: Refusals per connector per window before the ingress stops appending to
+    #: the delivery ledger. The refusal itself never changes shape -- the caller
+    #: still gets a 401 and learns nothing about a limit. Counts REFUSALS only, so a
+    #: correctly signed burst is never throttled -- whoever can sign is the
+    #: provider. Generous against real traffic (a busy merchant's webhook feed
+    #: is a few events per second at most) and still a hard bound on what an
+    #: unauthenticated caller who learned the URL can make us write.
+    payment_connector_refusal_budget: int = 120
+    payment_connector_refusal_window_seconds: int = 60
     payment_connector_secret_grace_hours: int = 24
     # Retention for terminal event rows. Long by default: these are the
     # provenance of fiscal documents, and the invoice outlives any sweep.

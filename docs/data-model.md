@@ -216,12 +216,16 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - `issuer_key_rate_limit(key_id, endpoint_class, org_id, window_start, count)` --
   the per-key fixed-window rate bucket (FORCE RLS).
 
-## Inbound payment connectors (ADR-0051, migrations 0092-0095)
+## Inbound payment connectors (ADR-0051, migrations 0092-0097)
 
 - `payment_connectors(id, org_id, issuer_profile_id FK cascade, created_by FK
   users set-null, provider[stripe|mycelium], label, signing_secret_ciphertext,
   previous_signing_secret_ciphertext?, previous_signing_secret_expires_at?,
-  api_key_hash?, previous_api_key_hash?, previous_api_key_expires_at?, enabled,
+  signing_secret_ciphertext NULLABLE (a vendor connector exists before its
+  provider has issued one -- the URL carries its id, so it must exist first;
+  ENABLING is what requires a secret), api_key_hash?, previous_api_key_hash?,
+  previous_api_key_expires_at? (armed only for providers that can send a
+  custom header, i.e. the native contract), enabled,
   invoice_mode[transmit|draft|dry_run|off],
   credit_note_mode[transmit|draft|dry_run|off],
   emission_event[invoice.paid|payment_intent.succeeded|
@@ -242,6 +246,12 @@ org-scoped entity. Memory is partitioned by `org_id`.
   one-way hash. ENABLE (not FORCE) RLS, so the SECURITY DEFINER
   `resolve_payment_connector(uuid)` reads a row with no tenant GUC; it returns
   nothing for a revoked row and NULLs an expired grace copy.
+- `payment_connector_refusals(connector_id PK FK cascade, org_id FK cascade,
+  window_start, count)` -- fixed-window cap on how many REFUSED deliveries per
+  connector get appended to the ledger, so an unauthenticated caller who
+  learned a URL cannot grow it without bound. Counts refusals, never requests:
+  a signed burst is by definition the provider. ENABLE (not FORCE) RLS, like
+  `payment_connectors`, because it is maintained on the no-tenant ingress path.
 - `payment_connector_events(id, org_id, connector_id FK cascade,
   provider_event_id, event_type, payload jsonb, occurred_at?,
   status[pending|processing|done|ignored|no_billing_data|needs_attention|dead],

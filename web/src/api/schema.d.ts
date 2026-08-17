@@ -11553,6 +11553,10 @@ export interface components {
         /**
          * PaymentConnectorCreateOut
          * @description The only shape that ever carries plaintext credentials.
+         *
+         *     ``signing_secret`` is NULL when there is nothing to show: a vendor connector
+         *     is created before its provider has issued one, and the SPA's next
+         *     instruction is to register the webhook URL rather than to copy a secret.
          */
         PaymentConnectorCreateOut: {
             /**
@@ -11623,6 +11627,8 @@ export interface components {
             version: number;
             /** Refund Event */
             refund_event: string;
+            /** Has Signing Secret */
+            has_signing_secret: boolean;
             /** Has Api Key */
             has_api_key: boolean;
             /** Webhook Url */
@@ -11630,7 +11636,7 @@ export interface components {
             /** Subscription */
             subscription: components["schemas"]["SubscriptionEventOut"][];
             /** Signing Secret */
-            signing_secret: string;
+            signing_secret?: string | null;
             /** Api Key */
             api_key?: string | null;
         };
@@ -11850,6 +11856,8 @@ export interface components {
             version: number;
             /** Refund Event */
             refund_event: string;
+            /** Has Signing Secret */
+            has_signing_secret: boolean;
             /** Has Api Key */
             has_api_key: boolean;
             /** Webhook Url */

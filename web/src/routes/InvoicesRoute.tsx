@@ -13,6 +13,7 @@ import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
+import { ConnectorTriage } from '../components/ConnectorTriage'
 import type { components } from '../api/schema'
 
 type Invoice = components['schemas']['InvoiceOut']
@@ -453,6 +454,9 @@ export function InvoicesRoute() {
   const activeId = session?.workspaceId
 
   const [profiles, setProfiles] = useState<Profile[]>([])
+  // Collapsed by default: the connector panels fetch on mount, and an
+  // operator with no connectors must pay nothing for the section existing.
+  const [showConnectors, setShowConnectors] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
   const [list, setList] = useState<Invoice[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -1206,6 +1210,23 @@ export function InvoicesRoute() {
       <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
+      {/* Inbound payment connectors: what they produced and what they turned
+          away. Deliberately NOT a fourth visibility band -- the bands are bands
+          of invoices and this is a different object -- and deliberately not in
+          Settings, where you go once to configure and never again. A panel of
+          its own, collapsed by default, so nothing about the existing list
+          changes for anyone who does not use connectors. */}
+      <div className="row">
+        <button
+          type="button"
+          className={`btn--sm ${showConnectors ? '' : 'btn--ghost'}`}
+          aria-pressed={showConnectors}
+          onClick={() => setShowConnectors(!showConnectors)}
+        >
+          {t('paymentConnectors.triageTitle')}
+        </button>
+      </div>
+      {showConnectors && <ConnectorTriage profiles={profiles} />}
       {/* Visibility band selector (Active | Archived | Trash). */}
       <div className="row">
         {INV_VIEWS.map((v) => (

@@ -423,6 +423,32 @@ unauthenticated webhook and whose fiscal work happens in a worker.
   live lookup and the next redelivery would file a second invoice for the same
   money; and it refuses when a live document already covers that payment. The
   fiscal number is still allocated at transmit, so promotion commits nothing.
+- **Requiring the signing secret to create a vendor connector.** It reads as
+  fail-closed and is actually a deadlock: the webhook URL carries the connector
+  id, so the connector must exist before the URL does, and the provider issues
+  a secret only once that URL is registered as an endpoint. The only way
+  through was to register a throwaway URL, harvest the secret, create the
+  connector and go back to fix the URL. The secret is therefore optional at
+  creation (migration 0096) and ENABLING is gated instead -- the state in which
+  the endpoint would actually accept money events. Minting one for a vendor is
+  still refused, at creation and at rotation: a secret the provider never
+  issued produces a connector that looks healthy and rejects everything.
+- **Offering the ingress API key for every provider.** The second factor
+  travels in a custom header and a Stripe webhook endpoint has no field for
+  one, so arming it there does not harden the endpoint, it silences it: the key
+  is configured, no delivery carries it, every event is refused, and because
+  the two factors are collapsed on purpose the refusal does not say which
+  failed. It is now a property of the provider
+  (`PROVIDERS_WITH_INGRESS_KEY`), and migration 0097 clears the keys already
+  armed where they could only break things.
+- **An unbounded audit trail on an unauthenticated path.** Appending a row per
+  refused delivery is what makes a refusal auditable, and also what lets anyone
+  who learns a connector URL grow that table without limit. Rate-limiting the
+  ENDPOINT would have been wrong -- it would throttle a provider's legitimate
+  burst -- so the counter is on REFUSALS: passing requires the signing secret,
+  so a signed flood is the provider and is never affected. Past the budget the
+  refusal is unchanged (same 401, no signal that a limit exists) and only the
+  append stops.
 - **Documenting the events to subscribe in the runbook.** The list depends on
   the connector's own settings (which trigger, whether credit notes are
   automated, which refund announcement), so a written checklist is wrong for

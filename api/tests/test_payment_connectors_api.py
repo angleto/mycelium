@@ -136,6 +136,21 @@ async def _create(c: AsyncClient, h: dict[str, str], issuer: str, **over: Any) -
     return out
 
 
+async def _create_keyed(
+    c: AsyncClient, h: dict[str, str], issuer: str, **over: Any
+) -> dict[str, Any]:
+    """A connector that CAN carry the optional ingress key.
+
+    Only our own contract can. A Stripe webhook endpoint sends what Stripe
+    decides to send and has no field for a custom header, so a key armed there
+    would not harden anything -- it would make every delivery be refused, with
+    the cause invisible because the two factors are collapsed on purpose.
+    """
+    return await _create(
+        c, h, issuer, provider="mycelium", signing_secret=None, with_api_key=True, **over
+    )
+
+
 async def _row(c: AsyncClient, h: dict[str, str], issuer: str, cid: str) -> dict[str, Any] | None:
     """The connector as the LIST route sees it -- the only read surface there is."""
     rows: list[dict[str, Any]] = (await c.get(_base(issuer), headers=h)).json()
@@ -285,7 +300,7 @@ async def _force_status(org_id: uuid.UUID, connector_id: str, event_uuid: str, s
 async def test_create_returns_both_credentials_once_and_the_ingress_url() -> None:
     async with _client() as c:
         owner, _member, _org, issuer = await _setup(c)
-        made = await _create(c, owner, issuer, with_api_key=True)
+        made = await _create_keyed(c, owner, issuer)
 
         # Both plaintexts, here and nowhere else.
         assert made["signing_secret"].startswith(svc.SIGNING_SECRET_PREFIX)
@@ -299,7 +314,7 @@ async def test_create_returns_both_credentials_once_and_the_ingress_url() -> Non
         assert any(getattr(r, "path", None) == _INGRESS_ROUTE for r in app.routes)
         parsed = urlparse(made["webhook_url"])
         assert parsed.scheme and parsed.netloc
-        assert parsed.path == f"/api/v1/connectors/stripe/{made['id']}"
+        assert parsed.path == f"/api/v1/connectors/{made['provider']}/{made['id']}"
 
 
 async def test_create_without_api_key_leaves_the_second_factor_unarmed() -> None:
@@ -324,7 +339,7 @@ async def test_create_accepts_the_providers_own_signing_secret() -> None:
 async def test_list_never_returns_secret_material() -> None:
     async with _client() as c:
         owner, _member, _org, issuer = await _setup(c)
-        made = await _create(c, owner, issuer, with_api_key=True)
+        made = await _create_keyed(c, owner, issuer)
 
         r = await c.get(_base(issuer), headers=owner)
         assert r.status_code == 200, r.text
@@ -332,11 +347,18 @@ async def test_list_never_returns_secret_material() -> None:
         assert len(rows) == 1
         row = rows[0]
 
-        # No key may even LOOK like credential material...
+        # No key may even LOOK like credential material. The two exceptions are
+        # BOOLEANS about whether a credential exists, never the credential: the
+        # SPA needs "is the second factor armed" and "can this connector verify
+        # anything yet" to render its state at all.
         leaking = [k for k in row if any(m in k.lower() for m in _SECRET_KEY_MARKERS)]
-        assert leaking == ["has_api_key"], f"unexpected credential-ish keys: {leaking}"
+        assert leaking == ["has_signing_secret", "has_api_key"], (
+            f"unexpected credential-ish keys: {leaking}"
+        )
         assert isinstance(row["has_api_key"], bool)
         assert row["has_api_key"] is True
+        assert isinstance(row["has_signing_secret"], bool)
+        assert row["has_signing_secret"] is True
 
         # ...and the serialised payload must not contain either plaintext under
         # any shape at all (a nested object, a differently named field).
@@ -400,6 +422,85 @@ async def test_rotating_a_vendor_connector_refuses_to_mint_a_secret() -> None:
         assert r.status_code == 200, r.text
 
 
+async def test_a_vendor_connector_is_created_before_its_secret_exists() -> None:
+    """The setup order the provider forces, end to end.
+
+    The webhook URL contains the connector id, so the connector must exist
+    before the URL exists; the provider issues a signing secret only once that
+    URL is registered as an endpoint. Demanding the secret at creation closed a
+    circle with no entry point, so creation without one is legal -- and ENABLING
+    is what stays gated, because that is the state in which the endpoint would
+    actually accept money events.
+    """
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+        r = await c.post(
+            _base(issuer),
+            headers=owner,
+            json={"label": f"stripe-{uuid.uuid4().hex[:6]}"},
+        )
+        assert r.status_code == 200, r.text
+        made = r.json()
+        cid = made["id"]
+        assert made["signing_secret"] is None, "nothing to show: none was issued"
+        assert made["has_signing_secret"] is False
+        assert made["enabled"] is False
+        # The URL is the whole point of creating it this early.
+        assert made["webhook_url"].endswith(f"/api/v1/connectors/stripe/{cid}")
+
+        # Enabling now would present a connector that cannot verify one delivery.
+        r = await c.patch(f"{_base(issuer)}/{cid}", headers=owner, json={"enabled": True})
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "payment_connector.signing_secret_missing"
+        assert (await _row(c, owner, issuer, cid))["enabled"] is False
+
+        # Register the URL at the provider, paste what it shows, and enable.
+        r = await c.post(
+            f"{_base(issuer)}/{cid}/rotate-signing-secret",
+            headers=owner,
+            json={"signing_secret": f"whsec_from_stripe_{uuid.uuid4().hex}"},
+        )
+        assert r.status_code == 200, r.text
+        assert (await _row(c, owner, issuer, cid))["has_signing_secret"] is True
+
+        r = await c.patch(f"{_base(issuer)}/{cid}", headers=owner, json={"enabled": True})
+        assert r.status_code == 200, r.text
+        assert (await _row(c, owner, issuer, cid))["enabled"] is True
+
+
+async def test_an_ingress_key_is_refused_where_the_sender_cannot_present_it() -> None:
+    """Arming the second factor on Stripe does not harden the endpoint, it
+    silences it: Stripe sends what Stripe decides to send and has no field for a
+    custom header, so the key would be configured, never presented, and every
+    delivery refused -- with the cause invisible, because the two factors are
+    collapsed on purpose."""
+    async with _client() as c:
+        owner, _member, _org, issuer = await _setup(c)
+
+        r = await c.post(
+            _base(issuer),
+            headers=owner,
+            json={
+                "label": f"stripe-{uuid.uuid4().hex[:6]}",
+                "signing_secret": f"whsec_test_{uuid.uuid4().hex}",
+                "with_api_key": True,
+            },
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "payment_connector.ingress_key_unsupported"
+        assert (await c.get(_base(issuer), headers=owner)).json() == []
+
+        # Nor after the fact, through rotation.
+        cid = (await _create(c, owner, issuer))["id"]
+        r = await c.post(f"{_base(issuer)}/{cid}/rotate-api-key", headers=owner)
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "payment_connector.ingress_key_unsupported"
+
+        # Our own contract CAN carry it, so the same call is fine there.
+        native = await _create_keyed(c, owner, issuer)
+        assert native["api_key"] is not None
+
+
 async def test_a_supplied_signing_secret_has_a_floor() -> None:
     """A pasted secret is the whole authority of a public endpoint, and pasting
     your own is now an offered path on the native contract, so a hand-typed
@@ -432,7 +533,7 @@ async def test_rotate_signing_secret_accepts_an_explicit_secret() -> None:
 async def test_rotate_api_key_issues_a_new_key_and_does_not_reshow_the_secret() -> None:
     async with _client() as c:
         owner, _member, _org, issuer = await _setup(c)
-        made = await _create(c, owner, issuer, with_api_key=True)
+        made = await _create_keyed(c, owner, issuer)
         cid = made["id"]
 
         r = await c.post(f"{_base(issuer)}/{cid}/rotate-api-key", headers=owner)
@@ -449,7 +550,7 @@ async def test_rotate_api_key_issues_a_new_key_and_does_not_reshow_the_secret() 
 async def test_clear_api_key_disarms_the_second_factor() -> None:
     async with _client() as c:
         owner, _member, _org, issuer = await _setup(c)
-        cid = (await _create(c, owner, issuer, with_api_key=True))["id"]
+        cid = (await _create_keyed(c, owner, issuer))["id"]
 
         r = await c.request("DELETE", f"{_base(issuer)}/{cid}/api-key", headers=owner)
         assert r.status_code == 200, r.text
@@ -464,7 +565,7 @@ async def test_clear_api_key_disarms_the_second_factor() -> None:
 async def test_a_member_may_list_but_never_mutate() -> None:
     async with _client() as c:
         owner, member, _org, issuer = await _setup(c)
-        made = await _create(c, owner, issuer, with_api_key=True, invoice_mode="draft")
+        made = await _create_keyed(c, owner, issuer, invoice_mode="draft")
         cid = made["id"]
 
         # Reading is an operator's job, so the list stays open to a member.
@@ -796,7 +897,7 @@ async def test_a_connector_under_a_sibling_issuer_profile_is_404_everywhere() ->
     async with _client() as c:
         owner, _member, org, issuer_a = await _setup(c)
         issuer_b = await _issuer(c, owner, label="Secondaria", vat="11111111119")
-        made = await _create(c, owner, issuer_a, with_api_key=True)
+        made = await _create_keyed(c, owner, issuer_a)
         cid = made["id"]
         await _ingest(org, cid, event_id="evt_scope")
         event_uuid = (await c.get(f"{_base(issuer_a)}/{cid}/events", headers=owner)).json()[0]["id"]
