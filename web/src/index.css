@@ -915,6 +915,15 @@ button.btn--ghost {
   padding-left: 0.6rem;
   border-left: 2px solid var(--border);
 }
+/* Choosing a counterpart for a parked payment: inline under the row it fixes,
+   because "which client is this?" is a question about THAT row. */
+.pc-assign {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
 /* Connector event table: provider ids are entropy, not text. They must not be
    allowed to set the column width, or every readable column loses its space. */
 .pc-id {

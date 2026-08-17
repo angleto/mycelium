@@ -726,6 +726,9 @@ export function ConnectorEvents({
   // The event whose received payload is expanded, if any. One at a time:
   // these are large nested objects and the question is always about one row.
   const [payload, setPayload] = useState<{ id: string; body: string } | null>(null)
+  // Which row is picking a counterpart, and the clients to pick from.
+  const [assigning, setAssigning] = useState<string | null>(null)
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -758,19 +761,19 @@ export function ConnectorEvents({
     }
   }, [profileId, connectorId, status, tick])
 
-  async function onAssignClient(r: EventRow) {
+  async function onAssignClient(r: EventRow, tagId: string) {
     // The manual half of "the customer sent their billing data late". When the
     // data arrives outside the provider there is nothing tying the mycelium
     // client to the provider's customer id, so Retry alone can never unblock
     // the payment -- it re-derives the counterpart from the frozen payload.
+    //
+    // The client is CHOSEN from the workspace's clients, not typed: this used
+    // to be a window.prompt asking for a tag UUID, which is not something an
+    // operator has, can remember, or should be made to copy out of a URL.
     if (!r.provider_customer_id) return
-    const tagId = window.prompt(
-      t('paymentConnectors.assignPrompt', { customer: r.provider_customer_id }),
-      '',
-    )
-    if (tagId === null || !tagId.trim()) return
     setErr(null)
     setMsg(null)
+    setAssigning(null)
     try {
       const out = await send<{ rearmed: number }>(
         `/issuer-profiles/${profileId}/payment-connectors/${connectorId}/assign-customer`,
@@ -779,12 +782,29 @@ export function ConnectorEvents({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider_customer_id: r.provider_customer_id,
-            client_tag_id: tagId.trim(),
+            client_tag_id: tagId,
           }),
         },
       )
       setMsg(t('paymentConnectors.assignDone', { count: out.rearmed }))
       setTick((n) => n + 1)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
+
+  async function openAssign(eventId: string) {
+    if (assigning === eventId) {
+      setAssigning(null)
+      return
+    }
+    setErr(null)
+    setAssigning(eventId)
+    if (clients.length) return
+    try {
+      // Fetched on demand, not with the list: a workspace can have many
+      // clients and most triage never needs them.
+      setClients(await send<{ id: string; name: string }[]>('/clients'))
     } catch (e) {
       setErr(message(e))
     }
@@ -999,10 +1019,35 @@ export function ConnectorEvents({
                     <button
                       type="button"
                       className="btn--sm"
-                      onClick={() => void onAssignClient(r)}
+                      aria-expanded={assigning === r.id}
+                      onClick={() => void openAssign(r.id)}
                     >
                       {t('paymentConnectors.assignClient')}
                     </button>
+                  )}
+                  {assigning === r.id && (
+                    <div className="pc-assign">
+                      <p className="hint">
+                        {t('paymentConnectors.assignPrompt', {
+                          customer: r.provider_customer_id,
+                        })}
+                      </p>
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) void onAssignClient(r, e.target.value)
+                        }}
+                      >
+                        <option value="" disabled>
+                          {t('paymentConnectors.assignPick')}
+                        </option>
+                        {clients.map((cl) => (
+                          <option key={cl.id} value={cl.id}>
+                            {cl.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   )}
                   {r.status !== 'done' && (
                     <button
