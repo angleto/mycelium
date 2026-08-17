@@ -1715,20 +1715,24 @@ async def _process_payment_sync(
     connector: PaymentConnector,
     event: PaymentConnectorEvent,
     intent: PaymentSyncIntent,
-) -> str:
+) -> tuple[str, str | None]:
     if not connector.payment_sync_enabled:
-        return "ignored"
+        return "ignored", "payment_sync_off"
     invoice_id = await _find_linked_invoice(
         session, connector_id=connector.id, keys=intent.parent_keys
     )
     if invoice_id is None:
         # Money we did not invoice (a payment predating the connector, or one
-        # whose emission trigger is a different event). Not an error.
-        return "ignored"
+        # whose emission trigger is a different event). Not an error -- but it
+        # still needs a NAME. An ignored event with an empty reason is the one
+        # thing an operator cannot act on: it reads as "something happened and
+        # nobody will say what", when the answer is simply that no document of
+        # ours matches this payment.
+        return "ignored", "payment_without_invoice"
     inv = await invoice_svc.get_invoice(session, org_id=connector.org_id, invoice_id=invoice_id)
     await _mark_paid_if_needed(session, connector=connector, inv=inv)
     event.invoice_id = inv.id
-    return "done"
+    return "done", None
 
 
 async def process_event(session: AsyncSession, *, org_id: uuid.UUID, event_id: uuid.UUID) -> str:
@@ -1769,6 +1773,7 @@ async def process_event(session: AsyncSession, *, org_id: uuid.UUID, event_id: u
                 party=intent.party,
             )
             return await _finish(session, event, status="done", slug=None)
+        slug: str | None = None
         if isinstance(intent, EmissionIntent):
             status = await _process_emission(
                 session, connector=connector, event=event, intent=intent
@@ -1778,10 +1783,12 @@ async def process_event(session: AsyncSession, *, org_id: uuid.UUID, event_id: u
                 session, connector=connector, event=event, intent=intent
             )
         else:
-            status = await _process_payment_sync(
+            # Reconciliation is the one branch that can legitimately end in
+            # "nothing to do", so it is also the one that has to say why.
+            status, slug = await _process_payment_sync(
                 session, connector=connector, event=event, intent=intent
             )
-        return await _finish(session, event, status=status, slug=None)
+        return await _finish(session, event, status=status, slug=slug)
     except PayloadError as exc:
         # Deterministic: a reprocess of the same frozen payload cannot succeed.
         return await _finish(

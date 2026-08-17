@@ -1217,6 +1217,43 @@ async def test_promote_turns_a_shadow_into_a_sendable_draft() -> None:
         assert r.json()["code"] == "payment_connector.not_dry_run"
 
 
+async def test_the_received_payload_is_readable_per_event() -> None:
+    """An operator asking "what did Stripe actually send me" has to be able to
+    look. Served per event and never projected onto the list: the list is read
+    many rows at a time and this is a large object carrying fiscal identity, so
+    reading one is a deliberate act.
+
+    Safe because an EVENT is authenticated -- it exists only because a MAC over
+    these exact bytes verified. The delivery ledger, which records what we
+    turned away, is attacker-controlled and keeps only a digest.
+    """
+    async with _client() as c:
+        owner, member, org, issuer = await _setup(c)
+        cid = (await _create(c, owner, issuer))["id"]
+        await _ingest(org, cid, event_id="evt_look", payload=_invoice_paid("evt_look"))
+        rows = (await c.get(f"{_base(issuer)}/{cid}/events", headers=owner)).json()
+        assert len(rows) == 1
+        event_id = rows[0]["id"]
+
+        # The list itself still carries no payload: that is what makes fetching
+        # one a decision rather than a side effect.
+        assert "payload" not in rows[0]
+
+        r = await c.get(f"{_base(issuer)}/{cid}/events/{event_id}/payload", headers=member)
+        assert r.status_code == 200, r.text
+        body = json.loads(r.text)
+        assert body["id"] == "evt_look"
+        assert body["data"]["object"]["customer_name"] == "Acme SpA"
+
+        # Scoped like every other by-event route: another issuer's nesting is a
+        # 404, never a 403.
+        r = await c.get(
+            f"/issuer-profiles/{uuid.uuid4()}/payment-connectors/{cid}/events/{event_id}/payload",
+            headers=owner,
+        )
+        assert r.status_code == 404, r.text
+
+
 async def test_the_vocabulary_advertises_dry_run() -> None:
     """The SPA renders the modes from the backend, so a widened set must reach
     it without a frontend release."""

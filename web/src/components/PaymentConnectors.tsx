@@ -641,6 +641,69 @@ function DefaultsFields({
   )
 }
 
+/** A provider id, shortened for a table and complete on hover.
+ *
+ * A Stripe event id is 30-odd characters of entropy that nobody reads: it is
+ * there to be recognised and copied, not scanned. Showing it whole made every
+ * other column in the row unreadable. */
+function ProviderId({ value }: { value: string }) {
+  const short = value.length > 16 ? `${value.slice(0, 10)}…${value.slice(-4)}` : value
+  return (
+    <code className="pc-id" title={value}>
+      {short}
+    </code>
+  )
+}
+
+/** Why an event did not become a document, in words.
+ *
+ * The slugs are the ledger's vocabulary and belong in the ledger; an operator
+ * deciding what to do next needs a sentence. The missing-data list gets the
+ * same treatment: ``vat_number|tax_code`` is a rule ("either of these"), and it
+ * reads as one. The raw slug stays available on hover, because that is what a
+ * bug report should quote. */
+function EventReason({ slug, detail }: { slug: string | null; detail: string | null }) {
+  const { t } = useTranslation()
+  if (!slug) return <span className="muted">—</span>
+  const key = `paymentConnectors.reason.${slug}`
+  const text = t(key)
+  return (
+    <>
+      <span title={slug}>{text === key ? slug : text}</span>
+      {detail && <MissingFields detail={detail} />}
+    </>
+  )
+}
+
+/** ``vat_number|tax_code, sdi_code|pec, address`` -> a readable list. */
+function MissingFields({ detail }: { detail: string }) {
+  const { t } = useTranslation()
+  const groups = detail
+    .split(',')
+    .map((g) => g.trim())
+    .filter(Boolean)
+  // Anything that is not the missing-fields shape is shown verbatim: this
+  // column also carries validator messages, which are already sentences.
+  const looksLikeFields = groups.every((g) => /^[a-z_|]+$/.test(g))
+  if (!looksLikeFields) return <div className="muted pc-detail">{detail}</div>
+  const name = (f: string) => {
+    const key = `paymentConnectors.field.${f}`
+    const label = t(key)
+    return label === key ? f : label
+  }
+  return (
+    <div className="muted pc-detail">
+      {t('paymentConnectors.missingLabel')}{' '}
+      {groups.map((g, i) => (
+        <span key={g}>
+          {i > 0 && ', '}
+          {g.split('|').map(name).join(t('paymentConnectors.fieldOr'))}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 /** The quarantine: events that arrived, verified, and could NOT become a valid
  * fiscal document. This is the operator's daily surface, so the stable slug
  * (client_billing_data_missing, parent_not_transmitted, ...) is shown verbatim:
@@ -660,6 +723,9 @@ export function ConnectorEvents({
 }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<EventRow[]>([])
+  // The event whose received payload is expanded, if any. One at a time:
+  // these are large nested objects and the question is always about one row.
+  const [payload, setPayload] = useState<{ id: string; body: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -719,6 +785,26 @@ export function ConnectorEvents({
       )
       setMsg(t('paymentConnectors.assignDone', { count: out.rearmed }))
       setTick((n) => n + 1)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
+
+  async function onShowPayload(eventId: string) {
+    // Inline rather than a download: the question this answers is "what did
+    // Stripe actually send me", and it is asked while reading the row.
+    if (payload?.id === eventId) {
+      setPayload(null)
+      return
+    }
+    setErr(null)
+    try {
+      const res = await authFetch(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+          `/events/${eventId}/payload`,
+      )
+      if (!res.ok) throw new Error(String(res.status))
+      setPayload({ id: eventId, body: await res.text() })
     } catch (e) {
       setErr(message(e))
     }
@@ -834,11 +920,11 @@ export function ConnectorEvents({
         <p className="ok">{t('paymentConnectors.quarantineEmpty')}</p>
       )}
       {!loading && rows.length > 0 && (
-        <table className="list">
+        <table className="tbl">
           <thead>
             <tr>
               <th>{t('paymentConnectors.eventType')}</th>
-              <th>{t('paymentConnectors.providerEventId')}</th>
+              <th>{t('paymentConnectors.customer')}</th>
               <th>{t('paymentConnectors.errorSlug')}</th>
               <th>{t('paymentConnectors.attempts')}</th>
               <th>{t('paymentConnectors.createdAt')}</th>
@@ -850,26 +936,39 @@ export function ConnectorEvents({
               <tr key={r.id}>
                 <td>
                   <code>{r.event_type}</code>
+                  <div className="muted">
+                    <ProviderId value={r.provider_event_id} />
+                  </div>
                 </td>
                 <td>
-                  <code>{r.provider_event_id}</code>
-                  {r.provider_customer_id && (
-                    <div className="muted">
-                      <code>{r.provider_customer_id}</code>
-                    </div>
+                  {r.provider_customer_id ? (
+                    <ProviderId value={r.provider_customer_id} />
+                  ) : (
+                    <span className="muted">—</span>
                   )}
                 </td>
                 <td>
-                  <code>{r.last_error ?? '—'}</code>
                   {/* The detail names WHICH fiscal datum is missing, which is
                       the difference between "fix something" and "fix this". */}
-                  {r.error_detail && <div className="muted">{r.error_detail}</div>}
+                  <EventReason slug={r.last_error} detail={r.error_detail} />
                 </td>
                 <td>
                   {r.attempt_count}/{r.max_attempts}
                 </td>
                 <td>{stamp(r.created_at)}</td>
                 <td>
+                  {/* What actually arrived. The row above says what we MADE of
+                      the event; this says what we were given, which is the only
+                      way to tell "the provider did not send it" from "we did
+                      not read it". */}
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    aria-expanded={payload?.id === r.id}
+                    onClick={() => void onShowPayload(r.id)}
+                  >
+                    {t('paymentConnectors.showPayload')}
+                  </button>{' '}
                   {/* In shadow mode the XML is the deliverable: this is the
                       artefact you diff against the incumbent provider. */}
                   {r.has_dry_run_xml && (
@@ -919,6 +1018,21 @@ export function ConnectorEvents({
             ))}
           </tbody>
         </table>
+      )}
+      {payload && (
+        <div className="card card--quiet">
+          <div className="row">
+            <strong>{t('paymentConnectors.showPayload')}</strong>
+            <button
+              type="button"
+              className="btn--sm btn--ghost"
+              onClick={() => setPayload(null)}
+            >
+              {t('paymentConnectors.cancel')}
+            </button>
+          </div>
+          <pre className="pc-payload">{payload.body}</pre>
+        </div>
       )}
     </div>
   )
@@ -971,7 +1085,7 @@ export function ConnectorDeliveries({
         <p className="ok">{t('paymentConnectors.deliveriesEmpty')}</p>
       )}
       {rows.length > 0 && (
-        <table className="list">
+        <table className="tbl">
           <thead>
             <tr>
               <th>{t('paymentConnectors.outcome')}</th>

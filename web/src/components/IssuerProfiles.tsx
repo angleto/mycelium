@@ -131,7 +131,7 @@ function IssuerCounters({ profileId }: { profileId: string }) {
       {rows.length === 0 ? (
         <p className="hint">—</p>
       ) : (
-        <table className="list">
+        <table className="tbl">
           <thead>
             <tr>
               <th>{t('invoices.countersSeries')}</th>

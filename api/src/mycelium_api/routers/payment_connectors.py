@@ -25,6 +25,7 @@ at create and at rotate -- and never in a read route.
 from __future__ import annotations
 
 import datetime
+import json
 import uuid
 from decimal import Decimal
 from typing import Annotated, Any
@@ -723,6 +724,48 @@ async def promote_dry_run(
         invoice_id=event.invoice_id,
     )
     return PromoteDryRunOut(invoice_id=inv.id, series=inv.series, year=inv.year, number=inv.number)
+
+
+@router.get(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+    "/events/{event_id}/payload"
+)
+async def event_payload(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> Response:
+    """The provider event exactly as it arrived.
+
+    Not projected onto the event LIST, and served per event instead: the list is
+    a triage surface read many rows at a time, and a Stripe event is a large
+    nested object carrying the counterpart's fiscal identity. Fetching one on
+    demand keeps the common read small and makes looking at a customer's data a
+    deliberate act rather than a side effect of opening a page.
+
+    Safe to serve, and this is the line that matters: an EVENT is authenticated
+    -- it exists only because a MAC computed with the connector's signing secret
+    verified over these exact bytes -- so its payload is provider-authored. The
+    delivery ledger, which records what we turned AWAY, is attacker-controlled
+    and therefore keeps a digest and never the body.
+    """
+    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    row = (
+        await ctx.session.execute(
+            select(PaymentConnectorEvent).where(
+                PaymentConnectorEvent.id == event_id,
+                PaymentConnectorEvent.connector_id == connector_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
+    return Response(
+        content=json.dumps(row.payload, indent=2, ensure_ascii=False, sort_keys=True),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get(

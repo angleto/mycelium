@@ -915,6 +915,31 @@ button.btn--ghost {
   padding-left: 0.6rem;
   border-left: 2px solid var(--border);
 }
+/* Connector event table: provider ids are entropy, not text. They must not be
+   allowed to set the column width, or every readable column loses its space. */
+.pc-id {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.pc-detail {
+  font-size: 0.8rem;
+  margin-top: 0.1rem;
+}
+/* Received payload: a nested provider object, so it scrolls in its own box
+   rather than stretching the page. */
+.pc-payload {
+  max-height: 22rem;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  margin: 0.4rem 0 0;
+  white-space: pre;
+}
 /* Payment-connector setup guide: the provider-side checklist that travels with
    a connector. Quieter than .card--running because it is reference material
    sitting inside an already-highlighted card, not a second call to action. */

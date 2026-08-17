@@ -370,6 +370,75 @@ async def test_payment_event_for_unknown_money_is_ignored() -> None:
     assert await _run(org_id, connector_id, event_id) == "ignored"
 
 
+async def test_an_ignored_event_always_says_why() -> None:
+    """ "Ignored" with an empty reason is the one outcome an operator cannot act
+    on: it reads as "something happened and nobody will say what". Payment
+    reconciliation is the branch that can legitimately find nothing to do, so it
+    is the branch that has to name it."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    # A payment for money we never invoiced: no document of ours matches it.
+    _c, orphan = await _ingest(
+        org_id,
+        connector_id,
+        {
+            "id": "evt_orphan",
+            "type": "charge.succeeded",
+            "created": 1_755_000_400,
+            "data": {
+                "object": {
+                    "id": "ch_orphan",
+                    "object": "charge",
+                    "currency": "eur",
+                    "payment_intent": "pi_orphan",
+                    "amount": 5000,
+                }
+            },
+        },
+    )
+    assert orphan is not None
+    assert await _run(org_id, connector_id, orphan) == "ignored"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = await s.get(PaymentConnectorEvent, orphan)
+        assert row is not None
+        assert row.last_error == "payment_without_invoice"
+
+    # And with reconciliation switched off, the reason says THAT instead.
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await svc.update_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            values={"payment_sync_enabled": False},
+        )
+    _c2, off = await _ingest(
+        org_id,
+        connector_id,
+        {
+            "id": "evt_off",
+            "type": "charge.succeeded",
+            "created": 1_755_000_500,
+            "data": {
+                "object": {
+                    "id": "ch_off",
+                    "object": "charge",
+                    "currency": "eur",
+                    "payment_intent": "pi_off",
+                    "amount": 5000,
+                }
+            },
+        },
+    )
+    assert off is not None
+    assert await _run(org_id, connector_id, off) == "ignored"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = await s.get(PaymentConnectorEvent, off)
+        assert row is not None
+        assert row.last_error == "payment_sync_off"
+
+
 # --- credit notes ----------------------------------------------------------
 
 

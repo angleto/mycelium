@@ -609,6 +609,11 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
         "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/discard-dry-run",
     ): HUMAN_ONLY,
     (
+        "GET",
+        "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+        "/events/{event_id}/payload",
+    ): HUMAN_ONLY,
+    (
         "POST",
         "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
         "/events/{event_id}/promote",
