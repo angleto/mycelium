@@ -750,7 +750,12 @@ export function ConnectorEvents({
   const [rows, setRows] = useState<EventRow[]>([])
   // The event whose received payload is expanded, if any. One at a time:
   // these are large nested objects and the question is always about one row.
-  const [payload, setPayload] = useState<{ id: string; body: string } | null>(null)
+  const [payload, setPayload] = useState<{
+    id: string
+    providerId: string
+    body: string
+  } | null>(null)
+  const [copiedPayload, setCopiedPayload] = useState(false)
   // Which row is picking a counterpart, and the clients to pick from.
   const [assigning, setAssigning] = useState<string | null>(null)
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
@@ -835,7 +840,17 @@ export function ConnectorEvents({
     }
   }
 
-  async function onShowPayload(eventId: string) {
+  async function copyPayload(body: string) {
+    try {
+      await navigator.clipboard.writeText(body)
+      setCopiedPayload(true)
+      window.setTimeout(() => setCopiedPayload(false), 2000)
+    } catch {
+      /* clipboard may be blocked */
+    }
+  }
+
+  async function onShowPayload(eventId: string, providerId: string) {
     // Inline rather than a download: the question this answers is "what did
     // Stripe actually send me", and it is asked while reading the row.
     if (payload?.id === eventId) {
@@ -849,7 +864,7 @@ export function ConnectorEvents({
           `/events/${eventId}/payload`,
       )
       if (!res.ok) throw new Error(String(res.status))
-      setPayload({ id: eventId, body: await res.text() })
+      setPayload({ id: eventId, providerId, body: await res.text() })
     } catch (e) {
       setErr(message(e))
     }
@@ -977,7 +992,7 @@ export function ConnectorEvents({
             </tr>
           </thead>
           <tbody>
-            {rows.flatMap((r) => [
+            {rows.map((r) => (
               <tr key={r.id}>
                 <td>
                   <code>{r.event_type}</code>
@@ -989,7 +1004,7 @@ export function ConnectorEvents({
                     <ProviderId
                       value={r.provider_event_id}
                       expanded={payload?.id === r.id}
-                      onClick={() => void onShowPayload(r.id)}
+                      onClick={() => void onShowPayload(r.id, r.provider_event_id)}
                     />
                   </div>
                 </td>
@@ -1080,31 +1095,48 @@ export function ConnectorEvents({
                     </button>
                   )}
                 </td>
-              </tr>,
-              payload?.id === r.id ? (
-                /* Under the row it belongs to, spanning the table: the answer
-                   to "what was this event" has to sit next to the event, or
-                   the reader has to hold a 30-character id in their head while
-                   scrolling to find it. */
-                <tr key={`${r.id}-payload`} className="pc-payload-row">
-                  <td colSpan={6}>
-                    <div className="row">
-                      <strong>{t('paymentConnectors.showPayload')}</strong>
-                      <button
-                        type="button"
-                        className="btn--sm btn--ghost"
-                        onClick={() => setPayload(null)}
-                      >
-                        {t('paymentConnectors.cancel')}
-                      </button>
-                    </div>
-                    <pre className="pc-payload">{payload.body}</pre>
-                  </td>
-                </tr>
-              ) : null,
-            ])}
+              </tr>
+            ))}
           </tbody>
         </table>
+      )}
+      {/* A window, not an expanded row: the payload is a nested provider object
+          and inlining it would push every other event off the screen, turning a
+          triage list into a scroll. Open on demand, gone on close. */}
+      {payload && (
+        <div
+          className="modal__backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPayload(null)
+          }}
+        >
+          <div className="modal__panel">
+            <div className="modal__head">
+              <strong>{t('paymentConnectors.showPayload')}</strong>
+              <code className="pc-id">{payload.providerId}</code>
+              <span className="modal__sp" />
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void copyPayload(payload.body)}
+              >
+                {copiedPayload ? 'OK' : t('paymentConnectors.copy')}
+              </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => setPayload(null)}
+              >
+                {t('paymentConnectors.cancel')}
+              </button>
+            </div>
+            <div className="modal__body">
+              <pre className="pc-payload">{payload.body}</pre>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

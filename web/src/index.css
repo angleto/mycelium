@@ -947,8 +947,12 @@ button.btn--ghost {
 .pc-id--link:focus-visible {
   text-decoration: underline solid;
 }
-.pc-payload-row > td {
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+/* Inside the payload window the box is already scrolled by the modal body, so
+   it stretches instead of capping its own height. */
+.modal__body > .pc-payload {
+  max-height: none;
+  border: none;
+  padding: 0;
 }
 .pc-detail {
   font-size: 0.8rem;
