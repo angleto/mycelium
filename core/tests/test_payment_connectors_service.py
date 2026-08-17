@@ -528,6 +528,204 @@ async def test_the_2026_stripe_tax_shape_does_not_inflate_the_invoice() -> None:
         assert inv.vat == Decimal("4.51")
 
 
+def _customer_updated_real() -> dict[str, Any]:
+    """A real ``customer.updated``, reduced from a production delivery.
+
+    Two things in it are not hypothetical. ``address.state`` is ``"Lazio"`` --
+    Stripe's state field is free text and Italian records carry the region as
+    often as the sigla -- and the metadata bag holds the codice destinatario
+    under several spellings at once, including a legacy vendor's.
+    """
+    return {
+        "id": "evt_customer_real",
+        "type": "customer.updated",
+        "created": 1_786_991_436,
+        "data": {
+            "object": {
+                "id": "cus_real",
+                "object": "customer",
+                "name": "AIR CONSULTING GROUP SRL",
+                "email": "amministrazione@acme.test",
+                "address": {
+                    "city": "Roma",
+                    "country": "IT",
+                    "line1": "Via Donatello, 67",
+                    "line2": "JHBM40P",
+                    "postal_code": "00196",
+                    "state": "Lazio",
+                },
+                "metadata": {
+                    "companyName": "AIR CONSULTING GROUP SRL",
+                    "billit_allowsend": "true",
+                    "billit_identifier_sdicoddest": "JHBM40P",
+                    "vatId": "IT11278231003",
+                    "codice_destinatario": "JHBM40P",
+                    "fiscal_code": "IT11278231003",
+                },
+            }
+        },
+    }
+
+
+async def test_a_customer_event_becomes_a_client_even_with_a_region_in_state() -> None:
+    """The event that silently failed in production.
+
+    Stripe sent ``state: "Lazio"`` and the province column holds four
+    characters, so the insert raised a driver-level truncation error. That is
+    NOT a DomainError: it escaped the runner, failed the event, and retried a
+    payload that could never succeed -- while the operator saw a customer they
+    had just updated in Stripe simply not appear.
+
+    So the mapper makes values fit before they reach the schema, and a
+    ``state`` that is not a sigla is DROPPED rather than truncated: "Lazio"
+    would have become "LAZI", and a wrong provincia on a fiscal document is
+    worse than an absent one, which the standard permits.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id)
+
+    _c, event_id = await _ingest(org_id, connector_id, _customer_updated_real())
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        link = (
+            await s.execute(
+                select(PaymentCustomerLink).where(
+                    PaymentCustomerLink.provider_customer_id == "cus_real"
+                )
+            )
+        ).scalar_one()
+        profile = (
+            await s.execute(select(ClientProfile).where(ClientProfile.tag_id == link.client_tag_id))
+        ).scalar_one()
+
+    assert profile.legal_name == "AIR CONSULTING GROUP SRL"
+    assert profile.sdi_code == "JHBM40P", "the codice destinatario lives in the metadata"
+    assert profile.city == "Roma"
+    assert profile.postal_code == "00196"
+    assert profile.address == "Via Donatello, 67"
+    assert profile.province is None, "'Lazio' is a region, not a sigla, so it is dropped"
+    # ``address.line2`` also held the codice destinatario, because the customer
+    # typed it into the only free field the checkout offered. It is NOT read as
+    # one: a second address line is an address line.
+    assert "JHBM40P" not in (profile.address or "")
+
+
+async def _native_connector(
+    org_id: uuid.UUID, user_id: uuid.UUID, issuer_id: uuid.UUID
+) -> uuid.UUID:
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row, _secret, _key = await svc.create_connector(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            issuer_profile_id=issuer_id,
+            label=f"native-{uuid.uuid4().hex[:6]}",
+            provider="mycelium",
+            enabled=True,
+        )
+        return row.id
+
+
+def _native_issue(event_id: str, **line_over: Any) -> dict[str, Any]:
+    line: dict[str, Any] = {"description": "Consulenza", "unit_price": "100.00"}
+    line.update(line_over)
+    return {
+        "id": event_id,
+        "type": "invoice.issue",
+        "created": 1_755_000_000,
+        "data": {
+            "reference": f"ORD-{event_id}",
+            "customer": {
+                "legal_name": "Acme SpA",
+                "country_code": "IT",
+                "vat_number": "IT09876543210",
+                "address": "Via Milano",
+                "civic_number": "9",
+                "postal_code": "20100",
+                "city": "Milano",
+                "province": "MI",
+                "sdi_code": "ABCDEFG",
+            },
+            "lines": [line],
+        },
+    }
+
+
+async def test_no_provider_value_can_fail_an_event_with_a_driver_error() -> None:
+    """The class of bug, not one instance of it.
+
+    A value the schema cannot hold does not truncate on the way in: it raises a
+    driver-level error (string truncation, numeric overflow) that is NOT a
+    DomainError, so it escapes the event runner, fails the event, and retries a
+    payload that can never succeed. The operator sees nothing happen and has
+    nothing to read.
+
+    One of these was live: Stripe sends ``address.state: "Lazio"`` and the
+    province column holds four characters, so every customer event from that
+    account failed silently. Probing the rest of the surface found five more,
+    across BOTH providers -- which is the point: the model is generic and has to
+    survive whatever either kind of sender puts in it.
+
+    Strings that are merely long are trimmed or dropped and the document is
+    still emitted; figures that do not fit are REFUSED (money silently shrunk
+    would be a number the sender never wrote, in a fiscal document). Either way
+    the outcome is one the runner classifies and the operator can read.
+    """
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    stripe_id = await _connector(org_id, user_id, issuer_id)
+    native_id = await _native_connector(org_id, user_id, issuer_id)
+
+    long_text = "X" * 400
+    stripe_cases: list[tuple[str, dict[str, Any], str]] = [
+        # invoices.purpose is String(200); a Stripe description is free text.
+        ("long_description", {"description": long_text}, "done"),
+        # client country is String(2) and a hand-made customer carries a name.
+        (
+            "long_country",
+            {
+                "customer_address": {
+                    "city": "Milano",
+                    "country": "ITALIA",
+                    "line1": "Via Milano 9",
+                    "postal_code": "20100",
+                    "state": "Lombardia",
+                }
+            },
+            "done",
+        ),
+        ("long_name", {"customer_name": long_text}, "done"),
+    ]
+    for name, over, expected in stripe_cases:
+        payload = _invoice_paid(event_id=f"evt_{name}", invoice_id=f"in_{name}")
+        payload["data"]["object"].update(over)
+        payload["data"]["object"]["payment_intent"] = f"pi_{name}"
+        payload["data"]["object"]["charge"] = f"ch_{name}"
+        _c, event_id = await _ingest(org_id, stripe_id, payload)
+        assert event_id is not None
+        assert await _run(org_id, stripe_id, event_id) == expected, name
+
+    native_cases: list[tuple[str, dict[str, Any], str]] = [
+        ("huge_price", {"unit_price": "999999999999999.00"}, "needs_attention"),
+        ("huge_rate", {"vat_rate": "99999"}, "needs_attention"),
+        ("huge_quantity", {"quantity": "99999999999999"}, "needs_attention"),
+        ("long_description", {"description": long_text}, "done"),
+    ]
+    for name, over, expected in native_cases:
+        payload = _native_issue(f"nat_{name}", **over)
+        _c, event_id = await _ingest(org_id, native_id, payload)
+        assert event_id is not None
+        assert await _run(org_id, native_id, event_id) == expected, name
+
+    # A country NAME on our own contract is the same trap from the other side.
+    payload = _native_issue("nat_country")
+    payload["data"]["customer"]["country_code"] = "ITALIA"
+    _c, event_id = await _ingest(org_id, native_id, payload)
+    assert event_id is not None
+    assert await _run(org_id, native_id, event_id) == "done"
+
+
 # --- credit notes ----------------------------------------------------------
 
 

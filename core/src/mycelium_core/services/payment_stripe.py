@@ -53,8 +53,12 @@ from mycelium_core.services.payment_events import (
     as_sequence,
     as_str,
     checked_identity,
+    checked_line,
+    clamp_field,
+    country_code,
     first_present,
     minor_to_decimal,
+    province_code,
     resolve_inclusive,
     signature_matches,
     within_tolerance,
@@ -155,22 +159,32 @@ def _party(
     vat_from_ids = _vat_from_tax_ids(tax_ids)
 
     name = as_str(node.get("name")) or fallback_name
-    country = as_str(addr.get("country")) or config.default_country_code
+    # A code or nothing: the column holds two characters and Stripe's country
+    # is free text on a manually-created customer.
+    country = country_code(as_str(addr.get("country"))) or config.default_country_code
+    # Every field is clamped to what the counterpart columns hold. A provider
+    # string that is too long does not truncate on the way in, it raises a
+    # driver error that is not a DomainError -- so it escapes the runner, fails
+    # the event, and retries a payload that can never succeed.
     return PartyIn(
-        legal_name=name,
+        legal_name=clamp_field("legal_name", name) or fallback_name,
         # The VAT's country. A VIES-prefixed number (IT0112...) overrides this
         # downstream in ``normalize_vat``; this is the fallback for a bare one.
         country_code=country,
-        vat_number=first_present(metadata, config.metadata_vat_keys) or vat_from_ids,
-        tax_code=first_present(metadata, config.metadata_tax_code_keys),
-        address=as_str(addr.get("line1")),
-        postal_code=as_str(addr.get("postal_code")),
-        city=as_str(addr.get("city")),
-        province=as_str(addr.get("state")),
+        vat_number=clamp_field(
+            "vat_number", first_present(metadata, config.metadata_vat_keys) or vat_from_ids
+        ),
+        tax_code=clamp_field("tax_code", first_present(metadata, config.metadata_tax_code_keys)),
+        address=clamp_field("address", as_str(addr.get("line1"))),
+        postal_code=clamp_field("postal_code", as_str(addr.get("postal_code"))),
+        city=clamp_field("city", as_str(addr.get("city"))),
+        # NOT clamped: ``state`` is free text and Italian records carry the
+        # region ("Lazio") as often as the sigla. Truncating would invent "LAZI".
+        province=province_code(as_str(addr.get("state"))),
         country=country,
-        sdi_code=first_present(metadata, config.metadata_sdi_keys),
-        pec=first_present(metadata, config.metadata_pec_keys),
-        email=as_str(node.get("email")),
+        sdi_code=clamp_field("sdi_code", first_present(metadata, config.metadata_sdi_keys)),
+        pec=clamp_field("pec", first_present(metadata, config.metadata_pec_keys)),
+        email=clamp_field("email", as_str(node.get("email"))),
     )
 
 
@@ -289,6 +303,9 @@ def _invoice_lines(invoice: Mapping[str, Any], *, config: MapperConfig) -> tuple
             or as_str(as_mapping(node.get("price")).get("nickname"))
             or config.default_line_description
             or "Servizio"
+        )
+        checked_line(
+            description=description, quantity=qty, unit_price=gross_or_net / qty, vat_rate=rate
         )
         out.append(
             LineIn(
@@ -477,7 +494,9 @@ class StripeMapper:
             lines=lines,
             currency=currency,
             customer_key=as_str(inv.get("customer")) or as_str(customer.get("id")),
-            purpose=as_str(inv.get("description")) or config.default_purpose,
+            purpose=clamp_field(
+                "purpose", as_str(inv.get("description")) or config.default_purpose
+            ),
             paid=True,
         )
 
@@ -512,7 +531,7 @@ class StripeMapper:
             ),
             currency=currency,
             customer_key=as_str(pi.get("customer")),
-            purpose=as_str(pi.get("description")) or config.default_purpose,
+            purpose=clamp_field("purpose", as_str(pi.get("description")) or config.default_purpose),
             paid=True,
         )
 

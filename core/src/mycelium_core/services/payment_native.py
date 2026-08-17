@@ -61,6 +61,10 @@ from mycelium_core.services.payment_events import (
     as_sequence,
     as_str,
     checked_identity,
+    checked_line,
+    clamp_field,
+    country_code,
+    province_code,
     resolve_inclusive,
     signature_matches,
     within_tolerance,
@@ -85,22 +89,26 @@ def _party(node: Mapping[str, Any], *, config: MapperConfig) -> PartyIn:
         or " ".join(p for p in (as_str(node.get("first_name")), as_str(node.get("last_name"))) if p)
         or "Cliente"
     )
+    # Clamped like the vendor adapter: our contract is documented but a sender
+    # is still someone else's code, and an over-long field must not fail an
+    # event with a driver error the runner cannot classify.
     return PartyIn(
-        legal_name=name,
-        first_name=as_str(node.get("first_name")),
-        last_name=as_str(node.get("last_name")),
-        country_code=as_str(node.get("country_code")) or config.default_country_code,
-        vat_number=as_str(node.get("vat_number")),
-        tax_code=as_str(node.get("tax_code")),
-        address=as_str(node.get("address")),
-        civic_number=as_str(node.get("civic_number")),
-        postal_code=as_str(node.get("postal_code")),
-        city=as_str(node.get("city")),
-        province=as_str(node.get("province")),
-        country=as_str(node.get("country")) or as_str(node.get("country_code")),
-        sdi_code=as_str(node.get("sdi_code")),
-        pec=as_str(node.get("pec")),
-        email=as_str(node.get("email")),
+        legal_name=clamp_field("legal_name", name) or "Cliente",
+        first_name=clamp_field("first_name", as_str(node.get("first_name"))),
+        last_name=clamp_field("last_name", as_str(node.get("last_name"))),
+        country_code=country_code(as_str(node.get("country_code"))) or config.default_country_code,
+        vat_number=clamp_field("vat_number", as_str(node.get("vat_number"))),
+        tax_code=clamp_field("tax_code", as_str(node.get("tax_code"))),
+        address=clamp_field("address", as_str(node.get("address"))),
+        civic_number=clamp_field("civic_number", as_str(node.get("civic_number"))),
+        postal_code=clamp_field("postal_code", as_str(node.get("postal_code"))),
+        city=clamp_field("city", as_str(node.get("city"))),
+        province=province_code(as_str(node.get("province"))),
+        country=country_code(as_str(node.get("country")))
+        or country_code(as_str(node.get("country_code"))),
+        sdi_code=clamp_field("sdi_code", as_str(node.get("sdi_code"))),
+        pec=clamp_field("pec", as_str(node.get("pec"))),
+        email=clamp_field("email", as_str(node.get("email"))),
     )
 
 
@@ -116,12 +124,17 @@ def _lines(raw: Any, *, config: MapperConfig) -> tuple[LineIn, ...]:
             as_str(node.get("description")) or config.default_line_description or "Servizio"
         )
         vat_rate = _decimal_field(node, "vat_rate")
+        qty = quantity if quantity is not None and quantity > 0 else Decimal(1)
+        rate = vat_rate if vat_rate is not None else config.default_vat_rate
+        # Refused, not clamped: silently shrinking money would put a number the
+        # sender never wrote into a fiscal document.
+        checked_line(description=description, quantity=qty, unit_price=unit_price, vat_rate=rate)
         out.append(
             LineIn(
                 description=description[:1000],
-                quantity=quantity if quantity is not None and quantity > 0 else Decimal(1),
+                quantity=qty,
                 unit_price=unit_price,
-                vat_rate=vat_rate if vat_rate is not None else config.default_vat_rate,
+                vat_rate=rate,
                 vat_nature=as_str(node.get("vat_nature")) or config.default_vat_nature,
                 # The contract lets a sender STATE it per line; absent means
                 # the connector's own rule decides (``auto`` reads the amount

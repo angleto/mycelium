@@ -87,6 +87,102 @@ def resolve_inclusive(stated: bool | None, vat_pricing: str) -> bool:
     return True if stated is None else stated
 
 
+#: Widths the counterpart columns can actually hold (``client_profile``). A
+#: provider string longer than these does not truncate on the way in: it raises
+#: a driver-level error that is NOT a DomainError, so it escapes the event
+#: runner, fails the event, and retries forever on a payload that can never
+#: succeed. The mapper is the right place to make values fit -- the same reason
+#: ``checked_identity`` bounds the event id.
+_FIELD_LIMITS = {
+    "legal_name": 200,
+    "purpose": 200,
+    "first_name": 60,
+    "last_name": 60,
+    "vat_number": 30,
+    "tax_code": 30,
+    "address": 200,
+    "civic_number": 8,
+    "postal_code": 10,
+    "city": 120,
+    "sdi_code": 7,
+    "pec": 320,
+    "email": 320,
+}
+
+
+def clamp_field(name: str, value: str | None) -> str | None:
+    """Trim a counterpart field to what the schema can hold."""
+    if value is None:
+        return None
+    limit = _FIELD_LIMITS.get(name)
+    return value[:limit] if limit else value
+
+
+#: Bounds the persisted document can hold: ``invoice_lines.quantity`` is
+#: Numeric(12,4), ``unit_price`` Numeric(14,4), ``vat_rate`` Numeric(5,2), and
+#: the line total lands in Numeric(14,2). Beyond them the INSERT raises a
+#: numeric-overflow error, which is not a DomainError -- it escapes the runner
+#: and the event retries a payload that can never succeed. Clamping money would
+#: be worse than refusing it, so these are refusals.
+_MAX_QUANTITY = Decimal(10) ** 8
+_MAX_UNIT_PRICE = Decimal(10) ** 10
+_MAX_VAT_RATE = Decimal(1000)
+_MAX_LINE_TOTAL = Decimal(10) ** 12
+
+
+def checked_line(
+    *, description: str, quantity: Decimal, unit_price: Decimal, vat_rate: Decimal | None
+) -> None:
+    """Refuse line figures the document cannot hold.
+
+    A PayloadError, so the runner parks the event as ``needs_attention`` with a
+    reason an operator can read, instead of a driver error that fails the event
+    with no classification and retries forever.
+    """
+    if quantity <= 0 or quantity >= _MAX_QUANTITY:
+        raise PayloadError(f"quantity out of range for line {description!r}")
+    if abs(unit_price) >= _MAX_UNIT_PRICE:
+        raise PayloadError(f"unit_price out of range for line {description!r}")
+    if vat_rate is not None and not (Decimal(0) <= vat_rate < _MAX_VAT_RATE):
+        raise PayloadError(f"vat_rate out of range for line {description!r}")
+    if abs(quantity * unit_price) >= _MAX_LINE_TOTAL:
+        raise PayloadError(f"line total out of range for line {description!r}")
+
+
+def country_code(value: str | None) -> str | None:
+    """The two-letter ISO country, or nothing.
+
+    Same rule and same reason as :func:`province_code`: the column holds two
+    characters, and a provider (or a sender implementing our contract) that
+    writes ``"ITALIA"`` must not fail the event with a truncation error. A
+    country is either a code or it is absent; guessing one from a name would be
+    inventing fiscal data.
+    """
+    if value is None:
+        return None
+    text = value.strip().upper()
+    return text if len(text) == 2 and text.isalpha() else None
+
+
+def province_code(value: str | None) -> str | None:
+    """The two-letter sigla, or nothing.
+
+    Stripe's ``address.state`` is free text and Italian records carry the region
+    ("Lazio"), the province name ("Roma") or the sigla ("RM") interchangeably.
+    The column holds four characters and FatturaPA wants the sigla, so anything
+    that is not one is DROPPED rather than guessed at or truncated: "Lazio"
+    would become "Lazi", and a wrong provincia on a fiscal document is worse
+    than an absent one, which the standard permits.
+    """
+    if value is None:
+        return None
+    text = value.strip().upper()
+    # "IT-RM" and "IT RM" are common ISO-3166-2 spellings.
+    if len(text) == 5 and text[:2] == "IT" and text[2] in {"-", " "}:
+        text = text[3:]
+    return text if len(text) == 2 and text.isalpha() else None
+
+
 # --- neutral DTOs ----------------------------------------------------------
 
 
@@ -565,9 +661,13 @@ __all__ = [
     "as_sequence",
     "as_str",
     "checked_identity",
+    "checked_line",
+    "clamp_field",
+    "country_code",
     "first_present",
     "get_mapper",
     "minor_to_decimal",
+    "province_code",
     "register_mapper",
     "resolve_inclusive",
     "signature_matches",
