@@ -931,6 +931,25 @@ button.btn--ghost {
   font-size: 0.78rem;
   white-space: nowrap;
 }
+/* The id doubles as the control that opens the event, so it has to LOOK like
+   one -- an underline and a pointer -- without becoming a button-shaped thing
+   in the middle of a dense table. */
+.pc-id--link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.pc-id--link:hover,
+.pc-id--link:focus-visible {
+  text-decoration: underline solid;
+}
+.pc-payload-row > td {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
 .pc-detail {
   font-size: 0.8rem;
   margin-top: 0.1rem;

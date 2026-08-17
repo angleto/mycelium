@@ -645,13 +645,38 @@ function DefaultsFields({
  *
  * A Stripe event id is 30-odd characters of entropy that nobody reads: it is
  * there to be recognised and copied, not scanned. Showing it whole made every
- * other column in the row unreadable. */
-function ProviderId({ value }: { value: string }) {
+ * other column in the row unreadable.
+ *
+ * With ``onClick`` it becomes the way IN to the event: the id is what the event
+ * IS, so clicking it to see what arrived needs no separate button and no label
+ * explaining which row it belongs to. */
+function ProviderId({
+  value,
+  onClick,
+  expanded,
+}: {
+  value: string
+  onClick?: () => void
+  expanded?: boolean
+}) {
   const short = value.length > 16 ? `${value.slice(0, 10)}…${value.slice(-4)}` : value
+  if (!onClick) {
+    return (
+      <code className="pc-id" title={value}>
+        {short}
+      </code>
+    )
+  }
   return (
-    <code className="pc-id" title={value}>
+    <button
+      type="button"
+      className="pc-id pc-id--link"
+      title={value}
+      aria-expanded={expanded}
+      onClick={onClick}
+    >
       {short}
-    </code>
+    </button>
   )
 }
 
@@ -952,12 +977,20 @@ export function ConnectorEvents({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.flatMap((r) => [
               <tr key={r.id}>
                 <td>
                   <code>{r.event_type}</code>
                   <div className="muted">
-                    <ProviderId value={r.provider_event_id} />
+                    {/* The id opens the event. It is the row's identity, so it
+                        is also the obvious thing to click to ask "what was
+                        it?" -- a separate button would just be a second name
+                        for the same row. */}
+                    <ProviderId
+                      value={r.provider_event_id}
+                      expanded={payload?.id === r.id}
+                      onClick={() => void onShowPayload(r.id)}
+                    />
                   </div>
                 </td>
                 <td>
@@ -977,18 +1010,6 @@ export function ConnectorEvents({
                 </td>
                 <td>{stamp(r.created_at)}</td>
                 <td>
-                  {/* What actually arrived. The row above says what we MADE of
-                      the event; this says what we were given, which is the only
-                      way to tell "the provider did not send it" from "we did
-                      not read it". */}
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    aria-expanded={payload?.id === r.id}
-                    onClick={() => void onShowPayload(r.id)}
-                  >
-                    {t('paymentConnectors.showPayload')}
-                  </button>{' '}
                   {/* In shadow mode the XML is the deliverable: this is the
                       artefact you diff against the incumbent provider. */}
                   {r.has_dry_run_xml && (
@@ -1059,25 +1080,31 @@ export function ConnectorEvents({
                     </button>
                   )}
                 </td>
-              </tr>
-            ))}
+              </tr>,
+              payload?.id === r.id ? (
+                /* Under the row it belongs to, spanning the table: the answer
+                   to "what was this event" has to sit next to the event, or
+                   the reader has to hold a 30-character id in their head while
+                   scrolling to find it. */
+                <tr key={`${r.id}-payload`} className="pc-payload-row">
+                  <td colSpan={6}>
+                    <div className="row">
+                      <strong>{t('paymentConnectors.showPayload')}</strong>
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        onClick={() => setPayload(null)}
+                      >
+                        {t('paymentConnectors.cancel')}
+                      </button>
+                    </div>
+                    <pre className="pc-payload">{payload.body}</pre>
+                  </td>
+                </tr>
+              ) : null,
+            ])}
           </tbody>
         </table>
-      )}
-      {payload && (
-        <div className="card card--quiet">
-          <div className="row">
-            <strong>{t('paymentConnectors.showPayload')}</strong>
-            <button
-              type="button"
-              className="btn--sm btn--ghost"
-              onClick={() => setPayload(null)}
-            >
-              {t('paymentConnectors.cancel')}
-            </button>
-          </div>
-          <pre className="pc-payload">{payload.body}</pre>
-        </div>
       )}
     </div>
   )
