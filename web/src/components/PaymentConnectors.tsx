@@ -1142,6 +1142,18 @@ export function ConnectorEvents({
   )
 }
 
+/** ``signature_invalid`` -> "Firma non valida". Unknown values fall through to
+ * the slug rather than to a blank, so widening the set server-side degrades to
+ * readable-but-technical instead of to nothing. */
+function useOutcomeLabel(): (outcome: string) => string {
+  const { t } = useTranslation()
+  return (outcome: string) => {
+    const key = `paymentConnectors.outcomeLabel.${outcome}`
+    const label = t(key)
+    return label === key ? outcome : label
+  }
+}
+
 /** The refusal ledger. An accepted event is already visible as an event row;
  * what has no other trace is a delivery we turned away (bad signature, revoked
  * connector, malformed body), and that is exactly the case where the provider
@@ -1154,6 +1166,7 @@ export function ConnectorDeliveries({
   connectorId: string
 }) {
   const { t } = useTranslation()
+  const outcomeLabel = useOutcomeLabel()
   const [rows, setRows] = useState<DeliveryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -1202,11 +1215,18 @@ export function ConnectorDeliveries({
             {rows.map((d) => (
               <tr key={d.id}>
                 <td>
-                  <code>{d.outcome}</code>
+                  {/* Same rule as the event list: the slug is the ledger's
+                      vocabulary, the operator needs the sentence. On hover for
+                      a bug report. */}
+                  <span title={d.outcome}>{outcomeLabel(d.outcome)}</span>
                 </td>
                 <td>{d.http_status}</td>
                 <td>
-                  <code>{d.provider_event_id ?? '—'}</code>
+                  {d.provider_event_id ? (
+                    <ProviderId value={d.provider_event_id} />
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
                 <td>{stamp(d.received_at)}</td>
               </tr>
