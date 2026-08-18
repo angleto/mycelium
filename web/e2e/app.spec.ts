@@ -150,16 +150,21 @@ test('notes: create, client auto-assigned, convert to task', async ({
   await expect(page.locator('.tagpick')).toBeVisible()
   await expect(page.locator('.tagpick__search')).toBeVisible()
   // The client is STRUCTURAL since ADR-0050: a note has exactly one and it
-  // cannot be detached, so it renders as a <select> rather than a chip with
-  // an ✕. ``.chip--rm`` now covers only the free-form tags, of which a
-  // freshly created note has none -- asserting on it here checked that the
-  // client was *removable*, which is precisely what the invariant forbids.
-  const clientSelect = page
+  // cannot be detached, so it is a picker rather than a chip with an ✕.
+  // ``.chip--rm`` now covers only the free-form tags, of which a freshly
+  // created note has none -- asserting on it here checked that the client was
+  // *removable*, which is precisely what the invariant forbids.
+  //
+  // The picker is a SEARCH, not a <select>: there is one client tag per paying
+  // customer once a payment connector is running, so the control cannot
+  // enumerate them. It shows the attached client by NAME, which makes this
+  // assertion stronger than the old one on a non-empty option value.
+  const clientPicker = page
     .locator('.tagpick label')
     .filter({ hasText: /client|cliente/i })
-    .locator('select')
-  await expect(clientSelect).toBeVisible()
-  await expect(clientSelect).not.toHaveValue('')
+    .locator('input.csearch__input')
+  await expect(clientPicker).toBeVisible()
+  await expect(clientPicker).not.toHaveValue('')
 
   // Derive a task (ADR-0029): the button is "Derive task" / "Genera task"
   // and, on success, the app navigates straight to the freshly-derived
