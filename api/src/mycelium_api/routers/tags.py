@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
@@ -95,6 +95,9 @@ async def list_tags(
     for_client: uuid.UUID | None = None,
     include_archived: bool = False,
     manage: bool = False,
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    recent: bool = False,
 ) -> list[TagOut]:
     """Archived tags are excluded by default so they vanish from every
     selection/filter surface; the Tag manager passes
@@ -112,6 +115,9 @@ async def list_tags(
         for_client=for_client,
         include_archived=include_archived,
         manage=manage,
+        q=q,
+        limit=limit,
+        recent=recent,
     )
     scopes = await taxonomy.scopes_by_tag(ctx.session, tag_ids=[t.id for t in tags])
     return [_out(t, scopes.get(t.id, [])) for t in tags]
@@ -245,10 +251,23 @@ def _project_out(t: Tag, p: object) -> ProjectOut:
 @router.get("/clients", response_model=list[ClientOut])
 async def list_clients(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    recent: bool = False,
 ) -> list[ClientOut]:
+    """Clients, optionally searched and capped.
+
+    Unbounded by default, because callers that legitimately want every client
+    exist (the Clients page, MCP, a report). The pickers pass ``limit`` and
+    either ``q`` or ``recent``: a workspace invoicing through a payment
+    connector has one client per paying customer, and a control that enumerates
+    them stops being usable long before the data does.
+    """
     # A workspace always has the default "Personal" client.
     await taxonomy.ensure_default_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
-    rows = await taxonomy.list_clients(ctx.session, org_id=ctx.org_id)
+    rows = await taxonomy.list_clients(
+        ctx.session, org_id=ctx.org_id, q=q, limit=limit, recent=recent
+    )
     return [_client_out(t, p) for t, p in rows]
 
 

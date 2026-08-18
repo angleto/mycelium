@@ -649,7 +649,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Clients */
+        /**
+         * List Clients
+         * @description Clients, optionally searched and capped.
+         *
+         *     Unbounded by default, because callers that legitimately want every client
+         *     exist (the Clients page, MCP, a report). The pickers pass ``limit`` and
+         *     either ``q`` or ``recent``: a workspace invoicing through a payment
+         *     connector has one client per paying customer, and a control that enumerates
+         *     them stops being usable long before the data does.
+         */
         get: operations["list_clients_clients_get"];
         put?: never;
         /** Create Client */
@@ -15453,6 +15462,9 @@ export interface operations {
                 for_client?: string | null;
                 include_archived?: boolean;
                 manage?: boolean;
+                q?: string | null;
+                limit?: number | null;
+                recent?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -15563,7 +15575,11 @@ export interface operations {
     };
     list_clients_clients_get: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string | null;
+                limit?: number | null;
+                recent?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;

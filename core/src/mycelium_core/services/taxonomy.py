@@ -8,8 +8,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -520,6 +521,9 @@ async def list_tags(
     for_client: uuid.UUID | None = None,
     include_archived: bool = False,
     manage: bool = False,
+    q: str | None = None,
+    limit: int | None = None,
+    recent: bool = False,
 ) -> list[Tag]:
     """List tags (RLS-scoped to the tenant).
 
@@ -636,7 +640,65 @@ async def list_tags(
                 and_(structural.is_(False), generic_ok),
             )
         )
+    # A tag list is not a bounded set. One client tag per paying customer means
+    # a picker that enumerates them stops working long before the data does, so
+    # the surfaces that used to render everything now SEARCH: ``q`` narrows and
+    # ``limit`` caps, and ``recent`` orders by what has actually been used
+    # rather than alphabetically, which is what makes an empty search box
+    # useful instead of arbitrary.
+    if q:
+        needle = f"%{q.strip().lower()}%"
+        stmt = stmt.where(func.lower(Tag.name).like(needle))
+    if recent:
+        # ``order_by(None)`` first: a second order_by APPENDS, so without the
+        # reset the base alphabetical order would win and "recent" would order
+        # by nothing at all -- silently, which is how it was caught by a test
+        # and not by reading.
+        activity = _tag_activity_subquery(org_id)
+        stmt = (
+            stmt.outerjoin(activity, activity.c.tag_id == Tag.id)
+            .order_by(None)
+            .order_by(activity.c.last_used.desc().nullslast(), Tag.name)
+        )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())
+
+
+def _tag_activity_subquery(org_id: uuid.UUID) -> Any:
+    """When each tag was last USED, derived from what it is attached to.
+
+    Nothing records the moment a tag is applied: ``task_tag`` and ``note_tag``
+    are two FK columns with no timestamp. So "recent" is read off the things
+    themselves -- the tasks and notes carrying the tag, and for a client tag the
+    invoices issued to it, which is the signal that matters when the tag came
+    from a payment connector.
+
+    Derived rather than denormalised on purpose: a ``last_used_at`` column would
+    add a write to every tagging, start with no history, and drift when a tag is
+    REMOVED from its last entity. This cannot drift -- it is a view of the
+    truth -- and it costs a bounded aggregate because every caller pairs it with
+    a limit.
+    """
+    used = (
+        select(TaskTag.tag_id.label("tag_id"), Task.updated_at.label("ts"))
+        .join(Task, Task.id == TaskTag.task_id)
+        .where(Task.org_id == org_id)
+        .union_all(
+            select(NoteTag.tag_id.label("tag_id"), Note.updated_at.label("ts"))
+            .join(Note, Note.id == NoteTag.note_id)
+            .where(Note.org_id == org_id),
+            select(Invoice.client_tag_id.label("tag_id"), Invoice.created_at.label("ts")).where(
+                Invoice.org_id == org_id
+            ),
+        )
+        .subquery()
+    )
+    return (
+        select(used.c.tag_id, func.max(used.c.ts).label("last_used"))
+        .group_by(used.c.tag_id)
+        .subquery()
+    )
 
 
 async def scopes_by_tag(
@@ -706,14 +768,50 @@ async def get_tag(session: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID
 
 
 async def list_clients(
-    session: AsyncSession, *, org_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    q: str | None = None,
+    limit: int | None = None,
+    recent: bool = False,
 ) -> list[tuple[Tag, ClientProfile]]:
-    rows = await session.execute(
+    """Clients, searchable and capped.
+
+    ``q`` matches the name, the VAT number and the codice fiscale, because the
+    identifier an operator has in hand is often the fiscal one -- from a bank
+    line, a provider dashboard, a customer's email -- and searching a client by
+    name they cannot remember is the case this is for.
+    """
+    stmt = (
         select(Tag, ClientProfile)
         .join(ClientProfile, ClientProfile.tag_id == Tag.id)
         .where(Tag.kind == TagKind.client, Tag.org_id == org_id)
         .order_by(Tag.name)
     )
+    if q:
+        needle = f"%{q.strip().lower()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(Tag.name).like(needle),
+                func.lower(ClientProfile.legal_name).like(needle),
+                func.lower(func.coalesce(ClientProfile.vat_number, "")).like(needle),
+                func.lower(func.coalesce(ClientProfile.tax_code, "")).like(needle),
+            )
+        )
+    if recent:
+        # ``order_by(None)`` first: a second order_by APPENDS, so without the
+        # reset the base alphabetical order would win and "recent" would order
+        # by nothing at all -- silently, which is how it was caught by a test
+        # and not by reading.
+        activity = _tag_activity_subquery(org_id)
+        stmt = (
+            stmt.outerjoin(activity, activity.c.tag_id == Tag.id)
+            .order_by(None)
+            .order_by(activity.c.last_used.desc().nullslast(), Tag.name)
+        )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    rows = await session.execute(stmt)
     return [(t, p) for t, p in rows.all()]
 
 

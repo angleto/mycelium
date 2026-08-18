@@ -924,6 +924,60 @@ button.btn--ghost {
   border-radius: 6px;
   background: var(--surface);
 }
+/* Client search: replaces every control that used to enumerate client tags.
+   The list floats over the page so a long result set never pushes the form
+   around, and it is capped by the server, not by CSS. */
+.csearch {
+  position: relative;
+  display: inline-block;
+}
+.csearch__input {
+  min-width: 12rem;
+}
+.csearch__list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 18rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.csearch__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+.csearch__row:hover,
+.csearch__row:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.csearch__hint {
+  padding: 0.3rem 0.45rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+/* The client row of the tag grid: one line, not a wall of chips. */
+.tagpickgrid__clients {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
 /* Connector event table: provider ids are entropy, not text. They must not be
    allowed to set the column width, or every readable column loses its space. */
 .pc-id {

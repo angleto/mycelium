@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
+import { ClientSearch } from './ClientSearch'
 import type { components } from '../api/schema'
 
 type Tag = components['schemas']['TagOut']
@@ -158,28 +159,22 @@ export function TagPicker({
           <div className="row">
             <label>
               {t('tagpicker.client', { defaultValue: 'Client' })}
-              <select
-                value={linked.clientId}
-                disabled={disabled}
-                onChange={(e) => pickClient(e.target.value)}
-              >
-                {structural.mode === 'defaults' ? (
-                  <option value="">
-                    {t('tagpicker.noClient', { defaultValue: 'No client' })}
-                  </option>
-                ) : (
-                  !linked.clientId && (
-                    <option value="" disabled>
-                      …
-                    </option>
-                  )
-                )}
-                {clientOpts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              {/* A search, not a dropdown. This is the control that attaches a
+                  client to a note or a task, and with one client per paying
+                  customer the option list is unbounded -- so it enumerates
+                  nothing and looks the picked client up by name, VAT or codice
+                  fiscale. Nothing is hidden: every client is one word away. */}
+              <ClientSearch
+                currentName={
+                  clientOpts.find((c) => c.id === linked.clientId)?.name ?? ''
+                }
+                allLabel={
+                  structural.mode === 'defaults'
+                    ? t('tagpicker.noClient', { defaultValue: 'No client' })
+                    : undefined
+                }
+                onChange={(id) => pickClient(id)}
+              />
             </label>
             <label>
               {t('tagpicker.project', { defaultValue: 'Project' })}

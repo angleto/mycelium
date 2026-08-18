@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { kindGlyph } from '../lib/tagGlyph'
+import { ClientSearch } from './ClientSearch'
 import { readableOn } from '../lib/color'
 import type { components } from '../api/schema'
 
@@ -42,11 +43,17 @@ export function TagPickerGrid({
     selected instanceof Set ? selected : new Set<string>(selected)
 
   const needle = q.trim().toLowerCase()
+  // Client tags (the ▲) are separated out and never laid as chips: there is one
+  // per paying customer, so a grid over them is unusable at the scale a payment
+  // connector produces, while the other kinds are naturally few. They get a
+  // search instead -- compact, and reaching every client rather than the first
+  // few hundred. A client already SELECTED still shows as a chip, so what is
+  // active is always visible and removable.
+  const clientTags = tags.filter((g) => g.kind === 'client')
+  const chipTags = tags.filter((g) => g.kind !== 'client')
   const filtered = needle
-    ? tags.filter((g) =>
-        `${g.kind} ${g.name}`.toLowerCase().includes(needle),
-      )
-    : tags
+    ? chipTags.filter((g) => `${g.kind} ${g.name}`.toLowerCase().includes(needle))
+    : chipTags
 
   const groups: { kind: string; tags: Tag[] }[] = groupByKind
     ? (() => {
@@ -70,6 +77,8 @@ export function TagPickerGrid({
     return <p className="hint">{emptyHint ?? t('tagpicker.none')}</p>
   }
 
+  const selectedClients = clientTags.filter((g) => selSet.has(g.id))
+
   return (
     <div className="tagpickgrid">
       {searchable && (
@@ -80,6 +89,25 @@ export function TagPickerGrid({
           onChange={(e) => setQ(e.target.value)}
         />
       )}
+      <div className="tagpickgrid__clients">
+        <span className="tagpickgrid__kind muted">{t('tagpicker.clientKind')}</span>
+        {selectedClients.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            aria-pressed
+            className="tagpickgrid__chip tagpickgrid__chip--on"
+            onClick={() => onToggle(g.id)}
+          >
+            {kindGlyph('client')} {g.name}
+          </button>
+        ))}
+        <ClientSearch
+          currentName=""
+          placeholder={t('tagpicker.clientSearch')}
+          onChange={(id) => id && onToggle(id)}
+        />
+      </div>
       {groups.map((grp) => (
         <div key={grp.kind || '_'} className="tagpickgrid__group">
           {grp.kind && (

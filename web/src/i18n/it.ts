@@ -397,6 +397,8 @@ export const it: Catalog = {
     unblock: 'Sblocca',
   },
   tagpicker: {
+    clientKind: 'cliente',
+    clientSearch: 'Cerca un cliente…',
     none: 'Nessun tag',
     search: 'Cerca tag…',
     noMatch: 'Nessun tag corrispondente',
@@ -1998,6 +2000,11 @@ export const it: Catalog = {
     tabTasks: 'Task',
     tabIdeas: 'Idee',
     tabSuggestions: 'Suggerimenti',
+  },
+  clientSearch: {
+    placeholder: 'Cerca cliente…',
+    none: 'Nessun cliente trovato',
+    recentHint: 'Clienti con attività recente. Digita per cercarli tutti (nome, P.IVA o codice fiscale).',
   },
   invoices: {
     section: {

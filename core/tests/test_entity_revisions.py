@@ -700,7 +700,13 @@ async def test_coarsen_keeps_one_per_day_then_one_per_week() -> None:
         # in; subtracting an interval at the SQL level confuses it
         # because it expects $4 to already be a timestamptz. Pre-compute
         # the absolute timestamp in Python and bind that directly.
-        now = dt.datetime.now(tz=dt.UTC)
+        # Anchored to MIDDAY, not to the real clock. The offsets below carry
+        # hours (day-60 minus 5h) to put several revisions inside one day, and
+        # subtracting them from a "now" that is itself early in the morning
+        # lands them on the PREVIOUS day -- so the rows stop grouping and the
+        # test fails for everyone who runs it between 00:00 and 05:00 UTC.
+        # A 12h shift changes no 30/365-day window boundary here.
+        now = dt.datetime.now(tz=dt.UTC).replace(hour=12, minute=0, second=0, microsecond=0)
         for offset, _kept in rows:
             ts = now - offset
             await s.execute(

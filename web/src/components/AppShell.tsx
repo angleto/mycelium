@@ -38,12 +38,12 @@ import {
 } from '../lib/prefixLookup'
 import { CommandPalette } from './CommandPalette'
 import { useFocus } from '../lib/focus'
+import { ClientSearch } from './ClientSearch'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }
-type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']
 
 // Focus: pick a client (all its projects) and optionally narrow to one
@@ -53,19 +53,17 @@ function ProjectFocus() {
   const session = useSession()
   const { clientId, projectId, setClient, setProject, setClientProjectIds, setNames } =
     useFocus()
-  const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Project[]>([])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [c, p] = await Promise.all([
-        api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
-        api.GET('/projects', { params: { header: h } }),
-      ])
+      // Projects only. The client list used to be fetched whole just to fill
+      // a dropdown; with the search there is nothing to enumerate, and one
+      // request per app load disappears with it.
+      const p = await api.GET('/projects', { params: { header: h } })
       if (!active) return
-      if (c.data) setClients(c.data)
       if (p.data) setProjects(p.data)
     })()
     return () => {
@@ -78,25 +76,22 @@ function ProjectFocus() {
   // unremembered). Cache the chosen client's name and render it as a
   // stand-in option until the real list arrives.
   const NAMEK = 'mycelium-focus-client-name'
-  const clientKnown = clients.some((c) => c.id === clientId)
   const cachedName =
     typeof localStorage !== 'undefined'
       ? (localStorage.getItem(NAMEK) ?? '')
       : ''
-  const onPickClient = (id: string) => {
-    if (id) {
-      const c = clients.find((x) => x.id === id)
-      if (c) localStorage.setItem(NAMEK, c.name)
-    } else {
-      localStorage.removeItem(NAMEK)
-    }
+  const onPickClient = (id: string, name: string) => {
+    // The name comes from the picker rather than from a full client list:
+    // with the search there IS no full list in memory, and the cached name is
+    // what keeps the control from flashing "all clients" on reload.
+    if (id) localStorage.setItem(NAMEK, name)
+    else localStorage.removeItem(NAMEK)
     setClient(id)
   }
 
-  // Archived clients/projects never appear in the focus picker:
-  // /tags?kind=client already filters server-side (include_archived=false
-  // default), /projects does NOT, so we filter both defensively here.
-  const visibleClients = clients.filter((c) => c.status !== 'archived')
+  // Archived projects never appear in the focus picker: /projects does not
+  // filter them server-side. Clients are searched, and that endpoint already
+  // excludes archived ones.
   const visibleProjects = projects.filter((p) => p.status !== 'archived')
   const ofClient = visibleProjects.filter((p) => p.client_tag_id === clientId)
   // Keep the provider's effective allow-list in sync with the data.
@@ -114,25 +109,22 @@ function ProjectFocus() {
   // "Scoped to …" chip) can name the active scope. Falls back to the cached
   // client name until the lists load.
   useEffect(() => {
-    const c = clients.find((x) => x.id === clientId)
     const p = projects.find((x) => x.id === projectId)
-    setNames(clientId ? (c?.name ?? cachedName) : '', projectId ? (p?.name ?? '') : '')
-  }, [clientId, projectId, clients, projects, cachedName, setNames])
+    setNames(clientId ? cachedName : '', projectId ? (p?.name ?? '') : '')
+  }, [clientId, projectId, projects, cachedName, setNames])
 
   return (
     <div className="focus">
       <span className="focus__lbl">{t('focus.label')}</span>
-      <select value={clientId} onChange={(e) => onPickClient(e.target.value)}>
-        <option value="">{t('focus.allClients')}</option>
-        {clientId && !clientKnown && (
-          <option value={clientId}>{cachedName || '…'}</option>
-        )}
-        {visibleClients.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      {/* A search, not a dropdown: one client per paying customer means this
+          control is over an unbounded set, and enumerating it stops working
+          long before the data does. Empty box = recently active clients. */}
+      <ClientSearch
+        currentName={clientId ? (cachedName || '…') : ''}
+        allLabel={t('focus.allClients')}
+        placeholder={t('focus.allClients')}
+        onChange={onPickClient}
+      />
       {clientId && (
         <select
           value={projectId}

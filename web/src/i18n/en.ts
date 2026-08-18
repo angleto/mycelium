@@ -398,6 +398,8 @@ export const en = {
     unblock: 'Unblock',
   },
   tagpicker: {
+    clientKind: 'client',
+    clientSearch: 'Search a client…',
     none: 'No tags',
     search: 'Search tags…',
     noMatch: 'No matching tags',
@@ -2005,6 +2007,11 @@ export const en = {
     tabTasks: 'Tasks',
     tabIdeas: 'Ideas',
     tabSuggestions: 'Suggestions',
+  },
+  clientSearch: {
+    placeholder: 'Search client…',
+    none: 'No client found',
+    recentHint: 'Clients with recent activity. Type to search them all (name, VAT number or codice fiscale).',
   },
   invoices: {
     section: {
