@@ -40,7 +40,7 @@ import { useTranslation } from 'react-i18next'
 import { authFetch } from '../api/client'
 import type { components } from '../api/schema'
 
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 type TagBrief = components['schemas']['TagBrief']
 
 // The mycelial 4-verb model (ADR-0040). ``related`` is UNDIRECTED (the
@@ -745,7 +745,11 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     (n: Note): boolean => {
       const q = search.trim().toLowerCase()
       if (!q) return false
-      const hay = ((n.title || '') + ' ' + (n.transcript || '')).toLowerCase()
+      // Title + the server-side preview line. The list projection no
+      // longer carries note bodies, so a match deep in a body is not
+      // reachable from here; that is what the ``q`` search on the notes
+      // page is for. Highlighting here stays a local, instant affordance.
+      const hay = ((n.title || '') + ' ' + (n.preview || '')).toLowerCase()
       return hay.includes(q)
     },
     [search],

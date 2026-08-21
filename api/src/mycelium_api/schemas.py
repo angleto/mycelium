@@ -2662,7 +2662,14 @@ class NoteMergeIn(BaseModel):
     strategy: str = Field(default="append", pattern="^(append)$")
 
 
-class NoteOut(BaseModel):
+class _NoteCommon(BaseModel):
+    """Fields shared by the list and the single-note projections.
+
+    Not a response model itself. It exists so ``NoteListOut`` is a
+    strict subset of ``NoteOut`` by construction, rather than by two
+    field lists that drift apart on the next added column.
+    """
+
     id: uuid.UUID
     project_id: uuid.UUID | None
     # Set when the note is a task's "work note" (the SPA detects it to
@@ -2677,7 +2684,6 @@ class NoteOut(BaseModel):
     kind: NoteKind
     status: NoteStatus
     title: str | None
-    transcript: str | None
     summary: str | None
     audio_ref: str | None
     audio_seconds: int | None = None
@@ -2707,10 +2713,36 @@ class NoteOut(BaseModel):
     # the SPA chip reflects all linked tasks -- not just the two
     # "fruit" kinds that ``derived_task_ids`` covers.
     linked_task_count: int = 0
+
+
+class NoteListOut(_NoteCommon):
+    """The list projection: metadata plus a bounded one-line preview.
+
+    Deliberately WITHOUT ``transcript``. A note body is unbounded, so
+    serializing it per row makes ``GET /notes`` cost O(total content of
+    the org) in bytes instead of O(rows shown) -- in production that
+    was a multi-MB response for a screen that renders one line per
+    note. Callers that need the body read ``GET /notes/{id}``; callers
+    that need to MATCH on it pass ``q``, which filters server-side over
+    part bodies (``services.notes.list_notes``) instead of shipping
+    every body so the client can filter locally.
+    """
+
+    # First non-empty line of the body, capped server-side
+    # (``services.notes._previews_by_note``). Enough for a row label or
+    # a card subtitle, which is all the list surfaces ever did with the
+    # full body. None when the note has no text yet.
+    preview: str | None = None
+
+
+class NoteOut(_NoteCommon):
+    """The single-note projection: everything, body included."""
+
+    transcript: str | None
     # Task 71c9d670 Phase 2a: the note's ordered markdown blocks
     # (note_part). Populated on GET /notes/{id} (single-note path);
-    # list endpoints leave it empty to stay light. Empty when no
-    # parts exist yet (a freshly created note, or one whose
+    # the other single-note paths leave it empty to stay light. Empty
+    # when no parts exist yet (a freshly created note, or one whose
     # transcript was never split).
     parts: list[NotePartOut] = Field(default_factory=list)
 

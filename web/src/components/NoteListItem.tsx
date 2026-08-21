@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { TagChip } from './TagChip'
 import type { components } from '../api/schema'
 
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 
 // Reusable two-row note row: row 1 = title (click to open) + kind /
 // status; row 2 = tags then actions. Used wherever notes are listed.
@@ -32,7 +32,7 @@ export function NoteListItem({
   onErase: () => void
 }) {
   const { t } = useTranslation()
-  const preview = (note.transcript ?? '').split('\n')[0].trim()
+  const preview = (note.preview ?? '').trim()
   const derivedTitles = derivedTaskTitles ?? []
   // Task 1e07437e: the chip reflects EVERY linked task (subject,
   // artifact, derived_from, promoted_from), not just the two "fruit"

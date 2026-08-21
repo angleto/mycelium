@@ -8,7 +8,7 @@ import { TagChip } from '../components/TagChip'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
-type NoteT = components['schemas']['NoteOut']
+type NoteT = components['schemas']['NoteListOut']
 type Mode = 'deleted' | 'archived'
 
 // Recycle bin: soft-deleted tasks (undelete = restore, clears

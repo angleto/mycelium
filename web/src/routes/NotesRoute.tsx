@@ -16,7 +16,7 @@ import { VoiceRecorder } from '../components/VoiceRecorder'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 type Kind = components['schemas']['NoteKind']
 type Tag = components['schemas']['TagOut']
 
@@ -173,15 +173,21 @@ export function NotesRoute() {
       })
     : candidates
 
-  // Instant client-side narrowing on top of the focus filter.
+  // Instant client-side narrowing, but ONLY while the debounced server
+  // search is still in flight. Once ``searchHits`` lands, the server has
+  // already applied ``q`` over title, part bodies and tag names; running
+  // the client predicate on top of it could then only DISCARD hits,
+  // because the list projection no longer carries the body (it carries a
+  // bounded ``preview``). That AND-ing is how a search silently loses
+  // results it correctly found.
   const queryTokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const visibleNotes =
-    queryTokens.length === 0
+    queryTokens.length === 0 || searchHits !== null
       ? shownNotes
       : shownNotes.filter((n) => {
           const hay = [
             n.title ?? '',
-            n.transcript ?? '',
+            n.preview ?? '',
             ...(n.tags ?? []).map((g) => g.name),
           ]
             .join('\n')
@@ -320,7 +326,7 @@ export function NotesRoute() {
     setConverting(n.id)
     const label =
       n.title?.trim() ||
-      (n.transcript ?? '').split('\n').find((l) => l.trim()) ||
+      (n.preview ?? '').trim() ||
       n.kind
     const title = label.slice(0, 290)
     const { data, error } = await api.POST('/notes/{note_id}/derive-task', {

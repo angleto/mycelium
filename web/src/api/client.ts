@@ -270,7 +270,7 @@ export async function searchNotesByText(
   query: string,
   tagId?: string,
   signal?: AbortSignal,
-): Promise<components['schemas']['NoteOut'][]> {
+): Promise<components['schemas']['NoteListOut'][]> {
   const { data } = await api.GET('/notes', {
     params: {
       header: workspaceHeader(),

@@ -6,7 +6,7 @@ import type { components } from '../api/schema'
 import { NotePickList } from './NotePickList'
 
 type NoteLinkOut = components['schemas']['NoteLinkOut']
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 
 // Mycelial 4-verb link model (ADR-0040). ``related`` is undirected;
 // the other three are directional (parent=origin/superseder/refuter,
@@ -91,7 +91,7 @@ export function NoteLinksPanel({ noteId }: { noteId: string }) {
       if (!n) return t('noteLinks.unknownNote')
       return (
         n.title?.trim() ||
-        (n.transcript ?? '').split('\n').find((s) => s.trim()) ||
+        (n.preview ?? '').trim() ||
         t('noteLinks.unknownNote')
       )
     },

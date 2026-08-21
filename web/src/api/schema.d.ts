@@ -11072,31 +11072,19 @@ export interface components {
             created_at: string;
         };
         /**
-         * NoteMergeIn
-         * @description Body for POST /notes/merge (task 71c9d670 Phase 2b). Folds the
-         *     source note's parts into the target with a fresh ord. ``strategy``
-         *     is reserved for future ``interleave`` variants; v1 ships
-         *     ``append`` only.
+         * NoteListOut
+         * @description The list projection: metadata plus a bounded one-line preview.
+         *
+         *     Deliberately WITHOUT ``transcript``. A note body is unbounded, so
+         *     serializing it per row makes ``GET /notes`` cost O(total content of
+         *     the org) in bytes instead of O(rows shown) -- in production that
+         *     was a multi-MB response for a screen that renders one line per
+         *     note. Callers that need the body read ``GET /notes/{id}``; callers
+         *     that need to MATCH on it pass ``q``, which filters server-side over
+         *     part bodies (``services.notes.list_notes``) instead of shipping
+         *     every body so the client can filter locally.
          */
-        NoteMergeIn: {
-            /**
-             * Source Note Id
-             * Format: uuid
-             */
-            source_note_id: string;
-            /**
-             * Target Note Id
-             * Format: uuid
-             */
-            target_note_id: string;
-            /**
-             * Strategy
-             * @default append
-             */
-            strategy?: string;
-        };
-        /** NoteOut */
-        NoteOut: {
+        NoteListOut: {
             /**
              * Id
              * Format: uuid
@@ -11112,8 +11100,6 @@ export interface components {
             status: components["schemas"]["NoteStatus"];
             /** Title */
             title: string | null;
-            /** Transcript */
-            transcript: string | null;
             /** Summary */
             summary: string | null;
             /** Audio Ref */
@@ -11155,6 +11141,96 @@ export interface components {
              * @default 0
              */
             linked_task_count?: number;
+            /** Preview */
+            preview?: string | null;
+        };
+        /**
+         * NoteMergeIn
+         * @description Body for POST /notes/merge (task 71c9d670 Phase 2b). Folds the
+         *     source note's parts into the target with a fresh ord. ``strategy``
+         *     is reserved for future ``interleave`` variants; v1 ships
+         *     ``append`` only.
+         */
+        NoteMergeIn: {
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /**
+             * Target Note Id
+             * Format: uuid
+             */
+            target_note_id: string;
+            /**
+             * Strategy
+             * @default append
+             */
+            strategy?: string;
+        };
+        /**
+         * NoteOut
+         * @description The single-note projection: everything, body included.
+         */
+        NoteOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Project Id */
+            project_id: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Task Title */
+            task_title?: string | null;
+            kind: components["schemas"]["NoteKind"];
+            status: components["schemas"]["NoteStatus"];
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Audio Ref */
+            audio_ref: string | null;
+            /** Audio Seconds */
+            audio_seconds?: number | null;
+            /**
+             * Is Archived
+             * @default false
+             */
+            is_archived?: boolean;
+            /**
+             * Protected
+             * @default false
+             */
+            protected?: boolean;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags?: components["schemas"]["TagBrief"][];
+            /** Version */
+            version: number;
+            /**
+             * Maturity
+             * @default seed
+             */
+            maturity?: string;
+            /** Promoted At */
+            promoted_at?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Derived Task Ids */
+            derived_task_ids?: string[];
+            /**
+             * Linked Task Count
+             * @default 0
+             */
+            linked_task_count?: number;
+            /** Transcript */
+            transcript: string | null;
             /** Parts */
             parts?: components["schemas"]["NotePartOut"][];
         };
@@ -23709,7 +23785,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NoteOut"][];
+                    "application/json": components["schemas"]["NoteListOut"][];
                 };
             };
             /** @description Validation Error */

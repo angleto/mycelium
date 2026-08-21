@@ -7,7 +7,7 @@ import { GardenIcon, type GardenIconName } from './GardenIcon'
 import { NotePickList } from './NotePickList'
 
 type NoteTaskLink = components['schemas']['NoteTaskLinkOut']
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 
 type Kind = 'subject' | 'artifact' | 'derived_from' | 'promoted_from'
 
@@ -87,7 +87,7 @@ export function LinkedNotesPanel({ taskId }: { taskId: string }) {
       if (!n) return t('linkedNotes.unknownNote')
       return (
         n.title?.trim() ||
-        (n.transcript ?? '').split('\n').find((s) => s.trim()) ||
+        (n.preview ?? '').trim() ||
         t('notes.untitled')
       )
     },

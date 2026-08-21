@@ -42,6 +42,7 @@ from mycelium_api.schemas import (
     NoteEraseOut,
     NoteLinkIn,
     NoteLinkOut,
+    NoteListOut,
     NoteMergeIn,
     NoteOut,
     NotePartAppendIn,
@@ -134,16 +135,15 @@ def _derived_transcript(
     return explicit
 
 
-def _out(
+def _list_out(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
     task_title: str | None = None,
     derived_task_ids: list[uuid.UUID] | None = None,
     linked_task_count: int = 0,
-    parts: list[NotePartOut] | None = None,
-    transcript: str | None = None,
-) -> NoteOut:
+    preview: str | None = None,
+) -> NoteListOut:
     # docs/adr/0029 P3: ``task_id`` exposed in the API is derived
     # from the typed link table (primary_task_id_for_note). Callers
     # batch-load the map for list endpoints; the single-note path
@@ -160,7 +160,7 @@ def _out(
         (t.id for t in (tags or []) if getattr(t.kind, "value", t.kind) == "project"),
         None,
     )
-    return NoteOut(
+    return NoteListOut(
         id=n.id,
         project_id=project_id,
         task_id=primary_task_id,
@@ -168,11 +168,6 @@ def _out(
         kind=n.kind,
         status=n.status,
         title=n.title,
-        # Phase 6 final: ``transcript`` is derived from the parts list
-        # when the caller has it loaded; otherwise the caller can
-        # pass an explicit value (single-row paths that skipped the
-        # parts join). The legacy column is gone in migration 0012.
-        transcript=_derived_transcript(parts, transcript),
         summary=n.summary,
         audio_ref=n.audio_ref,
         audio_seconds=n.audio_seconds,
@@ -186,6 +181,42 @@ def _out(
         humus_kind=n.humus_kind,
         derived_task_ids=list(derived_task_ids or []),
         linked_task_count=linked_task_count,
+        preview=preview,
+    )
+
+
+def _out(
+    n: Note,
+    tags: list[Tag] | None = None,
+    primary_task_id: uuid.UUID | None = None,
+    task_title: str | None = None,
+    derived_task_ids: list[uuid.UUID] | None = None,
+    linked_task_count: int = 0,
+    parts: list[NotePartOut] | None = None,
+    transcript: str | None = None,
+) -> NoteOut:
+    """The single-note projection: the shared fields plus the body.
+
+    Routed through ``_list_out`` so there is exactly ONE ORM -> schema
+    mapping for the fields the two projections share. Adding a column
+    to ``_NoteCommon`` then has a single place to fill it, instead of
+    two that silently drift.
+    """
+    base = _list_out(
+        n,
+        tags,
+        primary_task_id,
+        task_title,
+        derived_task_ids,
+        linked_task_count,
+    )
+    return NoteOut(
+        **base.model_dump(exclude={"preview"}),
+        # Phase 6 final: ``transcript`` is derived from the parts list
+        # when the caller has it loaded; otherwise the caller can pass
+        # an explicit value (single-row paths that skipped the parts
+        # join). The legacy column is gone in migration 0012.
+        transcript=_derived_transcript(parts, transcript),
         parts=list(parts or []),
     )
 
@@ -291,7 +322,7 @@ async def list_workspace_note_links(
     return [_link_out(r) for r in rows]
 
 
-@router.get("", response_model=list[NoteOut])
+@router.get("", response_model=list[NoteListOut])
 async def list_notes(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     include_archived: bool = False,
@@ -299,7 +330,7 @@ async def list_notes(
     project_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     q: str | None = None,
-) -> list[NoteOut]:
+) -> list[NoteListOut]:
     rows = await svc.list_notes(
         ctx.session,
         org_id=ctx.org_id,
@@ -323,19 +354,23 @@ async def list_notes(
     title_map = await note_links_svc.task_titles_for_ids(
         ctx.session, org_id=ctx.org_id, task_ids=list(pid_map.values())
     )
-    # Phase 6 final: ``transcript`` on the API is derived from
-    # note_part(ord=0)+ joined. One batched query keeps the list
-    # endpoint a single round-trip.
-    bodies = await svc._bodies_by_note(ctx.session, note_ids=ids)
+    # The list carries a bounded one-line preview, NOT the body: one
+    # ``DISTINCT ON`` row per note capped server-side, instead of every
+    # part body joined. Loading the bodies here made the response
+    # O(total content of the org) -- multiple MB for a screen that
+    # renders one line per note. Free-text matching over bodies is
+    # ``q``, applied server-side by ``services.notes.list_notes``; the
+    # body itself is on ``GET /notes/{id}``.
+    previews = await svc._previews_by_note(ctx.session, note_ids=ids)
     return [
-        _out(
+        _list_out(
             n,
             tagmap.get(n.id, []),
             primary_task_id=(pid := pid_map.get(n.id)),
             task_title=title_map.get(pid) if pid else None,
             derived_task_ids=derived_map.get(n.id, []),
             linked_task_count=count_map.get(n.id, 0),
-            transcript=bodies.get(n.id),
+            preview=previews.get(n.id),
         )
         for n in rows
     ]

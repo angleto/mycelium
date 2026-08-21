@@ -22,7 +22,7 @@ import { useFocus } from '../lib/focus'
 import { getSession } from '../auth/session'
 import type { components } from '../api/schema'
 
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 type NoteWithLinks = components['schemas']['NoteWithLinksOut']
 type TaskBrief = { id: string; title: string }
 
@@ -48,9 +48,15 @@ function bucketOf(n: Note): Tab {
 }
 
 function shortPreview(n: Note): string {
-  const body = (n.transcript || n.summary || '').trim()
-  if (!body) return ''
-  const first = body.split('\n').find((l) => l.trim().length > 0) || ''
+  // ``preview`` is the first non-empty line, already capped server-side
+  // (services/notes._previews_by_note): the list no longer ships the
+  // body, so there is nothing left to slice here. ``summary`` stays as
+  // the fallback for a note that has one but no text yet.
+  const line = (n.preview || '').trim()
+  if (line) return line
+  const summary = (n.summary || '').trim()
+  if (!summary) return ''
+  const first = summary.split('\n').find((l) => l.trim().length > 0) || ''
   return first.length > 220 ? first.slice(0, 219) + '…' : first
 }
 

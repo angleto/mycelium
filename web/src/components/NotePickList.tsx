@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { components } from '../api/schema'
 
-type Note = components['schemas']['NoteOut']
+type Note = components['schemas']['NoteListOut']
 
 // Searchable scrolling picker over a notes list. Mirror of
 // TaskPickList for the note side of LinkedNotesPanel. Filtering is
@@ -27,7 +27,7 @@ export function NotePickList({
     const needle = q.trim().toLowerCase()
     const labelOf = (n: Note) =>
       (n.title?.trim() ||
-        (n.transcript ?? '').split('\n').find((s) => s.trim()) ||
+        (n.preview ?? '').trim() ||
         '')
         .toString()
         .toLowerCase()
@@ -54,7 +54,7 @@ export function NotePickList({
             const proj = (n.tags ?? []).find((g) => g.kind === 'project')
             const label =
               n.title?.trim() ||
-              (n.transcript ?? '').split('\n').find((s) => s.trim()) ||
+              (n.preview ?? '').trim() ||
               t('notes.untitled')
             return (
               <li
