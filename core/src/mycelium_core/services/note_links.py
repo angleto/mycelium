@@ -70,17 +70,30 @@ _VALID_MATURITY: frozenset[str] = frozenset(m.value for m in NoteMaturity)
 
 
 async def _get_note(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
+    """The write-side guard of this module (link, unlink-adjacent flows,
+    set_maturity, promote/derive/start/record): the note must be
+    EFFECTIVE (task a186c989).
+
+    The ``deleted_at`` leg was here from the start; the ADR-0043 leg was
+    not, so ``promote_note_to_task`` -- which copies the body into
+    ``Task.description``, and from there into an agent's prompt -- was
+    the one mutation that still succeeded on an un-approved proposal.
+    The org filter stays explicit even though the shared clause does not
+    carry it: the FK alone does not enforce an org match.
+    """
     row = (
         await session.execute(
             select(Note).where(
                 Note.id == note_id,
                 Note.org_id == org_id,
-                Note.deleted_at.is_(None),
+                effective_note_clause(),
             )
         )
     ).scalar_one_or_none()
     if row is None:
-        raise NotFoundError(MessageCode.MEMORY_NOT_FOUND)
+        # A note, not a memory blob: the old MEMORY_NOT_FOUND named the
+        # wrong entity, which now also reads wrong for a gated proposal.
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return row
 
 
@@ -1034,7 +1047,9 @@ async def tick_maturity_transitions(
             await session.execute(
                 select(Note).where(
                     Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
+                    # An un-approved proposal does not age: its clock starts
+                    # when a human accepts it (task a186c989).
+                    effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity == NoteMaturity.seed.value,
                     Note.updated_at > seed_threshold,
@@ -1054,7 +1069,9 @@ async def tick_maturity_transitions(
             await session.execute(
                 select(Note).where(
                     Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
+                    # An un-approved proposal does not age: its clock starts
+                    # when a human accepts it (task a186c989).
+                    effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity.in_([NoteMaturity.growing.value, NoteMaturity.mature.value]),
                     Note.updated_at < dormant_threshold,
@@ -1077,7 +1094,9 @@ async def tick_maturity_transitions(
             await session.execute(
                 select(Note).where(
                     Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
+                    # An un-approved proposal does not age: its clock starts
+                    # when a human accepts it (task a186c989).
+                    effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity == NoteMaturity.dormant.value,
                     Note.updated_at > seed_threshold,

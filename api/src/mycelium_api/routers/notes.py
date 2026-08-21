@@ -1941,6 +1941,9 @@ async def get_note_revision(
     rev_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
+    # The snapshot carries the whole body: same guard as the timeline above
+    # (task a186c989), with the bin still readable for the restore flow.
+    await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id, include_deleted=True)
     rev = await rev_svc.get_revision(
         ctx.session,
         revision_id=rev_id,
@@ -1959,6 +1962,7 @@ async def update_note_revision_summary(
 ) -> RevisionOut:
     """Set / clear the ``summary`` label on a revision. Mirror of the
     /tasks endpoint; see that one for the contract."""
+    await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id, include_deleted=True)
     rev = await rev_svc.set_summary(
         ctx.session,
         revision_id=rev_id,

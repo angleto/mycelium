@@ -40,6 +40,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart, NotePartTrash, NotePartUIState
 from mycelium_core.services import audit, note_search, text_patch
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
 
 
@@ -56,14 +57,32 @@ async def list_parts(
     *,
     org_id: uuid.UUID,
     note_id: uuid.UUID,
+    include_deleted: bool = False,
 ) -> list[NotePart]:
     """Return the parts of a note in ``ord`` order. Member-level
-    (RLS already scopes the SELECT to the tenant)."""
+    (RLS already scopes the SELECT to the tenant).
+
+    Empty unless the note is EFFECTIVE (task a186c989): the parts are
+    where a note's text actually lives, so a table that does not know
+    about ``notes`` hands out the body of a note in the bin or of an
+    un-approved proposal -- which is precisely what the blob-side
+    perimeter already refuses to retrieve.
+
+    ``include_deleted`` has ONE legitimate caller,
+    ``entity_revisions.snapshot_note``: the delete revision is written
+    AFTER ``deleted_at`` is set, so without the opt-in it would snapshot
+    an empty part list and restoring that revision would empty the note.
+    """
     rows = (
         (
             await session.execute(
                 select(NotePart)
-                .where(NotePart.note_id == note_id, NotePart.org_id == org_id)
+                .join(Note, Note.id == NotePart.note_id)
+                .where(
+                    NotePart.note_id == note_id,
+                    NotePart.org_id == org_id,
+                    effective_note_clause(include_deleted=include_deleted),
+                )
                 .order_by(NotePart.ord, NotePart.id)
             )
         )
@@ -80,16 +99,23 @@ async def parts_by_note(
     note_ids: Sequence[uuid.UUID],
 ) -> dict[uuid.UUID, list[NotePart]]:
     """Batched ``{note_id: [parts]}`` for the list endpoints. One
-    query, ordered so each note's value is already sorted."""
+    query, ordered so each note's value is already sorted.
+
+    Effective notes only, exactly like its single-note twin
+    ``list_parts``: a batch reader must not be the cheap way around the
+    perimeter just because it takes many ids at once (task a186c989).
+    """
     if not note_ids:
         return {}
     rows = (
         (
             await session.execute(
                 select(NotePart)
+                .join(Note, Note.id == NotePart.note_id)
                 .where(
                     NotePart.org_id == org_id,
                     NotePart.note_id.in_(list(note_ids)),
+                    effective_note_clause(),
                 )
                 .order_by(NotePart.note_id, NotePart.ord, NotePart.id)
             )
@@ -103,9 +129,33 @@ async def parts_by_note(
     return out
 
 
-async def _get_note_in_org(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
+async def _get_note_in_org(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    include_deleted: bool = False,
+) -> Note:
+    """The owning note, and it has to be EFFECTIVE (task a186c989): a note
+    in the bin is restored first and worked on afterwards, and an
+    un-approved proposal is not editable at all -- that leg used to be
+    enforced by accident, from inside the revision logger, AFTER the write
+    had already started.
+
+    ``include_deleted`` is for the two places that must see a note on its
+    way out: the revision logger (``merge_notes`` soft-deletes the source
+    and then writes its outgoing revision) and the merge idempotency
+    branch (a re-run of an already-merged source must stay a no-op, not
+    become a 404).
+    """
     note = (
-        await session.execute(select(Note).where(Note.id == note_id, Note.org_id == org_id))
+        await session.execute(
+            select(Note).where(
+                Note.id == note_id,
+                Note.org_id == org_id,
+                effective_note_clause(include_deleted=include_deleted),
+            )
+        )
     ).scalar_one_or_none()
     if note is None:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
@@ -113,9 +163,26 @@ async def _get_note_in_org(session: AsyncSession, *, org_id: uuid.UUID, note_id:
 
 
 async def _get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID) -> NotePart:
+    """One part, by id, only while its note is EFFECTIVE (task a186c989).
+
+    A part id is not a permission to read the note it belongs to. This
+    join covers every part-addressed surface that flows through here --
+    the ``get_note_part`` tool, the raw-body download and its capability
+    token (checked at READ time, so a token minted before the note was
+    trashed stops working immediately), the body write/patch paths and
+    the annotation apply -- and ``delete_part`` / ``_get_trashed`` carry
+    the same clause, so reading, trashing, restoring and purging a part
+    all answer to one perimeter instead of three.
+    """
     part = (
         await session.execute(
-            select(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id)
+            select(NotePart)
+            .join(Note, Note.id == NotePart.note_id)
+            .where(
+                NotePart.id == part_id,
+                NotePart.org_id == org_id,
+                effective_note_clause(),
+            )
         )
     ).scalar_one_or_none()
     if part is None:
@@ -126,9 +193,19 @@ async def _get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.U
 async def _get_trashed(
     session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID
 ) -> NotePartTrash:
+    """A trashed part, while its note is EFFECTIVE. The side table keeps
+    the whole body, so it is a read surface like any other, and it is the
+    branch a purge takes when the part is already in the bin -- gating it
+    keeps read, restore and purge on one perimeter (task a186c989)."""
     entry = (
         await session.execute(
-            select(NotePartTrash).where(NotePartTrash.id == part_id, NotePartTrash.org_id == org_id)
+            select(NotePartTrash)
+            .join(Note, Note.id == NotePartTrash.note_id)
+            .where(
+                NotePartTrash.id == part_id,
+                NotePartTrash.org_id == org_id,
+                effective_note_clause(),
+            )
         )
     ).scalar_one_or_none()
     if entry is None:
@@ -172,7 +249,10 @@ async def _log_parts_revision(
     """
     from mycelium_core.services.notes import _log_note_revision
 
-    note = await _get_note_in_org(session, org_id=org_id, note_id=note_id)
+    # The revision logger runs from every mutator, and one of those flows
+    # must be able to see a note on its way out: ``merge_notes`` soft-
+    # deletes the source and only then writes its outgoing revision.
+    note = await _get_note_in_org(session, org_id=org_id, note_id=note_id, include_deleted=True)
     await _log_note_revision(
         session,
         org_id=org_id,
@@ -811,12 +891,24 @@ async def list_trashed(
 ) -> list[NotePartTrash]:
     """Trashed parts of a note, most recently trashed first. Without
     this a restore would be undiscoverable: the caller that trashed the
-    part is rarely the one that wants it back."""
+    part is rarely the one that wants it back.
+
+    The owning note must be EFFECTIVE (task a186c989). The two bins are
+    different axes and this side table carries the full body: a part
+    thrown away from a LIVE note is what it is for (migration 0089:
+    "restoring a part into a note that no longer exists is not a
+    thing"), so a note in the bin is restored first.
+    """
     rows = (
         (
             await session.execute(
                 select(NotePartTrash)
-                .where(NotePartTrash.note_id == note_id, NotePartTrash.org_id == org_id)
+                .join(Note, Note.id == NotePartTrash.note_id)
+                .where(
+                    NotePartTrash.note_id == note_id,
+                    NotePartTrash.org_id == org_id,
+                    effective_note_clause(),
+                )
                 .order_by(NotePartTrash.trashed_at.desc(), NotePartTrash.id)
             )
         )
@@ -843,9 +935,19 @@ async def delete_part(
     dance. The remaining parts keep their ords in both cases.
     """
     await require_role(session, org_id, actor_id, Role.member)
+    # Same perimeter as every other part-addressed operation (task
+    # a186c989). A purge is the most destructive of them, so it must not
+    # be the one door left open: reading a gated note's part is refused,
+    # and so is destroying it.
     part = (
         await session.execute(
-            select(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id)
+            select(NotePart)
+            .join(Note, Note.id == NotePart.note_id)
+            .where(
+                NotePart.id == part_id,
+                NotePart.org_id == org_id,
+                effective_note_clause(),
+            )
         )
     ).scalar_one_or_none()
     if part is None:
@@ -1084,7 +1186,11 @@ async def merge_notes(
     if source_note_id == target_note_id:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
-    source = await _get_note_in_org(session, org_id=org_id, note_id=source_note_id)
+    # Idempotency: a re-run against an already-merged (soft-deleted) source
+    # must stay the documented no-op below, not turn into a 404.
+    source = await _get_note_in_org(
+        session, org_id=org_id, note_id=source_note_id, include_deleted=True
+    )
     target = await _get_note_in_org(session, org_id=org_id, note_id=target_note_id)
     if source.deleted_at is not None:
         # Idempotent: source already merged or deleted earlier.

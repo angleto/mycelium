@@ -65,6 +65,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.user import User
 from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services import note_parts as parts_svc
+from mycelium_core.services.note_effective import effective_note_clause
 
 logger = logging.getLogger("mycelium.normalize_note_uuids")
 
@@ -206,8 +207,17 @@ async def _normalize_org(org_id: uuid.UUID, actor_id: uuid.UUID, *, apply: bool)
     refs_wrapped = 0
     cache: dict[str, bool] = {}
     async with tenant_session(str(org_id), str(actor_id)) as session:
+        # Effective notes only: the parts service refuses a note in the bin
+        # or an un-approved proposal, and a maintenance rewrite has no
+        # business reaching into either (task a186c989).
         note_ids = (
-            (await session.execute(select(Note.id).where(Note.org_id == org_id))).scalars().all()
+            (
+                await session.execute(
+                    select(Note.id).where(Note.org_id == org_id, effective_note_clause())
+                )
+            )
+            .scalars()
+            .all()
         )
         for note_id in note_ids:
             parts = await parts_svc.list_parts(session, org_id=org_id, note_id=note_id)

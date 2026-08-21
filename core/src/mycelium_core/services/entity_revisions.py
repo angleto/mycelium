@@ -263,7 +263,13 @@ async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
             "lang": p.lang,
             "version": int(p.version),
         }
-        for p in await _list_parts(session, org_id=note.org_id, note_id=note.id)
+        # ``include_deleted``: the delete revision is written AFTER
+        # ``deleted_at`` is set, so the effective-note gate on the parts
+        # would snapshot an empty body and restoring that revision would
+        # empty the note (task a186c989).
+        for p in await _list_parts(
+            session, org_id=note.org_id, note_id=note.id, include_deleted=True
+        )
     ]
     payload["tags"] = await _tags_for_note(session, note_id=note.id)
     return payload

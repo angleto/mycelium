@@ -11,12 +11,16 @@ and the channel flip the header drives.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from mycelium_api.main import app
+from mycelium_core.db import tenant_session
+from mycelium_core.models.note import Note
 
 
 def _email() -> str:
@@ -170,6 +174,49 @@ async def test_note_revisions_endpoints_symmetric() -> None:
         # Note baseline (create via API) is sealed-immediate.
         assert listing[1]["channel"] == "api"
         assert listing[1]["sealed_at"] is not None
+
+
+async def test_note_revision_reads_follow_the_note_gate() -> None:
+    """A revision snapshot carries the note's whole body, so the single
+    GET and the summary PATCH need the same guard the timeline has (task
+    a186c989): an un-approved proposal is refused, while the bin stays
+    readable because that is what restoring from the trash needs."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = await _signup(c, "RevGate")
+        h = _auth(a)
+        note = (
+            await c.post("/notes", headers=h, json={"kind": "text", "text": "TOPSECRET body"})
+        ).json()
+        nid, v = note["id"], note["version"]
+        rev_id = (await c.get(f"/notes/{nid}/revisions", headers=h)).json()[0]["id"]
+        first = await c.get(f"/notes/{nid}/revisions/{rev_id}", headers=h)
+        assert first.status_code == 200
+        assert "TOPSECRET body" in json.dumps(first.json()["snapshot"])
+
+        # In the bin: the timeline, the single read and the summary patch
+        # all keep working, because a restore needs them.
+        assert (
+            await c.post(f"/notes/{nid}/delete", headers=h, json={"expected_version": v})
+        ).status_code == 200
+        assert (await c.get(f"/notes/{nid}/revisions/{rev_id}", headers=h)).status_code == 200
+        assert (
+            await c.patch(f"/notes/{nid}/revisions/{rev_id}", headers=h, json={"summary": "s"})
+        ).status_code == 200
+
+        # An un-approved proposal is refused on all three.
+        async with tenant_session(a["workspace_id"], a["user_id"]) as s:
+            row = (await s.execute(select(Note).where(Note.id == uuid.UUID(nid)))).scalar_one()
+            row.deleted_at = None
+            row.review_state = "proposed"
+            await s.flush()
+        assert (await c.get(f"/notes/{nid}/revisions", headers=h)).status_code == 404
+        gone = await c.get(f"/notes/{nid}/revisions/{rev_id}", headers=h)
+        assert gone.status_code == 404, gone.text
+        assert "TOPSECRET" not in gone.text
+        assert (
+            await c.patch(f"/notes/{nid}/revisions/{rev_id}", headers=h, json={"summary": "s"})
+        ).status_code == 404
 
 
 async def test_revisions_rls_isolation_api() -> None:

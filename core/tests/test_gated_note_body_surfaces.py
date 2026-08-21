@@ -1,0 +1,374 @@
+"""A gated note's BODY is not readable by another door (task a186c989).
+
+ADR-0043 D2 withholds an un-approved proposal from every surface and a
+soft-deleted note is in the bin, but the text of a note does not live on
+the note: it lives in ``note_part``. That table knew nothing about
+``notes``, so anyone holding a note id (the review inbox hands them out)
+could read the body part by part, extract it into KG facts, or promote it
+into a task description -- three doors around a perimeter the retrieval
+side had already closed.
+
+The perimeter now sits on the two chokepoints of ``note_parts``
+(``_get_part`` and ``_get_note_in_org``) plus ``list_parts`` /
+``list_trashed``, on ``note_links._get_note`` and on ``kg.extract_facts``.
+Two opt-ins stay, and one of them is load-bearing: the delete revision is
+snapshotted AFTER ``deleted_at`` is set, so it must still see the parts or
+restoring it would empty the note.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from collections.abc import Iterator, Sequence
+from decimal import Decimal
+from typing import ClassVar
+
+import pytest
+from _fake_embedder import FakeEmbedder
+from sqlalchemy import select
+
+from mycelium_core.ai_providers import LLMResult
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import NotFoundError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.note import Note, NoteKind, NoteTurn, TurnRole
+from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.services import billing, entity_revisions, kg, memory, note_links
+from mycelium_core.services import note_parts as parts_svc
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
+
+
+def _email() -> str:
+    return f"{uuid.uuid4().hex[:10]}@example.test"
+
+
+async def _org() -> tuple[uuid.UUID, uuid.UUID]:
+    async with admin_session() as s:
+        r = await signup(s, email=_email(), password="pw-strong-123", org_name="GATED")
+    return r.org_id, r.user_id
+
+
+async def _note(s: object, org: uuid.UUID, user: uuid.UUID, text: str) -> Note:
+    return await nt.create_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=NoteKind.text,
+        title="gated-subject",
+        text=text,
+    )
+
+
+async def _propose(s: object, note_id: uuid.UUID) -> None:
+    note = (await s.execute(select(Note).where(Note.id == note_id))).scalar_one()  # type: ignore[attr-defined]
+    note.review_state = "proposed"
+    await s.flush()  # type: ignore[attr-defined]
+
+
+async def _version(s: object, note_id: uuid.UUID) -> int:
+    return int(
+        (await s.execute(select(Note.version).where(Note.id == note_id))).scalar_one()  # type: ignore[attr-defined]
+    )
+
+
+class _FakeExtractLLM:
+    """Records what it was asked to summarise, so a leak is observable."""
+
+    model_id = "fake-llm"
+    seen: ClassVar[list[str]] = []
+
+    async def complete(
+        self, *, system: str | None, messages: Sequence[tuple[str, str]]
+    ) -> LLMResult:
+        type(self).seen.append(messages[-1][1])
+        payload = json.dumps({"entities": [{"name": "Bob", "type": "person"}], "relations": []})
+        return LLMResult(text=payload, tokens_in=5, tokens_out=5, model_id=self.model_id)
+
+
+async def _seed_billing(s: object, org: uuid.UUID, user: uuid.UUID) -> None:
+    await billing.grant_credits(s, org_id=org, actor_id=user, amount=Decimal(1000))  # type: ignore[arg-type]
+    await billing.upsert_rate_card(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        model_id="fake-llm",
+        provider="local",
+        values={"credits_per_input": Decimal("0.001"), "credits_per_output": Decimal("0.001")},
+    )
+
+
+async def test_parts_of_a_gated_note_are_not_readable() -> None:
+    """The part-addressed and note-addressed reads both refuse, for both
+    legs of the predicate, and come back on restore/approval."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        trashed = await _note(s, org, user, "binned body FOXTROT")
+        gated = await _note(s, org, user, "unreviewed body GOLF")
+        # A second part on each note, thrown into the parts bin: the trash
+        # side table keeps the whole body, so it is a read surface too and
+        # the assertion below must not be an empty-vs-empty comparison.
+        for n in (trashed, gated):
+            extra = await parts_svc.create_part(
+                s, org_id=org, actor_id=user, note_id=n.id, body=f"second body {n.id.hex[:4]}"
+            )
+            await parts_svc.trash_part(
+                s,
+                org_id=org,
+                actor_id=user,
+                part_id=extra.id,
+                expected_version=extra.version,
+            )
+        trashed_part = (await parts_svc.list_parts(s, org_id=org, note_id=trashed.id))[0]
+        gated_part = (await parts_svc.list_parts(s, org_id=org, note_id=gated.id))[0]
+        assert trashed_part.body and gated_part.body
+        assert len(await parts_svc.list_trashed(s, org_id=org, note_id=trashed.id)) == 1
+        assert len(await parts_svc.list_trashed(s, org_id=org, note_id=gated.id)) == 1
+        trashed_bin_part = (await parts_svc.list_trashed(s, org_id=org, note_id=trashed.id))[0]
+
+        await _propose(s, gated.id)
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=trashed.id,
+            expected_version=await _version(s, trashed.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        for nid in (trashed.id, gated.id):
+            assert await parts_svc.list_parts(s, org_id=org, note_id=nid) == []
+            assert await parts_svc.list_trashed(s, org_id=org, note_id=nid) == []
+        for pid in (trashed_part.id, gated_part.id):
+            with pytest.raises(NotFoundError):
+                await parts_svc.get_part(s, org_id=org, part_id=pid)
+            # ... and the write side of the same chokepoint.
+            with pytest.raises(NotFoundError):
+                await parts_svc.update_part(
+                    s,
+                    org_id=org,
+                    actor_id=user,
+                    part_id=pid,
+                    body="overwritten",
+                    expected_version=1,
+                )
+        # Creating a part on a gated note is refused BEFORE anything is
+        # written: it used to fail later, from inside the revision logger,
+        # with the row already inserted and the ords already shifted.
+        for nid in (trashed.id, gated.id):
+            with pytest.raises(NotFoundError):
+                await parts_svc.create_part(
+                    s, org_id=org, actor_id=user, note_id=nid, body="new part"
+                )
+        # Purging is gated like reading: the most destructive door must not
+        # be the one left open.
+        with pytest.raises(NotFoundError):
+            await parts_svc.delete_part(s, org_id=org, actor_id=user, part_id=trashed_part.id)
+        with pytest.raises(NotFoundError):
+            await parts_svc.delete_part(s, org_id=org, actor_id=user, part_id=trashed_bin_part.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        await nt.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=trashed.id,
+            expected_version=await _version(s, trashed.id),
+        )
+        note = (await s.execute(select(Note).where(Note.id == gated.id))).scalar_one()
+        note.review_state = "approved"
+        await s.flush()
+
+    async with tenant_session(str(org), str(user)) as s:
+        for nid in (trashed.id, gated.id):
+            # Nothing was written, purged or shifted while the gate held:
+            # the note comes back exactly as it was.
+            parts = await parts_svc.list_parts(s, org_id=org, note_id=nid)
+            assert len(parts) == 1
+            assert "overwritten" not in (parts[0].body or "")
+            assert "new part" not in (parts[0].body or "")
+            assert len(await parts_svc.list_trashed(s, org_id=org, note_id=nid)) == 1
+        # The batch twin agrees with the single-note reader, before and after.
+        batch = await parts_svc.parts_by_note(s, org_id=org, note_ids=[trashed.id, gated.id])
+        assert {k: [p.id for p in v] for k, v in batch.items()} == {
+            nid: [p.id for p in await parts_svc.list_parts(s, org_id=org, note_id=nid)]
+            for nid in (trashed.id, gated.id)
+        }
+
+
+async def test_the_delete_revision_still_carries_the_body() -> None:
+    """The load-bearing opt-in: ``snapshot_note`` photographs the note
+    AFTER the soft-delete, so gating its parts without the opt-in would
+    write an empty snapshot -- and restoring that revision would empty the
+    note instead of bringing it back."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "body HOTEL")
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        rows = await entity_revisions.list_revisions(
+            s,
+            entity_kind=entity_revisions.ENTITY_KIND_NOTE,
+            entity_id=note.id,
+            limit=10,
+        )
+        latest = rows[0]
+        assert latest.snapshot["parts"], "the delete revision must keep the parts"
+        assert latest.snapshot["parts"][0]["body"] == "body HOTEL"
+
+
+async def test_kg_extract_refuses_a_gated_note() -> None:
+    """The body must not reach the metered prompt -- and must not come back
+    out as effective KG facts."""
+    org, user = await _org()
+    _FakeExtractLLM.seen = []
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        trashed = await _note(s, org, user, "binned INDIA")
+        gated = await _note(s, org, user, "unreviewed JULIET")
+        await _propose(s, gated.id)
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=trashed.id,
+            expected_version=await _version(s, trashed.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        for nid in (trashed.id, gated.id):
+            with pytest.raises(NotFoundError):
+                await kg.extract_facts(
+                    s, org_id=org, actor_id=user, note_id=nid, llm=_FakeExtractLLM()
+                )
+    assert _FakeExtractLLM.seen == []  # the LLM never saw either body
+
+
+async def test_promote_note_to_task_refuses_an_unreviewed_proposal() -> None:
+    """It copies the body into ``Task.description``, which an agent then
+    reads: the one mutation that still worked on a proposal."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "unreviewed KILO")
+        await _propose(s, note.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError) as err:
+            await note_links.promote_note_to_task(s, org_id=org, actor_id=user, note_id=note.id)
+        # A note, not a memory blob.
+        assert err.value.code is MessageCode.NOTE_NOT_FOUND
+        with pytest.raises(NotFoundError):
+            await note_links.set_maturity(
+                s, org_id=org, actor_id=user, note_id=note.id, maturity="growing"
+            )
+
+
+async def test_an_unreviewed_proposal_does_not_age() -> None:
+    """The maturity clock starts when a human accepts the note: otherwise
+    a proposal ripens into ``growing`` in the review inbox and becomes a
+    candidate for the auto-promotion sweep."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "unreviewed LIMA")
+        await _propose(s, note.id)
+        counters = await note_links.tick_maturity_transitions(s, org_id=org, actor_id=user)
+        assert counters["seed_to_growing"] == 0
+        fresh = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        assert fresh.maturity == "seed"
+
+
+@pytest.fixture
+def _embedder() -> Iterator[None]:
+    set_embedder_override(FakeEmbedder)
+    try:
+        yield
+    finally:
+        set_embedder_override(None)
+
+
+async def test_conversation_turns_of_a_gated_note_are_not_readable() -> None:
+    """``note_turns`` is the other child table that holds a note's text:
+    the transcript of a conversation note. Gating the parts and leaving
+    the turns open would have moved the door one table over."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        convo = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.conversation, title="chat"
+        )
+        s.add(
+            NoteTurn(
+                org_id=org, note_id=convo.id, role=TurnRole.user, content="secret NOVEMBER", ord=0
+            )
+        )
+        await s.flush()
+        assert [t.content for t in await nt.list_turns(s, org_id=org, note_id=convo.id)] == [
+            "secret NOVEMBER"
+        ]
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=convo.id,
+            expected_version=await _version(s, convo.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert await nt.list_turns(s, org_id=org, note_id=convo.id) == []
+        await nt.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=convo.id,
+            expected_version=await _version(s, convo.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert len(await nt.list_turns(s, org_id=org, note_id=convo.id)) == 1
+
+
+async def test_a_blob_id_is_not_a_way_around_the_perimeter(_embedder: None) -> None:
+    """``retrieve`` hides the indexed text of a gated note, but a blob id
+    captured from an earlier search used to read it straight back. The
+    by-id read now applies the same effective-source perimeter -- while
+    DELETING such a blob stays possible."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "indexed body OSCAR")
+
+    async with tenant_session(str(org), str(user)) as s:
+        blob_ids = list(
+            (
+                await s.execute(
+                    select(NotePartIndexPointer.blob_id).where(
+                        NotePartIndexPointer.note_id == note.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert blob_ids, "the part must be indexed for this test to mean anything"
+        blob = await memory.get_blob(s, org_id=org, blob_id=blob_ids[0])
+        assert "OSCAR" in (blob.text or "")
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError):
+            await memory.get_blob(s, org_id=org, blob_id=blob_ids[0])
+        # Hidden from reading is not the same as undeletable.
+        await memory.delete_blob(s, org_id=org, actor_id=user, blob_id=blob_ids[0])

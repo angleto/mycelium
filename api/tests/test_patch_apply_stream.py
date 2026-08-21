@@ -103,6 +103,40 @@ async def test_part_body_raw_headers_and_patch_roundtrip() -> None:
         assert next(p for p in full["parts"] if p["id"] == pid)["body"] == new
 
 
+async def test_a_capability_minted_before_the_trash_stops_serving_the_body() -> None:
+    """The note-effective check is at READ time, not at minting (task
+    a186c989): the read capability is multi-use for its whole TTL, so a
+    token taken while the note was live must stop working the moment the
+    note goes to the bin -- and the plain bearer read must too."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid, pid, _v = await _note_with_part(c, h, "secret MIKE\n")
+        cap = await _mint(
+            org,
+            user,
+            action=svc.ACTION_NOTE_PART_BODY_READ,
+            resource_kind=svc.RESOURCE_NOTE_PART,
+            resource_id=uuid.UUID(pid),
+        )
+        cap_headers = {"Authorization": f"Bearer {cap}"}
+        first = await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=cap_headers)
+        assert first.status_code == 200 and "MIKE" in first.text
+
+        note = (await c.get(f"/notes/{nid}", headers=h)).json()
+        gone = await c.post(
+            f"/notes/{nid}/delete",
+            headers=h,
+            json={"expected_version": note["version"]},
+        )
+        assert gone.status_code == 200, gone.text
+
+        again = await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=cap_headers)
+        assert again.status_code == 404, again.text
+        assert "MIKE" not in again.text
+        assert (await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=h)).status_code == 404
+
+
 async def test_patch_version_drift_409() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

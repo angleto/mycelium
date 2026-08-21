@@ -344,6 +344,12 @@ async def extract_facts(
     ``autonomous`` and the review gate is on, else effective. ``llm`` is an
     explicit test/override injection (decomposition pattern)."""
     await require_role(session, org_id, actor_id, Role.member)
+    # Read the note row before its text (task a186c989): ``get_body`` joins
+    # the parts and never looks at ``notes``, so without this the body of a
+    # trashed note or of an un-approved proposal went into the metered
+    # prompt AND came back out as effective KG facts. Same guard the twin
+    # ``decomposition.distill_note`` has always had.
+    await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)

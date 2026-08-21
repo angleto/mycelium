@@ -9056,7 +9056,12 @@ async def get_note_revision(
 ) -> dict[str, Any]:
     """Single note-revision lookup; 404 if the id doesn't belong to
     this note."""
-    async with _tenant(token, org_id) as (s, _org, _user):
+    async with _tenant(token, org_id) as (s, org, _user):
+        # Same guard as ``list_note_revisions``: a revision snapshot carries
+        # the note's whole body, so it must not be readable for a note the
+        # gate hides. ``include_deleted`` keeps the bin readable, which is
+        # what restoring from the trash needs (task a186c989).
+        await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id), include_deleted=True)
         rev = await revisions_svc.get_revision(
             s,
             revision_id=uuid.UUID(revision_id),

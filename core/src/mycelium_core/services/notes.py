@@ -1679,8 +1679,22 @@ async def list_turns(
     after: tuple[int, uuid.UUID] | None = None,
 ) -> list[NoteTurn]:
     """Conversation turns in ``ord`` order (ord asc, id asc -- a total order).
-    ``limit`` + the ``after`` keyset cursor page a long transcript."""
-    stmt = select(NoteTurn).where(NoteTurn.note_id == note_id)
+    ``limit`` + the ``after`` keyset cursor page a long transcript.
+
+    Empty unless the note is EFFECTIVE (task a186c989). ``note_turns`` is
+    the second child table that holds a note's text -- the transcript of a
+    conversation note -- so leaving it note-blind would have kept the door
+    the parts gate just closed wide open one table over.
+    """
+    stmt = (
+        select(NoteTurn)
+        .join(Note, Note.id == NoteTurn.note_id)
+        .where(
+            NoteTurn.note_id == note_id,
+            NoteTurn.org_id == org_id,
+            effective_note_clause(),
+        )
+    )
     if after is not None:
         ao, ai = after
         stmt = stmt.where(or_(NoteTurn.ord > ao, and_(NoteTurn.ord == ao, NoteTurn.id > ai)))

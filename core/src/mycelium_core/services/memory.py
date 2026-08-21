@@ -1204,10 +1204,37 @@ async def consolidate(
     return consolidated
 
 
-async def get_blob(session: AsyncSession, *, org_id: uuid.UUID, blob_id: uuid.UUID) -> MemoryBlob:
-    b = (
-        await session.execute(select(MemoryBlob).where(MemoryBlob.id == blob_id))
-    ).scalar_one_or_none()
+async def get_blob(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    blob_id: uuid.UUID,
+    include_ineffective_sources: bool = False,
+) -> MemoryBlob:
+    """One memory entry by id, with the SAME effective-source perimeter
+    ``retrieve`` applies (task a186c989).
+
+    ``ineffective_source_blob_exclusion`` used to be folded into the
+    retrieval branches only, so a blob id captured from an earlier search
+    kept serving the indexed text of a note that has since gone to the bin
+    or is awaiting review -- the by-id read was the way around the
+    perimeter, which is the same shape of hole the note-part surfaces had.
+
+    ``include_ineffective_sources`` is for the callers that must reach a
+    blob regardless of what its source is doing now, namely ``delete_blob``:
+    withholding a blob from reading must never mean it can no longer be
+    thrown away.
+    """
+    stmt = select(MemoryBlob).where(MemoryBlob.id == blob_id)
+    if not include_ineffective_sources:
+        # Local import for the same reason ``retrieve`` does it: the stage
+        # package imports back into this module.
+        from mycelium_core.services.retrieval.stages import (
+            ineffective_source_blob_exclusion,
+        )
+
+        stmt = stmt.where(ineffective_source_blob_exclusion(org_id))
+    b = (await session.execute(stmt)).scalar_one_or_none()
     if b is None:
         raise NotFoundError(MessageCode.MEMORY_NOT_FOUND)
     return b
@@ -1233,7 +1260,9 @@ async def delete_blob(
     ``gdpr_erase``, which removes a provenance link and only deletes a
     blob left with no provenance)."""
     await require_role(session, org_id, actor_id, Role.member)
-    blob = await get_blob(session, org_id=org_id, blob_id=blob_id)
+    # A blob whose source is trashed or awaiting review is hidden from
+    # reading, never from deletion (task a186c989).
+    blob = await get_blob(session, org_id=org_id, blob_id=blob_id, include_ineffective_sources=True)
     await session.execute(
         delete(MemoryBlob).where(MemoryBlob.id == blob.id, MemoryBlob.org_id == org_id)
     )

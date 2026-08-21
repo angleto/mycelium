@@ -1027,7 +1027,11 @@ async def auto_promote_mature(
                     Note.org_id == org_id,
                     Note.maturity == "growing",
                     Note.promoted_at.is_(None),
-                    Note.deleted_at.is_(None),
+                    # Effective notes only: the degree half of this gate
+                    # already ignores ineffective endpoints, and
+                    # ``set_maturity`` now refuses a proposal outright, so
+                    # the candidate query has to agree with both.
+                    effective_note_clause(),
                     # Invariant (task 8a26c000): do not auto-crystallise a
                     # note with active work (an open linked task).
                     ~note_inert.open_work_exists(Note.id),
