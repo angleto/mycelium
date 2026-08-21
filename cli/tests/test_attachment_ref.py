@@ -33,3 +33,34 @@ def test_missing_mime_defaults_to_link() -> None:
 def test_missing_filename_falls_back() -> None:
     ref = attachment_markdown_ref({"id": "z", "mime_type": "application/octet-stream"})
     assert ref == "[file](/attachments/z/download)"
+
+
+def test_bracketed_filename_stays_one_link() -> None:
+    """``_sanitize_filename`` on the backend strips path separators and
+    leading dots only, so a filename keeps its brackets. Interpolating it
+    raw produced ``[Report ]final.pdf](...)``, which CommonMark reads as the
+    link ``[Report ]`` followed by literal text. Mirrors
+    ``mycelium_core.markdown_inline`` and ``web/src/lib/markdownInline.ts``.
+    """
+    ref = attachment_markdown_ref(
+        {"id": "abc", "filename": "Report ]final[.pdf", "mime_type": "application/pdf"}
+    )
+    assert ref == r"[Report \]final\[.pdf](/attachments/abc/download)"
+
+
+def test_backslash_in_filename_is_escaped_first() -> None:
+    """Backslash before the brackets, or the escape added for a bracket
+    would itself be escaped and the bracket would come back out bare."""
+    ref = attachment_markdown_ref(
+        {"id": "abc", "filename": r"weird\].pdf", "mime_type": "application/pdf"}
+    )
+    assert ref == r"[weird\\\].pdf](/attachments/abc/download)"
+
+
+def test_newline_in_filename_collapses() -> None:
+    """A blank line inside a label ends the paragraph and truncates the
+    link."""
+    ref = attachment_markdown_ref(
+        {"id": "abc", "filename": "due\nrighe.pdf", "mime_type": "application/pdf"}
+    )
+    assert ref == "[due righe.pdf](/attachments/abc/download)"

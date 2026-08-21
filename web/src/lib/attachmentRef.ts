@@ -6,6 +6,7 @@ import {
   ensureAttachmentManifest,
   resolveAttachmentName,
 } from './attachmentManifest'
+import { mdLink, mdUnescapeLabel } from './markdownInline'
 
 // Markdown references to attachments.
 //
@@ -122,14 +123,21 @@ export function attachmentMarkdownRef(att: {
   mime_type?: string | null
 }): string {
   const { image, label, href } = attachmentRefFor(att)
-  return `${image ? '!' : ''}[${label}](${href})`
+  // The label is a filename, i.e. user data: `Report ]final.pdf` used to
+  // emit a string that is not a link at all. mdLink escapes both halves.
+  return mdLink(label, href, { image })
 }
 
-// One whole markdown link/image on a single line, with a bracket-free
-// label and a parenthesis-free, space-free destination. The destination is
-// then checked against isAttachmentHref, so only the canonical
+// One whole markdown link/image on a single line, with a
+// parenthesis-free, space-free destination. The destination is then
+// checked against isAttachmentHref, so only the canonical
 // /attachments/<id>/download route is ever accepted.
-const MARKDOWN_REF_RE = /^(!?)\[([^\]\n]*)\]\(([^\s()]+)\)$/
+//
+// The label admits BACKSLASH ESCAPES (`\]`, `\[`, `\\`), because that is
+// what attachmentMarkdownRef now emits for a filename containing a
+// bracket. A label class of `[^\]\n]*` would stop matching those exact
+// references -- the ones this matcher exists to recognise.
+const MARKDOWN_REF_RE = /^(!?)\[((?:\\[\s\S]|[^\\\]\n])*)\]\(([^\s()]+)\)$/
 
 /**
  * Recover an AttachmentRef from a pasted markdown reference — the exact
@@ -149,7 +157,8 @@ export function parseAttachmentMarkdownRef(text: string): AttachmentRef | null {
   if (!m) return null
   const href = m[3]
   if (!isAttachmentHref(href)) return null
-  return { image: m[1] === '!', label: m[2] || REF_FALLBACK_NAME, href }
+  const label = mdUnescapeLabel(m[2])
+  return { image: m[1] === '!', label: label || REF_FALLBACK_NAME, href }
 }
 
 // Extensions a browser can SAFELY render when an attachment link is opened

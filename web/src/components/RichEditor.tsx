@@ -53,6 +53,7 @@ import {
 } from '../lib/attachmentRef'
 import { AttachmentPicker } from './AttachmentPicker'
 import { isEditorHref } from '../lib/editorHref'
+import { mdLink } from '../lib/markdownInline'
 import { Subscript, Superscript } from '../lib/subSupMarks'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
@@ -845,7 +846,7 @@ export function RichEditor({
       // `![alt](filename)` reference to it resolves.
       invalidateAttachmentManifest(parent)
       if (rawMode) {
-        insertRawSnippet(`![${up.filename}](${up.url})`)
+        insertRawSnippet(mdLink(up.filename, up.url, { image: true }))
       } else if (editorRef.current) {
         editorRef.current
           .chain()

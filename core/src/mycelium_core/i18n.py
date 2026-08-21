@@ -228,6 +228,7 @@ class MessageCode(enum.StrEnum):
     NOTE_TASK_LINK_PROMOTED_IMMUTABLE = "note.task_link.promoted_immutable"
     NOTE_PART_ANCHOR_REQUIRED = "note.part.anchor_required"
     NOTE_PART_NOT_TRASHED = "note.part.not_trashed"
+    NOTE_BODY_MULTIPART = "note.body.multipart"
     GARDEN_SUGGESTION_TYPE_INVALID = "garden.suggestion_type_invalid"
     GARDEN_ACTION_INVALID = "garden.action_invalid"
     EVENT_QUOTA_EXCEEDED = "event.quota_exceeded"
@@ -645,6 +646,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.NOTE_PART_NOT_TRASHED: (
             "No trashed note part with this id: it was never trashed, was already "
             "restored, or has been purged."
+        ),
+        MessageCode.NOTE_BODY_MULTIPART: (
+            "This note has {parts} parts, and a flat body cannot say where they "
+            "begin and end. Edit the part you mean (note_parts), or send back the "
+            "body unchanged."
         ),
         MessageCode.NOTE_LINK_KIND_INVALID: "Invalid note link kind '{kind}'. Allowed: {valid}.",
         MessageCode.NOTE_LINK_SELF: "A note cannot be linked to itself.",

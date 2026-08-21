@@ -156,7 +156,13 @@ async def add_item(
         task_id=task_id,
         note_id=note_id,
         text=clean,
-        body=(body.strip() or None) if body is not None else None,
+        # ``body`` is markdown (docs/markdown-syntax.md lists checklist item
+        # bodies among the markdown surfaces), so it is stored verbatim. A
+        # blank body still CLEARS -- that is the caller-visible contract --
+        # but a body that has content keeps its own bytes: ``.strip()`` here
+        # silently demoted a body opening with a 4-space indented code block
+        # to a paragraph, and ate a trailing two-space hard break.
+        body=(body if body.strip() else None) if body is not None else None,
         done=False,
         position=pos,
         created_by=actor_id,
@@ -236,8 +242,9 @@ async def update_item(
             values["text"] = clean
             diff["text"] = clean
     if body is not None:
-        # Empty string clears the comment; otherwise store trimmed.
-        new_body = body.strip() or None
+        # Blank clears the comment; otherwise store the markdown verbatim
+        # (same reasoning as ``add_item``).
+        new_body = body if body.strip() else None
         if new_body != item.body:
             values["body"] = new_body
             diff["body"] = bool(new_body)

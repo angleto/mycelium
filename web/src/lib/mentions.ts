@@ -3,6 +3,8 @@
 // as plain markdown so it round-trips; resolved at render time into a
 // router link / chip. Mycelium kinds: task, note, tag.
 
+import { mdLink } from './markdownInline'
+
 export type MentionKind = 'task' | 'note' | 'tag'
 
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
@@ -20,7 +22,9 @@ export function formatMentionHref(kind: MentionKind, id: string): string {
 }
 
 export function mentionLink(kind: MentionKind, id: string, label: string): string {
-  return `[${label}](${formatMentionHref(kind, id)})`
+  // ``label`` is a task/note/tag title, i.e. user data: a title containing
+  // `]` (or a newline) would emit a string that is not a link.
+  return mdLink(label, formatMentionHref(kind, id))
 }
 
 export function routeForMention(kind: MentionKind, id: string): string {

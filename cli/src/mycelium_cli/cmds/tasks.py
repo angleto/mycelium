@@ -18,6 +18,7 @@ from mycelium_cli.cmds._common import (
 from mycelium_cli.completion import complete_task_id
 from mycelium_cli.http import CLIError
 from mycelium_cli.ui import (
+    body_or_none,
     edit_in_editor,
     emit_json,
     emit_table,
@@ -245,10 +246,9 @@ def add(
     if description == "-":
         import sys as _sys
 
-        description = _sys.stdin.read().strip() or None
+        description = body_or_none(_sys.stdin.read())
     elif description is None and not no_editor:
-        body_text = edit_in_editor(f"# {title}\n\n").strip()
-        description = body_text or None
+        description = body_or_none(edit_in_editor(f"# {title}\n\n"))
     # ``priority`` is intentionally not a CLI option: it is a calculated
     # field (importance x urgency, clamped 1..25). Pass --importance /
     # --urgency instead; defaults to Low/Low (4/4 -> priority 16) at the
@@ -454,10 +454,11 @@ def comment_add(
     if body == "-":
         import sys as _sys
 
-        body = _sys.stdin.read().strip()
+        body = _sys.stdin.read()
     elif body is None:
-        body = edit_in_editor("").strip()
-    if not body:
+        body = edit_in_editor("")
+    body = body_or_none(body)
+    if body is None:
         raise CLIError("empty comment body, aborting.")
     with client() as c:
         full = _resolve_task(c, task_id)

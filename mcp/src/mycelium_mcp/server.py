@@ -28,6 +28,7 @@ from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import embedder_available
 from mycelium_core.errors import AuthError, DomainError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.markdown_inline import md_link, md_link_label
 from mycelium_core.models.agent_run import AgentRun
 from mycelium_core.models.billing import CostBasis, RateCard, UsageRecord
 from mycelium_core.models.budget import Budget, BudgetPeriod
@@ -5827,7 +5828,17 @@ async def update_note(
     first line of the body. Bidirectional Proposal A link: pass
     ``task_id`` to link the note to a task (validated in-org, else
     TASK_NOT_FOUND), or ``clear_task_id=True`` to unlink; omitting both
-    leaves the existing link untouched."""
+    leaves the existing link untouched.
+
+    ``text`` is the FLAT body: the same ``\n\n`` join of every part that
+    ``get_note`` hands you. That join cannot be inverted (a blank line
+    inside a part reads exactly like a part boundary), so on a note with
+    SEVERAL parts this tool accepts only the body it can express: sending
+    it back unchanged is a no-op, and sending a changed one is refused
+    (``note.body.multipart``). Edit the part you mean with
+    ``update_note_part``, or append with ``append_note_part``. Notes with
+    zero or one part are unaffected. Bodies are stored byte for byte;
+    nothing here reformats markdown."""
     async with _tenant(token, org_id) as (s, org, user):
         extra: dict[str, Any] = {}
         if clear_task_id:
@@ -6607,8 +6618,13 @@ async def upload_attachment(
             mime_type=mime_type,
             data=raw,
         )
-        bang = "!" if att.mime_type.startswith("image/") else ""
-        markdown_ref = f"{bang}[{att.filename}](/attachments/{att.id}/download)"
+        # The label is a filename, i.e. user data: one containing `]` used to
+        # emit a string that is not a link at all (mycelium_core.markdown_inline).
+        markdown_ref = md_link(
+            att.filename,
+            f"/attachments/{att.id}/download",
+            image=att.mime_type.startswith("image/"),
+        )
         return {
             "id": str(att.id),
             "note_id": str(att.note_id) if att.note_id else None,
@@ -6697,7 +6713,9 @@ async def upload_attachment_instructions(
             "<path-to-file> with the local path. Token-free: no bytes go "
             "through MCP."
         ),
-        "markdown_ref_template": f"{bang}[{filename}](/attachments/<id>/download)",
+        # ``<id>`` is a placeholder the caller substitutes, so the destination
+        # is built by hand; only the user-supplied label needs escaping.
+        "markdown_ref_template": (f"{bang}[{md_link_label(filename)}](/attachments/<id>/download)"),
     }
 
 

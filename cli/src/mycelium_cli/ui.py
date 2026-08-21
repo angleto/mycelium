@@ -95,6 +95,25 @@ def fail(msg: str, *, hint: str | None = None) -> None:
             err().print(f"[dim]hint:[/dim] {hint}")
 
 
+def body_or_none(raw: str | None) -> str | None:
+    """A markdown body read from stdin, ``$EDITOR`` or a file: the bytes
+    verbatim when it has content, ``None`` when it is blank.
+
+    The call sites used to write ``raw.strip() or None``, which answers two
+    different questions with one expression. "Did the user write anything?"
+    is a question about the STRIPPED text; "what do we send?" is not.
+    Stripping what gets sent demoted a body opening with a 4-space indented
+    code block to a paragraph and ate a trailing two-space hard break -- and
+    since only some subcommands did it (``note create`` stripped,
+    ``note edit`` did not), the same text meant different bytes depending on
+    how it arrived. docs/markdown-syntax.md promises the CLI writes the bytes
+    it was given.
+    """
+    if raw is None:
+        return None
+    return raw if raw.strip() else None
+
+
 def edit_in_editor(initial: str = "", *, suffix: str = ".md") -> str:
     """Open ``$EDITOR`` on a tempfile preloaded with ``initial`` and
     return the saved buffer. An empty buffer signals "abort" upstream.

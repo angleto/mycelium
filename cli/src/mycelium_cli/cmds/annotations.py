@@ -19,7 +19,7 @@ import typer
 
 from mycelium_cli.cmds._common import client, get_json, short_id
 from mycelium_cli.http import CLIError
-from mycelium_cli.ui import edit_in_editor, emit_json, info, json_mode, success
+from mycelium_cli.ui import body_or_none, edit_in_editor, emit_json, info, json_mode, success
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -92,10 +92,13 @@ def comment(
     if body_file is not None:
         body = body_file.read_text()
     elif body == "-":
-        body = sys.stdin.read().strip()
+        body = sys.stdin.read()
     elif body is None:
-        body = edit_in_editor("").strip()
-    if not body:
+        body = edit_in_editor("")
+    # One rule for every source (``--body-file``, stdin, $EDITOR, ``--body``):
+    # blank aborts, anything else is markdown and goes over the wire verbatim.
+    body = body_or_none(body)
+    if body is None:
         raise CLIError("empty comment body, aborting.")
     with client() as c:
         a = get_json(

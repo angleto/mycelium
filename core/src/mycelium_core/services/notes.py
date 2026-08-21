@@ -31,7 +31,7 @@ from mycelium_core.ai_providers import (
     get_tts,
 )
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.errors import DomainError, NotFoundError, UnprocessableError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.models.classification_job import ClassificationJob
@@ -463,17 +463,18 @@ async def _log_note_revision(
     )
 
 
-async def get_body(session: AsyncSession, *, note_id: uuid.UUID) -> str:
-    """Return the canonical text body of a note as a single string
-    (task 1cd8bc0a Phase 6 final). The body is the concatenation of
-    every ``note_part`` row ordered by ``ord``, joined by a blank
-    line. Returns an empty string when the note has no parts.
+# The separator ``get_body`` joins parts with, and the one the flat-body
+# writer measures itself against. One constant, because the read and the
+# write have to agree on it byte for byte or a read/write-back round trip
+# stops being the identity.
+_BODY_JOIN = "\n\n"
 
-    Replaces the legacy ``note.transcript`` column reads after the
-    DROP. Callers that want the structured shape (with lang per part,
-    individual ords, etc.) should query ``note_parts.list_parts``
-    directly; this helper exists for the "I just want the flat body"
-    sites (search snippets, audit log, LLM summaries)."""
+
+async def _ordered_part_bodies(session: AsyncSession, *, note_id: uuid.UUID) -> list[str]:
+    """The note's part bodies in ``ord`` order: the exact list
+    ``get_body`` joins. Shared with the flat-body write guard so the
+    two can never disagree about how many parts there are or what the
+    flat body is."""
     from mycelium_core.models.note_part import NotePart
 
     rows = (
@@ -487,7 +488,21 @@ async def get_body(session: AsyncSession, *, note_id: uuid.UUID) -> str:
         .scalars()
         .all()
     )
-    return "\n\n".join((b or "") for b in rows)
+    return [(b or "") for b in rows]
+
+
+async def get_body(session: AsyncSession, *, note_id: uuid.UUID) -> str:
+    """Return the canonical text body of a note as a single string
+    (task 1cd8bc0a Phase 6 final). The body is the concatenation of
+    every ``note_part`` row ordered by ``ord``, joined by a blank
+    line. Returns an empty string when the note has no parts.
+
+    Replaces the legacy ``note.transcript`` column reads after the
+    DROP. Callers that want the structured shape (with lang per part,
+    individual ords, etc.) should query ``note_parts.list_parts``
+    directly; this helper exists for the "I just want the flat body"
+    sites (search snippets, audit log, LLM summaries)."""
+    return _BODY_JOIN.join(await _ordered_part_bodies(session, note_id=note_id))
 
 
 async def _bodies_by_note(
@@ -511,6 +526,58 @@ async def _bodies_by_note(
     for nid, body, _ in rows:
         out.setdefault(nid, []).append(body or "")
     return {nid: "\n\n".join(parts) for nid, parts in out.items()}
+
+
+# A note's markdown is unbounded, so a list endpoint that carries the
+# body is O(total content of the org) in bytes, not O(rows shown).
+# List endpoints carry this one-line preview instead. 220 chars is the
+# cap the SPA already applied client-side back when it received the
+# whole body just to slice a line out of it.
+_PREVIEW_MAX_CHARS = 220
+# How much of the chosen part we pull to find that line: larger than
+# the cap, so a short first line still leaves something to show, and
+# bounded, so N notes cost a bounded scan instead of a full read.
+_PREVIEW_SCAN_CHARS = 512
+
+
+async def _previews_by_note(
+    session: AsyncSession, *, note_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Batched ``{note_id: one-line preview}`` for list endpoints.
+
+    The bounded counterpart of :func:`_bodies_by_note`. ``DISTINCT ON``
+    returns exactly one row per note, carrying at most
+    ``_PREVIEW_SCAN_CHARS`` of its first non-empty part rather than
+    every part body joined. The ordering matches ``_bodies_by_note``
+    (ord, then id), so the preview is the first non-empty line the
+    full body would have started with. Notes whose parts are all empty
+    are absent from the map, which keeps null-vs-empty distinguished
+    for the caller exactly like the body path does.
+    """
+    from mycelium_core.models.note_part import NotePart
+
+    if not note_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                NotePart.note_id,
+                func.left(NotePart.body, _PREVIEW_SCAN_CHARS),
+            )
+            .where(
+                NotePart.note_id.in_(list(note_ids)),
+                func.btrim(NotePart.body) != "",
+            )
+            .order_by(NotePart.note_id, NotePart.ord, NotePart.id)
+            .distinct(NotePart.note_id)
+        )
+    ).all()
+    out2: dict[uuid.UUID, str] = {}
+    for nid, head in rows:
+        line = next((s.strip() for s in (head or "").split("\n") if s.strip()), "")
+        if line:
+            out2[nid] = line[:_PREVIEW_MAX_CHARS]
+    return out2
 
 
 async def _upsert_part_zero(
@@ -837,6 +904,33 @@ async def update_note(
     from mycelium_core.services.note_parts import _assert_not_promoted
 
     await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+    # ``text`` is the FLAT body: the very string ``get_body`` returns, which
+    # is the ``\n\n`` join of EVERY part. The join is not invertible -- a
+    # blank line inside a part reads the same as a part boundary -- so this
+    # writer cannot express a multi-part note. It used to try anyway, writing
+    # the whole join into part 0 and leaving parts 1..N alive, which turned
+    # the ordinary read/modify/write-back of an MCP or CLI caller into silent
+    # duplication ('AAA\n\nBBB' came back as 'AAA\n\nBBB\n\nBBB'). The same
+    # bug is already written up for the restore path in
+    # ``_collapse_parts_to_body``, where it was fixed only locally.
+    #
+    # Collapsing instead of duplicating is NOT the fix: deleting parts 1..N
+    # cascades ``annotation.note_part_id`` (ON DELETE CASCADE), so a flat body
+    # write would silently destroy every comment and suggestion anchored to
+    # those parts, plus their per-user collapse state and search blobs.
+    #
+    # So: unchanged flat body is a no-op on the parts (which is what makes a
+    # read/write-back round trip the identity), and a CHANGED flat body on a
+    # multi-part note is refused. The structured writers
+    # (``note_parts.update_part`` and friends, exposed over API, MCP and CLI)
+    # are the ones that can say which part changed.
+    skip_body_write = False
+    if text is not None:
+        bodies = await _ordered_part_bodies(session, note_id=note_id)
+        if len(bodies) > 1:
+            if text != _BODY_JOIN.join(bodies):
+                raise UnprocessableError(MessageCode.NOTE_BODY_MULTIPART, parts=len(bodies))
+            skip_body_write = True
     # Phase 6 final: ``text`` lands in note_part(ord=0), not in a
     # ``transcript`` column. The Note row's ``values`` carries only
     # the still-on-row fields (title, audio_ref, ...); the part write
@@ -879,7 +973,7 @@ async def update_note(
     # (it's gone in migration 0012); the part write completes the
     # body edit. Sequenced after _note_set so an optimistic version
     # conflict aborts both writes together.
-    if text is not None:
+    if text is not None and not skip_body_write:
         await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=text)
     if pending_task_link[0]:
         new_task_id = pending_task_link[1]
@@ -910,19 +1004,37 @@ _APPEND_TARGETS_NOTE: frozenset[str] = frozenset({"summary", "transcript"})
 def _collapsed_concat(current: str | None, separator: str, text: str) -> str:
     """Join ``current + separator + text`` with two collapses: an empty
     current swallows the separator; a current that already ends with the
-    separator (modulo trailing whitespace) doesn't get a second copy.
-    This keeps appended paragraphs aligned with the existing block
-    structure without introducing accidental gaps."""
+    separator doesn't get a second copy. This keeps appended paragraphs
+    aligned with the existing block structure without introducing
+    accidental gaps.
+
+    The previous shape tested ``base.rstrip(" \\t\\n\\r").endswith(
+    separator.rstrip(" \\t\\n\\r"))``. For every whitespace separator the
+    right-hand side is ``""``, so the test was vacuously true and the branch
+    always fired. Two bugs came out of it:
+
+    - with ``separator="\\n\\n"`` it ran ``base.rstrip()``, which eats a
+      two-space hard break off the end of the stored body on EVERY append;
+    - with any other whitespace separator it returned ``base + text``, i.e.
+      dropped the separator entirely (``_collapsed_concat("a", "\\n", "b")``
+      was ``"ab"``). ``separator`` is an MCP tool parameter, so that one was
+      reachable from an agent.
+
+    The blank-line separator is the only one with a collapse rule, and it is
+    now stated in newlines rather than in ``strip``: pad the trailing newline
+    run up to two, never remove bytes. Whitespace on the last CONTENT line is
+    markdown (a two-space hard break), not stray formatting, and normalising
+    it is exactly the class of damage the byte-exactness work exists to stop.
+    """
     base = current or ""
     if not base:
         return text
     if base.endswith(separator):
         return base + text
-    if separator and base.rstrip(" \t\n\r").endswith(separator.rstrip(" \t\n\r")):
-        # The current body ends with the structural part of the separator
-        # but has trailing whitespace; fall through to a single newline
-        # join so we don't double-up the blank line.
-        return base.rstrip() + "\n\n" + text if separator == "\n\n" else base + text
+    if separator == "\n\n":
+        # 0 or 1 here: a run of 2+ already matched ``endswith`` above.
+        trailing_newlines = len(base) - len(base.rstrip("\n"))
+        return base + "\n" * (2 - trailing_newlines) + text
     return base + separator + text
 
 

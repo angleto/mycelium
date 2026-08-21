@@ -432,3 +432,50 @@ async def test_purge_is_not_restorable_over_rest() -> None:
         gone = await c.post(f"/notes/{note_id}/parts/{p['id']}/restore", headers=h)
         assert gone.status_code == 404, gone.text
         assert (await c.get(f"/notes/{note_id}/parts:trashed", headers=h)).json() == []
+
+
+async def test_flat_body_write_on_a_multipart_note() -> None:
+    """``PATCH /notes/{id}`` carries the FLAT body, which is the ``\n\n``
+    join of every part. That join is not invertible, so the endpoint accepts
+    the body it can express and refuses the one it cannot.
+
+    It used to write the whole join into part 0 and leave parts 1..N alive,
+    so an agent reading ``transcript`` and PATCHing it back DUPLICATED every
+    part after the first. Collapsing instead would have been worse: deleting
+    the surviving parts cascades ``annotation.note_part_id``."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "flat body")
+        await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "AAA"})
+        await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "BBB"})
+
+        note = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        assert note["transcript"] == "AAA\n\nBBB"
+
+        # Write it back unchanged: the identity, structure included.
+        same = await c.patch(
+            f"/notes/{note_id}",
+            headers=h,
+            json={"expected_version": note["version"], "text": note["transcript"]},
+        )
+        assert same.status_code == 200, same.text
+        assert (await c.get(f"/notes/{note_id}", headers=h)).json()["transcript"] == "AAA\n\nBBB"
+        assert [p["body"] for p in (await c.get(f"/notes/{note_id}/parts", headers=h)).json()] == [
+            "AAA",
+            "BBB",
+        ]
+
+        # Change it, and the endpoint refuses instead of guessing.
+        note = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        changed = await c.patch(
+            f"/notes/{note_id}",
+            headers=h,
+            json={"expected_version": note["version"], "text": "AAA\n\nCCC"},
+        )
+        assert changed.status_code == 422, changed.text
+        assert "note.body.multipart" in changed.text
+        assert [p["body"] for p in (await c.get(f"/notes/{note_id}/parts", headers=h)).json()] == [
+            "AAA",
+            "BBB",
+        ]

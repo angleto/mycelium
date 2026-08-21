@@ -45,29 +45,62 @@ body cannot inject markup.
 | `![alt](file.png)` | same, resolved by filename against the note's or task's own attachments |
 | ` ```mermaid ` | live diagram, in the reader and in the editor |
 
-## Verbatim bodies and the visual editor
+## Verbatim bodies: the storage guarantee
 
 A body is stored as the markdown its author wrote. Nothing on the way in
-reformats it: MCP, the CLI and imports write the bytes they were given, and
-the SPA reads them. **The visual editor is a view mode, not a storage
-format** — it is the default one for every body, wherever the body came
-from, and opening a note in it changes nothing on the server.
+reformats it: MCP, the CLI, the REST API and imports write the bytes they
+were given, and the SPA reads them. Leading indentation, tabs, runs of blank
+lines, a two-space hard break and the trailing newline are all markdown, and
+all survive.
 
-What *is* asymmetric is writing. The visual editor can only save what its
-serializer produces, and that serialization is not the identity: it re-flows
-a hard-wrapped paragraph onto one line, escapes `[` and `_` outside words,
-and normalises table separators to `| --- |`. (The trailing newline is
-preserved.) So the editor measures, once per body, whether the body is a
-**fixed point** of its own round-trip, and when it is not it says so in a
-notice: reading it costs nothing, the first edit made *there* saves the
-normalised form. Content authored in the app is a fixed point by
-construction, so the notice never appears on it.
+One rule follows from the fact that a note is a list of **parts**, not a
+single string. The flat body (`transcript` in the REST payload, what MCP
+`get_note` returns) is the `\n\n` join of every part, and that join is not
+invertible: a blank line inside a part reads exactly like a part boundary.
+So the flat-body writers (`PATCH /notes/{id}` with `text`, MCP `update_note`,
+`mycelium note edit`) accept a body they can express and refuse one they
+cannot:
+
+- a note with zero or one part: `text` replaces the body, as always;
+- a note with several parts, `text` unchanged: no-op on the parts, so a
+  read/modify-nothing/write-back round trip is the identity;
+- a note with several parts, `text` changed: **refused** (422,
+  `note.body.multipart`). Edit the part you mean through the note-parts
+  surface (`PATCH /notes/{id}/parts/{part_id}`, MCP `update_note_part`,
+  `mycelium note parts replace`), which knows which part changed.
+
+Refusing rather than collapsing is deliberate: collapsing the parts into one
+would cascade-delete every comment and suggestion anchored to the parts that
+disappear.
+
+## The visual editor
+
+**The visual editor is a view mode, not a storage format** — it is the
+default one for every body, wherever the body came from, and opening a note
+in it changes nothing on the server.
+
+Writing is the asymmetric half, today. The current editor (tiptap) can only
+save what its markdown serializer produces, and that serialization is not the
+identity, so a body written outside the app is normalised the first time it is
+edited *there*. The editor measures this once per body and says so in a
+notice; content authored in the app is a fixed point by construction, so the
+notice never appears on it.
+
+The measured list is longer than this page used to claim. Beyond hard-wrapped
+paragraphs, display maths (`$$ … $$`), an underscore between non-ASCII
+characters (`Φ_ℓ`) and HTML other than `<sub>` / `<sup>`, the round trip also
+rewrites: setext headings to ATX, `*` and `+` bullets to `-`, `1)` to `1.`,
+`~~~` fences and indented code to ```` ``` ````, padded and **aligned** table
+separators to `| --- |`, tight task lists to loose ones, reference links to
+inline ones, and `[`, `*`, `_` to escaped forms. A few constructs are not
+merely reformatted but corrupted: YAML front matter, footnotes, a fence
+containing a ```` ``` ```` run, an escaped `\|` inside a table cell, and a
+table cell holding only an image.
 
 Practical consequence for anything meant to stay byte-exact: edit it under
 "Edit as Markdown", where what you type is what is stored.
 
-Things that are NOT fixed points, hence carry the notice: hard-wrapped
-paragraphs, display maths (`$$ … $$`), an underscore between non-ASCII
-characters (`Φ_ℓ`), and any HTML other than `<sub>` / `<sup>`. Inline maths
-(`$x_0$`), tables, lists, code fences, mermaid, attachment references,
-mention chips and the trailing newline all round-trip unchanged.
+This is being fixed by changing what the editor's document *is*: the markdown
+source itself, with rich rendering as a display layer over it, so there is no
+serializer to be lossy. This section will shrink to "the editor stores what
+you typed" when that lands.

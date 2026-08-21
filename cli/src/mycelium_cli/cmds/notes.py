@@ -25,6 +25,7 @@ from mycelium_cli.cmds._common import (
 from mycelium_cli.completion import complete_note_id, complete_task_id
 from mycelium_cli.http import CLIError, raise_for_response
 from mycelium_cli.ui import (
+    body_or_none,
     edit_in_editor,
     emit_json,
     emit_table,
@@ -138,9 +139,9 @@ def add(
 ) -> None:
     """Create a text note. With no -m/--text, opens $EDITOR."""
     if text == "-":
-        text = sys.stdin.read().strip() or None
+        text = body_or_none(sys.stdin.read())
     elif text is None and not no_editor:
-        text = edit_in_editor("").strip() or None
+        text = body_or_none(edit_in_editor(""))
     if not text:
         raise CLIError(
             "empty note body, aborting.",

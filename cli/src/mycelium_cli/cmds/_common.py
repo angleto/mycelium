@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -54,7 +55,17 @@ def attachment_markdown_ref(att: dict[str, Any]) -> str:
     mime = att.get("mime_type") or ""
     url = f"/attachments/{att_id}/download"
     bang = "!" if mime.startswith("image/") else ""
-    return f"{bang}[{name}]({url})"
+    # The label is a filename, i.e. user data: `Report ]final.pdf` used to
+    # emit `[Report ]final.pdf](...)`, which parses as the link `[Report ]`
+    # followed by literal text. Escape `\`, then the brackets, and collapse
+    # newline runs (a blank line inside a label truncates the link).
+    #
+    # Duplicated on purpose from ``mycelium_core.markdown_inline`` and
+    # ``web/src/lib/markdownInline.ts``: the CLI ships standalone, with no
+    # dependency on core. Change one, change all three.
+    label = name.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+    label = re.sub(r"\s*[\r\n]+\s*", " ", label)
+    return f"{bang}[{label}]({url})"
 
 
 def get_json(resp: httpx.Response) -> Any:
