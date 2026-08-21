@@ -70,6 +70,7 @@ from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import task_search as task_search_svc
 from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
 
 # Hard step cap: an agent run can never take more than this many model
@@ -184,7 +185,7 @@ async def _build_context(
             (
                 await session.execute(
                     select(Note)
-                    .where(Note.id.in_(linked_ids), Note.deleted_at.is_(None))
+                    .where(Note.id.in_(linked_ids), effective_note_clause())
                     .order_by(Note.created_at, Note.id)
                 )
             )
@@ -229,7 +230,7 @@ async def _run_tool(
                 (
                     await session.execute(
                         select(Note)
-                        .where(Note.id.in_(linked_ids), Note.deleted_at.is_(None))
+                        .where(Note.id.in_(linked_ids), effective_note_clause())
                         .order_by(Note.created_at, Note.id)
                     )
                 )

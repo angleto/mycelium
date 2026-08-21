@@ -5247,6 +5247,10 @@ async def list_notes(
                 org_id=org,
                 task_id=uuid.UUID(task_id),
                 kinds=tuple(link_kinds) if link_kinds else None,
+                # The trash view of a task's notes stays reachable: the id
+                # source applies the effective perimeter by default, so the
+                # opt-in has to travel with the call (task 854f1c28).
+                include_deleted=include_deleted,
             )
             if not note_ids:
                 return {"items": [], "next_cursor": None, "truncated": False}

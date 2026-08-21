@@ -1348,7 +1348,7 @@ async def get_or_create_work_note(
     if note_ids:
         existing = (
             await session.execute(
-                select(Note).where(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+                select(Note).where(Note.id.in_(note_ids), effective_note_clause())
             )
         ).scalar_one_or_none()
         if existing is not None:

@@ -63,6 +63,7 @@ from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit, note_inert, tag_assignment
 from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
 
 _VALID_MATURITY: frozenset[str] = frozenset(m.value for m in NoteMaturity)
@@ -644,14 +645,32 @@ async def notes_for_task(
     org_id: uuid.UUID,
     task_id: uuid.UUID,
     kinds: tuple[str, ...] | None = None,
+    include_deleted: bool = False,
 ) -> list[uuid.UUID]:
-    """All note ids linked to the given task. Optional ``kinds`` filter
-    restricts to specific relation types; default returns every kind.
+    """The EFFECTIVE note ids linked to the given task. Optional ``kinds``
+    filter restricts to specific relation types; default returns every kind.
     Replaces the legacy ``WHERE Note.task_id = task_id`` pattern.
+
+    The perimeter is here, not at the call sites (task 854f1c28). This used
+    to return raw junction rows and leave the filtering to whoever resolved
+    them: four of its five callers then wrote ``deleted_at IS NULL`` and
+    forgot the ADR-0043 leg, so the body of an un-approved proposal reached
+    an agent's prompt through the one path neither the retrieval predicate
+    nor the note/graph predicate covers. A link row is not a claim that the
+    note is visible, so the default answer is the effective set.
+
+    ``include_deleted`` is the trash-view opt-in (the MCP ``list_notes``
+    ``task_id`` path offers it): like the shared clause, it drops ONLY the
+    soft-delete leg -- an un-approved proposal is never returned.
     """
-    stmt = select(NoteTaskLink.note_id).where(
-        NoteTaskLink.org_id == org_id,
-        NoteTaskLink.task_id == task_id,
+    stmt = (
+        select(NoteTaskLink.note_id)
+        .join(Note, Note.id == NoteTaskLink.note_id)
+        .where(
+            NoteTaskLink.org_id == org_id,
+            NoteTaskLink.task_id == task_id,
+            effective_note_clause(include_deleted=include_deleted),
+        )
     )
     if kinds:
         stmt = stmt.where(NoteTaskLink.kind.in_(kinds))

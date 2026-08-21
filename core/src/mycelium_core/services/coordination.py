@@ -65,6 +65,7 @@ from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
 from mycelium_core.services import audit
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import notifications as notif_svc
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
 
 # In-app coordination notifications are an inbox primitive, not an
@@ -113,7 +114,7 @@ async def _producer_artifact_note_id(
     return (
         await session.execute(
             select(Note.id)
-            .where(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+            .where(Note.id.in_(note_ids), effective_note_clause())
             .order_by(Note.created_at.desc(), Note.id.desc())
             .limit(1)
         )
@@ -380,8 +381,16 @@ async def incoming_for_context(
             continue
         note: Note | None = None
         if ho.artifact_note_id is not None:
+            # The artifact's title and BODY go straight into the recipient's
+            # prompt (``agent_runtime._build_context``), so it has to be an
+            # effective note: a trashed artifact is material the user threw
+            # away and an un-approved proposal is withheld by ADR-0043. The
+            # handoff message itself still reaches the agent -- only the
+            # artifact quotation drops (task 854f1c28).
             note = (
-                await session.execute(select(Note).where(Note.id == ho.artifact_note_id))
+                await session.execute(
+                    select(Note).where(Note.id == ho.artifact_note_id, effective_note_clause())
+                )
             ).scalar_one_or_none()
         out.append((ho, pred, note))
     return out
