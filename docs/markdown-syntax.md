@@ -113,12 +113,16 @@ source comes straight back, so you are always editing markdown, never a
 rendering of it. The whole layer is decorations; it dispatches no document
 change, which is what the tests assert first.
 
+Whole blocks get a real preview: a ` ```mermaid ` fence renders as its
+diagram, a `$$ … $$` block as the typeset formula, a GFM table as a table
+with its alignments, and a setext underline (`======`) folds into the heading
+above it. Put the caret inside one and the source comes back. For a diagram
+and a formula the preview stays visible *underneath* the source while you
+edit it, because writing either of them blind is not writing them.
+
 Two constructs deliberately keep their source: an autolink (`<https://…>`),
-which is all URL and would vanish, and an image, which has no preview widget
-yet. A setext underline (`======`) is hidden but its line stays, because
-folding it away means replacing a range containing a line break and
-CodeMirror only accepts that from a state field; it moves with the
-block-level layer (fenced code, `$$` blocks, tables).
+which is all URL and would vanish, and an image, whose preview widget is the
+next piece of work.
 
 `web/test/markdown-corpus/` holds one fixture per construct the visual editor
 damages, and `pnpm test` asserts that every one of them comes back out of the

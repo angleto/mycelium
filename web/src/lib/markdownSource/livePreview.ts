@@ -7,6 +7,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view'
+import { overlaps, revealedRanges } from './reveal'
 
 // Live preview: markdown that LOOKS rendered while the document stays the
 // markdown source.
@@ -24,23 +25,6 @@ import {
 // both settled on this shape; anything cleverer (hide per construct, reveal
 // per construct) makes the caret's meaning depend on where inside a
 // construct it sits, and that is where those editors get bug reports.
-
-/** The document ranges whose markup stays visible: whole lines touched by
- *  any selection range. Cheap, and there is normally exactly one. */
-function revealedRanges(state: EditorState): { from: number; to: number }[] {
-  return state.selection.ranges.map((r) => ({
-    from: state.doc.lineAt(r.from).from,
-    to: state.doc.lineAt(r.to).to,
-  }))
-}
-
-function overlaps(
-  ranges: { from: number; to: number }[],
-  from: number,
-  to: number,
-): boolean {
-  return ranges.some((r) => from <= r.to && to >= r.from)
-}
 
 // Inline delimiters that carry no information once the thing they delimit is
 // styled. `CodeMark` and `URL` are NOT in this list unconditionally: a
@@ -74,15 +58,9 @@ const hide = Decoration.replace({})
  * next to it is the author's. Eating it turns `un **grassetto** qui` into
  * `un grassettoqui`, which is why the rule is per-kind rather than global.
  *
- * A setext underline is a known imperfection, left in on purpose. Its mark
- * IS the whole `=====` line, so hiding it leaves an empty line under the
- * heading. Folding the two lines together means replacing a range that
- * CONTAINS a line break, and CodeMirror refuses that from a ViewPlugin
- * ("Decorations that replace line breaks may not be specified via plugins")
- * because it changes the line structure the view measures heights from. The
- * fix is a StateField, which is what the block-level layer (fences, `$$`
- * blocks, tables) needs anyway; setext folding moves there with it rather
- * than growing a second mechanism here.
+ * A setext underline never reaches here: it is folded into its heading by
+ * the block layer, which can replace a range containing a line break because
+ * it is a StateField.
  */
 function hiddenRange(
   state: EditorState,
@@ -133,7 +111,13 @@ function buildDecorations(view: EditorView): DecorationSet {
       enter: (node) => {
         const cls = HEADING_LINE[node.name]
         if (cls) {
-          decorateLines(out, state, node.from, node.to, cls)
+          // A setext heading's underline is FOLDED AWAY by the block layer
+          // (blockPreview.ts), which replaces the newline before it. Styling
+          // that second line, or hiding its `====` here, would put a
+          // decoration inside a replaced range and CodeMirror would refuse
+          // the whole set. Only the heading's own line gets the class.
+          const lastLine = node.name.startsWith('Setext') ? node.from : node.to
+          decorateLines(out, state, node.from, lastLine, cls)
           return
         }
         if (node.name === 'Blockquote') {
@@ -150,6 +134,8 @@ function buildDecorations(view: EditorView): DecorationSet {
         }
         if (node.from === node.to) return
         const parent = node.node.parent?.name
+        // Same reason: the `====` line is the block layer's to remove.
+        if (node.name === 'HeaderMark' && parent?.startsWith('SetextHeading')) return
         const hidden =
           ALWAYS_HIDDEN.has(node.name) ||
           // The backticks of an inline code span, but not a fence.

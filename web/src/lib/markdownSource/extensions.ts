@@ -6,6 +6,7 @@ import { GFM } from '@lezer/markdown'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
+import { blockPreview } from './blockPreview'
 import { livePreview } from './livePreview'
 
 // The CodeMirror configuration of the markdown source surface, kept apart
@@ -100,6 +101,39 @@ const baseTheme = EditorView.theme({
     textDecoration: 'underline',
     textUnderlineOffset: '2px',
   },
+
+  // Block widgets (blockPreview.ts). They stand where several source lines
+  // would be, so they own their vertical rhythm; ``user-select: none`` keeps
+  // a drag across one from producing a selection that has no counterpart in
+  // the document.
+  '.cm-md-widget': {
+    margin: '0.4em 0',
+    userSelect: 'none',
+  },
+  '.cm-md-mermaid': { display: 'flex', justifyContent: 'center' },
+  '.cm-md-mermaid svg': { maxWidth: '100%', height: 'auto' },
+  '.cm-md-math': { overflowX: 'auto', textAlign: 'center' },
+  '.cm-md-math--error': {
+    fontFamily: 'inherit',
+    color: 'var(--muted)',
+    textAlign: 'left',
+  },
+  // The table scrolls inside its own box rather than widening the editor:
+  // a wide table must never make the whole writing surface scroll sideways.
+  '.cm-md-table': { overflowX: 'auto' },
+  '.cm-md-table table': {
+    borderCollapse: 'collapse',
+    fontSize: '0.95em',
+  },
+  '.cm-md-table th, .cm-md-table td': {
+    border: '1px solid var(--border)',
+    padding: '0.25em 0.6em',
+    textAlign: 'left',
+  },
+  '.cm-md-table th': {
+    fontWeight: '700',
+    backgroundColor: 'color-mix(in srgb, var(--text) 5%, transparent)',
+  },
 })
 
 export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
@@ -125,6 +159,10 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // it never dispatches a document change, so the bytes are the same with
     // it as without it.
     livePreview(),
+    // Block-level previews (mermaid, `$$`, tables, setext folding). A state
+    // field, not a plugin: these replace ranges that span line breaks and
+    // determine their own height.
+    blockPreview(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),

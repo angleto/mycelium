@@ -141,25 +141,6 @@ describe('markup recedes off the caret line', () => {
     expect(lines[2]).toBe('![alt](/attachments/x/download)')
   })
 
-  it('hides a setext underline, leaving the line (a stated imperfection)', () => {
-    // The mark here IS the `=====` line, so hiding it empties the line but
-    // does not remove it: folding the two lines together would mean replacing
-    // a range containing a line break, which CodeMirror only accepts from a
-    // StateField. That moves here with the block-level layer. Asserted so the
-    // current behaviour is a decision on the record, not a surprise.
-    const src = 'Titolo\n======\n\ntesto\n'
-    const view = open(src)
-    putCaret(view, src.indexOf('testo'))
-    const lines = rendered(view).split('\n')
-    expect(lines[0]).toBe('Titolo')
-    expect(lines[1]).toBe('')
-    expect(view.state.sliceDoc()).toBe(src)
-
-    // On the line, the source is back.
-    putCaret(view, 8)
-    expect(rendered(view).split('\n')[1]).toBe('======')
-  })
-
   it('eats the separator after a block delimiter but not around an inline one', () => {
     const src = '> citato\n> > annidato\n\nun **bold** e `code` qui\n'
     const view = open(src)
