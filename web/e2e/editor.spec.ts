@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
+import { inSourceMode, readSource, setSource, sourceContent } from './source-editor'
 
 // Regression coverage for the note rich editor (RichEditor + tiptap):
 // the layout overlap, the <label>-forwarded double-click bold, and the
@@ -43,11 +44,11 @@ async function ensureToolbar(page: Page) {
 
 async function enterMarkdownMode(page: Page) {
   await ensureToolbar(page)
-  if (!(await page.locator('textarea.rte__raw').first().isVisible().catch(() => false))) {
+  if (!(await inSourceMode(page))) {
     await toggleBtn(page).click()
     await page.waitForTimeout(300)
   }
-  await expect(page.locator('textarea.rte__raw').first()).toBeVisible()
+  await expect(sourceContent(page)).toBeVisible()
 }
 
 test('rich editor is not wrapped in a <label> (double-click must not bold)', async ({
@@ -68,15 +69,15 @@ test('markdown table round-trips through the editor', async ({ page }) => {
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
   const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |'].join('\n')
-  await page.locator('textarea.rte__raw').first().fill(md)
+  await setSource(page, md)
   await toggleBtn(page).click() // -> WYSIWYG
   // WYSIWYG renders a real table.
   await expect(page.locator('.ProseMirror table').first()).toBeVisible()
   expect(await page.locator('.ProseMirror th').count()).toBe(2)
   // Back to markdown: serializes to a pipe table again.
   await toggleBtn(page).click()
-  await expect(page.locator('textarea.rte__raw').first()).toBeVisible()
-  const back = await page.locator('textarea.rte__raw').first().inputValue()
+  await expect(sourceContent(page)).toBeVisible()
+  const back = await readSource(page)
   expect(back).toContain('| Name')
   expect(back).toContain('| Alice')
 })
@@ -105,7 +106,7 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
-  await page.locator('textarea.rte__raw').first().fill(VERBATIM)
+  await setSource(page, VERBATIM)
   // Let the 1.2s debounced autosave land the bytes we typed.
   await page.waitForResponse(
     (r) => /\/notes\/[^/]+\/parts\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
@@ -125,7 +126,7 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
   // The rich editor is the default view for every body, verbatim ones
   // included: rendering is a mode, not a property of how the bytes arrived.
   await expect(page.locator('.ProseMirror').first()).toBeVisible()
-  await expect(page.locator('textarea.rte__raw')).toHaveCount(0)
+  await expect(page.locator('.rte__src')).toHaveCount(0)
   // Rendering that body must still write nothing. Well past the autosave
   // debounce.
   await page.waitForTimeout(3500)
@@ -137,7 +138,7 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
 
   // And the source is still the bytes we uploaded, byte for byte.
   await enterMarkdownMode(page)
-  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(VERBATIM)
+  expect(await readSource(page)).toBe(VERBATIM)
 })
 
 test('links keep their destination through the rich editor', async ({ page }) => {
@@ -148,12 +149,12 @@ test('links keep their destination through the rich editor', async ({ page }) =>
   // mark excluded `link`, the second because tiptap's default isAllowedUri
   // rejects a relative path containing a directory separator.
   const md = '[`00-overview.md`](00-overview.md) e [testo](docs/00-overview.md)'
-  await page.locator('textarea.rte__raw').first().fill(md)
+  await setSource(page, md)
   await toggleBtn(page).click() // -> WYSIWYG
   await expect(page.locator('.ProseMirror a').first()).toBeVisible()
   expect(await page.locator('.ProseMirror a').count()).toBe(2)
   await toggleBtn(page).click() // -> back to markdown
-  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(md)
+  expect(await readSource(page)).toBe(md)
 })
 
 test('sub/sup render as real elements and round-trip, but stay literal in code', async ({
@@ -163,7 +164,7 @@ test('sub/sup render as real elements and round-trip, but stay literal in code',
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
   const md = 'x<sub>0</sub> e 2<sup>t</sup>, ma `x<sup>2</sup>` resta letterale'
-  await page.locator('textarea.rte__raw').first().fill(md)
+  await setSource(page, md)
   await toggleBtn(page).click() // -> WYSIWYG
   await expect(page.locator('.ProseMirror sup').first()).toBeVisible()
   expect(await page.locator('.ProseMirror sup').count()).toBe(1)
@@ -171,7 +172,7 @@ test('sub/sup render as real elements and round-trip, but stay literal in code',
   // Inside a code span the author asked for the characters, not the markup.
   expect(await page.locator('.ProseMirror code sup').count()).toBe(0)
   await toggleBtn(page).click() // -> back to markdown
-  expect(await page.locator('textarea.rte__raw').first().inputValue()).toBe(md)
+  expect(await readSource(page)).toBe(md)
 })
 
 test('in markdown mode the Attach-file block does not overlap the editor', async ({
@@ -180,12 +181,9 @@ test('in markdown mode the Attach-file block does not overlap the editor', async
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
-  await page
-    .locator('textarea.rte__raw')
-    .first()
-    .fill(Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n'))
+  await setSource(page, Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n'))
   const box = await page.evaluate(() => {
-    const ta = document.querySelector('textarea.rte__raw')!.getBoundingClientRect()
+    const ta = document.querySelector('.rte__raw.rte__src')!.getBoundingClientRect()
     const btn = document
       .querySelector('.atts')!
       .querySelector('button')!

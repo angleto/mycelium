@@ -54,6 +54,10 @@ import {
 import { AttachmentPicker } from './AttachmentPicker'
 import { isEditorHref } from '../lib/editorHref'
 import { mdLink } from '../lib/markdownInline'
+import {
+  SourceEditor,
+  type SourceEditorHandle,
+} from '../lib/markdownSource/SourceEditor'
 import { Subscript, Superscript } from '../lib/subSupMarks'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
@@ -704,7 +708,7 @@ export function RichEditor({
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfErr, setPdfErr] = useState<string | null>(null)
   const imgInput = useRef<HTMLInputElement>(null)
-  const rawRef = useRef<HTMLTextAreaElement>(null)
+  const srcRef = useRef<SourceEditorHandle>(null)
   // Latest rawMode for the scroll handle (built once, must see the live
   // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
   // to scroll to.
@@ -750,20 +754,15 @@ export function RichEditor({
   // end if not focused). The WYSIWYG branch goes through the editor's
   // insertContent below.
   const insertRawSnippet = (md: string) => {
-    const ta = rawRef.current
-    if (!ta) {
+    const src = srcRef.current
+    if (!src) {
       onChange(value + (value.endsWith('\n') || !value ? '' : '\n') + md + '\n')
       return
     }
-    const start = ta.selectionStart ?? value.length
-    const end = ta.selectionEnd ?? value.length
-    const next = value.slice(0, start) + md + value.slice(end)
-    onChange(next)
-    requestAnimationFrame(() => {
-      ta.focus()
-      const pos = start + md.length
-      ta.setSelectionRange(pos, pos)
-    })
+    // The source editor owns the caret, the change and the scroll: it
+    // dispatches one transaction instead of rewriting the whole value and
+    // then racing a requestAnimationFrame to put the caret back.
+    src.insert(md)
   }
 
   // Whether the caret sits somewhere that must keep pasted text VERBATIM:
@@ -862,6 +861,18 @@ export function RichEditor({
     } finally {
       setUploading(false)
     }
+  }
+
+  // Images pasted or dropped onto the source editor upload and land as a
+  // markdown reference. Returns whether the event was consumed: anything
+  // that is not an uploadable image falls through to CodeMirror, which is
+  // what still pastes the text half of a mixed payload.
+  const handleDroppedFiles = (files: File[]): boolean => {
+    if (!parentRef.current) return false
+    const images = files.filter(isAcceptedImage)
+    if (!images.length) return false
+    for (const f of images) void doUpload(f)
+    return true
   }
 
   // Stable ref to the editor for paste/drop handlers (which are bound
@@ -1182,13 +1193,7 @@ export function RichEditor({
   const goToFraction = useCallback((f: number) => {
     const clamped = Math.max(0, Math.min(1, f))
     if (rawModeRef.current) {
-      const ta = rawRef.current
-      if (!ta) return
-      ta.scrollTop = clamped * (ta.scrollHeight - ta.clientHeight)
-      ta.scrollIntoView({
-        behavior: 'smooth',
-        block: clamped <= 0 ? 'start' : clamped >= 1 ? 'end' : 'center',
-      })
+      srcRef.current?.scrollToFraction(clamped)
       return
     }
     const ed = editorRef.current
@@ -1638,42 +1643,13 @@ export function RichEditor({
         </p>
       )}
       {rawMode ? (
-        <textarea
-          ref={rawRef}
-          className="rte__raw"
+        <SourceEditor
+          handleRef={srcRef}
+          className="rte__raw rte__src"
           value={value}
           placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          onPaste={(e) => {
-            if (!parentRef.current) return
-            const items = e.clipboardData?.items
-            if (!items) return
-            for (let i = 0; i < items.length; i += 1) {
-              const it = items[i]
-              if (it.kind === 'file') {
-                const f = it.getAsFile()
-                if (f && isAcceptedImage(f)) {
-                  e.preventDefault()
-                  void doUpload(f)
-                  return
-                }
-              }
-            }
-          }}
-          onDrop={(e) => {
-            if (!parentRef.current) return
-            const files = e.dataTransfer?.files
-            if (!files || files.length === 0) return
-            let any = false
-            for (let i = 0; i < files.length; i += 1) {
-              const f = files[i]
-              if (isAcceptedImage(f)) {
-                void doUpload(f)
-                any = true
-              }
-            }
-            if (any) e.preventDefault()
-          }}
+          onChange={onChange}
+          onPasteFiles={handleDroppedFiles}
         />
       ) : (
         <EditorContent editor={editor} />

@@ -3015,6 +3015,24 @@ button.btn--danger:hover {
   font-size: 0.85rem;
   outline: none;
 }
+/* The markdown SOURCE editor (CodeMirror) mounts into a host div that takes
+   the whole .rte__raw box -- border, radius, background, font, and every
+   sizing rule already written for it, the modal one included. What it must
+   NOT take is the scrolling and the padding: CodeMirror's own .cm-scroller
+   is the scroll container and .cm-content carries the padding, so leaving
+   both on the host would give two nested scrollbars and a doubled gutter.
+   The modal-scoped override is spelled out because that rule
+   (.modal__body .grow .rte .rte__raw) outranks a two-class selector. */
+.rte__raw.rte__src,
+.modal__body .grow .rte .rte__raw.rte__src {
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+}
+.rte__raw.rte__src > .cm-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 /* Comfortable, roomy editor (notes): a big box, not a caselina. */
 .rte--lg .rte__raw,
 .rte--lg .ProseMirror {

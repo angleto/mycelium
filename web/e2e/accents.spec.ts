@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 import { authedApi } from './api'
+import { readSource, sourceContent } from './source-editor'
 
 // Accented letters typed the way macOS types them: a DEAD KEY. Option+`
 // then `e` is not two characters, it is one IME composition — the browser
@@ -235,13 +236,13 @@ test('dead-key accents survive in markdown mode', async ({ page }) => {
   await openFreshNoteEditor(page)
 
   await page.getByRole('button', { name: /Edit as Markdown/ }).first().click()
-  const ta = page.locator('textarea.rte__raw').first()
-  await expect(ta).toBeVisible()
-  await ta.click()
+  const src = sourceContent(page)
+  await expect(src).toBeVisible()
+  await src.click()
   await page.keyboard.type('citt')
   await typeDeadKeyAccentSlowly(page, '`', 'à', 2500)
 
-  expect(await ta.inputValue()).toBe('città')
+  expect(await readSource(page)).toBe('città')
 })
 
 test('dead-key accents survive in the note title field', async ({ page }) => {

@@ -98,9 +98,28 @@ containing a ```` ``` ```` run, an escaped `\|` inside a table cell, and a
 table cell holding only an image.
 
 Practical consequence for anything meant to stay byte-exact: edit it under
-"Edit as Markdown", where what you type is what is stored.
+**"Edit as Markdown"**, where what you type is what is stored.
 
-This is being fixed by changing what the editor's document *is*: the markdown
-source itself, with rich rendering as a display layer over it, so there is no
-serializer to be lossy. This section will shrink to "the editor stores what
-you typed" when that lands.
+That mode is no longer a bare `<textarea>`. It is a CodeMirror surface whose
+*document is the markdown string itself*: reading it is `state.sliceDoc()`
+and nothing else, so there is no serializer between what you type and what is
+stored, and therefore nothing that can be lossy. It highlights structure,
+wraps long lines and has real undo/redo, but it never rewrites a byte you did
+not type.
+
+`web/test/markdown-corpus/` holds one fixture per construct the visual editor
+damages, and `pnpm test` asserts that every one of them comes back out of the
+source editor exactly as it went in. There is no allowlist of known-lossy
+cases: a fixture that cannot round-trip is a bug. The corpus runs in the
+`web` CI job, needs no backend, and takes about two seconds.
+
+The one stated limit is line endings. A uniformly-LF body and a uniformly-CRLF
+body are both exact. A body that MIXES the two displays correctly and writes
+nothing when opened, but normalises to LF on the first edit: pinning CRLF for
+such a body would make CodeMirror split on `\r\n` only, collapsing the whole
+document into a single line with no block structure at all. (The visual editor
+destroys every CRLF unconditionally, so this is strictly narrower.)
+
+The visual editor is being moved onto the same substrate, with rich rendering
+as a decoration layer over the source rather than a second document model.
+When that lands, the notice and this whole section go with it.

@@ -1,0 +1,10 @@
+# The markdown identity corpus is byte-exact by definition: these fixtures
+# exist to assert that the editor gives back the bytes it was given, so git
+# must not touch their line endings, whitespace or encoding on the way in or
+# out. Without this, a checkout on a machine with core.autocrlf=true would
+# rewrite the fixtures and the test would assert the wrong thing (or pass for
+# the wrong reason).
+# ``-text`` stops the EOL conversion; a bare ``diff`` puts the textual diff
+# back, which ``-text`` would otherwise turn off (a reviewer would see
+# "Binary files differ" instead of the fixture).
+web/test/markdown-corpus/** -text diff

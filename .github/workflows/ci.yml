@@ -116,6 +116,16 @@ jobs:
       # "files": []). Use `pnpm typecheck` / `npm run typecheck`.
       - name: Typecheck
         run: pnpm typecheck
+      # The markdown identity corpus: every fixture in web/test/markdown-corpus
+      # must come back out of the editor's document model as the bytes that
+      # went in. The editor's document IS the markdown source, so this is a
+      # law rather than a target, and there is no allowlist of known-lossy
+      # constructs. Needs no DOM for the identity assertions (EditorState is
+      # pure) and no backend at all; runs in about two seconds. After
+      # Typecheck because vitest transpiles without typechecking, so a type
+      # error would otherwise surface here as a confusing runtime failure.
+      - name: Unit tests (markdown identity corpus)
+        run: pnpm test
       - name: Build
         run: pnpm build
 

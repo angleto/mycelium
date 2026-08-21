@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
+import { inSourceMode, readSource, setSource, sourceContent } from './source-editor'
 
 // Linkable attachments in the note/task body. The load-bearing risk is
 // the tiptap Link `validate` predicate: a relative
@@ -49,10 +50,10 @@ async function toggleEditorMode(page: Page) {
 }
 
 async function enterMarkdownMode(page: Page) {
-  if (!(await page.locator('textarea.rte__raw').first().isVisible())) {
+  if (!(await inSourceMode(page))) {
     await toggleEditorMode(page)
   }
-  await expect(page.locator('textarea.rte__raw').first()).toBeVisible()
+  await expect(sourceContent(page)).toBeVisible()
 }
 
 test('attachment link survives the markdown round-trip (keystone)', async ({
@@ -63,7 +64,7 @@ test('attachment link survives the markdown round-trip (keystone)', async ({
   await enterMarkdownMode(page)
   const id = '11111111-1111-1111-1111-111111111111'
   const href = `/attachments/${id}/download`
-  await page.locator('textarea.rte__raw').fill(`[doc.pdf](${href})`)
+  await setSource(page, `[doc.pdf](${href})`)
   // -> WYSIWYG: the Link mark must be kept by validate (the fix), so the
   // parsed prose carries a real anchor with the relative href.
   await toggleEditorMode(page)
@@ -73,8 +74,8 @@ test('attachment link survives the markdown round-trip (keystone)', async ({
   // -> back to markdown: the link must serialize back intact, not as the
   // bare word "doc.pdf" (the pre-fix failure: silent link loss).
   await toggleEditorMode(page)
-  await expect(page.locator('textarea.rte__raw')).toBeVisible()
-  const back = await page.locator('textarea.rte__raw').inputValue()
+  await expect(sourceContent(page)).toBeVisible()
+  const back = await readSource(page)
   expect(back).toContain(`[doc.pdf](${href})`)
 })
 
@@ -87,14 +88,14 @@ test('a bare-filename attachment link survives the round-trip', async ({
   // A link whose href is a plain filename (an attachment of this note
   // referenced by name). Link.validate must keep the mark so it is not
   // demoted to bare text on parse-back.
-  await page.locator('textarea.rte__raw').fill('[the figure](Fig02_donne.png)')
+  await setSource(page, '[the figure](Fig02_donne.png)')
   await toggleEditorMode(page)
   await expect(
     page.locator('.ProseMirror a[href="Fig02_donne.png"]'),
   ).toBeVisible()
   await toggleEditorMode(page)
-  await expect(page.locator('textarea.rte__raw')).toBeVisible()
-  const back = await page.locator('textarea.rte__raw').inputValue()
+  await expect(sourceContent(page)).toBeVisible()
+  const back = await readSource(page)
   expect(back).toContain('[the figure](Fig02_donne.png)')
 })
 

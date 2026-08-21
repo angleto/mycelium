@@ -1,0 +1,3 @@
+- [ ] da fare
+- [x] fatto
+- [ ] anche questo
