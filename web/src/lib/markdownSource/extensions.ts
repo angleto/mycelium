@@ -1,10 +1,12 @@
 import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown'
+import { GFM } from '@lezer/markdown'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
+import { livePreview } from './livePreview'
 
 // The CodeMirror configuration of the markdown source surface, kept apart
 // from the React shell in SourceEditor.tsx so the contract this file encodes
@@ -68,6 +70,36 @@ const baseTheme = EditorView.theme({
     backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent)',
   },
   '.cm-placeholder': { color: 'var(--muted)' },
+
+  // Live-preview structure. These are LINE decorations, so they style the
+  // line the construct occupies without the document knowing anything about
+  // it. Sizes are relative so the whole surface still scales with the host's
+  // font-size (the notes editor and the checklist editor are not the same
+  // size).
+  '.cm-md-h1': { fontSize: '1.5em', fontWeight: '700', lineHeight: '1.3' },
+  '.cm-md-h2': { fontSize: '1.3em', fontWeight: '700', lineHeight: '1.3' },
+  '.cm-md-h3': { fontSize: '1.15em', fontWeight: '700' },
+  '.cm-md-h4': { fontWeight: '700' },
+  '.cm-md-h5': { fontWeight: '700', color: 'var(--muted)' },
+  '.cm-md-h6': { fontWeight: '700', color: 'var(--muted)' },
+  '.cm-md-quote': {
+    borderLeft: '3px solid var(--border)',
+    paddingLeft: '0.6em',
+    color: 'var(--muted)',
+    fontStyle: 'italic',
+  },
+  '.cm-md-code': {
+    backgroundColor: 'color-mix(in srgb, var(--text) 6%, transparent)',
+  },
+  '.cm-md-hr': {
+    color: 'var(--muted)',
+    borderBottom: '1px solid var(--border)',
+  },
+  '.cm-md-linklabel': {
+    color: 'var(--accent)',
+    textDecoration: 'underline',
+    textUnderlineOffset: '2px',
+  },
 })
 
 export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
@@ -76,8 +108,23 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     ...(sep ? [EditorState.lineSeparator.of(sep)] : []),
     history(),
     keymap.of([...defaultKeymap, ...historyKeymap]),
-    markdown({ base: markdownLanguage }),
+    // CommonMark + GFM, and NOTHING else. ``markdownLanguage`` (the obvious
+    // choice) is commonmark + GFM + Subscript + Superscript + Emoji, and the
+    // last three are syntax this app does not have: docs/markdown-syntax.md
+    // rules out Pandoc's ``^sup^`` / ``~sub~`` by decision (a single ``~``
+    // collides with GFM strikethrough), and the reader renders them as
+    // literal text. An editor that highlighted them as markup would be
+    // promising a rendering that never arrives.
+    //
+    // ``completeHTMLTags: false`` for the same reason: only ``<sub>`` and
+    // ``<sup>`` are interpreted anywhere in Mycelium, so completing arbitrary
+    // HTML tags would be an invitation to write text that stays literal.
+    markdown({ base: commonmarkLanguage, extensions: [GFM], completeHTMLTags: false }),
     syntaxHighlighting(mdHighlight),
+    // Markup recedes on the lines the caret is not on. Presentational only:
+    // it never dispatches a document change, so the bytes are the same with
+    // it as without it.
+    livePreview(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),

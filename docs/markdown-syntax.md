@@ -103,9 +103,22 @@ Practical consequence for anything meant to stay byte-exact: edit it under
 That mode is no longer a bare `<textarea>`. It is a CodeMirror surface whose
 *document is the markdown string itself*: reading it is `state.sliceDoc()`
 and nothing else, so there is no serializer between what you type and what is
-stored, and therefore nothing that can be lossy. It highlights structure,
-wraps long lines and has real undo/redo, but it never rewrites a byte you did
-not type.
+stored, and therefore nothing that can be lossy. It never rewrites a byte you
+did not type.
+
+It also renders while you write. Markup recedes on every line the caret is
+not on: `## Titolo` shows as a heading, `**grassetto**` as bold,
+`[label](url)` as an underlined label. Put the caret on the line and the
+source comes straight back, so you are always editing markdown, never a
+rendering of it. The whole layer is decorations; it dispatches no document
+change, which is what the tests assert first.
+
+Two constructs deliberately keep their source: an autolink (`<https://…>`),
+which is all URL and would vanish, and an image, which has no preview widget
+yet. A setext underline (`======`) is hidden but its line stays, because
+folding it away means replacing a range containing a line break and
+CodeMirror only accepts that from a state field; it moves with the
+block-level layer (fenced code, `$$` blocks, tables).
 
 `web/test/markdown-corpus/` holds one fixture per construct the visual editor
 damages, and `pnpm test` asserts that every one of them comes back out of the

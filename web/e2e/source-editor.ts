@@ -55,6 +55,13 @@ export async function setSource(page: Page, md: string, nth = 0): Promise<void> 
 /**
  * The document as text, rebuilt from the rendered lines.
  *
+ * SELECT-ALL FIRST, and that is not a trick: the live-preview layer hides
+ * markup on every line the selection does not touch, so reading the rendered
+ * lines with the caret parked somewhere gives the RENDERING (`Titolo`), not
+ * the source (`## Titolo`). Selecting the whole document reveals the whole
+ * document, by the editor's own documented rule, and the rendered lines then
+ * are the source. It reads the contract instead of reaching around it.
+ *
  * One `.cm-line` per document line, in order, `textContent` faithful (the
  * content is `white-space: pre-wrap` and neither `highlightSpecialChars` nor
  * `highlightWhitespace` is configured, so nothing substitutes characters).
@@ -67,6 +74,9 @@ export async function setSource(page: Page, md: string, nth = 0): Promise<void> 
  * body belongs on the wire (the PATCH payload), not in the DOM.
  */
 export async function readSource(page: Page, nth = 0): Promise<string> {
+  const content = sourceContent(page, nth)
+  await content.click()
+  await page.keyboard.press('ControlOrMeta+a')
   const lines = await page.locator('.rte__src').nth(nth).locator('.cm-line').allTextContents()
   return lines.join('\n')
 }
