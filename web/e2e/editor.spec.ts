@@ -264,3 +264,26 @@ test('a markdown-source edit is what gets saved, byte for byte', async ({ page }
   await page.waitForTimeout(300)
   expect(bodies.at(-1)).toBe(VERBATIM.slice(0, at) + 'X' + VERBATIM.slice(at))
 })
+
+test('the @ typeahead inserts a mention link in markdown mode', async ({ page }) => {
+  // The trigger has to match what the user TYPES (`@` + a title), not the
+  // `@note:<uuid>` the completion produces -- a source keyed on the output
+  // would never fire.
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+
+  await sourceContent(page).click()
+  // The note this editor belongs to is itself a candidate, so its own title
+  // is a query guaranteed to match.
+  await page.keyboard.type('@e2e')
+  await expect(page.locator('.cm-tooltip-autocomplete')).toBeVisible({ timeout: 15_000 })
+  // CodeMirror refuses an accept within its interactionDelay (75ms) of the
+  // popup opening, so a keystroke already in flight cannot pick an option the
+  // user has not seen. Part of the contract, not a flake workaround.
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Enter')
+
+  const back = await readSource(page)
+  expect(back).toMatch(/\]\(@(note|task):[0-9a-f-]{36}\) $/)
+})

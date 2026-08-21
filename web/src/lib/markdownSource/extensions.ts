@@ -8,6 +8,7 @@ import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
 import { attachmentRetain } from './attachmentRetain'
 import { tableKeymap } from './tableCommands'
+import { markdownCompletion } from './completion'
 import { activeMarks, type ActiveMark } from './commands'
 import type { ImageUploadParent } from '../imageUpload'
 import { blockPreview } from './blockPreview'
@@ -184,6 +185,9 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // Tab moves between table cells and does nothing elsewhere, so the key
     // keeps its accessibility meaning outside a table.
     tableKeymap(),
+    // `@` and `[[` typeaheads, inserting the same markdown the tiptap
+    // surface does so a body reads the same whichever one wrote it.
+    markdownCompletion(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),

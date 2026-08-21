@@ -148,6 +148,21 @@ exists not to do.
 Tab and Shift-Tab move between table cells, and do nothing anywhere else, so
 the key keeps its usual meaning outside a table.
 
+### Typeaheads and pasting
+
+`@` followed by a title searches this workspace's tasks, notes and tags and
+inserts `[label](@kind:uuid)`. `[[` followed by a title, or by an 8-character
+id prefix, inserts the backticked chip (`` `91cf6aaa` ``). Both insert exactly
+what the visual editor inserts, so a body reads the same whichever surface
+wrote it, and both escape the label they wrap.
+
+Pasting markdown source finally works: the document IS the text, so a
+reference, a table or a whole document lands as itself. (In the visual editor
+a pasted `![name](/attachments/…)` arrived as literal text and the serializer
+escaped it on the way out, so the stored body held `!\[name\](…)` and readers
+saw the characters instead of the image.) Pasting a URL over a selection
+still wraps it as a link, and pasting or dropping an image file uploads it.
+
 `web/test/markdown-corpus/` holds one fixture per construct the visual editor
 damages, and `pnpm test` asserts that every one of them comes back out of the
 source editor exactly as it went in. There is no allowlist of known-lossy
