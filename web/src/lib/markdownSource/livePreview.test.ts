@@ -129,16 +129,16 @@ describe('markup recedes off the caret line', () => {
     expect(lines[4]).toBe('```')
   })
 
-  it('leaves an autolink and an image alone', () => {
-    // An autolink is all URL: hiding it leaves an empty line. An image has
-    // no widget to stand in for it yet, so hiding its source would make it
-    // invisible rather than rendered.
-    const src = '<https://example.com>\n\n![alt](/attachments/x/download)\n'
+  it('leaves an autolink alone', () => {
+    // An autolink is all URL: hiding the destination leaves an empty line,
+    // and there is no label to put in its place. (An image used to be in
+    // this test for a related reason -- nothing to show instead of the
+    // source. It has a widget now; see images.test.ts.)
+    const src = '<https://example.com>\n\naltro\n'
     const view = open(src)
     putCaret(view, src.length)
-    const lines = rendered(view).split('\n')
-    expect(lines[0]).toBe('<https://example.com>')
-    expect(lines[2]).toBe('![alt](/attachments/x/download)')
+    expect(rendered(view).split('\n')[0]).toBe('<https://example.com>')
+    expect(view.state.sliceDoc()).toBe(src)
   })
 
   it('eats the separator after a block delimiter but not around an inline one', () => {

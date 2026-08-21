@@ -3,6 +3,7 @@ import { EditorState, Transaction, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { lineSepFor } from './lineSep'
 import { markdownSourceExtensions } from './extensions'
+import type { ImageUploadParent } from '../imageUpload'
 
 // The markdown SOURCE editing surface.
 //
@@ -80,6 +81,7 @@ export function SourceEditor({
   placeholder,
   className,
   onPasteFiles,
+  getParent,
   handleRef,
 }: {
   value: string
@@ -89,6 +91,9 @@ export function SourceEditor({
   /** Return true to consume the files (an image upload); false lets the
    *  event fall through to CodeMirror's own paste/drop handling. */
   onPasteFiles?: (files: File[]) => boolean
+  /** The note/task the body belongs to, for resolving bare-filename image
+   *  embeds and for holding their bytes while the editor is open. */
+  getParent?: () => ImageUploadParent | undefined
   handleRef?: Ref<SourceEditorHandle>
 }) {
   const host = useRef<HTMLDivElement>(null)
@@ -101,9 +106,11 @@ export function SourceEditor({
   // so the extensions read them through refs and always see the live ones.
   const onChangeRef = useRef(onChange)
   const onPasteRef = useRef(onPasteFiles)
+  const getParentRef = useRef(getParent)
   useEffect(() => {
     onChangeRef.current = onChange
     onPasteRef.current = onPasteFiles
+    getParentRef.current = getParent
   })
 
   useEffect(() => {
@@ -118,6 +125,7 @@ export function SourceEditor({
           onChangeRef.current(v)
         },
         onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
+        getParent: () => getParentRef.current?.(),
       })
     const view = new EditorView({
       state: EditorState.create({
@@ -155,6 +163,7 @@ export function SourceEditor({
           onChangeRef.current(v)
         },
         onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
+        getParent: () => getParentRef.current?.(),
       }),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps

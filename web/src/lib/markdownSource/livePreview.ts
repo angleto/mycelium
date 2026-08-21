@@ -8,6 +8,8 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import { overlaps, revealedRanges } from './reveal'
+import { ImageWidget, parseImageEmbed } from './widgets'
+import type { ImageUploadParent } from '../imageUpload'
 
 // Live preview: markdown that LOOKS rendered while the document stays the
 // markdown source.
@@ -97,7 +99,10 @@ function decorateLines(
   }
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
+function buildDecorations(
+  view: EditorView,
+  getParent: () => ImageUploadParent | undefined,
+): DecorationSet {
   const { state } = view
   const revealed = revealedRanges(state)
   const out: Range<Decoration>[] = []
@@ -131,6 +136,22 @@ function buildDecorations(view: EditorView): DecorationSet {
         if (node.name === 'HorizontalRule') {
           decorateLines(out, state, node.from, node.to, 'cm-md-hr')
           return
+        }
+        if (node.name === 'Image') {
+          // The whole embed becomes the picture. Descending would let the
+          // hide pass below put decorations INSIDE a replaced range, which
+          // CodeMirror rejects for the entire set, so this returns false
+          // either way -- revealed (show the source) or not.
+          if (overlaps(revealed, node.from, node.to)) return false
+          const source = state.sliceDoc(node.from, node.to)
+          const embed = parseImageEmbed(source)
+          if (!embed) return false
+          out.push(
+            Decoration.replace({
+              widget: new ImageWidget({ source, ...embed, getParent }),
+            }).range(node.from, node.to),
+          )
+          return false
         }
         if (node.from === node.to) return
         const parent = node.node.parent?.name
@@ -186,12 +207,13 @@ function linkLabels(view: EditorView): DecorationSet {
   return Decoration.set(out, true)
 }
 
-const livePreviewPlugin = ViewPlugin.fromClass(
+function makeLivePreviewPlugin(getParent: () => ImageUploadParent | undefined) {
+  return ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
 
     constructor(view: EditorView) {
-      this.decorations = buildDecorations(view)
+      this.decorations = buildDecorations(view, getParent)
     }
 
     update(u: ViewUpdate) {
@@ -210,12 +232,13 @@ const livePreviewPlugin = ViewPlugin.fromClass(
         u.selectionSet ||
         syntaxTree(u.startState) !== syntaxTree(u.state)
       ) {
-        this.decorations = buildDecorations(u.view)
+        this.decorations = buildDecorations(u.view, getParent)
       }
     }
   },
   { decorations: (v) => v.decorations },
-)
+  )
+}
 
 const linkLabelPlugin = ViewPlugin.fromClass(
   class {
@@ -239,7 +262,14 @@ const linkLabelPlugin = ViewPlugin.fromClass(
 )
 
 /** The live-preview layer. Presentational: it adds decorations and never
- *  dispatches a document change. */
-export function livePreview(): Extension {
-  return [livePreviewPlugin, linkLabelPlugin]
+ *  dispatches a document change.
+ *
+ *  ``getParent`` is read live, per widget build, rather than captured: a
+ *  brand-new note has no id when its editor is constructed, and a bare
+ *  filename embed can only be resolved against a parent that exists. */
+export function livePreview(opts: {
+  getParent?: () => ImageUploadParent | undefined
+}): Extension {
+  const getParent = opts.getParent ?? (() => undefined)
+  return [makeLivePreviewPlugin(getParent), linkLabelPlugin]
 }

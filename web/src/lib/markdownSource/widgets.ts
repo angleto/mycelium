@@ -4,6 +4,8 @@ import { createElement, type ReactNode } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { Mermaid } from '../../components/Mermaid'
+import { AttachmentImage } from './AttachmentImage'
+import type { ImageUploadParent } from '../imageUpload'
 
 // The block widgets the live-preview layer puts in place of a construct's
 // source: a rendered diagram, a typeset formula, a real table.
@@ -218,5 +220,68 @@ export class TableWidget extends WidgetType {
 
   ignoreEvent(): boolean {
     return true
+  }
+}
+
+
+/**
+ * An `![alt](src "title")` embed, as the image.
+ *
+ * `eq()` keys on the whole source slice, so a widget survives a keystroke
+ * elsewhere untouched; the refcounted blob cache then never re-fetches. What
+ * it does NOT protect against is the caret moving onto the image's own line,
+ * which reveals the source and destroys the widget for real -- that is what
+ * `attachmentRetain` is for.
+ */
+export class ImageWidget extends ReactWidget {
+  protected className = 'cm-md-widget-inline'
+  readonly key: string
+  private readonly src: string
+  private readonly alt: string
+  private readonly title: string | undefined
+  private readonly getParent: () => ImageUploadParent | undefined
+
+  constructor(opts: {
+    source: string
+    src: string
+    alt: string
+    title?: string
+    getParent: () => ImageUploadParent | undefined
+  }) {
+    super()
+    this.key = opts.source
+    this.src = opts.src
+    this.alt = opts.alt
+    this.title = opts.title
+    this.getParent = opts.getParent
+  }
+
+  protected render(): ReactNode {
+    return createElement(AttachmentImage, {
+      src: this.src,
+      alt: this.alt,
+      title: this.title,
+      parent: this.getParent(),
+    })
+  }
+}
+
+// `![alt](dest "title")`, whole and on one line. Deliberately the same shape
+// the rest of the app parses (attachmentRef.ts): a bracket-free-or-escaped
+// label, an optional angle-bracketed destination, an optional quoted title.
+const IMAGE_RE =
+  /^!\[((?:\\[\s\S]|[^\\\]\n])*)\]\(\s*(<[^<>\n]*>|[^\s()]*)\s*(?:"([^"\n]*)"|'([^'\n]*)')?\s*\)$/
+
+/** Decompose an image embed, or null when the slice is not exactly one. */
+export function parseImageEmbed(
+  source: string,
+): { src: string; alt: string; title?: string } | null {
+  const m = IMAGE_RE.exec(source)
+  if (!m) return null
+  const dest = m[2].startsWith('<') && m[2].endsWith('>') ? m[2].slice(1, -1) : m[2]
+  return {
+    src: dest.replace(/\\([\s\S])/g, '$1'),
+    alt: m[1].replace(/\\([\s\S])/g, '$1'),
+    title: m[3] ?? m[4],
   }
 }

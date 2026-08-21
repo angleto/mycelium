@@ -283,6 +283,35 @@ function isAuthPath(src: string | undefined | null): src is string {
 }
 
 /**
+ * Hold a reference to an attachment's bytes for as long as the returned
+ * function has not been called. Not a hook: for callers outside React's
+ * lifecycle that still need the refcount discipline this module is built on.
+ *
+ * The case it exists for is the markdown source editor. Its image previews
+ * are CodeMirror widgets, and a widget is destroyed and rebuilt whenever the
+ * caret moves onto or off the line it sits on (the source is revealed
+ * there). Each destroy unmounts a React root, which releases the entry; on
+ * the last one the refcount hits zero and the object URL is revoked. So
+ * arrowing down through a note with ten images would re-download all ten,
+ * with a visible flash each time. The editor host retains every attachment
+ * its body references for the editor's lifetime, and widget churn then never
+ * takes a count to zero.
+ *
+ * Returns a no-op for a non-attachment src, and is idempotent: calling the
+ * release twice releases once.
+ */
+export function retainAuthBlob(src: string | undefined | null): () => void {
+  if (!isAuthPath(src)) return () => {}
+  const entry = acquire(src)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    release(entry)
+  }
+}
+
+/**
  * Resolve an attachment URL into a renderable image src. Returns null for
  * as long as there is no object URL — while the auth-fetch and its bounded
  * transient retries are in flight, and after they failed. This hook has no

@@ -120,9 +120,15 @@ above it. Put the caret inside one and the source comes back. For a diagram
 and a formula the preview stays visible *underneath* the source while you
 edit it, because writing either of them blind is not writing them.
 
-Two constructs deliberately keep their source: an autolink (`<https://…>`),
-which is all URL and would vanish, and an image, whose preview widget is the
-next piece of work.
+An image embed (`![alt](…)`) shows the picture, whether the reference is an
+`/attachments/<id>/download` path or a bare filename resolved against this
+note's or task's own attachments. The bytes are held for as long as the
+editor is open, so moving the caret onto and off an image's line never
+re-downloads it.
+
+One construct deliberately keeps its source: an autolink (`<https://…>`),
+which is all URL, so hiding the destination would leave an empty line with no
+label to put in its place.
 
 `web/test/markdown-corpus/` holds one fixture per construct the visual editor
 damages, and `pnpm test` asserts that every one of them comes back out of the

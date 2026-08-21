@@ -6,6 +6,8 @@ import { GFM } from '@lezer/markdown'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
+import { attachmentRetain } from './attachmentRetain'
+import type { ImageUploadParent } from '../imageUpload'
 import { blockPreview } from './blockPreview'
 import { livePreview } from './livePreview'
 
@@ -24,6 +26,10 @@ export type SourceOptions = {
   /** Return true to consume a paste/drop of files (an image upload); false
    *  lets the event fall through to CodeMirror's own handling. */
   onPasteFiles?: (files: File[]) => boolean
+  /** The note or task the body belongs to, read LIVE: it resolves a
+   *  bare-filename image embed against that parent's own attachments, and a
+   *  brand-new note has no id yet when its editor is built. */
+  getParent?: () => ImageUploadParent | undefined
 }
 
 // Syntax highlighting for the source. Deliberately restrained: this is a
@@ -110,6 +116,9 @@ const baseTheme = EditorView.theme({
     margin: '0.4em 0',
     userSelect: 'none',
   },
+  // An image embed is replaced INLINE (it can sit mid-paragraph), so the
+  // widget is an inline box rather than a block one.
+  '.cm-md-widget-inline': { display: 'inline-block', verticalAlign: 'middle' },
   '.cm-md-mermaid': { display: 'flex', justifyContent: 'center' },
   '.cm-md-mermaid svg': { maxWidth: '100%', height: 'auto' },
   '.cm-md-math': { overflowX: 'auto', textAlign: 'center' },
@@ -158,11 +167,15 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // Markup recedes on the lines the caret is not on. Presentational only:
     // it never dispatches a document change, so the bytes are the same with
     // it as without it.
-    livePreview(),
+    livePreview({ getParent: opts.getParent }),
     // Block-level previews (mermaid, `$$`, tables, setext folding). A state
     // field, not a plugin: these replace ranges that span line breaks and
     // determine their own height.
     blockPreview(),
+    // Hold the bytes of every embedded attachment for the editor's lifetime,
+    // so a widget destroyed by the caret moving onto its line does not take
+    // the refcount to zero and throw the image away.
+    attachmentRetain(opts.getParent ?? (() => undefined)),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),

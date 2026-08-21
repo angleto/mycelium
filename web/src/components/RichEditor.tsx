@@ -1650,6 +1650,7 @@ export function RichEditor({
           placeholder={placeholder}
           onChange={onChange}
           onPasteFiles={handleDroppedFiles}
+          getParent={() => parentRef.current}
         />
       ) : (
         <EditorContent editor={editor} />
