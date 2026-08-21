@@ -51,8 +51,15 @@ type Project = components['schemas']['ProjectOut']
 function ProjectFocus() {
   const { t } = useTranslation()
   const session = useSession()
-  const { clientId, projectId, setClient, setProject, setClientProjectIds, setNames } =
-    useFocus()
+  const {
+    clientId,
+    projectId,
+    clientName,
+    setClient,
+    setProject,
+    setClientProjectIds,
+    setProjectName,
+  } = useFocus()
   const [projects, setProjects] = useState<Project[]>([])
 
   useEffect(() => {
@@ -71,24 +78,6 @@ function ProjectFocus() {
     }
   }, [session?.workspaceId])
 
-  // The client list loads async; without this the controlled select
-  // falls back to "All clients" for a beat on every reload (looks
-  // unremembered). Cache the chosen client's name and render it as a
-  // stand-in option until the real list arrives.
-  const NAMEK = 'mycelium-focus-client-name'
-  const cachedName =
-    typeof localStorage !== 'undefined'
-      ? (localStorage.getItem(NAMEK) ?? '')
-      : ''
-  const onPickClient = (id: string, name: string) => {
-    // The name comes from the picker rather than from a full client list:
-    // with the search there IS no full list in memory, and the cached name is
-    // what keeps the control from flashing "all clients" on reload.
-    if (id) localStorage.setItem(NAMEK, name)
-    else localStorage.removeItem(NAMEK)
-    setClient(id)
-  }
-
   // Archived projects never appear in the focus picker: /projects does not
   // filter them server-side. Clients are searched, and that endpoint already
   // excludes archived ones.
@@ -105,25 +94,32 @@ function ProjectFocus() {
         : [],
     )
   }, [clientId, projects, setClientProjectIds])
-  // Keep the human-readable focus names in sync so consumers (the advisory
-  // "Scoped to …" chip) can name the active scope. Falls back to the cached
-  // client name until the lists load.
+  // The project NAME is derived here because this is where the project list
+  // lives; the client name travels with its id in the focus record.
+  // Consumers (the advisory "Scoped to …" chip) read both off the context.
   useEffect(() => {
     const p = projects.find((x) => x.id === projectId)
-    setNames(clientId ? cachedName : '', projectId ? (p?.name ?? '') : '')
-  }, [clientId, projectId, projects, cachedName, setNames])
+    setProjectName(projectId ? (p?.name ?? '') : '')
+  }, [projectId, projects, setProjectName])
 
   return (
     <div className="focus">
       <span className="focus__lbl">{t('focus.label')}</span>
       {/* A search, not a dropdown: one client per paying customer means this
           control is over an unbounded set, and enumerating it stops working
-          long before the data does. Empty box = recently active clients. */}
+          long before the data does. Empty box = recently active clients.
+
+          The displayed NAME comes from the picker rather than from a full
+          client list -- with the search there IS no list in memory, and
+          remembering it is what keeps the control from flashing "all clients"
+          on reload. It is remembered WITH the id, in this workspace's focus
+          record, so a name and an id from two different tenants can no longer
+          be rendered together (task 805a569c). */}
       <ClientSearch
-        currentName={clientId ? (cachedName || '…') : ''}
+        currentName={clientId ? (clientName || '…') : ''}
         allLabel={t('focus.allClients')}
         placeholder={t('focus.allClients')}
-        onChange={onPickClient}
+        onChange={setClient}
       />
       {clientId && (
         <select
