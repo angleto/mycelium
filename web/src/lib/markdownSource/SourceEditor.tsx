@@ -3,6 +3,7 @@ import { EditorState, Transaction, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { lineSepFor } from './lineSep'
 import { markdownSourceExtensions } from './extensions'
+import { activeMarks, type ActiveMark } from './commands'
 import type { ImageUploadParent } from '../imageUpload'
 
 // The markdown SOURCE editing surface.
@@ -28,6 +29,10 @@ export type SourceEditorHandle = {
   /** Scroll to a fraction of the document (0 = start, 1 = end). */
   scrollToFraction: (f: number) => void
   focus: () => void
+  /** Run a source command against the live view. Returns what the command
+   *  returned: false means it refused (see commands.ts), and the caller can
+   *  leave the document alone rather than guessing. */
+  run: (cmd: (view: EditorView) => boolean) => boolean
 }
 
 /**
@@ -82,6 +87,7 @@ export function SourceEditor({
   className,
   onPasteFiles,
   getParent,
+  onActive,
   handleRef,
 }: {
   value: string
@@ -94,6 +100,8 @@ export function SourceEditor({
   /** The note/task the body belongs to, for resolving bare-filename image
    *  embeds and for holding their bytes while the editor is open. */
   getParent?: () => ImageUploadParent | undefined
+  /** Reports which constructs the caret is inside, for the toolbar. */
+  onActive?: (marks: Set<ActiveMark>) => void
   handleRef?: Ref<SourceEditorHandle>
 }) {
   const host = useRef<HTMLDivElement>(null)
@@ -107,10 +115,12 @@ export function SourceEditor({
   const onChangeRef = useRef(onChange)
   const onPasteRef = useRef(onPasteFiles)
   const getParentRef = useRef(getParent)
+  const onActiveRef = useRef(onActive)
   useEffect(() => {
     onChangeRef.current = onChange
     onPasteRef.current = onPasteFiles
     getParentRef.current = getParent
+    onActiveRef.current = onActive
   })
 
   useEffect(() => {
@@ -126,6 +136,7 @@ export function SourceEditor({
         },
         onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
         getParent: () => getParentRef.current?.(),
+        onActive: (marks) => onActiveRef.current?.(marks),
       })
     const view = new EditorView({
       state: EditorState.create({
@@ -135,6 +146,9 @@ export function SourceEditor({
       parent,
     })
     viewRef.current = view
+    // The update listener never fires for the initial state, so the toolbar
+    // would start with nothing pressed until the first keystroke.
+    onActiveRef.current?.(activeMarks(view.state))
     return () => {
       view.destroy()
       viewRef.current = null
@@ -164,6 +178,7 @@ export function SourceEditor({
         },
         onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
         getParent: () => getParentRef.current?.(),
+        onActive: (marks) => onActiveRef.current?.(marks),
       }),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -205,6 +220,10 @@ export function SourceEditor({
         })
       },
       focus: () => viewRef.current?.focus(),
+      run: (cmd) => {
+        const view = viewRef.current
+        return view ? cmd(view) : false
+      },
     }),
     [],
   )

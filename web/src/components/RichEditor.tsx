@@ -54,10 +54,32 @@ import {
 import { AttachmentPicker } from './AttachmentPicker'
 import { isEditorHref } from '../lib/editorHref'
 import { mdLink } from '../lib/markdownInline'
+import type { EditorView as CmView } from '@codemirror/view'
 import {
   SourceEditor,
   type SourceEditorHandle,
 } from '../lib/markdownSource/SourceEditor'
+import {
+  insertHorizontalRule as srcHr,
+  insertTable as srcInsertTable,
+  setLink as srcSetLink,
+  toggleBulletList as srcBullet,
+  toggleCodeBlock as srcCodeBlock,
+  toggleHeading as srcHeading,
+  toggleOrderedList as srcOrdered,
+  toggleQuote as srcQuote,
+  toggleTaskList as srcTask,
+  toggleWrap as srcWrap,
+  redoCommand as srcRedo,
+  undoCommand as srcUndo,
+  type ActiveMark,
+} from '../lib/markdownSource/commands'
+import {
+  addColumnAfter as srcAddCol,
+  addRowAfter as srcAddRow,
+  deleteTable as srcDelTable,
+  formatTable as srcFormatTable,
+} from '../lib/markdownSource/tableCommands'
 import { Subscript, Superscript } from '../lib/subSupMarks'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
@@ -708,7 +730,24 @@ export function RichEditor({
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfErr, setPdfErr] = useState<string | null>(null)
   const imgInput = useRef<HTMLInputElement>(null)
-  const srcRef = useRef<SourceEditorHandle>(null)
+  // STATE, not a ref: whether the source editor exists decides whether the
+  // toolbar's buttons are enabled, and that is render-relevant information.
+  // A ref would have to be read during render to answer it, which is both
+  // what react-hooks/refs forbids and, here, exactly why: the toolbar would
+  // not re-render when the editor mounted.
+  const [srcHandle, setSrcHandle] = useState<SourceEditorHandle | null>(null)
+  // Mirrored for the callbacks built once for the component's lifetime
+  // (goToFraction), which must see the live handle rather than the one that
+  // existed when they were created.
+  const srcHandleRef = useRef<SourceEditorHandle | null>(null)
+  useEffect(() => {
+    srcHandleRef.current = srcHandle
+  }, [srcHandle])
+  // Which constructs the caret is inside in SOURCE mode, reported by the
+  // editor on every selection change. The tiptap path asks the editor
+  // synchronously (``editor.isActive``); CodeMirror has no equivalent that
+  // re-renders React, so the state is pushed instead of pulled.
+  const [srcMarks, setSrcMarks] = useState<Set<ActiveMark>>(() => new Set())
   // Latest rawMode for the scroll handle (built once, must see the live
   // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
   // to scroll to.
@@ -754,7 +793,7 @@ export function RichEditor({
   // end if not focused). The WYSIWYG branch goes through the editor's
   // insertContent below.
   const insertRawSnippet = (md: string) => {
-    const src = srcRef.current
+    const src = srcHandle
     if (!src) {
       onChange(value + (value.endsWith('\n') || !value ? '' : '\n') + md + '\n')
       return
@@ -1193,7 +1232,7 @@ export function RichEditor({
   const goToFraction = useCallback((f: number) => {
     const clamped = Math.max(0, Math.min(1, f))
     if (rawModeRef.current) {
-      srcRef.current?.scrollToFraction(clamped)
+      srcHandleRef.current?.scrollToFraction(clamped)
       return
     }
     const ed = editorRef.current
@@ -1275,7 +1314,21 @@ export function RichEditor({
     })
   }, [value, editor])
 
-  const fmt = !rawMode && editor != null
+  // Both surfaces format now. In source mode the commands are string
+  // transformations (lib/markdownSource/commands.ts) and the handle exists
+  // as soon as the editor mounts.
+  const fmt = rawMode ? srcHandle != null : editor != null
+
+  /** Is this button's construct active under the caret, in whichever
+   *  surface is showing? */
+  const isOn = (
+    activeName?: string,
+    activeAttrs?: Record<string, unknown>,
+    srcMark?: ActiveMark,
+  ): boolean =>
+    rawMode
+      ? !!srcMark && srcMarks.has(srcMark)
+      : !!activeName && !!editor?.isActive(activeName, activeAttrs)
 
   const tb = (
     label: string,
@@ -1283,14 +1336,12 @@ export function RichEditor({
     run: () => void,
     activeName?: string,
     activeAttrs?: Record<string, unknown>,
+    srcMark?: ActiveMark,
   ) => (
     <button
       type="button"
       className={
-        'btn--ghost btn--sm rte__fmt' +
-        (activeName && editor?.isActive(activeName, activeAttrs)
-          ? ' rte__fmt--on'
-          : '')
+        'btn--ghost btn--sm rte__fmt' + (isOn(activeName, activeAttrs, srcMark) ? ' rte__fmt--on' : '')
       }
       title={t(titleKey)}
       disabled={!fmt}
@@ -1300,9 +1351,28 @@ export function RichEditor({
     </button>
   )
 
+  /** One button, two surfaces: run the tiptap chain or the source command
+   *  depending on which one is mounted. */
+  const dual = (wysiwyg: () => void, source: (v: CmView) => boolean) => () => {
+    if (rawMode) {
+      srcHandle?.run(source)
+      return
+    }
+    wysiwyg()
+  }
+
   // Link insert/edit: prompt for a URL (empty clears the link). The
   // editor's own Link.validate rejects unsafe schemes.
   const setLink = () => {
+    if (rawMode) {
+      // Same prompt, different surface: the source command reads the
+      // destination out of the link the caret is in (if any) and writes it
+      // back through the shared escaper.
+      srcHandle?.run((v) =>
+        srcSetLink(v, (current) => window.prompt(t('editor.linkPrompt'), current)),
+      )
+      return
+    }
     if (!editor) return
     const prev = (editor.getAttributes('link').href as string | undefined) ?? ''
     const url = window.prompt(t('editor.linkPrompt'), prev)
@@ -1479,34 +1549,43 @@ export function RichEditor({
               <span className="rte__sep" aria-hidden="true" />
             </>
           )}
-          {tb('B', 'editor.bold', () =>
-            editor?.chain().focus().toggleBold().run(), 'bold')}
-          {tb('I', 'editor.italic', () =>
-            editor?.chain().focus().toggleItalic().run(), 'italic')}
-          {tb('S', 'editor.strike', () =>
-            editor?.chain().focus().toggleStrike().run(), 'strike')}
-          {tb('H1', 'editor.h1', () =>
-            editor?.chain().focus().toggleHeading({ level: 1 }).run(),
-            'heading', { level: 1 })}
-          {tb('H2', 'editor.h2', () =>
-            editor?.chain().focus().toggleHeading({ level: 2 }).run(),
-            'heading', { level: 2 })}
-          {tb('H3', 'editor.h3', () =>
-            editor?.chain().focus().toggleHeading({ level: 3 }).run(),
-            'heading', { level: 3 })}
-          {tb('•', 'editor.bullet', () =>
-            editor?.chain().focus().toggleBulletList().run(), 'bulletList')}
-          {tb('1.', 'editor.ordered', () =>
-            editor?.chain().focus().toggleOrderedList().run(), 'orderedList')}
-          {tb('☑', 'editor.checklist', () =>
-            editor?.chain().focus().toggleTaskList().run(), 'taskList')}
-          {tb('❝', 'editor.quote', () =>
-            editor?.chain().focus().toggleBlockquote().run(), 'blockquote')}
-          {tb('</>', 'editor.code', () =>
-            editor?.chain().focus().toggleCode().run(), 'code')}
-          {tb('{ }', 'editor.codeBlock', () =>
-            editor?.chain().focus().toggleCodeBlock().run(), 'codeBlock')}
-          {tb('🔗', 'editor.link', setLink, 'link')}
+          {tb('B', 'editor.bold',
+            dual(() => editor?.chain().focus().toggleBold().run(), srcWrap('bold')),
+            'bold', undefined, 'bold')}
+          {tb('I', 'editor.italic',
+            dual(() => editor?.chain().focus().toggleItalic().run(), srcWrap('italic')),
+            'italic', undefined, 'italic')}
+          {tb('S', 'editor.strike',
+            dual(() => editor?.chain().focus().toggleStrike().run(), srcWrap('strike')),
+            'strike', undefined, 'strike')}
+          {tb('H1', 'editor.h1',
+            dual(() => editor?.chain().focus().toggleHeading({ level: 1 }).run(), srcHeading(1)),
+            'heading', { level: 1 }, 'heading1')}
+          {tb('H2', 'editor.h2',
+            dual(() => editor?.chain().focus().toggleHeading({ level: 2 }).run(), srcHeading(2)),
+            'heading', { level: 2 }, 'heading2')}
+          {tb('H3', 'editor.h3',
+            dual(() => editor?.chain().focus().toggleHeading({ level: 3 }).run(), srcHeading(3)),
+            'heading', { level: 3 }, 'heading3')}
+          {tb('•', 'editor.bullet',
+            dual(() => editor?.chain().focus().toggleBulletList().run(), srcBullet),
+            'bulletList', undefined, 'bulletList')}
+          {tb('1.', 'editor.ordered',
+            dual(() => editor?.chain().focus().toggleOrderedList().run(), srcOrdered),
+            'orderedList', undefined, 'orderedList')}
+          {tb('☑', 'editor.checklist',
+            dual(() => editor?.chain().focus().toggleTaskList().run(), srcTask),
+            'taskList', undefined, 'taskList')}
+          {tb('❝', 'editor.quote',
+            dual(() => editor?.chain().focus().toggleBlockquote().run(), srcQuote),
+            'blockquote', undefined, 'blockquote')}
+          {tb('</>', 'editor.code',
+            dual(() => editor?.chain().focus().toggleCode().run(), srcWrap('code')),
+            'code', undefined, 'code')}
+          {tb('{ }', 'editor.codeBlock',
+            dual(() => editor?.chain().focus().toggleCodeBlock().run(), srcCodeBlock),
+            'codeBlock', undefined, 'codeBlock')}
+          {tb('🔗', 'editor.link', setLink, 'link', undefined, 'link')}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
@@ -1529,37 +1608,44 @@ export function RichEditor({
           >
             📎
           </button>
-          {tb('―', 'editor.hr', () =>
-            editor?.chain().focus().setHorizontalRule().run())}
+          {tb('―', 'editor.hr',
+            dual(() => editor?.chain().focus().setHorizontalRule().run(), srcHr))}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
             title={t('editor.table')}
             disabled={!fmt}
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                .run()
-            }
+            onClick={dual(
+              () =>
+                editor
+                  ?.chain()
+                  .focus()
+                  .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                  .run(),
+              srcInsertTable,
+            )}
           >
             ▦
           </button>
-          {fmt && editor?.isActive('table') && (
+          {isOn('table', undefined, 'table') && (
             <>
-              {tb('+row', 'editor.tableRow', () =>
-                editor?.chain().focus().addRowAfter().run())}
-              {tb('+col', 'editor.tableCol', () =>
-                editor?.chain().focus().addColumnAfter().run())}
-              {tb('✕tbl', 'editor.tableDel', () =>
-                editor?.chain().focus().deleteTable().run())}
+              {tb('+row', 'editor.tableRow',
+                dual(() => editor?.chain().focus().addRowAfter().run(), srcAddRow))}
+              {tb('+col', 'editor.tableCol',
+                dual(() => editor?.chain().focus().addColumnAfter().run(), srcAddCol))}
+              {tb('✕tbl', 'editor.tableDel',
+                dual(() => editor?.chain().focus().deleteTable().run(), srcDelTable))}
+              {/* Re-aligning rewrites bytes nobody typed, so it is a button
+                  the author presses and never something Tab does. Source
+                  mode only: the tiptap grid has no source to align. */}
+              {rawMode &&
+                tb('⇔tbl', 'editor.tableFormat', () => srcHandle?.run(srcFormatTable))}
             </>
           )}
-          {tb('↶', 'editor.undo', () =>
-            editor?.chain().focus().undo().run())}
-          {tb('↷', 'editor.redo', () =>
-            editor?.chain().focus().redo().run())}
+          {tb('↶', 'editor.undo',
+            dual(() => editor?.chain().focus().undo().run(), srcUndo))}
+          {tb('↷', 'editor.redo',
+            dual(() => editor?.chain().focus().redo().run(), srcRedo))}
           </span>
           )}
         </div>
@@ -1644,13 +1730,14 @@ export function RichEditor({
       )}
       {rawMode ? (
         <SourceEditor
-          handleRef={srcRef}
+          handleRef={setSrcHandle}
           className="rte__raw rte__src"
           value={value}
           placeholder={placeholder}
           onChange={onChange}
           onPasteFiles={handleDroppedFiles}
           getParent={() => parentRef.current}
+          onActive={setSrcMarks}
         />
       ) : (
         <EditorContent editor={editor} />

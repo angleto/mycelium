@@ -7,6 +7,8 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
 import { attachmentRetain } from './attachmentRetain'
+import { tableKeymap } from './tableCommands'
+import { activeMarks, type ActiveMark } from './commands'
 import type { ImageUploadParent } from '../imageUpload'
 import { blockPreview } from './blockPreview'
 import { livePreview } from './livePreview'
@@ -30,6 +32,9 @@ export type SourceOptions = {
    *  bare-filename image embed against that parent's own attachments, and a
    *  brand-new note has no id yet when its editor is built. */
   getParent?: () => ImageUploadParent | undefined
+  /** The constructs the caret is inside, for the toolbar's pressed state.
+   *  Fired on every selection or document change. */
+  onActive?: (marks: Set<ActiveMark>) => void
 }
 
 // Syntax highlighting for the source. Deliberately restrained: this is a
@@ -176,6 +181,9 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // so a widget destroyed by the caret moving onto its line does not take
     // the refcount to zero and throw the image away.
     attachmentRetain(opts.getParent ?? (() => undefined)),
+    // Tab moves between table cells and does nothing elsewhere, so the key
+    // keeps its accessibility meaning outside a table.
+    tableKeymap(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),
@@ -202,8 +210,8 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
       },
     }),
     EditorView.updateListener.of((u) => {
-      if (!u.docChanged) return
-      opts.onChange(u.state.sliceDoc())
+      if (u.docChanged) opts.onChange(u.state.sliceDoc())
+      if (u.docChanged || u.selectionSet) opts.onActive?.(activeMarks(u.state))
     }),
   ]
 }

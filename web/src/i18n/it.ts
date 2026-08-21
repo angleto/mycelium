@@ -1216,6 +1216,7 @@ export const it: Catalog = {
     tableRow: 'Aggiungi riga',
     tableCol: 'Aggiungi colonna',
     tableDel: 'Elimina tabella',
+    tableFormat: 'Riallinea le colonne della tabella',
     image: 'Inserisci immagine',
     imageNeedsSave: 'Salva la nota prima di aggiungere immagini.',
     attach: 'Allega / collega un file',

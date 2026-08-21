@@ -193,3 +193,74 @@ test('in markdown mode the Attach-file block does not overlap the editor', async
   // The attach button starts at or below the editor's bottom edge.
   expect(box.attachTop).toBeGreaterThanOrEqual(box.taBottom - 1)
 })
+
+test('the toolbar formats markdown SOURCE, and reports what is under the caret', async ({
+  page,
+}) => {
+  // The toolbar used to be disabled in markdown mode: every button was a
+  // ProseMirror command and there was no ProseMirror. They are source
+  // transformations now, so the same buttons drive both surfaces.
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+
+  // By TITLE, not by accessible name: these buttons carry a glyph as their
+  // content (`•`, `H1`), so the accessible name is the glyph and the label
+  // lives in the tooltip.
+  const btn = (title: string) => page.getByTitle(title, { exact: true }).first()
+
+  await setSource(page, 'uno\ndue')
+  await sourceContent(page).click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await btn('Bullet list').click()
+  expect(await readSource(page)).toBe('- uno\n- due')
+
+  // Toggling back removes the markers rather than adding a second set.
+  await sourceContent(page).click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await btn('Bullet list').click()
+  expect(await readSource(page)).toBe('uno\ndue')
+
+  // A heading, and the pressed state that follows the caret into it.
+  await sourceContent(page).click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await btn('Heading 1').click()
+  expect(await readSource(page)).toBe('# uno\n# due')
+  await expect(btn('Heading 1')).toHaveClass(/rte__fmt--on/)
+  await expect(btn('Heading 2')).not.toHaveClass(/rte__fmt--on/)
+})
+
+test('a markdown-source edit is what gets saved, byte for byte', async ({ page }) => {
+  // The contract at the wire: the PATCH carries exactly the source, with
+  // exactly the edit the toolbar made, and nothing else normalised.
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+  await setSource(page, VERBATIM)
+  await page.waitForResponse(
+    (r) => /\/notes\/[^/]+\/parts\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
+    { timeout: 15_000 },
+  )
+
+  const bodies: string[] = []
+  page.on('request', (r) => {
+    if (r.url().includes('/parts/') && r.method() === 'PATCH') {
+      const json = r.postDataJSON() as { body?: string } | null
+      if (json?.body !== undefined) bodies.push(json.body)
+    }
+  })
+
+  // Put the caret at a known offset and type one character.
+  const at = VERBATIM.indexOf('paragrafo')
+  await sourceContent(page).click()
+  await page.keyboard.press('ControlOrMeta+ArrowUp')
+  for (let i = 0; i < at; i += 1) await page.keyboard.press('ArrowRight')
+  await page.keyboard.type('X')
+
+  await page.waitForResponse(
+    (r) => /\/notes\/[^/]+\/parts\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
+    { timeout: 15_000 },
+  )
+  await page.waitForTimeout(300)
+  expect(bodies.at(-1)).toBe(VERBATIM.slice(0, at) + 'X' + VERBATIM.slice(at))
+})

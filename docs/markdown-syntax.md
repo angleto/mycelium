@@ -130,6 +130,24 @@ One construct deliberately keeps its source: an autolink (`<https://…>`),
 which is all URL, so hiding the destination would leave an empty line with no
 label to put in its place.
 
+### The toolbar in source mode
+
+Every formatting button works here too, as a transformation of the source:
+`B` inserts `**`, `H2` puts `## ` on each selected line, the list buttons
+switch marker kind instead of stacking one on top of another, and the link
+button escapes the label it wraps. Undo and redo are the editor's own.
+
+Two behaviours worth knowing. A button **refuses** rather than guessing when
+its range crosses a blank line (one pair of `**` cannot wrap two paragraphs)
+or lands inside a code fence or a table's delimiter row, where those
+characters would not be markup. And a table's columns are re-aligned only
+when you press the re-align button: nothing reformats a table you are merely
+editing, because rewriting bytes nobody typed is the thing this editor
+exists not to do.
+
+Tab and Shift-Tab move between table cells, and do nothing anywhere else, so
+the key keeps its usual meaning outside a table.
+
 `web/test/markdown-corpus/` holds one fixture per construct the visual editor
 damages, and `pnpm test` asserts that every one of them comes back out of the
 source editor exactly as it went in. There is no allowlist of known-lossy

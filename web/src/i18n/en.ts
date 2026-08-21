@@ -1219,6 +1219,7 @@ export const en = {
     tableRow: 'Add row',
     tableCol: 'Add column',
     tableDel: 'Delete table',
+    tableFormat: 'Re-align the table columns',
     image: 'Insert image',
     imageNeedsSave: 'Save the note before adding images.',
     attach: 'Attach / link a file',
