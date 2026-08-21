@@ -46,6 +46,7 @@ from mycelium_core.models.task import Task
 from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import graph as graph_svc
+from mycelium_core.services.note_effective import effective_note_clause
 
 
 @dataclass(frozen=True)
@@ -70,16 +71,13 @@ async def suggest_links_for_note(
     queries are RLS-scoped). Empty list when the workspace has
     fewer than 2 notes or the source has no signal.
     """
-    # ADR-0043: never suggest linking to a proposed (un-approved, hidden)
-    # note -- it is excluded from every listing, so a candidate pointing at it
-    # would surface an invisible node. NULL/'approved' pass via IS DISTINCT
-    # FROM; byte-identical until a proposed note exists.
+    # Only EFFECTIVE notes are candidates (task f8402e7f): suggesting a link
+    # to a note nobody can open -- an un-approved proposal (ADR-0043) or one
+    # in the bin -- offers the user an invisible node, and accepting it would
+    # write an edge the weave then drops at query time. Mirrors the task arm
+    # below, which has read this way since ADR-0042.
     note_rows = (
-        await session.execute(
-            select(Note.id).where(
-                Note.org_id == org_id, Note.review_state.is_distinct_from("proposed")
-            )
-        )
+        await session.execute(select(Note.id).where(Note.org_id == org_id, effective_note_clause()))
     ).all()
     all_ids: set[uuid.UUID] = {r[0] for r in note_rows}
     if note_id not in all_ids or len(all_ids) < 2:
@@ -98,12 +96,15 @@ async def suggest_links_for_note(
             excluded.add(c)
         elif c == note_id:
             excluded.add(p)
-    # Generic-tag corpus + the source's tag set.
+    # Generic-tag corpus + the source's tag set. Ineffective notes are
+    # excluded so the Adamic-Adar rarity denominator (tag_deg) matches the
+    # rest of the graph, which never counts one -- same shape as the task arm.
     tag_rows = (
         await session.execute(
             select(NoteTag.note_id, NoteTag.tag_id, Tag.kind)
             .join(Tag, Tag.id == NoteTag.tag_id)
-            .where(NoteTag.org_id == org_id)
+            .join(Note, Note.id == NoteTag.note_id)
+            .where(NoteTag.org_id == org_id, effective_note_clause())
         )
     ).all()
     note_tags: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
@@ -117,10 +118,13 @@ async def suggest_links_for_note(
     ppr = await graph_svc.compute_personalized_pagerank(session, org_id=org_id, seed_ids=[note_id])
     ppr_max = max(ppr.values()) if ppr else 1.0
     ppr_max = ppr_max if ppr_max > 0 else 1.0
-    # Degree per node (manual links only) for the damping factor.
+    # Degree per node (manual links only) for the damping factor. Only edges
+    # between EFFECTIVE notes (``all_ids``) count: a link to a trashed or
+    # un-approved note is not a graph edge, so it must not inflate a live
+    # candidate's degree penalty (the task arm already reads this way).
     degree: dict[uuid.UUID, int] = defaultdict(int)
     for p, c in linked_rows:
-        if p != c:
+        if p != c and p in all_ids and c in all_ids:
             degree[p] += 1
             degree[c] += 1
     deg_max = max(degree.values()) if degree else 1

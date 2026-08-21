@@ -71,6 +71,10 @@ from mycelium_core.services import (
 from mycelium_core.services import graph as graph_svc
 from mycelium_core.services import link_prediction as linkpred_svc
 from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.note_effective import (
+    effective_note_clause,
+    ineffective_note_ids,
+)
 from mycelium_core.services.rbac import require_role
 
 MODEL_VERSION = "garden-classify-v1"
@@ -174,11 +178,16 @@ async def _note_generic_tags(
     UUIDs). Default false keeps the notes-only corpus byte-identical."""
     by_node: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     deg: dict[uuid.UUID, int] = defaultdict(int)
+    # Effective notes only, the same perimeter ``graph._note_generic_tags``
+    # uses (task f8402e7f): a trashed or un-approved note is not a node, so
+    # it must not become a phantom co-occurrence node here nor inflate the
+    # rarity denominator -- the note-side twin of the task filter below.
     note_rows = (
         await session.execute(
             select(NoteTag.note_id, NoteTag.tag_id, Tag.kind)
             .join(Tag, Tag.id == NoteTag.tag_id)
-            .where(NoteTag.org_id == org_id)
+            .join(Note, Note.id == NoteTag.note_id)
+            .where(NoteTag.org_id == org_id, effective_note_clause())
         )
     ).all()
     for node_id, tag_id, kind in note_rows:
@@ -398,7 +407,13 @@ async def _manual_link_degree(
     session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
 ) -> int:
     """Undirected manual-link degree: the number of typed note↔note link
-    rows touching the note (either endpoint)."""
+    rows touching the note (either endpoint).
+
+    Only links to EFFECTIVE notes count (task f8402e7f). This degree is
+    half of the ``min(pr_pct, deg_term)`` gate that auto-promotes a note to
+    ``mature``, so counting links to notes in the bin would let a note
+    mature on connections to material that no longer exists.
+    """
     rows = (
         await session.execute(
             select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
@@ -406,7 +421,10 @@ async def _manual_link_degree(
             )
         )
     ).all()
-    return sum(1 for p, c in rows if note_id in (p, c))
+    ineffective = await ineffective_note_ids(session, org_id=org_id)
+    return sum(
+        1 for p, c in rows if note_id in (p, c) and p not in ineffective and c not in ineffective
+    )
 
 
 async def _suggest_cluster(
@@ -468,6 +486,15 @@ async def classify_node(
     # (ADR-0042). With it off, a non-note id is "not found" exactly as before
     # and the corpus/behaviour for notes is byte-identical.
     unified = get_settings().garden_unified_task_graph_enabled
+    # Deliberately the deleted_at leg ONLY, not the shared effective predicate
+    # (task f8402e7f): ``create_note`` enqueues the on-create ClassificationJob
+    # BEFORE the caller stamps ``review_state='proposed'`` (externally-supplied
+    # humus always is, adversarial audit A-2), so refusing a proposal here would
+    # poison that job into a permanent ``error`` with nothing to re-queue it
+    # after approval. Whether a proposal should be classified before review, or
+    # its job deferred until approval, is an open product decision -- until it
+    # is taken, classification stays reachable and its OUTPUT is what the gate
+    # withholds (the suggestions are cached, never applied to a hidden node).
     note = (
         await session.execute(
             select(Note).where(Note.id == node_id, Note.org_id == org_id, Note.deleted_at.is_(None))
@@ -503,11 +530,9 @@ async def classify_node(
                 .select_from(Note)
                 .where(
                     Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
-                    # ADR-0043: a proposed (un-approved) note is not yet an
-                    # effective corpus member, so it does not count toward the
-                    # cold-start maturity damping.
-                    Note.review_state.is_distinct_from("proposed"),
+                    # Only effective notes are corpus members, so only they
+                    # count toward the cold-start maturity damping.
+                    effective_note_clause(),
                 )
             )
         ).scalar_one()
@@ -1021,8 +1046,14 @@ async def auto_promote_mature(
             )
         )
     ).all()
+    # Same perimeter as ``_manual_link_degree``, which is the interactive
+    # half of this very gate (task f8402e7f): if the two counted differently,
+    # the panel would refuse a promotion that the nightly tick then applies.
+    ineffective = await ineffective_note_ids(session, org_id=org_id)
     degree: dict[uuid.UUID, int] = defaultdict(int)
     for parent_id, child_id in link_rows:
+        if parent_id in ineffective or child_id in ineffective:
+            continue
         degree[parent_id] += 1
         degree[child_id] += 1
 

@@ -63,6 +63,7 @@ from mycelium_core.services import graph_snapshot as snap_svc
 from mycelium_core.services import note_inert
 from mycelium_core.services.decomposition import _MAX_PATTERN_SOURCES, _existing_humus
 from mycelium_core.services.graph import _note_generic_tags, _pair_key
+from mycelium_core.services.note_effective import effective_note_clause, ineffective_note_ids
 
 # Bound the corpus scan: we rank and slice to ``limit`` anyway, so an org
 # with thousands of inert notes never materialises them all.
@@ -184,7 +185,11 @@ async def list_distillation_candidates(
             select(Note)
             .where(
                 Note.org_id == org_id,
-                Note.deleted_at.is_(None),
+                # Effective notes only (task f8402e7f): an un-approved
+                # proposal must not be offered as raw material either, and
+                # relying on ``humus_flag`` to exclude it by coincidence is
+                # what let the two axes drift apart in the first place.
+                effective_note_clause(),
                 Note.humus_flag.is_(False),
                 # Fase P: protected prose never surfaces as a candidate
                 # (mirrors is_inert and the extraction-side filters, so a
@@ -273,7 +278,7 @@ async def list_distillation_candidates(
     if want_season:
         arch_stmt = select(Note.id, Note.created_at).where(
             Note.org_id == org_id,
-            Note.deleted_at.is_(None),
+            effective_note_clause(),
             Note.is_archived.is_(True),
             Note.humus_flag.is_(False),
             Note.protected.is_(False),
@@ -310,6 +315,13 @@ async def list_distillation_candidates(
 
     # ---- EDGE candidates (need the weave + existing links) ---------------
     if want_link_add or want_link_prune or want_link_direct:
+        # A pair with an ineffective endpoint is not an edge of the graph, so
+        # it is never a link candidate (task f8402e7f). The ``add`` arm gets
+        # this from the weave; ``prune`` and ``direct`` read the raw link and
+        # usage rows, which outlive the note's trip to the bin, so they need
+        # the same perimeter applied here -- otherwise the two link-suggestion
+        # families disagree about which notes exist.
+        ineffective_ids = await ineffective_note_ids(session, org_id=org_id)
         linked_pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
         related_pairs: list[tuple[uuid.UUID, uuid.UUID]] = []
         link_rows = (
@@ -322,6 +334,8 @@ async def list_distillation_candidates(
             )
         ).all()
         for parent_id, child_id, link_kind in link_rows:
+            if parent_id in ineffective_ids or child_id in ineffective_ids:
+                continue
             linked_pairs.add(_pair_key(parent_id, child_id))
             if link_kind == "related":
                 related_pairs.append(_pair_key(parent_id, child_id))
@@ -412,6 +426,8 @@ async def list_distillation_candidates(
                 )
             ).all()
             for a_id, b_id, traversals, fwd, bwd in usage_rows:
+                if a_id in ineffective_ids or b_id in ineffective_ids:
+                    continue
                 pk = _pair_key(a_id, b_id)
                 # Only unlinked or ``related``-linked pairs: a pair that
                 # already carries a structural link (hypha_of etc.) is

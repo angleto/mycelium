@@ -66,6 +66,7 @@ from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.retrieval_trace import RetrievalTrace
 from mycelium_core.services.graph import _pair_key
+from mycelium_core.services.note_effective import effective_note_clause
 
 # Rolling lookback, same season framing as COACTIVITY_WINDOW_DAYS: the
 # live weave is shaped by the recent past, not ancient searches.
@@ -214,7 +215,10 @@ async def refresh_edge_usage(
             if created_at > row.last:
                 row.last = created_at
 
-    # Drop pairs touching a soft-deleted / vanished note before write.
+    # Drop pairs touching a vanished or ineffective note before write. The
+    # authoritative perimeter is the reader's (the weave builders filter at
+    # query time, task f8402e7f); this only avoids storing rows nobody may
+    # read, with the same predicate so the two cannot diverge.
     if acc:
         note_ids = {n for pk in acc for n in pk}
         live = {
@@ -224,7 +228,7 @@ async def refresh_edge_usage(
                     select(Note.id).where(
                         Note.org_id == org_id,
                         Note.id.in_(note_ids),
-                        Note.deleted_at.is_(None),
+                        effective_note_clause(),
                     )
                 )
             ).all()

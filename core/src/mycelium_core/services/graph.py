@@ -60,6 +60,10 @@ from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
+from mycelium_core.services.note_effective import (
+    effective_note_clause,
+    ineffective_note_ids,
+)
 
 # Per-kind base contribution. Mirrors the SPA's ``edgeWeightV1`` so the
 # server-side authoritative weight reads identically when the client
@@ -172,21 +176,15 @@ def _pair_key(a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
 async def _node_ids(
     session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool
 ) -> list[uuid.UUID]:
-    """The graph's node set. Notes only by default; notes + live tasks when
-    ``include_tasks`` (ADR-0042 D1). With it off this runs the exact same
-    ``select(Note.id)`` the centrality helpers used inline, so the order and
-    the resulting analytics are byte-identical. Note and task ids never
-    collide (distinct UUIDs), so a bare UUID stays a sufficient node key."""
-    # ADR-0043: a proposed (autonomously-generated, un-approved) note is not
-    # an effective graph node -- it must not enter centrality/clustering until
-    # a human approves it. NULL/'approved' pass via IS DISTINCT FROM, so the
-    # set is byte-identical until a proposed note exists.
+    """The graph's node set: the org's EFFECTIVE notes, plus its live tasks
+    when ``include_tasks`` (ADR-0042 D1). Note and task ids never collide
+    (distinct UUIDs), so a bare UUID stays a sufficient node key."""
+    # Both legs are the same statement about lifecycle, so both read it from
+    # one place (task f8402e7f): an un-approved proposal (ADR-0043) and a
+    # note in the TRASH are equally not graph nodes -- centrality and
+    # clustering must not let either move the ranking of live notes.
     note_rows = (
-        await session.execute(
-            select(Note.id).where(
-                Note.org_id == org_id, Note.review_state.is_distinct_from("proposed")
-            )
-        )
+        await session.execute(select(Note.id).where(Note.org_id == org_id, effective_note_clause()))
     ).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
     if include_tasks:
@@ -211,12 +209,20 @@ async def _generic_tag_degrees(
 
     ``include_tasks`` (ADR-0042 D1) extends the corpus over ``task_tags``
     too, so the rarity denominator reflects the unified foresta. Default
-    false keeps the notes-only degree counts byte-identical."""
+    false keeps the notes-only degree counts byte-identical.
+
+    NODES, not rows: both legs join their owner and keep only the ones
+    ``_node_ids`` would return (task f8402e7f). A proposed or trashed note
+    counted here would silently rarefy -- and so re-rank -- the edges
+    between two LIVE notes that share the tag, which is the same harm as
+    letting it into the node set, just one indirection away.
+    """
     rows = (
         await session.execute(
             select(NoteTag.tag_id, Tag.kind)
             .join(Tag, Tag.id == NoteTag.tag_id)
-            .where(NoteTag.org_id == org_id)
+            .join(Note, Note.id == NoteTag.note_id)
+            .where(NoteTag.org_id == org_id, effective_note_clause())
         )
     ).all()
     deg: dict[uuid.UUID, int] = defaultdict(int)
@@ -244,15 +250,18 @@ async def _generic_tag_degrees(
 async def _note_generic_tags(
     session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
 ) -> dict[uuid.UUID, set[uuid.UUID]]:
-    """``{node_id: {generic_tag_id, ...}}`` for every visible node in the
-    org. Single batched query (one extra when ``include_tasks`` folds
-    ``task_tags`` in, ADR-0042 D1). Keys are note ids by default, notes +
-    tasks when unified; the two id spaces never collide."""
+    """``{node_id: {generic_tag_id, ...}}`` for every node in the org --
+    the same node set as ``_node_ids``, so an ineffective note (proposed
+    or trashed, task f8402e7f) can never seed a tag-overlap edge. Single
+    batched query (one extra when ``include_tasks`` folds ``task_tags``
+    in, ADR-0042 D1). Keys are note ids by default, notes + tasks when
+    unified; the two id spaces never collide."""
     rows = (
         await session.execute(
             select(NoteTag.note_id, NoteTag.tag_id, Tag.kind)
             .join(Tag, Tag.id == NoteTag.tag_id)
-            .where(NoteTag.org_id == org_id)
+            .join(Note, Note.id == NoteTag.note_id)
+            .where(NoteTag.org_id == org_id, effective_note_clause())
         )
     ).all()
     out: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
@@ -318,21 +327,15 @@ async def compute_note_edge_weights(
     weave (the caller — a unified surface — passes the fleet flag in).
     """
     inc = include_tasks
-    # ADR-0043: a proposed (un-approved) note is not a graph node
-    # (``_node_ids`` excludes it), so its ``hypha_of`` links (and any tag /
-    # co-activity rows) must not emit edges -- otherwise ``compute_betweenness``
-    # (node set derived from the edges) would resurrect it as a phantom,
-    # exactly the soft-deleted-task case the ``live_task_ids`` guard below
-    # handles. The (usually empty) set keeps the weave byte-identical until a
-    # proposed note exists.
-    proposed_note_ids = {
-        r[0]
-        for r in (
-            await session.execute(
-                select(Note.id).where(Note.org_id == org_id, Note.review_state == "proposed")
-            )
-        ).all()
-    }
+    # An ineffective note -- un-approved proposal (ADR-0043) or trashed --
+    # is not a graph node (``_node_ids`` excludes it), so its ``hypha_of``
+    # links and its co-activity / usage rows must not emit edges either:
+    # ``compute_betweenness`` derives its node set FROM THE EDGES, so any
+    # surviving edge resurrects the note as a phantom -- the same failure
+    # the ``live_task_ids`` guard below prevents on the task side. Empty on
+    # a workspace with no proposal and an empty bin, and then the weave is
+    # byte-identical to the unfiltered one (task f8402e7f).
+    ineffective_ids = await ineffective_note_ids(session, org_id=org_id)
     link_rows = (
         await session.execute(
             select(
@@ -346,7 +349,7 @@ async def compute_note_edge_weights(
     by_pair: dict[tuple[uuid.UUID, uuid.UUID], list[float]] = defaultdict(list)
     seen_kind: dict[tuple[uuid.UUID, uuid.UUID, str], bool] = {}
     for parent_id, child_id, kind in link_rows:
-        if parent_id in proposed_note_ids or child_id in proposed_note_ids:
+        if parent_id in ineffective_ids or child_id in ineffective_ids:
             continue
         pk = _pair_key(parent_id, child_id)
         # Dedupe (parent, child, kind) so duplicate-by-direction rows
@@ -367,10 +370,6 @@ async def compute_note_edge_weights(
     # ``weight >= threshold`` to keep the visual layer clean.
     tag_deg = await _generic_tag_degrees(session, org_id=org_id, include_tasks=inc)
     note_tags = await _note_generic_tags(session, org_id=org_id, include_tasks=inc)
-    if proposed_note_ids:
-        # A proposed note carries no tags today, but drop it defensively so it
-        # can never seed a tag-overlap edge regardless of future flows.
-        note_tags = {nid: tags for nid, tags in note_tags.items() if nid not in proposed_note_ids}
     note_ids: list[uuid.UUID] = sorted(note_tags.keys(), key=str)
     by_tag_to_notes: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
     for nid in note_ids:
@@ -409,7 +408,7 @@ async def compute_note_edge_weights(
         )
     ).all()
     for note_a_id, note_b_id, session_count in coact_rows:
-        if note_a_id in proposed_note_ids or note_b_id in proposed_note_ids:
+        if note_a_id in ineffective_ids or note_b_id in ineffective_ids:
             continue
         w_coact = _coactivity_weight(session_count)
         if w_coact <= 0:
@@ -437,7 +436,7 @@ async def compute_note_edge_weights(
         )
     ).all()
     for note_a_id, note_b_id, decay_score in usage_rows:
-        if note_a_id in proposed_note_ids or note_b_id in proposed_note_ids:
+        if note_a_id in ineffective_ids or note_b_id in ineffective_ids:
             continue
         w_usage = _usage_weight(decay_score)
         if w_usage <= 0:
@@ -482,7 +481,11 @@ async def compute_note_edge_weights(
             )
         ).all()
         for note_id, task_id, kind in ntl_rows:
-            if task_id not in live_task_ids:
+            # BOTH endpoints must be nodes: the task leg via ``live_task_ids``,
+            # the note leg via the same effective predicate the note-note legs
+            # use above -- a note↔task link is the one edge source that can
+            # smuggle a trashed NOTE back into the unified weave.
+            if task_id not in live_task_ids or note_id in ineffective_ids:
                 continue
             w_nt = _NOTE_TASK_KIND_WEIGHT.get(kind, 0.0)
             if w_nt > 0:
@@ -522,8 +525,14 @@ async def compute_tag_neighborhood_entropy(
     ).all()
     if not link_rows:
         return None
+    # Same node perimeter as the rest of the analytics (task f8402e7f): a
+    # trashed or un-approved note is neither a neighbourhood of its own to
+    # sample nor a neighbour whose tags count toward someone else's variety.
+    ineffective_ids = await ineffective_note_ids(session, org_id=org_id)
     adj: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     for parent_id, child_id in link_rows:
+        if parent_id in ineffective_ids or child_id in ineffective_ids:
+            continue
         adj[parent_id].add(child_id)
         adj[child_id].add(parent_id)
     note_tags = await _note_generic_tags(session, org_id=org_id)
@@ -820,10 +829,11 @@ async def compute_recency(
         await session.execute(
             select(Note.id, Note.created_at).where(
                 Note.org_id == org_id,
-                Note.deleted_at.is_(None),
-                # ADR-0043: an un-approved proposal gets no recency score (it
-                # is not an effective node; no centrality to combine it with).
-                Note.review_state.is_distinct_from("proposed"),
+                # The same effective-node perimeter as ``_node_ids``: recency
+                # is the axis a consumer combines WITH centrality, so it must
+                # score exactly the nodes centrality scores -- an un-approved
+                # proposal and a trashed note get neither.
+                effective_note_clause(),
             )
         )
     ).all()
@@ -922,13 +932,11 @@ async def humus_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uui
         select(Note.id).where(
             Note.org_id == org_id,
             Note.humus_flag.is_(True),
-            # ADR-0043 D2/D1: a humus note still awaiting human review
-            # (``review_state='proposed'``) is withheld from the free-wander
-            # bias until approved; NULL/'approved' pass via IS DISTINCT FROM.
-            Note.review_state.is_distinct_from("proposed"),
-            # Task c5da112c: a trashed humus atom leaves the wander too
-            # (retention deliberately never hard-deletes it, ADR-0041).
-            Note.deleted_at.is_(None),
+            # Effective notes only: a humus atom still awaiting human review
+            # (ADR-0043 D2/D1) or sitting in the bin (task c5da112c --
+            # retention deliberately never hard-deletes it, ADR-0041) is
+            # withheld from the free-wander bias.
+            effective_note_clause(),
         )
     )
     return {r[0] for r in rows}

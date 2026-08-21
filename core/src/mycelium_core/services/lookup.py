@@ -31,6 +31,7 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import Note
 from mycelium_core.models.task import Task
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services.note_effective import effective_note_clause
 
 # Accept either a raw hex run (``91cf6aaa``) or a partial UUID with
 # dashes (``91cf6aaa-9abc``). Min 4 hex chars is the smallest prefix
@@ -176,11 +177,10 @@ async def resolve_prefix(
         qn = select(Note.id, Note.title, Note.deleted_at).where(
             text("notes.id::text LIKE :pat").bindparams(pat=pat)
         )
-        if not include_deleted:
-            qn = qn.where(Note.deleted_at.is_(None))
-        # ADR-0043 D2: a 'proposed' note (autonomously generated, pending
-        # review) is not offered in the @-mention / lookup picker.
-        qn = qn.where(Note.review_state.is_distinct_from("proposed"))
+        # The effective-note predicate: a trashed note only with the opt-in,
+        # a 'proposed' one (autonomously generated, pending review) never --
+        # the @-mention picker must not offer a node nobody can open.
+        qn = qn.where(effective_note_clause(include_deleted=include_deleted))
         qn = qn.order_by(Note.updated_at.desc()).limit(limit - len(out))
         note_rows = (await session.execute(qn)).all()
         for nid, title, deleted_at in note_rows:

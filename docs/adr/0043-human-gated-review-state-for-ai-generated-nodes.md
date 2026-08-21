@@ -47,6 +47,8 @@ Deferred (each a tracked follow-up, none on the closure path for e87daff4):
   it from PageRank/Leiden centrality math (`compute_recency`, the Leiden node
   set, the classify corpus) is a second-order refinement (it skews ranking,
   not visibility) and is gated/offline, so it is a follow-up.
+  **Done** — task 035ce6de for the `proposed` leg, task f8402e7f for the
+  `deleted_at` leg and the consolidation (see the amendment below).
 
 ## Scope — what is gated, and what is NOT (critical)
 
@@ -190,3 +192,34 @@ nodes) we do not need today. The column approach keeps the hot filter a
 plain predicate; a table can supersede it if non-note nodes ever need the
 gate. Overloading `maturity`/`humus_flag`/`DispatchRequest`/the bus-state:
 rejected above (the survey's accrocco findings).
+
+## Amendment (2026-08-21, task f8402e7f) — the effective predicate has ONE implementation
+
+D1 states the rule (`review_state IS DISTINCT FROM 'proposed' AND deleted_at
+IS NULL`) but every surface re-derived it, and the copies diverged: the
+note/graph family (`_node_ids`, the weave builder, `local_edges`,
+`bounded_neighborhood`, link prediction) filtered only the `proposed` leg, so
+a note in the TRASH still moved the PageRank of live notes, still reached an
+agent through the bounded working set, and could still be offered as a link
+target. Audit note `bdc62d7a` §2.4.
+
+The rule now lives in `core/src/mycelium_core/services/note_effective.py` in
+three renderings of one definition — `effective_note_clause()` (SQL),
+`ineffective_note_ids()` (its complement, for the builders that stream edge
+rows) and `note_is_effective()` (the row-level mirror) — the note-side twin of
+`ineffective_source_blob_exclusion` (task c5da112c) for the blob side. Every
+note/graph and listing surface reads it from there; the SQL and Python forms
+are pinned against each other over the whole state matrix by test. The
+perimeter stays DERIVED at query time, so a restore returns the note to every
+surface with nothing re-indexed.
+
+Two consequences worth recording:
+
+- **`is_archived` is NOT an axis of the predicate**, deliberately. The archive
+  is the *input* of the decomposition pipeline: `candidates` ranks archived
+  notes by their stored centrality and groups them by Leiden community, so an
+  archived note must stay a graph node. It remains a per-surface presentation
+  filter with its own `include_archived` opt-in.
+- The Adamic-Adar **rarity denominator** counts nodes, not rows: a proposed or
+  trashed note no longer inflates it (the task arm already worked this way),
+  so edge weights between live notes stop depending on what is in the bin.

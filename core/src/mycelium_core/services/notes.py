@@ -45,6 +45,7 @@ from mycelium_core.services import audit, billing, lifecycle, tag_assignment
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
+from mycelium_core.services.note_effective import effective_note_clause, note_is_effective
 from mycelium_core.services.rbac import require_role
 
 
@@ -181,14 +182,13 @@ async def list_notes(
     from mycelium_core.models.note_part import NotePart
 
     stmt = select(Note)
-    if not include_deleted:
-        stmt = stmt.where(Note.deleted_at.is_(None))
+    # The effective-note predicate (ADR-0043 D1) with its trash opt-in: an
+    # autonomously-generated proposal awaiting review is never listed here
+    # (only the review inbox surfaces it), and the bin needs ``include_deleted``.
+    # The archive is the separate presentation axis and keeps its own opt-in.
+    stmt = stmt.where(effective_note_clause(include_deleted=include_deleted))
     if not include_archived:
         stmt = stmt.where(Note.is_archived.is_(False))
-    # ADR-0043 D2: an autonomously-generated proposal awaiting human review is
-    # never listed here (only the review inbox surfaces it). NULL/'approved'
-    # pass via IS DISTINCT FROM; a no-op until a proposed note exists.
-    stmt = stmt.where(Note.review_state.is_distinct_from("proposed"))
     if note_ids is not None:
         # Explicit id set (e.g. the notes linked to a task): narrow to it
         # while keeping all the visibility/maturity/sort logic below.
@@ -260,10 +260,11 @@ async def get_note(
     # bypass (the review service loads via session.get and does not depend on
     # this), mirroring ``include_deleted``.
     n = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
-    if (
-        n is None
-        or (n.deleted_at is not None and not include_deleted)
-        or (n.review_state == "proposed" and not include_proposed)
+    if n is None or not note_is_effective(
+        review_state=n.review_state,
+        deleted_at=n.deleted_at,
+        include_deleted=include_deleted,
+        include_proposed=include_proposed,
     ):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n

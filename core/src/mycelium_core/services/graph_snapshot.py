@@ -36,6 +36,7 @@ from mycelium_core.models.task import Task
 from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import graph as graph_svc
+from mycelium_core.services.note_effective import effective_note_clause
 
 _log = logging.getLogger("mycelium.graph_snapshot")
 
@@ -49,6 +50,17 @@ async def graph_signature(
     add/remove (a delete changes the count, an add changes both).
     Note-body edits don't change the graph and correctly don't change the
     signature.
+
+    The note term is three counts -- EFFECTIVE / trashed / proposed (task
+    f8402e7f) -- not one. It has to include the effective set, the one the
+    analytics actually run on: a soft-delete and an approval leave the row
+    in place, so a raw row count never moved and ``refresh_graph_snapshot``
+    kept serving a stored centrality that still contained the trashed node,
+    a fix in the computation that never reached the surface. And it has to
+    split them, or the two opposite lifecycle events that can happen in the
+    same window (one note trashed, one proposal approved) cancel out in a
+    single count and leave the snapshot stale anyway. The task leg already
+    counted only live tasks.
 
     Co-activity feeds ``compute_note_edge_weights`` (a third soft-OR
     source), so it must be in the fingerprint or the materialised
@@ -67,9 +79,17 @@ async def graph_signature(
     fingerprint (no spurious recompute on an existing snapshot). The caller
     (``refresh_graph_snapshot``) passes the fleet flag in.
     """
-    notes = (
-        await session.execute(select(func.count()).select_from(Note).where(Note.org_id == org_id))
-    ).scalar_one()
+    notes, trashed_notes, proposed_notes = (
+        await session.execute(
+            select(
+                func.count().filter(effective_note_clause()),
+                func.count().filter(Note.deleted_at.is_not(None)),
+                func.count().filter(Note.review_state == "proposed"),
+            )
+            .select_from(Note)
+            .where(Note.org_id == org_id)
+        )
+    ).one()
     links, max_link_ts = (
         await session.execute(
             select(func.count(), func.max(NoteNoteLink.created_at)).where(
@@ -110,7 +130,8 @@ async def graph_signature(
     cts = max_coact_ts.isoformat() if max_coact_ts is not None else "-"
     uts = max_usage_ts.isoformat() if max_usage_ts is not None else "-"
     sig = (
-        f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
+        f"n{notes}/{trashed_notes}/{proposed_notes}"
+        f":l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
         f":u{usage_n}/{usage_sum}/{uts}"
     )
     if not include_tasks:

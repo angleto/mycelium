@@ -50,6 +50,11 @@ from mycelium_core.services.graph import (
     _softor,
     _usage_weight,
 )
+from mycelium_core.services.note_effective import (
+    effective_note_clause,
+    ineffective_note_ids,
+    note_is_effective,
+)
 from mycelium_core.services.rbac import require_role
 
 # Best-first defaults. ``gamma`` mirrors the walk-continuation mass of the
@@ -73,8 +78,11 @@ async def local_edges(
     test_graph_local). Four bounded queries (links, co-activity, edge usage,
     co-tag) + a tag-degree lookup; nothing scans the org.
 
-    Neighbours in ``review_state='proposed'`` are dropped (they are not
-    graph nodes, ADR-0043) -- same filter as the full builder.
+    Ineffective neighbours are dropped (a proposal awaiting review or a
+    note in the bin is not a graph node) and so are their tags in the
+    rarity denominator -- the same shared predicate the full builder
+    applies, which is what makes the parity structural instead of two
+    filters that have to be kept in step by hand.
     """
     contribs: dict[uuid.UUID, list[float]] = defaultdict(list)
 
@@ -123,12 +131,23 @@ async def local_edges(
         ).all()
     }
     if x_tags:
-        # Degree of each shared tag over ALL org notes (the full builder does
-        # not exclude proposed notes from the rarity denominator; parity).
+        # Degree of each shared tag over the org's EFFECTIVE notes -- the same
+        # rarity denominator ``_generic_tag_degrees`` computes for the full
+        # builder on the NOTES-ONLY weave, which is the parity contract of
+        # this module (task f8402e7f; the unified ``include_tasks`` denominator
+        # folds ``task_tags`` in and stays on the full builders). The join is
+        # what keeps the two sides in step: a note the full builder does not
+        # count must not be counted here either, or the same pair gets two
+        # different weights.
         deg_rows = (
             await session.execute(
                 select(NoteTag.tag_id, func.count())
-                .where(NoteTag.org_id == org_id, NoteTag.tag_id.in_(x_tags))
+                .join(Note, Note.id == NoteTag.note_id)
+                .where(
+                    NoteTag.org_id == org_id,
+                    NoteTag.tag_id.in_(x_tags),
+                    effective_note_clause(),
+                )
                 .group_by(NoteTag.tag_id)
             )
         ).all()
@@ -201,24 +220,20 @@ async def local_edges(
 
     if not contribs:
         return {}
-    # Proposed neighbours are not graph nodes (ADR-0043); one bounded
-    # filter query over the candidate set only.
-    proposed = {
-        r[0]
-        for r in (
-            await session.execute(
-                select(Note.id).where(
-                    Note.org_id == org_id,
-                    Note.id.in_(contribs.keys()),
-                    Note.review_state == "proposed",
-                )
-            )
-        ).all()
-    }
+    # An ineffective endpoint -- un-approved proposal or trashed -- is not a
+    # graph node, so it is not an edge endpoint either (task f8402e7f): one
+    # bounded filter query over the candidate set plus X, never over the org.
+    ineffective = await ineffective_note_ids(
+        session, org_id=org_id, among=[note_id, *contribs.keys()]
+    )
+    if note_id in ineffective:
+        # X itself is not a node: the full builder emits no pair touching it,
+        # and parity with the full builder is this module's hard contract.
+        return {}
     return {
         nb: w
         for nb, values in contribs.items()
-        if nb not in proposed and (w := _softor(values)) > 0
+        if nb not in ineffective and (w := _softor(values)) > 0
     }
 
 
@@ -297,7 +312,15 @@ async def bounded_neighborhood(
     await require_role(session, org_id, actor_id, Role.member)
     node_budget = max(1, node_budget)
     seed = await session.get(Note, seed_note_id)
-    if seed is None or seed.org_id != org_id or seed.review_state == "proposed":
+    # An ineffective seed is not openable anywhere else either (``get_note``
+    # raises the same NotFoundError for a trashed or un-approved note), so the
+    # walk refuses to start rather than building a working set around a node
+    # the rest of the system denies (task f8402e7f).
+    if (
+        seed is None
+        or seed.org_id != org_id
+        or not note_is_effective(review_state=seed.review_state, deleted_at=seed.deleted_at)
+    ):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
 
     chars = await _note_chars(session, seed_note_id)

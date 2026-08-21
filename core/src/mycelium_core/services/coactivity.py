@@ -57,6 +57,7 @@ from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
 from mycelium_core.models.note_part import NotePart
+from mycelium_core.services.note_effective import effective_note_clause
 
 # Rolling lookback: only the recent past shapes the live weave. Matches
 # the "last 30-90 days" framing in ADR-0031's co-activity note; 90 days
@@ -101,9 +102,16 @@ _NOTE_TOUCH_ACTIONS: frozenset[str] = frozenset(
 _PART_TOUCH_ACTIONS: frozenset[str] = frozenset({"update", "append", "prepend", "replace"})
 
 
-async def _live_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uuid.UUID]:
+async def _effective_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uuid.UUID]:
+    """The notes worth materialising co-activity for. The AUTHORITATIVE
+    perimeter is the reader's (``graph.compute_note_edge_weights`` drops any
+    pair with an ineffective endpoint at query time, task f8402e7f); this is
+    only the write-side economy of not storing rows nobody may read. It uses
+    the same predicate so the two can never mean different things, and it
+    self-heals: the next sweep re-materialises whatever a restore or an
+    approval brought back."""
     rows = await session.execute(
-        select(Note.id).where(Note.org_id == org_id, Note.deleted_at.is_(None))
+        select(Note.id).where(Note.org_id == org_id, effective_note_clause())
     )
     return {r[0] for r in rows}
 
@@ -211,8 +219,8 @@ async def refresh_coactivity(
     events.sort(key=lambda e: (str(e[0]), e[2]))
     pairs = _aggregate_sessions(events)
 
-    # Drop pairs touching a note that no longer exists / was soft-deleted.
-    live = await _live_note_ids(session, org_id=org_id)
+    # Drop pairs touching a note that no longer exists or is not effective.
+    live = await _effective_note_ids(session, org_id=org_id)
     pairs = {pk: v for pk, v in pairs.items() if pk[0] in live and pk[1] in live}
 
     # Full per-org replace: the table is a projection of the window.

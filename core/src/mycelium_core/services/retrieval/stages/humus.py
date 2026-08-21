@@ -39,6 +39,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.retrieval.stages.fusion import RRFFusionStage
 from mycelium_core.services.retrieval.stages.lexical import LexicalFTSStage
 from mycelium_core.services.retrieval.stages.order_limit import OrderingStage
@@ -78,15 +79,14 @@ def humus_blob_predicate(
         BlobSource.source_kind == "note_part",
         BlobSource.org_id == org_id,
         Note.humus_flag.is_(True),
-        # ADR-0043 D2: an autonomously-generated humus note awaiting
-        # human review (``review_state='proposed'``) is withheld from the
-        # walk until approved. NULL/'approved' both pass (IS DISTINCT FROM).
-        Note.review_state.is_distinct_from("proposed"),
-        # Task c5da112c: a trashed humus atom is out of the walk. The base
-        # ``ineffective_source_blob_exclusion`` already withholds it from
-        # every branch; this keeps the humus predicate correct standalone
-        # (it is also used outside the pipeline, e.g. the free wander set).
-        Note.deleted_at.is_(None),
+        # Effective source notes only: a humus atom awaiting human review
+        # (ADR-0043 D2) or sitting in the bin (task c5da112c) is out of the
+        # walk. The base ``ineffective_source_blob_exclusion`` already
+        # withholds it from every branch; this keeps the humus predicate
+        # correct standalone (it is also used outside the pipeline, e.g. the
+        # free wander set). Read from the shared note predicate so this copy
+        # cannot drift the way the ~10 hand-written ones did (task f8402e7f).
+        effective_note_clause(),
     ]
     if kinds:
         conds.append(Note.humus_kind.in_(tuple(kinds)))

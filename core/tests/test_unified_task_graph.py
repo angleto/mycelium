@@ -267,6 +267,36 @@ async def test_on_path_excludes_soft_deleted_tasks() -> None:
     assert t2.id not in node_ids  # its only edge was to the deleted task
 
 
+async def test_on_path_excludes_trashed_notes_from_note_task_links() -> None:
+    """The mirror of the test above, on the note side (task f8402e7f): a
+    note↔task link outlives the note's trip to the bin, and it is the one
+    edge source that can smuggle a trashed NOTE back into the unified weave
+    -- betweenness derives its node set from the edges, so a surviving edge
+    is a phantom node."""
+    org, user = await _workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        n1 = await _note(s, org, user, "n1")
+        n2 = await _note(s, org, user, "n2")
+        t1 = await _task(s, org, user, "t1")
+        await _link_note_task(s, org, n1.id, t1.id, "subject")
+        await _link_note_task(s, org, n2.id, t1.id, "subject")
+        await notes_svc.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=n1.id,
+            expected_version=n1.version,
+        )
+        edges = await graph_svc.compute_note_edge_weights(s, org_id=org, include_tasks=True)
+        pr = await graph_svc.compute_pagerank(s, org_id=org, include_tasks=True)
+        bc = await graph_svc.compute_betweenness(s, org_id=org, include_tasks=True)
+    node_ids = {e.src for e in edges} | {e.dst for e in edges}
+    assert n1.id not in node_ids
+    assert n1.id not in pr
+    assert n1.id not in bc
+    assert n2.id in pr and n2.id in node_ids  # the live note keeps its edge
+
+
 async def test_suggest_links_for_task_ignores_soft_deleted_tasks() -> None:
     """The task link-prediction scores of live candidates must be unchanged by
     a soft-deleted task that shares a tag (would inflate the Adamic-Adar

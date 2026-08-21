@@ -13,10 +13,12 @@ from decimal import Decimal
 
 import pytest
 from _fake_embedder import FakeEmbedder
+from sqlalchemy import select
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
-from mycelium_core.models.note import NoteKind
+from mycelium_core.errors import NotFoundError
+from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.services import billing, note_links
 from mycelium_core.services import focus_context as fc
 from mycelium_core.services import notes as nt
@@ -111,6 +113,40 @@ async def test_focus_context_empty_for_isolated_seed(_embedder: None) -> None:
     async with tenant_session(str(org), str(user)) as s:
         nodes = await fc.focus_context(s, org_id=org, actor_id=user, seed_id=seed_id, budget=10)
     assert nodes == []
+
+
+async def test_trashed_seed_is_refused_by_every_walk_mode(_embedder: None) -> None:
+    """A reading set is rooted at a note the caller could open, so a trashed
+    seed is a NotFoundError -- not an empty list on one mode and the note
+    itself echoed back on another (task f8402e7f). Without the guard the
+    free-wander mode returned the trashed seed WITH its title, which is the
+    one thing the bin is supposed to prevent."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        seed = await _note(s, org, user, "seed", "seed body")
+        other = await _note(s, org, user, "other", "other body")
+        await _link(s, org, user, seed, other)
+    async with tenant_session(str(org), str(user)) as s:
+        assert await fc.walk_context(
+            s, org_id=org, actor_id=user, seed_id=seed, mode="free_wander", budget=5
+        )
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=seed,
+            expected_version=(
+                await s.execute(select(Note.version).where(Note.id == seed))
+            ).scalar_one(),
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError):
+            await fc.focus_context(s, org_id=org, actor_id=user, seed_id=seed, budget=10)
+        for mode in ("focused", "free_wander", "bounded"):
+            with pytest.raises(NotFoundError):
+                await fc.walk_context(
+                    s, org_id=org, actor_id=user, seed_id=seed, mode=mode, budget=5
+                )
 
 
 async def test_focus_context_query_fusion_reranks_toward_relevant(_embedder: None) -> None:

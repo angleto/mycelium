@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import MemoryBlob
@@ -31,6 +31,7 @@ from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.services import graph as graph_svc
 from mycelium_core.services import graph_local
 from mycelium_core.services import memory as memory_svc
+from mycelium_core.services.note_effective import note_is_effective
 from mycelium_core.services.rbac import require_role
 
 # RRF constant for the late fusion of the PPR rank and the retrieval rank.
@@ -75,6 +76,27 @@ class WalkStep:
     provenance: str | None
 
 
+async def _require_effective_seed(
+    session: AsyncSession, *, org_id: uuid.UUID, seed_id: uuid.UUID
+) -> None:
+    """A reading set is rooted at a note the caller could open: refuse a
+    seed that is not effective -- trashed or an un-approved proposal --
+    with the same NotFoundError ``get_note`` raises (task f8402e7f).
+
+    Without this the three walk modes each failed differently on a
+    trashed seed (empty list / the seed itself echoed back with its title
+    / NotFoundError from the bounded traversal), and the free-wander case
+    leaked the note the rest of the system hides.
+    """
+    seed = await session.get(Note, seed_id)
+    if (
+        seed is None
+        or seed.org_id != org_id
+        or not note_is_effective(review_state=seed.review_state, deleted_at=seed.deleted_at)
+    ):
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+
+
 async def focus_context(
     session: AsyncSession,
     *,
@@ -93,6 +115,7 @@ async def focus_context(
     hybrid retrieval ranking. RLS-scoped; member role required.
     """
     await require_role(session, org_id, actor_id, Role.member)
+    await _require_effective_seed(session, org_id=org_id, seed_id=seed_id)
     ranks = await graph_svc.compute_personalized_pagerank(
         session, org_id=org_id, seed_ids=[seed_id]
     )
@@ -178,6 +201,7 @@ async def walk_context(
     Mirrors the ``GET /garden/walk`` route so the SPA and an MCP agent share
     one traversal; ``graph_focus_context`` remains the QUERY-aware variant."""
     await require_role(session, org_id, actor_id, Role.member)
+    await _require_effective_seed(session, org_id=org_id, seed_id=seed_id)
     # Bound the budget: a member caller must not be able to drive an arbitrarily
     # long Node2Vec walk / huge reading set (adversarial audit A-6, CPU guard).
     budget = max(1, min(budget, _MAX_WALK_BUDGET))

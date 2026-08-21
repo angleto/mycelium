@@ -82,6 +82,12 @@ async def _attach(s: object, org: uuid.UUID, note_id: uuid.UUID, tag_id: uuid.UU
     await s.flush()  # type: ignore[attr-defined]
 
 
+async def _version(s: object, note_id: uuid.UUID) -> int:
+    return int(
+        (await s.execute(select(Note.version).where(Note.id == note_id))).scalar_one()  # type: ignore[attr-defined]
+    )
+
+
 async def _coact(s: object, org: uuid.UUID, a: uuid.UUID, b: uuid.UUID, count: int) -> None:
     ka, kb = _pair_key(a, b)
     s.add(NoteCoactivity(org_id=org, note_a_id=ka, note_b_id=kb, session_count=count))  # type: ignore[attr-defined]
@@ -135,6 +141,72 @@ async def test_local_edges_drop_proposed_neighbour() -> None:
         nb.review_state = "proposed"
         await s.flush()
         assert await graph_local.local_edges(s, org_id=org, note_id=a) == {}
+
+
+async def test_local_edges_drop_trashed_neighbour() -> None:
+    """A note in the bin is not a graph node, so it is not a neighbour
+    either -- and it comes back on restore with nothing re-indexed (the
+    perimeter is derived at query time, task f8402e7f)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _note(s, org, user, "A")
+        b = await _note(s, org, user, "B")
+        await _link(s, org, a, b, "related")
+        before = await graph_local.local_edges(s, org_id=org, note_id=a)
+        assert set(before) == {b}
+        await nt.soft_delete_note(
+            s,  # type: ignore[arg-type]
+            org_id=org,
+            actor_id=user,
+            note_id=b,
+            expected_version=await _version(s, b),
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        assert await graph_local.local_edges(s, org_id=org, note_id=a) == {}
+        await nt.restore_note(
+            s,  # type: ignore[arg-type]
+            org_id=org,
+            actor_id=user,
+            note_id=b,
+            expected_version=await _version(s, b),
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        assert await graph_local.local_edges(s, org_id=org, note_id=a) == before
+
+
+async def test_bounded_never_returns_a_trashed_note_as_neighbour_or_seed() -> None:
+    """(b) of task f8402e7f: the bounded walk is the working-set builder
+    (ADR-0049), so a trashed note must not reach an agent through it --
+    neither as a step of the neighbourhood nor as an accepted seed."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _note(s, org, user, "A")
+        b = await _note(s, org, user, "B")
+        c = await _note(s, org, user, "C")
+        await _link(s, org, a, b, "related")
+        await _link(s, org, b, c, "related")
+        await _link(s, org, a, c, "related")
+        hood = await graph_local.bounded_neighborhood(
+            s, org_id=org, actor_id=user, seed_note_id=a, tau=0.001
+        )
+        assert {n.note_id for n in hood.nodes} == {b, c}
+        await nt.soft_delete_note(
+            s,  # type: ignore[arg-type]
+            org_id=org,
+            actor_id=user,
+            note_id=b,
+            expected_version=await _version(s, b),
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        # Surgical: b disappears, the live neighbour c is still reached.
+        hood = await graph_local.bounded_neighborhood(
+            s, org_id=org, actor_id=user, seed_note_id=a, tau=0.001
+        )
+        assert {n.note_id for n in hood.nodes} == {c}
+        # ... and it is not an acceptable seed: same NotFoundError a trashed
+        # note raises everywhere else.
+        with pytest.raises(NotFoundError):
+            await graph_local.bounded_neighborhood(s, org_id=org, actor_id=user, seed_note_id=b)
 
 
 async def test_bounded_budget_determinism_and_order() -> None:

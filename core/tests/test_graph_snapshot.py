@@ -120,6 +120,64 @@ async def test_refresh_is_signature_gated_and_idempotent() -> None:
         assert snap2.computed_at >= first_computed_at
 
 
+async def test_soft_delete_invalidates_the_signature() -> None:
+    """Trashing a note must move the fingerprint (task f8402e7f): the row
+    survives a soft-delete, so a raw row count never changed and the
+    materialised centrality/betweenness kept the trashed node forever --
+    the computation would be fixed and the SERVED answer stale."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _note(s, org, user, "a")
+        b = await _note(s, org, user, "b")
+        c = await _note(s, org, user, "c")
+        await _link(s, org, user, a, b)
+        await _link(s, org, user, b, c)
+        assert await snap_svc.refresh_graph_snapshot(s, org_id=org) is True
+        assert await snap_svc.refresh_graph_snapshot(s, org_id=org) is False
+        sig_before = await snap_svc.graph_signature(s, org_id=org)
+        await notes_svc.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=c.id,
+            expected_version=c.version,
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        assert await snap_svc.graph_signature(s, org_id=org) != sig_before
+        assert await snap_svc.refresh_graph_snapshot(s, org_id=org) is True
+        snap = await snap_svc.get_graph_snapshot(s, org_id=org)
+        assert snap is not None
+        assert str(c.id) not in snap.centrality
+        assert str(c.id) not in snap.betweenness
+
+
+async def test_opposite_lifecycle_events_do_not_cancel_in_the_signature() -> None:
+    """One note trashed and one proposal approved in the same window leave
+    the EFFECTIVE count where it was: the fingerprint splits the three
+    counts precisely so the pair cannot cancel out and strand the snapshot
+    (task f8402e7f)."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _note(s, org, user, "a")
+        b = await _note(s, org, user, "b")
+        c = await _note(s, org, user, "c")
+        await _link(s, org, user, a, b)
+        p = await _note(s, org, user, "p")
+        p.review_state = "proposed"
+        await s.flush()
+        sig_before = await snap_svc.graph_signature(s, org_id=org)
+        await notes_svc.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=c.id,
+            expected_version=c.version,
+        )
+        p.review_state = "approved"
+        await s.flush()
+        assert await snap_svc.graph_signature(s, org_id=org) != sig_before
+
+
 async def test_force_refresh_bypasses_signature() -> None:
     org, user = await _org_user()
     async with tenant_session(str(org), str(user)) as s:

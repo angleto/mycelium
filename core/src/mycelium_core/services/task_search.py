@@ -79,6 +79,7 @@ from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
 from mycelium_core.services.fts_language import detect_fts_language
+from mycelium_core.services.note_effective import note_is_effective
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING only: ``memory`` is otherwise imported at
@@ -1105,14 +1106,15 @@ async def _note_filter_meta(
     rows = (await session.execute(stmt)).all()
     out: dict[uuid.UUID, _NoteMeta] = {}
     for nid, title, deleted_at, is_archived, review_state in rows:
-        if deleted_at is not None and not include_deleted:
+        # The row-level form of the effective-note predicate: a 'proposed'
+        # note is never surfaced through unified search even if its part blob
+        # ranked high (belt-and-suspenders with the retrieve-level filter),
+        # and the bin needs the explicit opt-in.
+        if not note_is_effective(
+            review_state=review_state, deleted_at=deleted_at, include_deleted=include_deleted
+        ):
             continue
         if is_archived and not include_archived:
-            continue
-        # ADR-0043 D2: a 'proposed' note (autonomously generated, pending
-        # review) is never surfaced through unified search, even if its part
-        # blob ranked high (belt-and-suspenders with the retrieve-level filter).
-        if review_state == "proposed":
             continue
         out[nid] = _NoteMeta(title=title)
     return out
