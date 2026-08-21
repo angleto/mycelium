@@ -955,6 +955,15 @@ button.btn--ghost {
   width: 100%;
   text-align: left;
   background: none;
+  /* Paired with the background on purpose. The global ``button`` rule paints
+     an accent FILL (background: var(--accent); color: var(--accent-fg)), so a
+     row that only neutralises the background keeps the fill's ink over the
+     dropdown surface: #ffffff on #fdfcf7 in light, #0f1612 on #161e18 in dark
+     -- about 1.05:1 either way, i.e. invisible in both themes (task
+     805a569c). Same reset as .assignpick__opt and .deppick__row; see
+     scripts/check-button-ink.mjs, which fails the build when the pair comes
+     apart again. */
+  color: var(--text);
   border: none;
   padding: 0.3rem 0.45rem;
   border-radius: 6px;
@@ -4658,6 +4667,11 @@ button.btn--danger:hover {
   border: 1px solid var(--border, #ccc);
   border-radius: 4px;
   background: none;
+  /* Paired with the background: dropping the accent fill without dropping the
+     accent ink leaves text the fill's colour, invisible on the surface in
+     both themes. Inert for the image variant (it holds an <img>), and the
+     --pdf/--audio/--video/--text variants below re-ink themselves. */
+  color: var(--text);
   cursor: zoom-in;
   line-height: 0;
 }

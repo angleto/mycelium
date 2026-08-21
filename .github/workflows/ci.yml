@@ -98,6 +98,13 @@ jobs:
       # English in every locale, and neither shows up in a type error.
       - name: i18n keys
         run: pnpm check:i18n
+      # A button that drops the accent FILL must drop the accent INK too: the
+      # global `button` rule sets both, so undoing only the background leaves
+      # the fill's colour over a plain surface -- white on white in light and
+      # black on black in dark. It shipped three times before this check
+      # existed (task 805a569c), and neither eslint nor tsc can see CSS.
+      - name: Button fill/ink pairs
+        run: pnpm check:css
       # Explicit, before the bundle. `pnpm build` already runs `tsc -b`
       # first, so this adds no coverage -- it buys attribution: a type
       # error surfaces as "Typecheck" instead of a Build failure whose
