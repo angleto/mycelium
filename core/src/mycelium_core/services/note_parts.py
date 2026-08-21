@@ -58,6 +58,7 @@ async def list_parts(
     org_id: uuid.UUID,
     note_id: uuid.UUID,
     include_deleted: bool = False,
+    include_proposed: bool = False,
 ) -> list[NotePart]:
     """Return the parts of a note in ``ord`` order. Member-level
     (RLS already scopes the SELECT to the tenant).
@@ -68,10 +69,13 @@ async def list_parts(
     un-approved proposal -- which is precisely what the blob-side
     perimeter already refuses to retrieve.
 
-    ``include_deleted`` has ONE legitimate caller,
-    ``entity_revisions.snapshot_note``: the delete revision is written
-    AFTER ``deleted_at`` is set, so without the opt-in it would snapshot
-    an empty part list and restoring that revision would empty the note.
+    Both opt-ins have ONE legitimate caller,
+    ``entity_revisions.snapshot_note``, and for the same reason: a
+    snapshot must photograph the parts that are there whatever the note's
+    state, or the revision restores as an empty note. The delete revision
+    is written AFTER ``deleted_at`` is set (hence ``include_deleted``),
+    and the same trap waits on the review axis (hence
+    ``include_proposed``).
     """
     rows = (
         (
@@ -81,7 +85,9 @@ async def list_parts(
                 .where(
                     NotePart.note_id == note_id,
                     NotePart.org_id == org_id,
-                    effective_note_clause(include_deleted=include_deleted),
+                    effective_note_clause(
+                        include_deleted=include_deleted, include_proposed=include_proposed
+                    ),
                 )
                 .order_by(NotePart.ord, NotePart.id)
             )
@@ -135,6 +141,7 @@ async def _get_note_in_org(
     org_id: uuid.UUID,
     note_id: uuid.UUID,
     include_deleted: bool = False,
+    include_proposed: bool = False,
 ) -> Note:
     """The owning note, and it has to be EFFECTIVE (task a186c989): a note
     in the bin is restored first and worked on afterwards, and an
@@ -146,14 +153,17 @@ async def _get_note_in_org(
     way out: the revision logger (``merge_notes`` soft-deletes the source
     and then writes its outgoing revision) and the merge idempotency
     branch (a re-run of an already-merged source must stay a no-op, not
-    become a 404).
+    become a 404). ``include_proposed`` is the photographer's opt-out,
+    used by the revision logger only.
     """
     note = (
         await session.execute(
             select(Note).where(
                 Note.id == note_id,
                 Note.org_id == org_id,
-                effective_note_clause(include_deleted=include_deleted),
+                effective_note_clause(
+                    include_deleted=include_deleted, include_proposed=include_proposed
+                ),
             )
         )
     ).scalar_one_or_none()
@@ -252,7 +262,13 @@ async def _log_parts_revision(
     # The revision logger runs from every mutator, and one of those flows
     # must be able to see a note on its way out: ``merge_notes`` soft-
     # deletes the source and only then writes its outgoing revision.
-    note = await _get_note_in_org(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    note = await _get_note_in_org(
+        session,
+        org_id=org_id,
+        note_id=note_id,
+        include_deleted=True,
+        include_proposed=True,
+    )
     await _log_note_revision(
         session,
         org_id=org_id,

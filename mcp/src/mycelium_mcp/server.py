@@ -1565,7 +1565,13 @@ async def list_comment_revisions(
     Each row carries the snapshot, who edited, when, and
     ``changed_fields`` (``body`` / ``status`` / ``_create`` / ``_delete``
     / ``_restore``). Feed an id to ``restore_comment_revision``."""
-    async with _tenant(token, org_id) as (s, _org, _user):
+    async with _tenant(token, org_id) as (s, org, _user):
+        # A comment snapshot quotes the document it hangs on
+        # (``anchor_quote`` / ``original_text``), so the timeline answers to
+        # the comment's perimeter -- which, for a note anchor, is the note's.
+        await annotations_svc.get_annotation(
+            s, org_id=org, annotation_id=uuid.UUID(comment_id), include_deleted=True
+        )
         rows = await revisions_svc.list_revisions(
             s,
             entity_kind=revisions_svc.ENTITY_KIND_ANNOTATION,
@@ -1584,7 +1590,10 @@ async def get_comment_revision(
 ) -> dict[str, Any]:
     """Single comment-revision lookup; 404 if the id does not belong to
     this comment. Read the old body before deciding to restore it."""
-    async with _tenant(token, org_id) as (s, _org, _user):
+    async with _tenant(token, org_id) as (s, org, _user):
+        await annotations_svc.get_annotation(
+            s, org_id=org, annotation_id=uuid.UUID(comment_id), include_deleted=True
+        )
         rev = await revisions_svc.get_revision(
             s,
             revision_id=uuid.UUID(revision_id),
@@ -8987,7 +8996,12 @@ async def get_task_revision(
 ) -> dict[str, Any]:
     """Single revision lookup; 404 if the id doesn't belong to this
     task (defense in depth on top of RLS)."""
-    async with _tenant(token, org_id) as (s, _org, _user):
+    async with _tenant(token, org_id) as (s, org, _user):
+        # Same guard as ``list_task_revisions``: the snapshot carries the
+        # whole description, so the read answers to the task's perimeter
+        # and not to RLS alone. ``include_deleted`` keeps the bin readable,
+        # which is what a restore needs.
+        await tasks.get_task(s, org_id=org, task_id=uuid.UUID(task_id), include_deleted=True)
         rev = await revisions_svc.get_revision(
             s,
             revision_id=uuid.UUID(revision_id),

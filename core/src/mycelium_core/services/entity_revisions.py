@@ -263,12 +263,17 @@ async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
             "lang": p.lang,
             "version": int(p.version),
         }
-        # ``include_deleted``: the delete revision is written AFTER
-        # ``deleted_at`` is set, so the effective-note gate on the parts
-        # would snapshot an empty body and restoring that revision would
-        # empty the note (task a186c989).
+        # A snapshot photographs whatever is there, on both axes: the
+        # delete revision is written AFTER ``deleted_at`` is set, and a
+        # note can be gated for review too. Either gate applied here would
+        # snapshot an empty body, and restoring that revision would EMPTY
+        # the note (task a186c989).
         for p in await _list_parts(
-            session, org_id=note.org_id, note_id=note.id, include_deleted=True
+            session,
+            org_id=note.org_id,
+            note_id=note.id,
+            include_deleted=True,
+            include_proposed=True,
         )
     ]
     payload["tags"] = await _tags_for_note(session, note_id=note.id)

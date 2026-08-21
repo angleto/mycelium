@@ -35,9 +35,19 @@ from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import Note, NoteKind, NoteTurn, TurnRole
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
-from mycelium_core.services import billing, entity_revisions, kg, memory, note_links
+from mycelium_core.services import (
+    annotations,
+    billing,
+    entity_revisions,
+    garden_review,
+    kg,
+    memory,
+    note_links,
+)
+from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import note_parts as parts_svc
 from mycelium_core.services import notes as nt
+from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.auth import signup
 
 
@@ -226,6 +236,21 @@ async def test_the_delete_revision_still_carries_the_body() -> None:
         assert latest.snapshot["parts"][0]["body"] == "body HOTEL"
 
 
+async def test_a_snapshot_photographs_a_gated_note_whole() -> None:
+    """The other half of the same trap, on the review axis: a snapshot
+    records whatever state the note is in. If the reader's gate applied
+    here, an un-approved proposal would snapshot with no parts and the
+    first restore from that revision would empty it."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "body PAPA")
+        await _propose(s, note.id)
+        payload = await entity_revisions.snapshot_note(s, note)
+        assert payload["parts"], "a photographer does not apply the reader's gate"
+        assert payload["parts"][0]["body"] == "body PAPA"
+        assert payload["transcript"] == "body PAPA"
+
+
 async def test_kg_extract_refuses_a_gated_note() -> None:
     """The body must not reach the metered prompt -- and must not come back
     out as effective KG facts."""
@@ -372,3 +397,211 @@ async def test_a_blob_id_is_not_a_way_around_the_perimeter(_embedder: None) -> N
             await memory.get_blob(s, org_id=org, blob_id=blob_ids[0])
         # Hidden from reading is not the same as undeletable.
         await memory.delete_blob(s, org_id=org, actor_id=user, blob_id=blob_ids[0])
+
+
+async def test_comment_threads_do_not_outlive_the_note_they_quote() -> None:
+    """An annotation QUOTES the note: ``anchor_quote`` and a suggestion's
+    ``original_text`` are verbatim extracts. So the comment surfaces have
+    to answer to the note's perimeter, or the body walks out two hops
+    away -- with the part id no listing hands out any more."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "quoted body QUEBEC")
+        part = (await parts_svc.list_parts(s, org_id=org, note_id=note.id))[0]
+        comment = await annotations.create_comment(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind="note_part",
+            doc_id=part.id,
+            body="my rationale",
+            anchor_quote="quoted body QUEBEC",
+        )
+        assert (
+            len(await annotations.list_for_doc(s, org_id=org, doc_kind="note_part", doc_id=part.id))
+            == 1
+        )
+        identity = (await identities_svc.ensure_for_user(s, org_id=org, user_id=user)).id
+        await annotations.assign(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=comment.id,
+            expected_version=comment.version,
+            assignee_identity_id=identity,
+        )
+        assert comment.id in {
+            a.id
+            for a in await annotations.list_assigned(s, org_id=org, assignee_identity_id=identity)
+        }
+        await _propose(s, note.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (
+            await annotations.list_for_doc(s, org_id=org, doc_kind="note_part", doc_id=part.id)
+            == []
+        )
+        assert await annotations.count_for_doc(
+            s, org_id=org, doc_kind="note_part", doc_id=part.id
+        ) == (0, 0)
+        with pytest.raises(NotFoundError):
+            await annotations.get_annotation(s, org_id=org, annotation_id=comment.id)
+        # The "assigned to me" inbox has no document handle to start from, so
+        # it carries the perimeter of its own: it was the surface handing the
+        # part id of a gated note back to whoever held the assignment.
+        assert await annotations.list_assigned(s, org_id=org, assignee_identity_id=identity) == []
+        # The write door is not wider than the read door.
+        with pytest.raises(NotFoundError):
+            await annotations.create_comment(
+                s,
+                org_id=org,
+                actor_id=user,
+                doc_kind="note_part",
+                doc_id=part.id,
+                body="another",
+            )
+
+    async with tenant_session(str(org), str(user)) as s:
+        row = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        row.review_state = "approved"
+        await s.flush()
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (
+            len(await annotations.list_for_doc(s, org_id=org, doc_kind="note_part", doc_id=part.id))
+            == 1
+        )
+
+
+async def test_task_comments_and_archived_notes_keep_their_threads() -> None:
+    """The mechanical trap of the same change: an INNER join would wipe
+    out every task-description comment (the work diary of every task),
+    and the archive is not part of the predicate."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="T")
+        await annotations.create_comment(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind="task_description",
+            doc_id=task.id,
+            body="a task comment",
+        )
+        note = await _note(s, org, user, "archived body ROMEO")
+        part = (await parts_svc.list_parts(s, org_id=org, note_id=note.id))[0]
+        await annotations.create_comment(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind="note_part",
+            doc_id=part.id,
+            body="a note comment",
+        )
+        await nt.archive_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            archived=True,
+            expected_version=await _version(s, note.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (
+            len(
+                await annotations.list_for_doc(
+                    s, org_id=org, doc_kind="task_description", doc_id=task.id
+                )
+            )
+            == 1
+        )
+        assert (
+            len(await annotations.list_for_doc(s, org_id=org, doc_kind="note_part", doc_id=part.id))
+            == 1
+        )
+
+
+async def test_the_note_family_stops_editing_what_is_in_the_bin() -> None:
+    """``update_note`` used to rewrite the title and the body of a trashed
+    note while ``update_part``, on the very same part, answered 404. The
+    lifecycle actions that must reach into the bin say so explicitly."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "body SIERRA")
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        v = await _version(s, note.id)
+        for call in (
+            nt.update_note(
+                s, org_id=org, actor_id=user, note_id=note.id, expected_version=v, title="renamed"
+            ),
+            nt.archive_note(
+                s, org_id=org, actor_id=user, note_id=note.id, archived=True, expected_version=v
+            ),
+            nt.protect_note(
+                s, org_id=org, actor_id=user, note_id=note.id, protected=True, expected_version=v
+            ),
+        ):
+            with pytest.raises(NotFoundError):
+                await call
+        # Restore is the one action that must see the bin, and it works.
+        await nt.restore_note(s, org_id=org, actor_id=user, note_id=note.id, expected_version=v)
+        fresh = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        assert fresh.deleted_at is None and fresh.title == "gated-subject"
+
+
+async def test_a_live_proposal_is_not_restorable() -> None:
+    """The un-reject opens exactly one state. A proposal still waiting in
+    the review inbox has nothing to restore, and letting the restore path
+    reach it would hand a version bump and a revision, on a note no read
+    surface opens, to anyone with notes:write."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "pending body UNIFORM")
+        await _propose(s, note.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError):
+            await nt.restore_note(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=note.id,
+                expected_version=await _version(s, note.id),
+            )
+        fresh = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        assert fresh.version == 1  # untouched: no version bump, no revision
+
+
+async def test_a_rejected_proposal_can_be_un_rejected() -> None:
+    """``reject_node`` rejects by soft-deleting and promises the note is
+    "reversible via the normal restore path". It was not: the restore
+    refused a note still marked ``proposed``. Restoring one puts it back
+    in the review inbox, which is what un-rejecting means."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "proposed body TANGO")
+        await _propose(s, note.id)
+        await garden_review.reject_node(s, org_id=org, actor_id=user, note_id=note.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        await nt.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+        fresh = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        assert fresh.deleted_at is None
+        assert fresh.review_state == "proposed"  # back in the inbox, not silently approved
+        pending = await garden_review.list_pending(s, org_id=org)
+        assert note.id in {p.note_id for p in pending}

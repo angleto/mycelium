@@ -444,8 +444,26 @@ async def _log_note_revision(
 ) -> None:
     """Recovery-history entry for a note mutation. Reads the note back
     so the snapshot reflects the post-update state (the Core UPDATE
-    inside ``optimistic_update`` bypasses the ORM mapper)."""
-    fresh = await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    inside ``optimistic_update`` bypasses the ORM mapper).
+
+    A photographer, not a read surface: it records whatever state the
+    note is in, including states no reader may see. Refusing here used
+    to be what stopped a mutation on an un-approved proposal -- from
+    INSIDE the logger, after the write, naming the wrong reason. The
+    doors do that job now, each on its own path: ``_note_set`` for the
+    note itself, the ``note_parts`` chokepoints for its text,
+    ``note_links._get_note`` for link and maturity writes. Structural
+    junction writes that log no revision (unlinking, detaching a tag)
+    are outside all three and remain ungated -- worth knowing before
+    reading this as "everything is gated".
+    """
+    fresh = await get_note(
+        session,
+        org_id=org_id,
+        note_id=note_id,
+        include_deleted=True,
+        include_proposed=True,
+    )
     snapshot = await _revisions.snapshot_note(session, fresh)
     await _revisions.append(
         session,
@@ -616,11 +634,24 @@ async def _note_set(
     channel: str = "system",
     edit_session_id: str | None = None,
     restored_from: uuid.UUID | None = None,
+    include_deleted: bool = False,
+    include_proposed: bool = False,
 ) -> int:
-    # Validate existence (include deleted: restore needs to see the
-    # soft-deleted row). Flag flip + audit shared with tasks via
-    # lifecycle.transition.
-    await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    # Validate existence, on the note's own perimeter. This used to admit
+    # the bin for EVERY action because one of them (restore) needs to see
+    # the soft-deleted row -- which left ``update_note`` rewriting the
+    # title and the body of a note in the trash while ``update_part``, on
+    # the very same part, answered 404. The exceptions now say so:
+    # restore has to reach into the bin, and re-deleting an already
+    # trashed note has to stay reachable, everything else works on a live
+    # note. Flag flip + audit shared with tasks via lifecycle.transition.
+    await get_note(
+        session,
+        org_id=org_id,
+        note_id=note_id,
+        include_deleted=include_deleted,
+        include_proposed=include_proposed,
+    )
     new_version = await lifecycle.transition(
         session,
         model_cls=Note,
@@ -1179,6 +1210,9 @@ async def soft_delete_note(
         expected_version=expected_version,
         values={"deleted_at": dt.datetime.now(tz=dt.UTC)},
         action="delete",
+        # Deleting what is already in the bin stays reachable (it re-stamps
+        # ``deleted_at`` today; see the note on idempotency in the task).
+        include_deleted=True,
     )
 
 
@@ -1190,6 +1224,26 @@ async def restore_note(
     note_id: uuid.UUID,
     expected_version: int,
 ) -> int:
+    # The only action that must see the soft-deleted row -- and the only one
+    # that may touch a proposal, but ONLY a rejected one:
+    # ``garden_review.reject_node`` rejects by soft-deleting and leaves
+    # ``review_state='proposed'``, promising the note is "reversible via the
+    # normal restore path". Without the opt-in that promise was false. Passing
+    # it unconditionally would be worse than the bug: with both legs relaxed
+    # the guard degenerates to "the row exists", and a LIVE proposal -- one
+    # still waiting in the review inbox, which no read surface will open --
+    # would take a version bump and a revision from anyone with notes:write.
+    # So the un-reject is opened by hand, on the one state that means it.
+    note = await get_note(
+        session,
+        org_id=org_id,
+        note_id=note_id,
+        include_deleted=True,
+        include_proposed=True,
+    )
+    rejected = note.review_state == "proposed" and note.deleted_at is not None
+    if note.review_state == "proposed" and not rejected:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return await _note_set(
         session,
         org_id=org_id,
@@ -1198,6 +1252,8 @@ async def restore_note(
         expected_version=expected_version,
         values={"deleted_at": None},
         action="restore",
+        include_deleted=True,
+        include_proposed=rejected,
     )
 
 

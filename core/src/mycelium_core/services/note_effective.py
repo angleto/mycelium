@@ -47,7 +47,7 @@ import datetime as dt
 import uuid
 from collections.abc import Iterable
 
-from sqlalchemy import ColumnElement, and_, not_, select
+from sqlalchemy import ColumnElement, and_, not_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.models.note import Note
@@ -64,7 +64,9 @@ PROPOSED = "proposed"
 _AMONG_CHUNK = 5000
 
 
-def effective_note_clause(*, include_deleted: bool = False) -> ColumnElement[bool]:
+def effective_note_clause(
+    *, include_deleted: bool = False, include_proposed: bool = False
+) -> ColumnElement[bool]:
     """SQL predicate selecting the EFFECTIVE notes (ADR-0043 D1):
     ``review_state IS DISTINCT FROM 'proposed' AND deleted_at IS NULL``.
 
@@ -73,19 +75,33 @@ def effective_note_clause(*, include_deleted: bool = False) -> ColumnElement[boo
     clause is a no-op until a workspace actually holds a proposed note.
 
     ``include_deleted=True`` is the trash-view opt-in (``list_notes``,
-    ``lookup``, the unified search): it drops ONLY the soft-delete leg.
-    The ADR-0043 withholding of an un-approved proposal is not an option
-    and always stands -- the review inbox reaches those notes by
-    selecting ``review_state = 'proposed'`` positively, never by relaxing
-    this predicate.
+    ``lookup``, the unified search, the merge idempotency branch): it
+    drops ONLY the soft-delete leg.
+
+    ``include_proposed=True`` is NOT a listing option: no surface may mix
+    un-approved proposals into what it shows. It exists for the
+    PHOTOGRAPHERS -- the revision logger and ``snapshot_note`` -- which
+    must record whatever state a note is in, including a state no reader
+    is allowed to see. A snapshot that silently dropped the parts of a
+    gated note would restore as an empty note, so being permissive there
+    is the safe direction, and being permissive anywhere else is not.
+    The review inbox itself does not use this: it selects
+    ``review_state = 'proposed'`` positively.
 
     Both legs are NULL-safe booleans (``IS DISTINCT FROM`` / ``IS NULL``
     never evaluate to NULL), so :func:`ineffective_note_ids` can negate
     the whole clause without the usual three-valued-logic hazard.
     """
-    if include_deleted:
-        return Note.review_state.is_distinct_from(PROPOSED)
-    return and_(Note.review_state.is_distinct_from(PROPOSED), Note.deleted_at.is_(None))
+    legs: list[ColumnElement[bool]] = []
+    if not include_proposed:
+        legs.append(Note.review_state.is_distinct_from(PROPOSED))
+    if not include_deleted:
+        legs.append(Note.deleted_at.is_(None))
+    if not legs:
+        return true()
+    if len(legs) == 1:
+        return legs[0]
+    return and_(*legs)
 
 
 async def ineffective_note_ids(
@@ -140,10 +156,11 @@ def note_is_effective(
     paths that already hold the note (or just its two state columns:
     ``task_search`` reads them as a projection, not as an ORM object).
 
-    ``include_proposed`` is the review-inbox bypass of ``notes.get_note``
-    -- the ONE caller allowed to open an un-approved proposal, because
-    approving it is how it stops being one. It has no SQL counterpart on
-    purpose: no listing or graph surface may mix proposals in.
+    ``include_proposed`` opens the review gate, and the callers allowed
+    to ask for it are counted on one hand: the review inbox path of
+    ``notes.get_note`` (approving a proposal is how it stops being one),
+    the un-reject in ``notes.restore_note``, and the photographers that
+    must record a state nobody may read. It is never a listing option.
 
     All three forms are pinned against each other by test over the full
     (review_state x deleted_at) matrix, so this can never drift from the

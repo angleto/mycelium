@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,11 +41,13 @@ from mycelium_core.models.annotation import (
 )
 from mycelium_core.models.identity import Identity, IdentityKind
 from mycelium_core.models.membership import Role
+from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit, md_anchor, text_patch
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import identities as identities_svc
+from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
 
 
@@ -81,6 +83,38 @@ async def _resolve_author(
     return await _user_identity_id(session, org_id=org_id, actor_id=actor_id)
 
 
+def _effective_note_anchor() -> ColumnElement[bool]:
+    """An annotation is reachable only while the document it hangs on is:
+    for a ``note_part`` anchor, that is the note's own perimeter (task
+    a186c989).
+
+    An annotation is not just commentary about the text, it QUOTES it:
+    ``anchor_quote`` / ``anchor_prefix`` / ``anchor_suffix`` are verbatim
+    extracts (W3C TextQuoteSelector) and a suggestion's ``original_text``
+    is the exact passage it would replace. So a comment thread on a note
+    that went to the bin, or on a proposal awaiting review, hands out the
+    body the note surfaces refuse -- two hops away, and with the part id
+    that no listing gives out any more.
+
+    Use it with the outer joins below: a ``task_description`` annotation
+    has no note in the picture and must pass untouched, and the archive
+    is not part of the predicate, so an archived note keeps its threads.
+    """
+    return or_(Annotation.note_part_id.is_(None), effective_note_clause())
+
+
+def _with_note_perimeter(stmt: Select[Any]) -> Select[Any]:
+    """OUTER join the anchor chain (annotation -> note_part -> note) and
+    apply :func:`_effective_note_anchor`. Outer, never inner: an inner
+    join would silently drop every task-description annotation, which is
+    the whole work diary of every task."""
+    return (
+        stmt.outerjoin(NotePart, NotePart.id == Annotation.note_part_id)
+        .outerjoin(Note, Note.id == NotePart.note_id)
+        .where(_effective_note_anchor())
+    )
+
+
 async def _resolve_doc(
     session: AsyncSession,
     *,
@@ -101,9 +135,14 @@ async def _resolve_doc(
         if found is None:
             raise NotFoundError(MessageCode.TASK_NOT_FOUND)
         return doc_id, None
-    # note_part
+    # note_part: and the note it belongs to has to be effective, or the
+    # write door would be wider than every read door on the same text.
     found = (
-        await session.execute(select(NotePart.id).where(NotePart.id == doc_id))
+        await session.execute(
+            select(NotePart.id)
+            .join(Note, Note.id == NotePart.note_id)
+            .where(NotePart.id == doc_id, effective_note_clause())
+        )
     ).scalar_one_or_none()
     if found is None:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
@@ -116,11 +155,31 @@ async def _get(
     org_id: uuid.UUID,
     annotation_id: uuid.UUID,
     include_deleted: bool = False,
+    include_ineffective_note: bool = False,
 ) -> Annotation:
-    ann = (
-        await session.execute(select(Annotation).where(Annotation.id == annotation_id))
+    """The id-addressed chokepoint of this module, and therefore the place
+    the note perimeter belongs: it covers the read, the whole body family,
+    the raw-body capability (checked at read time), assign/resolve/restore
+    and the accept path.
+
+    ``include_ineffective_note`` is asked for by exactly two callers, and
+    for opposite reasons: ``_log_annotation_revision``, which photographs
+    whatever state its row is in (a gate inside a logger fails after the
+    write, not at the door), and the admin-only ``purge``, because
+    withholding a thread from reading must not make it unerasable.
+    Everything else stays on the perimeter: a thread on a note in the bin
+    is reached by restoring the note, the same way its parts are.
+    """
+    stmt = select(Annotation)
+    if not include_ineffective_note:
+        stmt = _with_note_perimeter(stmt)
+    ann: Annotation | None = (
+        await session.execute(stmt.where(Annotation.id == annotation_id))
     ).scalar_one_or_none()
     if ann is None:
+        # ANNOTATION_NOT_FOUND either way: the caller addressed an
+        # annotation, and must not learn from the error code whether the
+        # id exists behind a gate it may not pass.
         raise NotFoundError(MessageCode.ANNOTATION_NOT_FOUND)
     if ann.deleted_at is not None and not include_deleted:
         raise NotFoundError(MessageCode.ANNOTATION_NOT_FOUND)
@@ -149,7 +208,15 @@ async def _log_annotation_revision(
     a card, not keystroke-by-keystroke into an autosave window, so there
     is nothing to coalesce and every edit seals its own row.
     """
-    fresh = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    # Photographer: record the row whatever state it (or the note it hangs
+    # on) is in. A gate here would fail after the write, not at the door.
+    fresh = await _get(
+        session,
+        org_id=org_id,
+        annotation_id=annotation_id,
+        include_deleted=True,
+        include_ineffective_note=True,
+    )
     await _revisions.append(
         session,
         org_id=org_id,
@@ -370,7 +437,7 @@ async def list_for_doc(
     ``suggestion``. ``limit`` + the ``after`` keyset cursor page the thread."""
     if doc_kind not in ANNOTATION_DOC_KINDS:
         raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
-    stmt = select(Annotation).where(Annotation.doc_kind == doc_kind)
+    stmt = _with_note_perimeter(select(Annotation)).where(Annotation.doc_kind == doc_kind)
     if doc_kind == "task_description":
         stmt = stmt.where(Annotation.task_id == doc_id)
     else:
@@ -407,14 +474,10 @@ async def count_for_doc(
     if doc_kind not in ANNOTATION_DOC_KINDS:
         raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
     anchor = Annotation.task_id if doc_kind == "task_description" else Annotation.note_part_id
-    base = (
-        select(func.count())
-        .select_from(Annotation)
-        .where(
-            Annotation.doc_kind == doc_kind,
-            anchor == doc_id,
-            Annotation.deleted_at.is_(None),
-        )
+    base = _with_note_perimeter(select(func.count()).select_from(Annotation)).where(
+        Annotation.doc_kind == doc_kind,
+        anchor == doc_id,
+        Annotation.deleted_at.is_(None),
     )
     if kind is not None:
         base = base.where(Annotation.kind == kind)
@@ -432,7 +495,10 @@ async def get_annotation(
 ) -> Annotation:
     """``include_deleted=True`` reads a soft-deleted row: the only way to
     learn the ``version`` :func:`restore` needs, for a caller that was not
-    the one who deleted it."""
+    the one who deleted it. It relaxes the ANNOTATION's own soft-delete and
+    nothing else -- the perimeter of the note a comment hangs on (task
+    a186c989) has no opt-out here, so a thread on a gated note is out of
+    reach until the note itself comes back."""
     return await _get(
         session,
         org_id=org_id,
@@ -453,7 +519,10 @@ async def list_assigned(
     ``assignee_identity_id`` across the workspace, newest first. Excludes
     soft-deleted; ``include_resolved=False`` keeps only ``open`` items (the
     actionable inbox). RLS scopes the SELECT to the tenant."""
-    stmt = select(Annotation).where(
+    # The inbox has no document handle to start from, so it needs the
+    # perimeter of its own: it was the surface handing back the part id of
+    # a gated note to whoever had an assignment on it.
+    stmt = _with_note_perimeter(select(Annotation)).where(
         Annotation.assigned_to_identity_id == assignee_identity_id,
         Annotation.deleted_at.is_(None),
     )
@@ -924,14 +993,26 @@ async def purge(
     an author manage their own words, and that is right for a reversible
     delete; erasing a signed entry from a shared conversation for good is
     a different act, and the person best placed to abuse it is its
-    author. Accepts a live or an already-soft-deleted row.
+    author. Accepts a live or an already-soft-deleted row, and one whose
+    note is gated: withholding a thread from READING must never mean an
+    admin can no longer erase it (task a186c989). That is the same call
+    as ``memory.delete_blob``, and the opposite one from
+    ``note_parts.delete_part`` -- purging a part of a binned note would
+    destroy text that note's own restore needs, while purging a comment
+    destroys only the comment.
 
     The revision history goes with it via ``trg_comment_revision_cascade``
     (migration 0090), which is also the only thing preventing a purged
     comment's text from surviving in the timeline.
     """
     await require_role(session, org_id, actor_id, Role.admin)
-    ann = await _get(session, org_id=org_id, annotation_id=annotation_id, include_deleted=True)
+    ann = await _get(
+        session,
+        org_id=org_id,
+        annotation_id=annotation_id,
+        include_deleted=True,
+        include_ineffective_note=True,
+    )
     doc_kind = ann.doc_kind
     await session.execute(delete(Annotation).where(Annotation.id == annotation_id))
     await session.flush()

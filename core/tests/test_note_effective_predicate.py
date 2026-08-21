@@ -242,24 +242,34 @@ async def test_the_three_forms_agree_on_every_state() -> None:
                 ids[(review_state, trashed)] = nid
 
         for include_deleted in (False, True):
-            selected = {
-                r[0]
-                for r in (
-                    await s.execute(
-                        select(Note.id).where(
-                            Note.org_id == org,
-                            effective_note_clause(include_deleted=include_deleted),
+            for include_proposed in (False, True):
+                selected = {
+                    r[0]
+                    for r in (
+                        await s.execute(
+                            select(Note.id).where(
+                                Note.org_id == org,
+                                effective_note_clause(
+                                    include_deleted=include_deleted,
+                                    include_proposed=include_proposed,
+                                ),
+                            )
                         )
+                    ).all()
+                }
+                for (review_state, trashed), nid in ids.items():
+                    expected = note_is_effective(
+                        review_state=review_state,
+                        deleted_at=deleted_at if trashed else None,
+                        include_deleted=include_deleted,
+                        include_proposed=include_proposed,
                     )
-                ).all()
-            }
-            for (review_state, trashed), nid in ids.items():
-                expected = note_is_effective(
-                    review_state=review_state,
-                    deleted_at=deleted_at if trashed else None,
-                    include_deleted=include_deleted,
-                )
-                assert (nid in selected) is expected, (review_state, trashed, include_deleted)
+                    assert (nid in selected) is expected, (
+                        review_state,
+                        trashed,
+                        include_deleted,
+                        include_proposed,
+                    )
 
         # The id-set form is exactly the complement, whole-org and narrowed
         # to a candidate set alike (the builders rely on both).
@@ -274,7 +284,9 @@ async def test_the_three_forms_agree_on_every_state() -> None:
         assert await ineffective_note_ids(s, org_id=org, among=every) == every - effective
         assert await ineffective_note_ids(s, org_id=org, among=[]) == set()
 
-        # The inbox bypass has no SQL counterpart on purpose: it is the one
-        # caller (``notes.get_note``) allowed to open an un-approved proposal.
+        # ``include_proposed`` is not a listing option in either form: it is
+        # the review-inbox bypass of ``get_note`` and the photographers'
+        # opt-out (the revision logger and ``snapshot_note``), never a way
+        # for a surface to show a proposal.
         assert note_is_effective(review_state="proposed", deleted_at=None, include_proposed=True)
         assert not note_is_effective(review_state="proposed", deleted_at=None)

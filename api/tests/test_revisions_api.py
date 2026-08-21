@@ -219,6 +219,69 @@ async def test_note_revision_reads_follow_the_note_gate() -> None:
         ).status_code == 404
 
 
+async def test_task_and_comment_revision_reads_have_the_same_guard() -> None:
+    """The single revision read of a task and of a comment used to skip the
+    guard its own timeline twin has. A task snapshot carries the whole
+    description; a comment snapshot carries ``anchor_quote`` and
+    ``original_text``, which are verbatim extracts of the NOTE it hangs on
+    -- so the comment reads answer to the note's perimeter."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = await _signup(c, "RevTwins")
+        h = _auth(a)
+
+        task = (
+            await c.post("/tasks", headers=h, json={"title": "T", "description": "DESC-SECRET"})
+        ).json()
+        tid = task["id"]
+        trev = (await c.get(f"/tasks/{tid}/revisions", headers=h)).json()[0]["id"]
+        assert (await c.get(f"/tasks/{tid}/revisions/{trev}", headers=h)).status_code == 200
+        # An unknown task id is a task 404, not a revision 404 (the guard is
+        # at the door, as on the timeline).
+        missing = await c.get(f"/tasks/{uuid.uuid4()}/revisions/{trev}", headers=h)
+        assert missing.status_code == 404, missing.text
+
+        note = (
+            await c.post("/notes", headers=h, json={"kind": "text", "text": "QUOTED-SECRET"})
+        ).json()
+        nid = note["id"]
+        pid = (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["id"]
+        comment = (
+            await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={
+                    "doc_kind": "note_part",
+                    "doc_id": pid,
+                    "body": "rationale",
+                    "anchor_quote": "QUOTED-SECRET",
+                },
+            )
+        ).json()
+        cid = comment["id"]
+        crev = (await c.get(f"/annotations/{cid}/revisions", headers=h)).json()[0]["id"]
+        alive = await c.get(f"/annotations/{cid}/revisions/{crev}", headers=h)
+        assert alive.status_code == 200
+        assert "QUOTED-SECRET" in json.dumps(alive.json()["snapshot"])
+
+        # Gate the note: the comment's history goes with it.
+        async with tenant_session(a["workspace_id"], a["user_id"]) as s:
+            row = (await s.execute(select(Note).where(Note.id == uuid.UUID(nid)))).scalar_one()
+            row.review_state = "proposed"
+            await s.flush()
+        for url in (
+            f"/annotations/{cid}/revisions",
+            f"/annotations/{cid}/revisions/{crev}",
+        ):
+            r = await c.get(url, headers=h)
+            assert r.status_code == 404, (url, r.text)
+            assert "QUOTED-SECRET" not in r.text
+        patched = await c.patch(
+            f"/annotations/{cid}/revisions/{crev}", headers=h, json={"summary": "s"}
+        )
+        assert patched.status_code == 404, patched.text
+
+
 async def test_revisions_rls_isolation_api() -> None:
     """A revision in workspace A is not reachable from workspace B's
     bearer. The defence-in-depth check in the router (entity_kind +

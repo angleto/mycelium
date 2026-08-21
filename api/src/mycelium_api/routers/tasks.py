@@ -1548,6 +1548,9 @@ async def get_task_revision(
 ) -> RevisionOut:
     """Single revision lookup; 404 if the id doesn't belong to this
     task (defense in depth on top of RLS)."""
+    # The snapshot carries the whole description: same guard as the
+    # timeline above, with the bin still readable for the restore flow.
+    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     rev = await rev_svc.get_revision(
         ctx.session,
         revision_id=rev_id,
@@ -1569,6 +1572,7 @@ async def update_task_revision_summary(
     rows (the immutability trigger has a column allow-list since
     migration 0010). No optimistic-lock guard: a stale write merely
     overwrites the previous label."""
+    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     rev = await rev_svc.set_summary(
         ctx.session,
         revision_id=rev_id,

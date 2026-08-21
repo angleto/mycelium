@@ -703,6 +703,12 @@ async def get_annotation_revision(
     rev_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
+    # The snapshot quotes the document the comment hangs on
+    # (``anchor_quote`` / ``original_text``), so the read answers to the
+    # comment's perimeter -- which, for a note anchor, is the note's.
+    await svc.get_annotation(
+        ctx.session, org_id=ctx.org_id, annotation_id=annotation_id, include_deleted=True
+    )
     rev = await rev_svc.get_revision(
         ctx.session,
         revision_id=rev_id,
@@ -719,8 +725,15 @@ async def update_annotation_revision_summary(
     body: RevisionSummaryIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
-    """Set / clear the ``summary`` label on a revision. Mirror of the
-    /notes and /tasks endpoints; see those for the contract."""
+    """Set / clear the ``summary`` label on a revision. Same summary
+    contract as the /notes and /tasks endpoints, with one difference: a
+    comment's snapshot quotes the document it hangs on, so for a note
+    anchor this follows the NOTE's perimeter -- where the note and task
+    twins keep the bin readable for their own restore flow, a thread on a
+    binned note is unreachable until the note is restored."""
+    await svc.get_annotation(
+        ctx.session, org_id=ctx.org_id, annotation_id=annotation_id, include_deleted=True
+    )
     rev = await rev_svc.set_summary(
         ctx.session,
         revision_id=rev_id,
