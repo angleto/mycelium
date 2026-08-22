@@ -24,6 +24,7 @@ from mycelium_core.errors import AuthError, ForbiddenError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.membership import Role
+from mycelium_core.models.user import User
 from mycelium_core.security import decode_token_async
 from mycelium_core.services import agent_tokens as svc
 from mycelium_core.services.auth import login, signup
@@ -222,3 +223,50 @@ async def test_decode_token_async_revoked_raises_auth_error() -> None:
     with pytest.raises(AuthError) as exc_info:
         await decode_token_async(r.raw)
     assert exc_info.value.code == MessageCode.AGENT_TOKEN_INVALID
+
+
+async def test_authenticate_rejects_a_token_whose_user_is_deactivated() -> None:
+    """The credential that used to survive the lock.
+
+    Deactivating a user closes the SPA and the API on the next request
+    (``deps.current_user``) and refuses their login, but the SECURITY
+    DEFINER function read only ``ai_assistants.is_active`` -- never
+    ``users.is_active`` -- and MCP's ``_tenant`` checks membership only.
+    So an agent token, the one credential that acts unattended, kept
+    working indefinitely after its owner was locked out.
+
+    Reactivation restores it: the gate is a live read of the flag, not a
+    revocation, so an accidental deactivation does not silently destroy
+    a credential that cannot be recovered (the raw is shown once).
+    """
+    org, user, _ = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        r = await svc.mint(s, org_id=org, actor_id=user, name="cli")
+    raw = r.raw
+    assert await svc.authenticate(raw) is not None
+
+    async with admin_session() as s:
+        await s.execute(update(User).where(User.id == user).values(is_active=False))
+    assert await svc.authenticate(raw) is None, "a locked-out user keeps no working credential"
+    # And through the shared credential entry point, which is what the MCP
+    # transports and the API bearer path both call.
+    with pytest.raises(AuthError):
+        await decode_token_async(raw)
+
+    # And the refusal does not record the token as used: the function
+    # bumps last_used_at only past the reject clause, which is why the
+    # check belongs in the SQL and not in the Python caller.
+    # tenant_session, not admin: ``agent_tokens`` is org-scoped and RLS
+    # fails closed without the GUC.
+    async with tenant_session(str(org), str(user)) as s:
+        row = (await s.execute(select(AgentToken).where(AgentToken.id == r.token.id))).scalar_one()
+        before_reactivation = row.last_used_at
+
+    async with admin_session() as s:
+        await s.execute(update(User).where(User.id == user).values(is_active=True))
+    again = await svc.authenticate(raw)
+    assert again is not None, "reactivating restores it; the gate is a read, not a revocation"
+
+    async with tenant_session(str(org), str(user)) as s:
+        row = (await s.execute(select(AgentToken).where(AgentToken.id == r.token.id))).scalar_one()
+        assert row.last_used_at != before_reactivation
