@@ -40,7 +40,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
@@ -486,18 +486,16 @@ async def classify_node(
     # (ADR-0042). With it off, a non-note id is "not found" exactly as before
     # and the corpus/behaviour for notes is byte-identical.
     unified = get_settings().garden_unified_task_graph_enabled
-    # Deliberately the deleted_at leg ONLY, not the shared effective predicate
-    # (task f8402e7f): ``create_note`` enqueues the on-create ClassificationJob
-    # BEFORE the caller stamps ``review_state='proposed'`` (externally-supplied
-    # humus always is, adversarial audit A-2), so refusing a proposal here would
-    # poison that job into a permanent ``error`` with nothing to re-queue it
-    # after approval. Whether a proposal should be classified before review, or
-    # its job deferred until approval, is an open product decision -- until it
-    # is taken, classification stays reachable and its OUTPUT is what the gate
-    # withholds (the suggestions are cached, never applied to a hidden node).
+    # The shared effective predicate (task 24de74e5): a proposal awaiting
+    # review is not a corpus member, so it is not classified either. The
+    # on-create job is enqueued BEFORE the caller stamps
+    # ``review_state='proposed'`` (externally-supplied humus always is,
+    # adversarial audit A-2) -- that job now WAITS instead of dying here:
+    # ``process_classification_jobs`` leaves it pending until a human decides,
+    # and picks it up on the tick after approval.
     note = (
         await session.execute(
-            select(Note).where(Note.id == node_id, Note.org_id == org_id, Note.deleted_at.is_(None))
+            select(Note).where(Note.id == node_id, Note.org_id == org_id, effective_note_clause())
         )
     ).scalar_one_or_none()
     node_kind = "note"
@@ -755,6 +753,35 @@ async def read_classification(
 _JOB_BATCH = 50
 
 
+def _awaiting_review() -> ColumnElement[bool]:
+    """SQL: the note is a proposal a human has NOT decided on yet -- live and
+    still ``proposed``. Rejecting soft-deletes it, which takes it out of this
+    set on purpose: a rejected node is gone, not early.
+
+    ``IS NOT DISTINCT FROM``, not ``=``: ``review_state`` is NULL for every
+    ordinary note, and a plain equality would make the whole predicate NULL,
+    so negating it would filter out exactly the rows this queue exists to
+    process. Same NULL-safety the shared perimeter predicate is built on.
+    """
+    return and_(Note.review_state.is_not_distinct_from("proposed"), Note.deleted_at.is_(None))
+
+
+async def _is_awaiting_review(
+    session: AsyncSession, *, org_id: uuid.UUID, job: ClassificationJob
+) -> bool:
+    """Row-level twin of :func:`_awaiting_review`, for the late arrival."""
+    if job.node_kind != "note":
+        return False
+    row = (
+        await session.execute(
+            select(Note.review_state, Note.deleted_at).where(
+                Note.id == job.node_id, Note.org_id == org_id
+            )
+        )
+    ).first()
+    return row is not None and row[0] == "proposed" and row[1] is None
+
+
 async def process_classification_jobs(
     session: AsyncSession,
     *,
@@ -765,15 +792,33 @@ async def process_classification_jobs(
     """Drain pending on-create classification jobs (ADR-0042 D5): classify each
     node and cache the result (D4). Per-job SAVEPOINT isolation so one bad node
     never rolls back the batch; a poison node is marked ``error`` with the
-    message, never retried in a loop. Returns ``{"processed", "errors"}``."""
+    message, never retried in a loop. Returns ``{"processed", "errors",
+    "deferred"}``.
+
+    A node awaiting human review is neither done nor poison, it is EARLY (task
+    24de74e5): its job stays ``pending`` and is picked up on the tick after
+    approval. Deferred jobs are excluded in the QUERY rather than skipped in
+    the loop, so a proposal nobody reviews cannot sit at the head of an
+    oldest-first batch and starve every job behind it. A REJECTED proposal is
+    soft-deleted, so it stops being deferred and fails like any vanished node
+    -- the queue never holds a row that can no longer become work.
+    """
     now = now or dt.datetime.now(dt.UTC)
+    # LEFT JOIN: a task job has no note to look at and must pass through.
     jobs = list(
         (
             await session.execute(
                 select(ClassificationJob)
+                .outerjoin(
+                    Note,
+                    and_(
+                        ClassificationJob.node_kind == "note", Note.id == ClassificationJob.node_id
+                    ),
+                )
                 .where(
                     ClassificationJob.org_id == org_id,
                     ClassificationJob.status == "pending",
+                    or_(Note.id.is_(None), ~_awaiting_review()),
                 )
                 .order_by(ClassificationJob.created_at)
                 .limit(limit)
@@ -782,6 +827,7 @@ async def process_classification_jobs(
     )
     processed = 0
     errors = 0
+    deferred = 0
     for job in jobs:
         try:
             async with session.begin_nested():
@@ -798,12 +844,19 @@ async def process_classification_jobs(
             job.processed_at = now
             processed += 1
         except Exception as exc:  # isolate a poison job; mark error, never loop on it
+            # ... unless the node became a proposal between the query above and
+            # now (the stamp lands right after the create that enqueued this):
+            # that is the deferred case arriving late, and a deferral must not
+            # decay into a permanent error.
+            if await _is_awaiting_review(session, org_id=org_id, job=job):
+                deferred += 1
+                continue
             job.status = "error"
             job.error = str(exc)[:500]
             job.processed_at = now
             errors += 1
     await session.flush()
-    return {"processed": processed, "errors": errors}
+    return {"processed": processed, "errors": errors, "deferred": deferred}
 
 
 async def _mutate(
@@ -1143,7 +1196,11 @@ async def autoclassify_unprocessed(
                 select(Note)
                 .where(
                     Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
+                    # Effective notes only (task 24de74e5): the snapshot has no
+                    # community for a proposal -- it is not a graph node -- so
+                    # stamping it here would mark it "processed, singleton"
+                    # forever and it would never be grouped after approval.
+                    effective_note_clause(),
                     Note.auto_classified_at.is_(None),
                 )
                 .order_by(Note.created_at)

@@ -16,11 +16,13 @@ from sqlalchemy import select
 
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import NotFoundError
 from mycelium_core.models.classification_job import ClassificationJob
 from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import TagKind
 from mycelium_core.services import garden_classify as gc
+from mycelium_core.services import garden_review as review
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import taxonomy
@@ -135,6 +137,92 @@ async def test_drain_classifies_and_caches(monkeypatch: pytest.MonkeyPatch) -> N
             r.suggestion_type == "tag" and r.suggestion_value.get("tag_id") == str(y)
             for r in cached
         )
+
+
+async def test_a_proposal_waits_for_its_reviewer_instead_of_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A node awaiting human review is neither done nor poison, it is EARLY
+    (task 24de74e5): the job stays pending, is not counted as an error, and
+    is drained on the tick after approval. The enqueue happens BEFORE the
+    caller stamps the review state, so this is the ordinary order of events
+    for autonomously-produced humus, not an edge case."""
+    monkeypatch.setattr(get_settings(), "garden_autoclassify_on_creation_enabled", True)
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "proposed")
+        note.review_state = "proposed"
+        await s.flush()
+
+        res = await gc.process_classification_jobs(s, org_id=org)
+        assert res["errors"] == 0
+        assert res["deferred"] == 0  # not even looked at: filtered in the query
+        job = (
+            await s.execute(select(ClassificationJob).where(ClassificationJob.node_id == note.id))
+        ).scalar_one()
+        assert job.status == "pending"
+        assert job.processed_at is None
+        # And the panel refuses it too, for the same reason.
+        with pytest.raises(NotFoundError):
+            await gc.classify_node(s, org_id=org, node_id=note.id)
+
+        # A human approves: the very next drain does the work.
+        note.review_state = "approved"
+        await s.flush()
+        res = await gc.process_classification_jobs(s, org_id=org)
+        assert res["processed"] >= 1 and res["errors"] == 0
+        await s.refresh(job)
+        assert job.status == "done"
+        assert await gc.read_classification(s, org_id=org, node_id=note.id) is not None
+
+
+async def test_a_rejected_proposal_stops_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deferral is not a leak: rejecting soft-deletes the node, which takes it
+    out of the waiting set and lets its job reach a terminal state like any
+    other vanished node. The queue never holds a row that can no longer
+    become work."""
+    monkeypatch.setattr(get_settings(), "garden_autoclassify_on_creation_enabled", True)
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "rejected")
+        note.review_state = "proposed"
+        await s.flush()
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=note.id)
+
+        res = await gc.process_classification_jobs(s, org_id=org)
+        assert res["errors"] == 1
+        job = (
+            await s.execute(select(ClassificationJob).where(ClassificationJob.node_id == note.id))
+        ).scalar_one()
+        assert job.status == "error"
+
+
+async def test_a_waiting_proposal_does_not_starve_the_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The batch is oldest-first, so a proposal nobody reviews would sit at
+    its head forever. Deferred jobs are excluded in the QUERY precisely so
+    they cannot hold a slot: with room for exactly one job, the younger
+    effective node is the one that gets it."""
+    monkeypatch.setattr(get_settings(), "garden_autoclassify_on_creation_enabled", True)
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        waiting = await _note(s, org, user, "waiting")
+        waiting.review_state = "proposed"
+        await s.flush()
+        later = await _note(s, org, user, "later")
+        await s.flush()
+
+        res = await gc.process_classification_jobs(s, org_id=org, limit=1)
+        assert res["processed"] == 1 and res["errors"] == 0
+        by_node = {
+            j.node_id: j
+            for j in (
+                await s.execute(select(ClassificationJob).where(ClassificationJob.org_id == org))
+            ).scalars()
+        }
+        assert by_node[later.id].status == "done"
+        assert by_node[waiting.id].status == "pending"
 
 
 async def test_drain_isolates_a_poison_job(monkeypatch: pytest.MonkeyPatch) -> None:

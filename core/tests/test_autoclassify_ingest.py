@@ -75,6 +75,31 @@ async def test_autoclassify_unprocessed_stamps_and_is_idempotent() -> None:
         assert n2 == 0
 
 
+async def test_a_proposal_is_not_marked_seen_before_its_review() -> None:
+    """The snapshot has no community for a proposal -- it is not a graph node
+    -- so stamping it here would record "processed, singleton" forever and it
+    would never be grouped after approval (task 24de74e5). It waits, and the
+    pass picks it up on the tick after a human approves it."""
+    org, user = await _org()
+    ids = await _make_notes(org, user, 2)
+    async with tenant_session(str(org), str(user)) as s:
+        proposed = (await s.execute(select(Note).where(Note.id == ids[0]))).scalar_one()
+        proposed.review_state = "proposed"
+        await s.flush()
+        await graph_snapshot.refresh_graph_snapshot(s, org_id=org, force=True)
+
+        assert await garden_classify.autoclassify_unprocessed(s, org_id=org) == 1
+        await s.refresh(proposed)
+        assert proposed.auto_classified_at is None  # still unseen, not "singleton"
+
+        proposed.review_state = "approved"
+        await s.flush()
+        await graph_snapshot.refresh_graph_snapshot(s, org_id=org, force=True)
+        assert await garden_classify.autoclassify_unprocessed(s, org_id=org) == 1
+        await s.refresh(proposed)
+        assert proposed.auto_classified_at is not None
+
+
 async def test_autoclassify_is_bounded_by_limit() -> None:
     """The pass drains over ticks (bounded batch, like the search backfills)."""
     org, user = await _org()
