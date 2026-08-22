@@ -261,6 +261,12 @@ class WorkspaceOut(BaseModel):
     # this explicitly from the membership (or "owner" for a global
     # admin acting without one).
     my_role: str = "owner"
+    # Lifecycle of the workspace itself ("active" | "archived"). The
+    # summary list has always carried it; /me did not, so the SPA could
+    # only learn that the workspace it is CURRENTLY IN is archived by
+    # separately fetching the whole list. The switcher badges the active
+    # workspace from this field.
+    status: str = "active"
 
 
 class MemberOut(BaseModel):

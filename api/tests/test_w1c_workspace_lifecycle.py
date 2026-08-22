@@ -123,3 +123,86 @@ async def test_delete_workspace_cascades_and_safeguards() -> None:
         assert n == 0
         me = await c.get("/workspaces/me", headers=hdr)
         assert me.status_code == 403
+
+
+async def test_workspace_me_reports_its_own_archived_state() -> None:
+    """The SPA's switcher badges the workspace you are STANDING IN as
+    archived. Before ``status`` was on ``WorkspaceOut`` that fact was
+    only obtainable by fetching the whole roster."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        ta = a["token"]
+        second = (
+            await c.post("/workspaces", headers=_bearer(ta), json={"name": "Client X"})
+        ).json()
+        hdr = {**_bearer(ta), "X-Workspace-Id": second["id"]}
+
+        assert (await c.get("/workspaces/me", headers=hdr)).json()["status"] == "active"
+
+        assert (
+            await c.post(f"/workspaces/{second['id']}/archive", headers=_bearer(ta))
+        ).status_code == 204
+        me = (await c.get("/workspaces/me", headers=hdr)).json()
+        assert me["status"] == "archived"
+
+        assert (
+            await c.post(f"/workspaces/{second['id']}/unarchive", headers=_bearer(ta))
+        ).status_code == 204
+        assert (await c.get("/workspaces/me", headers=hdr)).json()["status"] == "active"
+
+
+async def test_member_cannot_archive_or_delete_and_is_told_why() -> None:
+    """A plain member is refused both lifecycle operations, with a
+    RENDERED message. The archive path used to raise the templated
+    ``rbac.role_insufficient`` with no params, so the user was shown the
+    literal ``Role {current} is insufficient, requires >= {minimum}``."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        to = owner["token"]
+        shared = (await c.post("/workspaces", headers=_bearer(to), json={"name": "Shared"})).json()
+        sid = shared["id"]
+
+        guest_email = _email()
+        guest = (
+            await c.post(
+                "/auth/signup",
+                json={"email": guest_email, "password": "pw-strong-123"},
+            )
+        ).json()
+        tg = guest["token"]
+
+        # The owner adds them as a plain member (owner-gated, so the
+        # request is made with the elevated workspace role).
+        added = await c.post(
+            "/workspaces/me/members",
+            headers={**_bearer(to), "X-Workspace-Id": sid, "X-Workspace-Role": "owner"},
+            json={"email": guest_email, "role": "member"},
+        )
+        assert added.status_code == 200
+
+        r = await c.post(f"/workspaces/{sid}/archive", headers=_bearer(tg))
+        assert r.status_code == 403
+        body = r.json()
+        assert body["code"] == "workspace.not_owner"
+        # The whole point: a rendered sentence, not an unfilled template.
+        assert "{" not in body["detail"]
+
+        r = await c.delete(f"/workspaces/{sid}", headers=_bearer(tg))
+        assert r.status_code == 403
+        assert r.json()["code"] == "workspace.not_owner"
+
+        # And the workspace is untouched by either attempt.
+        ws = {w["id"]: w for w in (await c.get("/workspaces", headers=_bearer(to))).json()}
+        assert ws[sid]["status"] == "active"

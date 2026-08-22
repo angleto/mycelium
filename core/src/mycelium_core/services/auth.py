@@ -25,8 +25,9 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.attachment_store import get_attachment_store
 from mycelium_core.config import get_settings
-from mycelium_core.db import admin_session
+from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import (
     AuthError,
     DomainError,
@@ -35,6 +36,7 @@ from mycelium_core.errors import (
     NotFoundError,
 )
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.auth_tokens import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -225,7 +227,16 @@ async def delete_org_for_user(
     workspace). The org-scoped data goes with it via ON DELETE CASCADE.
     Crosses the RLS boundary only through the SECURITY DEFINER
     ``delete_organization`` function (migration 0019), which re-checks
-    both preconditions atomically (defense in depth)."""
+    both preconditions atomically (defense in depth).
+
+    The SPA warns that deleting a workspace destroys ALL of its data, so
+    the off-DB bytes have to go too: SQL cannot reach the object store,
+    and the row CASCADE would silently orphan every S3 attachment. The
+    blobs are purged FIRST, through a tenant session (``attachments`` is
+    org-scoped and this one is a no-tenant admin session, which RLS
+    fail-closes), exactly as ``trash.empty_trash`` and the project purge
+    already do.
+    """
     orgs = await list_user_orgs(session, user_id=user_id)
     target = next((o for o in orgs if o.id == org_id), None)
     if target is None:
@@ -234,10 +245,32 @@ async def delete_org_for_user(
         raise ForbiddenError(MessageCode.WORKSPACE_NOT_OWNER)
     if len(orgs) <= 1:
         raise DomainError(MessageCode.WORKSPACE_SOLE)
+    await _purge_org_attachment_blobs(org_id=org_id, user_id=user_id)
     await session.execute(
         text("SELECT delete_organization(:o, :u)"),
         {"o": str(org_id), "u": str(user_id)},
     )
+
+
+async def _purge_org_attachment_blobs(*, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Delete every object-store blob owned by a workspace about to be
+    hard-deleted. A no-op on the ``pg`` backend (the bytes are a column
+    and die with the row); the S3 backend needs the explicit sweep.
+
+    Failures are deliberately NOT swallowed: a half-purged bucket with
+    the rows still present is recoverable (re-run the delete), whereas
+    dropping the rows first and failing here loses the keys forever.
+    """
+    async with tenant_session(str(org_id), str(user_id)) as ts:
+        rows = await ts.execute(
+            select(Attachment.storage_key).where(Attachment.storage_key.is_not(None))
+        )
+        keys = [k for k in rows.scalars().all() if k]
+    if not keys:
+        return
+    store = get_attachment_store(get_settings())
+    for key in keys:
+        await store.delete(key)
 
 
 async def set_workspace_status(
@@ -254,7 +287,16 @@ async def set_workspace_status(
     if target is None:
         raise NotFoundError(MessageCode.ORG_NOT_FOUND)
     if target.role not in ("owner", "admin"):
-        raise ForbiddenError(MessageCode.RBAC_ROLE_INSUFFICIENT)
+        # WORKSPACE_NOT_OWNER, not RBAC_ROLE_INSUFFICIENT: the latter is a
+        # TEMPLATE ("Role {current} is insufficient, requires >= {minimum}")
+        # and this call site has no params to fill it, so ``render`` fell
+        # back to the raw template and the user was shown literal braces.
+        # It also matches what the SQL guard raises (set_organization_status
+        # -> 'workspace.not_owner'), so both layers now speak with one voice.
+        # ``admin`` is still accepted here for backward compatibility; the
+        # product model has only member/owner, so every reachable failure
+        # really is "you are not the owner".
+        raise ForbiddenError(MessageCode.WORKSPACE_NOT_OWNER)
     await session.execute(
         text("SELECT set_organization_status(:o, :u, :s)"),
         {"o": str(org_id), "u": str(user_id), "s": status},

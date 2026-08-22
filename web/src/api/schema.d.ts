@@ -14426,6 +14426,11 @@ export interface components {
              * @default owner
              */
             my_role?: string;
+            /**
+             * Status
+             * @default active
+             */
+            status?: string;
         };
         /** WorkspacePatchIn */
         WorkspacePatchIn: {

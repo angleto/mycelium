@@ -104,6 +104,7 @@ async def get_my_workspace(
         version=org.version,
         settings=settings_out,
         my_role=my_role,
+        status=org.status,
     )
 
 
