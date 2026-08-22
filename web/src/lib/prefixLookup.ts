@@ -16,8 +16,10 @@
 // different perimeter. We don't expire entries in-process: archived /
 // deleted upgrades or task title edits are eventually consistent for chip
 // rendering, which is acceptable (the user can refresh to re-read). The
-// cache is wiped on logout via the SPA's existing token-change reset path
-// (same module reload model as ``taskMentionCache``).
+// cache is dropped whenever the ACTIVE WORKSPACE changes (including on
+// logout), via ``clearOnWorkspaceChange``: a prefix is only unique inside
+// one tenant, so an entry resolved in workspace A would otherwise route a
+// chip in workspace B to an entity that is not there.
 //
 // TWO INTENTS, one endpoint (task d12f6217). Resolving an id -- a chip, a
 // short URL, the palette's code branch -- asks "what entity is this?", and
@@ -30,6 +32,7 @@
 // the caller is asking.
 
 import { authFetch } from '../api/client'
+import { clearOnWorkspaceChange } from './tenantCache'
 
 export interface LookupMatch {
   kind: 'task' | 'note'
@@ -60,6 +63,11 @@ export function isFullUuid(raw: string): boolean {
 
 const cache = new Map<string, LookupOut>()
 const inflight = new Map<string, Promise<LookupOut | null>>()
+
+clearOnWorkspaceChange(() => {
+  cache.clear()
+  inflight.clear()
+})
 
 export interface LookupOpts {
   kinds?: readonly ('task' | 'note')[]

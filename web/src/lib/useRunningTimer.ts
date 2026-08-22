@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
+import { clearOnWorkspaceChange } from './tenantCache'
 
 // Single source of truth for "what is running now". A running timer is
 // a server row (ended_at IS NULL); the elapsed shown to the user is
@@ -16,6 +17,14 @@ let cache: Entry[] = []
 let listenersInstalled = false
 let inflight: Promise<void> | null = null
 const subs = new Set<() => void>()
+
+// The running entries belong to the workspace they were read in. Drop
+// them on a switch so the top-bar chip cannot show the previous
+// tenant's timer until the first refetch lands.
+clearOnWorkspaceChange(() => {
+  cache = []
+  for (const s of subs) s()
+})
 
 function refresh(): Promise<void> {
   if (inflight) return inflight

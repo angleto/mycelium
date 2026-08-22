@@ -6,6 +6,7 @@
 // want one round-trip per id, not one per occurrence.
 
 import { authFetch } from '../api/client'
+import { clearOnWorkspaceChange } from './tenantCache'
 
 export interface TaskMentionInfo {
   id: string
@@ -25,9 +26,17 @@ const taskCache = new Map<string, TaskMentionInfo>()
 const inflight = new Map<string, Promise<TaskMentionInfo | null>>()
 
 // Workflow states are global per org: id → (name, is_terminal). We
-// fetch the default workflow's states once and keep them for the
-// session; the SPA already invalidates on logout.
+// fetch the default workflow's states once and keep them for as long as
+// the active workspace lasts. Both this and the task cache are dropped
+// on a workspace switch (and on logout) — the ids they hold belong to
+// one tenant and mean nothing in the next.
 let workflowStatesByIdPromise: Promise<Map<string, WorkflowStateRow>> | null = null
+
+clearOnWorkspaceChange(() => {
+  taskCache.clear()
+  inflight.clear()
+  workflowStatesByIdPromise = null
+})
 
 async function loadWorkflowStates(): Promise<Map<string, WorkflowStateRow>> {
   if (!workflowStatesByIdPromise) {
