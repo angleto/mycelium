@@ -31,8 +31,18 @@ import {
   type AnnotationAnchor,
 } from '../lib/annotationDecorations'
 import { InlineAnnotator, type InlineAnnotatorHandle } from './InlineAnnotator'
-import type { Annotation, DocKind } from '../lib/useAnnotations'
+import { anchorDomainOf, type Annotation, type DocKind } from '../lib/useAnnotations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
+import {
+  sourceSurface,
+  tiptapSurface,
+  type AnnotationSurface,
+} from '../lib/annotationSurface'
+import {
+  flashAnnotation,
+  locateSourceAnchor,
+  setAnnotations as setSourceAnnotations,
+} from '../lib/markdownSource/annotationLayer'
 import { authFetch } from '../api/client'
 import { formatMentionHref } from '../lib/mentions'
 import {
@@ -59,7 +69,7 @@ import {
 import { AttachmentPicker } from './AttachmentPicker'
 import { isEditorHref } from '../lib/editorHref'
 import { mdLink } from '../lib/markdownInline'
-import type { EditorView as CmView } from '@codemirror/view'
+import { EditorView as CmEditorView, type EditorView as CmView } from '@codemirror/view'
 import {
   SourceEditor,
   type SourceEditorHandle,
@@ -577,6 +587,7 @@ function anchorOf(a: Annotation): AnchorQuery {
     anchorPrefix: a.anchor_prefix ?? null,
     anchorSuffix: a.anchor_suffix ?? null,
     originalText: a.original_text ?? null,
+    anchorDomain: anchorDomainOf(a),
   }
 }
 
@@ -1068,6 +1079,40 @@ export function RichEditor({
   // ProseMirror's view reconciliation, unlike a class hand-added to a
   // decoration node (which PM reverts on its next update). The clear is
   // coalesced so a rapid repeat / prev-next sequence always pulses fully.
+  // Locate an anchor in whichever surface is showing. The two layers refuse
+  // each other's domain rather than guessing, so an anchor captured in the
+  // WYSIWYG editor simply does not resolve in the source one and vice versa
+  // -- it stays listed in the panel, unpainted, instead of being drawn over
+  // a passage nobody chose.
+  const locateIn = useCallback((a: AnchorQuery): { from: number; to: number } | null => {
+    if (rawModeRef.current) {
+      const view = srcHandleRef.current?.view()
+      return view ? locateSourceAnchor(view.state.sliceDoc(), a) : null
+    }
+    const ed = editorRef.current
+    return ed ? locateAnchor(ed.state.doc, a) : null
+  }, [])
+
+  // Scroll a located range into view and pulse it, in the source surface.
+  // One dispatch does both: CodeMirror takes the scroll as an effect rather
+  // than as a DOM call, so it cannot fight the caret.
+  const flashSourceRange = useCallback((r: { from: number; to: number }) => {
+    const view = srcHandleRef.current?.view()
+    if (!view) return
+    view.dispatch({
+      effects: [
+        flashAnnotation.of(r),
+        CmEditorView.scrollIntoView(r.from, { y: 'center' }),
+      ],
+    })
+    if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
+    flashClearRef.current = window.setTimeout(() => {
+      const v = srcHandleRef.current?.view()
+      if (v) v.dispatch({ effects: flashAnnotation.of(null) })
+      flashClearRef.current = null
+    }, 1500)
+  }, [])
+
   const flashRange = useCallback((ed: CoreEditor, r: { from: number; to: number }) => {
     const dom = ed.view.domAtPos(r.from)
     // nodeType 3 = Text; ``Node`` is shadowed by @tiptap/core's import here,
@@ -1086,21 +1131,21 @@ export function RichEditor({
   // Annotations that have a locatable passage, in document order — the
   // domain both the panel's "go to text" and the toolbar prev/next walk.
   const orderedAnchored = useCallback(() => {
-    const ed = editorRef.current
-    if (!ed) return [] as { row: Annotation; from: number; to: number }[]
     return (inlineAnnotations?.rows ?? [])
       .filter(isNavigableAnnotation)
-      .map((row) => ({ row, r: locateAnchor(ed.state.doc, anchorOf(row)) }))
+      .map((row) => ({ row, r: locateIn(anchorOf(row)) }))
       .flatMap((x) => (x.r ? [{ row: x.row, from: x.r.from, to: x.r.to }] : []))
       .sort((a, b) => a.from - b.from)
-  }, [inlineAnnotations?.rows])
+  }, [inlineAnnotations?.rows, locateIn])
 
   // Step to the next/previous anchored annotation in document order and
   // flash it; wraps at the ends. ``dir`` is +1 (▼, first→last) or -1 (▲).
   const navigateAnnotations = useCallback(
     (dir: 1 | -1) => {
-      const ed = editorRef.current
-      if (!ed || rawModeRef.current) return
+      // Both surfaces navigate now. This used to bail in markdown mode
+      // because there was no ProseMirror to flash a range in; the source
+      // editor has its own flash effect.
+      if (!editorRef.current && !srcHandleRef.current) return
       const items = orderedAnchored()
       if (!items.length) {
         // No locatable passage to jump to. If open annotations exist but
@@ -1127,12 +1172,13 @@ export function RichEditor({
       if (idx < 0) idx = items.length - 1
       if (idx >= items.length) idx = 0
       navIdRef.current = items[idx].row.id
-      flashRange(ed, items[idx])
+      if (rawModeRef.current) flashSourceRange(items[idx])
+      else if (editorRef.current) flashRange(editorRef.current, items[idx])
       // Reveal the comment/suggestion body, not just its passage: the
       // toolbar buttons read "go to the next comment", so show it.
       annoRef.current?.openAnnotation(items[idx].row.id)
     },
-    [orderedAnchored, flashRange, inlineAnnotations?.rows],
+    [orderedAnchored, flashRange, flashSourceRange, inlineAnnotations?.rows],
   )
 
   // Imperative "go to this annotation" for the panel's per-card button:
@@ -1143,19 +1189,19 @@ export function RichEditor({
     viewRef,
     () => ({
       scrollToAnnotation: (a: Annotation) => {
-        const ed = editorRef.current
-        if (!ed || rawModeRef.current) return false
-        const r = locateAnchor(ed.state.doc, anchorOf(a))
+        const r = locateIn(anchorOf(a))
         if (!r) return false
         // Sync the toolbar nav cursor so a subsequent ▼/▲ continues from
         // the card the user jumped to (by ID; if it's resolved and thus
         // outside the open-only walk, the next step restarts from the end).
         navIdRef.current = a.id
-        flashRange(ed, r)
+        if (rawModeRef.current) flashSourceRange(r)
+        else if (editorRef.current) flashRange(editorRef.current, r)
+        else return false
         return true
       },
     }),
-    [flashRange],
+    [flashRange, flashSourceRange, locateIn],
   )
 
   // Any OPEN anchored annotation to navigate? Gates the toolbar prev/next.
@@ -1218,9 +1264,15 @@ export function RichEditor({
   // whenever they change. This is a meta-only transaction (no doc
   // change), so it never affects the markdown round-trip or the caret.
   useEffect(() => {
-    if (!editor) return
-    editor.view.dispatch(editor.state.tr.setMeta(annotationKey, annotations ?? []))
-  }, [annotations, editor])
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(annotationKey, annotations ?? []))
+    }
+    // The same anchors go to the source layer, which ignores the ones
+    // captured in the other domain. Both editors can be alive across a mode
+    // switch, and pushing to both keeps whichever is showing correct.
+    const view = srcHandle?.view()
+    if (view) view.dispatch({ effects: setSourceAnnotations.of(annotations ?? []) })
+  }, [annotations, editor, srcHandle])
 
   // Reflect *external* value changes (a different part/note loaded, a
   // raw-mode edit, a conflict reload) onto the editor, while leaving
@@ -1257,6 +1309,18 @@ export function RichEditor({
   // Both surfaces format now. In source mode the commands are string
   // transformations (lib/markdownSource/commands.ts) and the handle exists
   // as soon as the editor mounts.
+  // The editing surface the annotation UI is layered over: the markdown one
+  // when that is showing, the WYSIWYG one otherwise. Rebuilt when the mode
+  // flips, which is what re-subscribes the annotator's selection listener to
+  // the editor the user is actually in.
+  const annotationSurface = useMemo<AnnotationSurface | null>(() => {
+    if (rawMode) {
+      const view = srcHandle?.view() ?? null
+      return view ? sourceSurface(view) : null
+    }
+    return editor ? tiptapSurface(editor) : null
+  }, [rawMode, srcHandle, editor])
+
   const fmt = rawMode ? srcHandle != null : editor != null
 
   /** Is this button's construct active under the caret, in whichever
@@ -1682,10 +1746,10 @@ export function RichEditor({
       ) : (
         <EditorContent editor={editor} />
       )}
-      {editor && !rawMode && inlineAnnotations && (
+      {annotationSurface && inlineAnnotations && (
         <InlineAnnotator
           ref={annoRef}
-          editor={editor}
+          surface={annotationSurface}
           docKind={inlineAnnotations.docKind}
           docId={inlineAnnotations.docId}
           rows={inlineAnnotations.rows}

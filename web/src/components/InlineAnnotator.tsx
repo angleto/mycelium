@@ -7,9 +7,9 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import type { Editor } from '@tiptap/core'
 
 import * as annoApi from '../lib/annotationsApi'
+import type { AnnotationSurface, SurfaceSelection } from '../lib/annotationSurface'
 import { MarkdownView } from './Markdown'
 import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, DocKind } from '../lib/useAnnotations'
@@ -31,24 +31,19 @@ import type { Annotation, DocKind } from '../lib/useAnnotations'
 // collapsed by a blur before the handler runs — the defect that made
 // the old toolbar buttons do nothing.
 
-interface Sel {
-  from: number
-  to: number
-  text: string
-  prefix: string
-  suffix: string
-  // Viewport coordinates of the selection, for fixed-position popovers.
-  left: number
-  top: number
-  bottom: number
-}
+// The selection shape is the surface's (lib/annotationSurface.ts): this
+// component is written against an editing surface, not against an editor.
+type Sel = SurfaceSelection
 
 interface ActiveAt {
   id: string
 }
 
 interface Props {
-  editor: Editor
+  /** The editing surface this annotator is layered over. Either editor
+   *  satisfies it; see lib/annotationSurface.ts for why it is three
+   *  functions rather than an editor instance. */
+  surface: AnnotationSurface
   docKind: DocKind
   docId: string
   rows: Annotation[]
@@ -108,7 +103,7 @@ function clampTop(below: number, anchorTop: number, height = 300): number {
 export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   function InlineAnnotator(
     {
-      editor,
+      surface,
       docKind,
       docId,
       rows,
@@ -151,35 +146,11 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
     setErr('')
   }, [])
 
-  // Read the current editor selection as text + W3C prefix/suffix +
-  // viewport coordinates. Returns null for an empty/whitespace
-  // selection.
-  const readSelection = useCallback((): Sel | null => {
-    const { state, view } = editor
-    const { from, to, empty } = state.selection
-    if (empty || to <= from) return null
-    const doc = state.doc
-    const text = doc.textBetween(from, to, ' ')
-    if (!text.trim()) return null
-    const prefix = doc.textBetween(doc.resolve(from).start(), from, ' ').slice(-24)
-    const suffix = doc.textBetween(to, doc.resolve(to).end(), ' ').slice(0, 24)
-    try {
-      const a = view.coordsAtPos(from)
-      const b = view.coordsAtPos(to)
-      return {
-        from,
-        to,
-        text,
-        prefix,
-        suffix,
-        left: (a.left + b.left) / 2,
-        top: Math.min(a.top, b.top),
-        bottom: Math.max(a.bottom, b.bottom),
-      }
-    } catch {
-      return null
-    }
-  }, [editor])
+  // The live selection as an anchor. Read from the editor's STATE, never
+  // from a DOM selection: a blur must not be able to collapse it before a
+  // handler runs, which is the defect that made the old toolbar buttons do
+  // nothing.
+  const readSelection = useCallback((): Sel | null => surface.readSelection(), [surface])
 
   // Track the selection so a compose popover can anchor to it and so the
   // host toolbar's Comment / Suggest buttons enable only when there is
@@ -190,17 +161,20 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       setSel(s)
       onSelectableChange?.(s != null)
     }
+    // Called once up front: neither surface reports the selection it already
+    // has, so without this the toolbar starts disabled over a live selection.
     update()
-    editor.on('selectionUpdate', update)
+    const off = surface.onSelectionChange(update)
     return () => {
-      editor.off('selectionUpdate', update)
+      off()
       onSelectableChange?.(false)
     }
-  }, [editor, readSelection, onSelectableChange])
+  }, [surface, readSelection, onSelectableChange])
 
   // Click an inline mark → open the action popover on it.
   useEffect(() => {
-    const dom = editor.view.dom as HTMLElement
+    const dom = surface.markRoot()
+    if (!dom) return
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       const el = target?.closest('[data-annotation-id]') as HTMLElement | null
@@ -216,7 +190,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
     }
     dom.addEventListener('click', onClick)
     return () => dom.removeEventListener('click', onClick)
-  }, [editor])
+  }, [surface])
 
   // Escape closes whatever is open.
   useEffect(() => {
@@ -271,16 +245,11 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const submitCompose = async () => {
     if (!compose) return
     const s = compose.sel
-    // RENDERED, declared explicitly. This component reads its anchor off the
-    // ProseMirror tree (`doc.textBetween(from, to, ' ')`): markup stripped,
-    // links reduced to their label, blocks joined by a space. Everything else
-    // that writes an annotation -- the API, MCP, the CLI, and the markdown
-    // source editor, whose document IS the markdown -- quotes the SOURCE, and
-    // that is the server's default. Saying so here is what keeps the two
-    // surfaces from writing the same field in two different languages.
-    //
-    // When this surface is retired the flag goes with it, and migration 0099
-    // has already converted every row it could to the source domain.
+    // The DOMAIN comes from the surface that captured the quote. The two
+    // adapters read the document in two different languages -- the tiptap one
+    // a rendered projection, the markdown one the stored bytes -- and a quote
+    // read back in the wrong one does not merely fail to locate: it can match
+    // the WRONG passage.
     const r =
       compose.kind === 'comment'
         ? await annoApi.createComment({
@@ -290,7 +259,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             anchorQuote: s.text,
             anchorPrefix: s.prefix,
             anchorSuffix: s.suffix,
-            anchorDomain: 'rendered',
+            anchorDomain: surface.domain,
           })
         : await annoApi.createSuggestion({
             docKind,
@@ -300,7 +269,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             rationale: cWhy,
             anchorPrefix: s.prefix,
             anchorSuffix: s.suffix,
-            anchorDomain: 'rendered',
+            anchorDomain: surface.domain,
           })
     if (!r.ok) {
       setErr(r.error ?? 'Error')

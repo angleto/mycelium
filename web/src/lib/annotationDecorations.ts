@@ -25,6 +25,12 @@ export interface AnnotationAnchor {
   anchorSuffix: string | null
   originalText: string | null
   proposedText: string | null
+  /** Which projection the quote is written in. This layer resolves only
+   *  RENDERED anchors -- its whole projection exists for them -- and the
+   *  source layer (markdownSource/annotationLayer.ts) resolves only source
+   *  ones. Neither guesses at the other's, because a quote read in the wrong
+   *  domain can match the WRONG passage rather than simply missing. */
+  anchorDomain?: 'source' | 'rendered'
 }
 
 interface Range {
@@ -137,6 +143,7 @@ export interface AnchorQuery {
   anchorPrefix: string | null
   anchorSuffix: string | null
   originalText: string | null
+  anchorDomain?: 'source' | 'rendered'
 }
 
 // Live PM range of an annotation's anchored passage, computed with the
@@ -157,6 +164,10 @@ export function locateAnchor(
   doc: PMNode,
   a: AnchorQuery,
 ): { from: number; to: number } | null {
+  // A SOURCE anchor quotes the markdown, which this projection has stripped:
+  // `**bold**` does not occur in it. Refuse rather than fall through to a
+  // partial match on the bare word.
+  if (a.anchorDomain === 'source') return null
   const needle = a.kind === 'suggestion' ? a.originalText : a.anchorQuote
   if (!needle) return null
   const map = renderDocWithMap(doc)
@@ -184,6 +195,7 @@ function buildDeco(
   const map = renderDocWithMap(doc)
   for (const a of anchors) {
     if (a.status !== 'open') continue
+    if (a.anchorDomain === 'source') continue
     if (a.kind === 'comment') {
       if (!a.anchorQuote) continue
       const r = findRange(map, a.anchorQuote, a.anchorPrefix, a.anchorSuffix, used)

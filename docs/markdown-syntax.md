@@ -148,6 +148,27 @@ exists not to do.
 Tab and Shift-Tab move between table cells, and do nothing anywhere else, so
 the key keeps its usual meaning outside a table.
 
+### Comments and suggestions
+
+They work here too, and their anchor is the markdown SOURCE: select
+`**importante**` and that is what gets quoted, struck and spliced. The
+visual editor captures a RENDERED quote instead (markup stripped, links
+reduced to their label), so each annotation records which projection it was
+written in and each surface paints only its own. An annotation captured in
+the other one stays listed in the panel, unpainted, rather than being drawn
+over a passage nobody chose.
+
+A selection is grown so it never covers one delimiter of a pair without the
+other: dragging from the middle of a word to inside the closing `**` quotes
+the whole `**run**`, because half a delimiter is markup with nothing to close
+it. A selection covering NEITHER delimiter is left alone, since commenting on
+just the word inside a bold run is the ordinary thing to want.
+
+One limit worth knowing: an annotation whose passage sits inside a block that
+is currently shown as a widget (a rendered table, a diagram) is not
+highlighted until you put the caret in that block and its source comes back.
+The annotation is still there and still accepts.
+
 ### Typeaheads and pasting
 
 `@` followed by a title searches this workspace's tasks, notes and tags and

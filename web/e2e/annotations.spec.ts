@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 import { authedApi } from './api'
+import { inSourceMode, readSource, sourceContent } from './source-editor'
 
 // Regression for the inline annotation UX (InlineAnnotator over the
 // task-description RichEditor):
@@ -240,4 +241,60 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
   // longer shadows the reloaded body (the #2 note-path bug).
   await expect(editor).toContainText('REPLACED text', { timeout: 8000 })
   await expect(editor).not.toContainText('beta gamma delta')
+})
+
+test('inline suggest in MARKDOWN mode: the anchor is the source, and accept splices it', async ({
+  page,
+}) => {
+  // The capability this whole move exists for. Until now the annotation UI
+  // was rendered only over the WYSIWYG surface, so switching to markdown
+  // meant losing comments and suggestions entirely.
+  //
+  // The anchor captured here is the markdown SOURCE -- `**importante**`, not
+  // `importante` -- which is the same domain the server resolves it in, so
+  // what is struck on screen is what gets spliced on accept.
+  const errors: string[] = []
+  watch(page, errors)
+  const noteId = await createNoteWithPart('Il termine **importante** va spiegato.')
+  await login(page)
+  await page.goto(`/notes/${noteId}`)
+  await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(1500)
+
+  // Into markdown mode.
+  const toggle = page.getByRole('button', { name: /Edit as Markdown|Rich editor/ }).first()
+  if (!(await toggle.isVisible().catch(() => false))) {
+    await page.locator('.rte__collapse').first().click()
+  }
+  if (!(await inSourceMode(page))) await toggle.click()
+  await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
+
+  // Select the whole line, which in this surface quotes the markup too.
+  await sourceContent(page).click()
+  await page.keyboard.press('ControlOrMeta+a')
+
+  const suggestBtn = page.locator('.rte__annotate--suggest').first()
+  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  await suggestBtn.click()
+
+  const pop = page.locator('.anno-pop').first()
+  await expect(pop).toBeVisible({ timeout: 5000 })
+  await pop.locator('textarea').first().fill('Il termine _essenziale_ va spiegato.')
+  await pop.getByRole('button', { name: /Propose|Proponi/i }).click()
+  await page.waitForTimeout(1000)
+
+  // Painted over the SOURCE: the struck range and the ghost proposal.
+  const del = page.locator('.anno-mark--del').first()
+  await expect(del).toBeVisible({ timeout: 5000 })
+  await expect(page.locator('.anno-mark--ins').first()).toContainText('essenziale')
+
+  await del.click()
+  const actPop = page.locator('.anno-pop').first()
+  await expect(actPop).toBeVisible({ timeout: 5000 })
+  await actPop.getByRole('button', { name: /Accept|Accetta/i }).click()
+  await page.waitForTimeout(2500)
+
+  // And the stored body is the markdown, spliced exactly.
+  expect(await readSource(page)).toBe('Il termine _essenziale_ va spiegato.')
+  expect(errors).toEqual([])
 })

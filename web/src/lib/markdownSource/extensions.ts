@@ -10,6 +10,8 @@ import { attachmentRetain } from './attachmentRetain'
 import { tableKeymap } from './tableCommands'
 import { markdownCompletion } from './completion'
 import { activeMarks, type ActiveMark } from './commands'
+import { annotationLayer } from './annotationLayer'
+import { notifySelection } from '../annotationSurface'
 import type { ImageUploadParent } from '../imageUpload'
 import { blockPreview } from './blockPreview'
 import { livePreview } from './livePreview'
@@ -188,6 +190,9 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // `@` and `[[` typeaheads, inserting the same markdown the tiptap
     // surface does so a body reads the same whichever one wrote it.
     markdownCompletion(),
+    // Comment / suggestion marks. A bare state field: the annotations
+    // themselves live in React state and arrive through a StateEffect.
+    annotationLayer(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),
@@ -216,6 +221,10 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     EditorView.updateListener.of((u) => {
       if (u.docChanged) opts.onChange(u.state.sliceDoc())
       if (u.docChanged || u.selectionSet) opts.onActive?.(activeMarks(u.state))
+      // A CodeMirror extension is fixed at state creation, so the annotation
+      // UI -- which mounts after the editor -- cannot add its own listener.
+      // One listener here, fanned out through the surface registry.
+      if (u.docChanged || u.selectionSet) notifySelection(u.view)
     }),
   ]
 }

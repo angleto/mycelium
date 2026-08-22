@@ -33,6 +33,10 @@ export type SourceEditorHandle = {
    *  returned: false means it refused (see commands.ts), and the caller can
    *  leave the document alone rather than guessing. */
   run: (cmd: (view: EditorView) => boolean) => boolean
+  /** The live view, for a consumer that needs the surface itself rather than
+   *  a command over it -- the annotation layer reads the selection, listens
+   *  for a click on a mark, and measures coordinates for its popovers. */
+  view: () => EditorView | null
 }
 
 /**
@@ -224,6 +228,7 @@ export function SourceEditor({
         const view = viewRef.current
         return view ? cmd(view) : false
       },
+      view: () => viewRef.current,
     }),
     [],
   )

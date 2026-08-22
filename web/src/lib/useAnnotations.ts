@@ -56,6 +56,22 @@ export function useAnnotations(docKind: DocKind, docId: string) {
 }
 
 /** Open annotations as inline-decoration anchors for the editor. */
+/**
+ * Which projection an anchor's quote is written in.
+ *
+ * Read defensively rather than off the generated type: `web/src/api/schema.d.ts`
+ * has not been regenerated since `anchor_domain` was added server-side, and
+ * regenerating it right now would sweep in another branch's in-flight API
+ * changes. Anything that is not the literal 'rendered' reads as 'source',
+ * which is also the server's default -- so a client running against a stale
+ * schema degrades to the CORRECT answer rather than to undefined.
+ */
+export function anchorDomainOf(a: Annotation): 'source' | 'rendered' {
+  return (a as { anchor_domain?: unknown }).anchor_domain === 'rendered'
+    ? 'rendered'
+    : 'source'
+}
+
 export function toAnchors(rows: Annotation[]): AnnotationAnchor[] {
   return rows
     .filter((r) => r.status === 'open' && !r.deleted_at)
@@ -68,5 +84,6 @@ export function toAnchors(rows: Annotation[]): AnnotationAnchor[] {
       anchorSuffix: r.anchor_suffix ?? null,
       originalText: r.original_text ?? null,
       proposedText: r.proposed_text ?? null,
+      anchorDomain: anchorDomainOf(r),
     }))
 }
