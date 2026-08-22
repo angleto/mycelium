@@ -223,3 +223,14 @@ Two consequences worth recording:
 - The Adamic-Adar **rarity denominator** counts nodes, not rows: a proposed or
   trashed note no longer inflates it (the task arm already worked this way),
   so edge weights between live notes stop depending on what is in the bin.
+
+Follow-up (2026-08-22, task 02f8f7c7): the three ADR-0035 sensors that count
+notes and links by hand — `time_to_first_link`, `density_delta_7d`,
+`fungal_lag` — read the predicate from the same module now, at both ends of
+every link. `density_delta_7d` was the visible one: it filtered the notes and
+not the links, so rejecting a proposal (a soft delete) shrank the denominator
+while its edges stayed in the numerator and the sensor reported a THICKENING
+mycelium every time the forester threw something away. `fungal_lag` counted
+un-approved distillations as humus produced. Persisted `garden_health_daily`
+values are not back-filled: the stored series steps once at the first tick
+after the change and is continuous after it.

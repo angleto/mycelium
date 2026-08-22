@@ -33,6 +33,19 @@ The nightly worker tick calls :func:`persist_snapshot` to write one
 ``garden_health_daily`` row per org per day; the live endpoint reads the
 current values from :func:`compute_health` and the trend from
 :func:`recent_snapshots`.
+
+PERIMETER (ADR-0043 D1, task 02f8f7c7): every sensor that counts notes
+or links counts the EFFECTIVE ones -- ``review_state IS DISTINCT FROM
+'proposed' AND deleted_at IS NULL`` -- through
+:func:`~mycelium_core.services.note_effective.effective_note_clause`, at
+both ends of a link. The graph sensors (``tag_entropy_local``,
+``leiden_modularity``) get it from ``graph``; ``time_to_first_link``,
+``density_delta_7d`` and ``fungal_lag`` apply it here. Snapshots persist
+the value that was true under the perimeter of the day they were taken,
+so the stored series steps once at the first tick after this shipped
+(most visibly where a workspace holds proposals or a full bin) and is
+continuous from there: the history is not rewritten, and no sensor is
+back-filled to pretend it always read this way.
 """
 
 from __future__ import annotations
@@ -45,6 +58,7 @@ from typing import Any, Literal
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.classification_feedback import ClassificationFeedback
@@ -55,6 +69,7 @@ from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.retrieval_trace import RetrievalTrace
 from mycelium_core.models.search_click import SearchClick
 from mycelium_core.services import graph as graph_svc
+from mycelium_core.services.note_effective import effective_note_clause
 
 ACCEPT_RATE_FLOOR = 0.40
 TAG_ENTROPY_FLOOR = 1.2
@@ -237,7 +252,16 @@ async def _recall_at_k(
 async def _time_to_first_link(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:
     """Median seconds from a note's creation to its first note<->note link
     (incoming or outgoing). None when no note has a link yet. Lower means
-    the mycelium absorbs new notes faster."""
+    the mycelium absorbs new notes faster.
+
+    Read over the EFFECTIVE corpus (ADR-0043 D1), at BOTH ends: a trashed
+    or un-approved note is not a node, and an edge with one such end is
+    not an edge -- ``graph.compute_note_edge_weights`` drops it, so
+    timing an absorption through it would report a link the graph does
+    not have. ``created`` already holds exactly the effective notes,
+    which makes "endpoint absent from ``created``" the same test as
+    "endpoint is ineffective", with no second query to run.
+    """
     links = (
         await session.execute(
             select(
@@ -251,19 +275,19 @@ async def _time_to_first_link(session: AsyncSession, *, org_id: uuid.UUID) -> fl
         return None
     created_rows = (
         await session.execute(
-            select(Note.id, Note.created_at).where(Note.org_id == org_id, Note.deleted_at.is_(None))
+            select(Note.id, Note.created_at).where(Note.org_id == org_id, effective_note_clause())
         )
     ).all()
     created: dict[uuid.UUID, datetime.datetime] = {nid: ts for nid, ts in created_rows}
     first: dict[uuid.UUID, datetime.datetime] = {}
     for parent_id, child_id, ts in links:
+        if parent_id not in created or child_id not in created:
+            continue
         for nid in (parent_id, child_id):
             cur = first.get(nid)
             if cur is None or ts < cur:
                 first[nid] = ts
-    deltas = sorted(
-        (link_ts - created[nid]).total_seconds() for nid, link_ts in first.items() if nid in created
-    )
+    deltas = sorted((link_ts - created[nid]).total_seconds() for nid, link_ts in first.items())
     if not deltas:
         return None
     mid = len(deltas) // 2
@@ -276,47 +300,47 @@ async def _density_delta_7d(
 ) -> float | None:
     """Change in links-per-note over the last 7 days: current density minus
     the density as of 7 days ago (by row creation time). Positive means the
-    mycelium is thickening. None until there were notes 7 days ago."""
+    mycelium is thickening. None until there were notes 7 days ago.
+
+    Numerator and denominator are read over the SAME perimeter -- the
+    effective corpus (ADR-0043 D1), at both ends of every link. Filtering
+    the notes alone, which is what this did, made rejecting a proposal
+    RAISE the density: ``garden_review.reject_node`` soft-deletes the
+    node, so the denominator lost it while its links stayed in the
+    numerator, and the sensor reported a thickening mycelium every time
+    the forester threw something away.
+
+    Both readings are taken over the corpus AS IT STANDS NOW ("created
+    before the cutoff and effective today"), not as it stood 7 days ago:
+    the perimeter is derived from the note row and there is no history of
+    it to query, so a note trashed yesterday is absent from both terms.
+    That makes the delta a comparison between two states of today's
+    corpus, which is the honest reading available here -- and the reason
+    this is a trend indicator, never an audit figure.
+    """
     cutoff = now - datetime.timedelta(days=7)
-    notes_now = int(
-        (
-            await session.execute(
-                select(func.count())
-                .select_from(Note)
-                .where(Note.org_id == org_id, Note.deleted_at.is_(None))
-            )
-        ).scalar_one()
+    parent, child = aliased(Note), aliased(Note)
+    links_q = (
+        select(func.count())
+        .select_from(NoteNoteLink)
+        .join(parent, parent.id == NoteNoteLink.parent_note_id)
+        .join(child, child.id == NoteNoteLink.child_note_id)
+        .where(
+            NoteNoteLink.org_id == org_id,
+            effective_note_clause(entity=parent),
+            effective_note_clause(entity=child),
+        )
     )
-    notes_then = int(
-        (
-            await session.execute(
-                select(func.count())
-                .select_from(Note)
-                .where(
-                    Note.org_id == org_id,
-                    Note.deleted_at.is_(None),
-                    Note.created_at <= cutoff,
-                )
-            )
-        ).scalar_one()
+    notes_q = (
+        select(func.count()).select_from(Note).where(Note.org_id == org_id, effective_note_clause())
     )
+    notes_now = int((await session.execute(notes_q)).scalar_one())
+    notes_then = int((await session.execute(notes_q.where(Note.created_at <= cutoff))).scalar_one())
     if not notes_now or not notes_then:
         return None
-    links_now = int(
-        (
-            await session.execute(
-                select(func.count()).select_from(NoteNoteLink).where(NoteNoteLink.org_id == org_id)
-            )
-        ).scalar_one()
-    )
+    links_now = int((await session.execute(links_q)).scalar_one())
     links_then = int(
-        (
-            await session.execute(
-                select(func.count())
-                .select_from(NoteNoteLink)
-                .where(NoteNoteLink.org_id == org_id, NoteNoteLink.created_at <= cutoff)
-            )
-        ).scalar_one()
+        (await session.execute(links_q.where(NoteNoteLink.created_at <= cutoff))).scalar_one()
     )
     return round(links_now / notes_now - links_then / notes_then, 4)
 
@@ -355,20 +379,35 @@ async def _fungal_lag(
     takes to turn an archived note into humus (WS-C6).
 
     Returns ``(value, reason)``; ``reason`` is set only when ``value`` is
-    None: ``_NO_DISTILLATIONS`` when there are genuinely zero distillations,
-    ``_NO_ARCHIVED_DISTILLATIONS`` when distillations exist but none derive
-    from an archived source (e.g. all distilled on-demand while live).
+    None: ``_NO_DISTILLATIONS`` when there are genuinely zero effective
+    distillations, ``_NO_ARCHIVED_DISTILLATIONS`` when some exist but none
+    derive from an archived source (e.g. all distilled on-demand while
+    live). "Effective" is the perimeter below: a workspace whose only
+    distillations are proposals awaiting review reads as no humus
+    produced, which is what it is.
     """
-    # (source_id, distillation created_at) for every hypha_of humus atom.
+    # (source_id, distillation created_at) for every hypha_of humus atom,
+    # over the effective corpus (ADR-0043 D1) at BOTH ends: an un-approved
+    # distillation is a PROPOSAL of humus, not humus produced, and counting
+    # it timed a decomposition nobody has accepted; a trashed distillation
+    # (or a trashed source) is not in the mycelium at all. Only the
+    # ``review_state`` leg is new here -- the soft-delete leg was already
+    # filtered, on the distillation alone.
+    source = aliased(Note)
     distill_rows = (
         await session.execute(
-            select(NoteNoteLink.parent_note_id, Note.created_at)
+            select(
+                NoteNoteLink.parent_note_id,
+                Note.created_at,
+                effective_note_clause(entity=source).label("source_effective"),
+            )
             .join(Note, Note.id == NoteNoteLink.child_note_id)
+            .join(source, source.id == NoteNoteLink.parent_note_id)
             .where(
                 NoteNoteLink.org_id == org_id,
                 NoteNoteLink.kind == "hypha_of",
                 Note.humus_kind == "distillation",
-                Note.deleted_at.is_(None),
+                effective_note_clause(),
             )
         )
     ).all()
@@ -376,8 +415,15 @@ async def _fungal_lag(
         return None, _NO_DISTILLATIONS
     # First distillation per source (the idempotency guard means one per
     # source in practice; min() honours "first" if that ever changes).
+    # The source perimeter is read as a COLUMN, not as a WHERE leg, on
+    # purpose: an atom whose source has left the mycelium is still an atom,
+    # so it belongs in the "are there any distillations at all" answer and
+    # only its interval is unmeasurable -- filtering it in SQL would report
+    # ``_NO_DISTILLATIONS`` over a corpus that visibly holds humus.
     first_distill: dict[uuid.UUID, datetime.datetime] = {}
-    for source_id, distill_ts in distill_rows:
+    for source_id, distill_ts, source_effective in distill_rows:
+        if not source_effective:
+            continue
         cur = first_distill.get(source_id)
         if cur is None or distill_ts < cur:
             first_distill[source_id] = distill_ts

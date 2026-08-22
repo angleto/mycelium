@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -198,6 +198,53 @@ async def test_time_to_first_link_present_when_linked_none_otherwise() -> None:
     assert m.value is not None and m.value >= 0  # link created after the notes
 
 
+async def _trash(s: object, org: uuid.UUID, user: uuid.UUID, note_id: uuid.UUID) -> None:
+    """Bin a note through the service (version read fresh: linking does
+    not bump it, but nothing here depends on that)."""
+    ver = (await s.execute(select(Note.version).where(Note.id == note_id))).scalar_one()  # type: ignore[attr-defined]
+    await notes_svc.soft_delete_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        note_id=note_id,
+        expected_version=ver,
+    )
+
+
+async def test_time_to_first_link_ignores_an_edge_whose_other_end_is_binned() -> None:
+    """ADR-0043 D1 at both ends (task 02f8f7c7): an edge into the bin is
+    not an edge -- the weave builder drops it -- so it cannot be the
+    moment a live note was absorbed."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        assert (await health_svc.compute_health(s, org_id=org)).time_to_first_link.value is not None
+        await _trash(s, org, user, b.id)
+        health = await health_svc.compute_health(s, org_id=org)
+    # a is still live and still linkless: no reading, not a stale one.
+    assert health.time_to_first_link.value is None
+    assert health.time_to_first_link.reason
+
+
+async def test_time_to_first_link_ignores_an_edge_into_an_unapproved_proposal() -> None:
+    """The same at the review gate: a 'proposed' node is not a node yet,
+    so linking to it is not absorption into the mycelium."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        await s.execute(update(Note).where(Note.id == b.id).values(review_state="proposed"))
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.time_to_first_link.value is None
+
+
 async def test_tag_entropy_of_two_distinct_neighbour_tags_is_one_bit() -> None:
     org, user = await _org_user()
     async with tenant_session(str(org), str(user)) as s:
@@ -238,6 +285,47 @@ async def test_density_delta_positive_when_links_added_after_old_notes() -> None
         health = await health_svc.compute_health(s, org_id=org)
     # now: 2 notes / 1 link = 0.5 ; then: 1 note / 0 links = 0.0 ; delta 0.5.
     assert health.density_delta_7d.value == 0.5
+
+
+async def test_density_delta_does_not_rise_when_a_linked_node_is_binned() -> None:
+    """The reported failure (task 02f8f7c7): the denominator lost the
+    binned note while the numerator kept its link, so throwing something
+    away -- what ``reject_node`` does to a rejected proposal -- reported a
+    THICKENING mycelium. Numerator and denominator now read the same
+    perimeter, so the edge leaves with its endpoint."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "old-a")
+        b = await _make_note(s, org, user, "new-b")
+        old = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=10)
+        await s.execute(update(Note).where(Note.id == a.id).values(created_at=old))
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        assert (await health_svc.compute_health(s, org_id=org)).density_delta_7d.value == 0.5
+        await _trash(s, org, user, b.id)
+        health = await health_svc.compute_health(s, org_id=org)
+    # now: 1 effective note / 0 effective links = 0.0 ; then: 1 / 0 = 0.0.
+    # Before the fix: 1.0 - 0.0 = 1.0, a rise caused by a deletion.
+    assert health.density_delta_7d.value == 0.0
+
+
+async def test_density_delta_excludes_unapproved_proposals_from_both_terms() -> None:
+    """A proposal awaiting review is neither a node nor an edge: it must
+    not move the density in either direction while it sits in the inbox."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "old-a")
+        old = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=10)
+        await s.execute(update(Note).where(Note.id == a.id).values(created_at=old))
+        b = await _make_note(s, org, user, "proposed-b")
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        await s.execute(update(Note).where(Note.id == b.id).values(review_state="proposed"))
+        health = await health_svc.compute_health(s, org_id=org)
+    # Without the review leg: 2 notes / 1 link now -> 0.5 out of thin air.
+    assert health.density_delta_7d.value == 0.0
 
 
 async def test_recall_at_k_is_blocked_with_reason() -> None:
@@ -302,6 +390,82 @@ async def test_fungal_lag_reason_when_distillation_from_live_source(_wire_llm: N
             text="a non-trivial body the LLM will distill on the first pass",
         )
         await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.fungal_lag.value is None
+    assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
+
+
+async def test_fungal_lag_ignores_a_distillation_awaiting_review(_wire_llm: None) -> None:
+    """An un-approved distillation is a PROPOSAL of humus, not humus
+    produced: it must not report decomposition that nobody accepted (task
+    02f8f7c7). With no other distillation the sensor reads 'none yet'."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="finished",
+            text="a finished thought worth distilling into reusable atoms",
+        )
+        await s.flush()
+        s.add(
+            ActivityLog(
+                org_id=org,
+                actor_id=user,
+                actor_kind="human_direct",
+                entity="note",
+                entity_id=source.id,
+                action="archive",
+                ts=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2),
+            )
+        )
+        await s.flush()
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        assert (await health_svc.compute_health(s, org_id=org)).fungal_lag.value is not None
+        await s.execute(
+            update(Note)
+            .where(Note.org_id == org, Note.humus_kind == "distillation")
+            .values(review_state="proposed")
+        )
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.fungal_lag.value is None
+    assert health.fungal_lag.reason == health_svc._NO_DISTILLATIONS
+
+
+async def test_fungal_lag_when_the_source_is_binned_reports_no_archived_source(
+    _wire_llm: None,
+) -> None:
+    """The source left the mycelium: there is no interval to measure, and
+    the humus atom it produced is still there -- so the reason is 'none
+    from an archived source', never 'no distillations yet'."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="finished",
+            text="a finished thought worth distilling into reusable atoms",
+        )
+        await s.flush()
+        s.add(
+            ActivityLog(
+                org_id=org,
+                actor_id=user,
+                actor_kind="human_direct",
+                entity="note",
+                entity_id=source.id,
+                action="archive",
+                ts=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2),
+            )
+        )
+        await s.flush()
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        assert (await health_svc.compute_health(s, org_id=org)).fungal_lag.value is not None
+        await _trash(s, org, user, source.id)
         health = await health_svc.compute_health(s, org_id=org)
     assert health.fungal_lag.value is None
     assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
