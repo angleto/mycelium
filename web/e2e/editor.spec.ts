@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
-import { readSource, setSource, sourceContent } from './source-editor'
+import { placeCaret, readSource, setSource, sourceContent } from './source-editor'
 
 // Regression coverage for the note editor. There is ONE editing surface now
 // -- the markdown source, live-previewed -- so the mode toggle these tests
@@ -235,9 +235,7 @@ test('a markdown-source edit is what gets saved, byte for byte', async ({ page }
 
   // Put the caret at a known offset and type one character.
   const at = VERBATIM.indexOf('paragrafo')
-  await sourceContent(page).click()
-  await page.keyboard.press('ControlOrMeta+ArrowUp')
-  for (let i = 0; i < at; i += 1) await page.keyboard.press('ArrowRight')
+  await placeCaret(page, VERBATIM, at)
   await page.keyboard.type('X')
 
   await page.waitForResponse(

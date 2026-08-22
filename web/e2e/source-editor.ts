@@ -53,6 +53,72 @@ export async function setSource(page: Page, md: string, nth = 0): Promise<void> 
 }
 
 /**
+ * Put the caret at an absolute offset in the SOURCE.
+ *
+ * NOT by counting ArrowRight from the document start. The live preview hides
+ * markup and renders whole blocks as widgets, so a keypress crosses RENDERED
+ * positions, not source characters: walking `n` times right lands further down
+ * the document than offset `n` says, and the test that did it typed its
+ * character three blocks away from where it meant to.
+ *
+ * Select-all first -- the editor's own reveal rule, the same one `readSource`
+ * leans on: with the whole document selected every line shows its source, so
+ * the rendered lines ARE the source lines and a (line, column) resolved from
+ * the source text addresses the DOM faithfully. Then set the browser
+ * selection there, which is where CodeMirror reads its own from; collapsing
+ * the selection re-hides the other lines' markup, which changes what is
+ * DRAWN and never the document, so the offset stays put.
+ *
+ * ``md`` is the source the editor currently holds: the caller has it (it
+ * pasted it), and resolving the offset against it keeps this helper out of
+ * the business of parsing what is on screen.
+ */
+export async function placeCaret(
+  page: Page,
+  md: string,
+  offset: number,
+  nth = 0,
+): Promise<void> {
+  const before = md.slice(0, offset)
+  const line = before.split('\n').length - 1
+  const column = offset - (before.lastIndexOf('\n') + 1)
+  const content = sourceContent(page, nth)
+  await content.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page
+    .locator('.rte__src')
+    .nth(nth)
+    .locator('.cm-line')
+    .nth(line)
+    .evaluate((el, col) => {
+      // The line's text nodes in order; the column falls in one of them.
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      let seen = 0
+      let node = walker.nextNode() as Text | null
+      let target: Text | null = node
+      let inNode = col
+      while (node) {
+        if (seen + node.length >= col) {
+          target = node
+          inNode = col - seen
+          break
+        }
+        seen += node.length
+        target = node
+        inNode = node.length
+        node = walker.nextNode() as Text | null
+      }
+      const range = document.createRange()
+      if (target) range.setStart(target, Math.min(inNode, target.length))
+      else range.setStart(el, 0)
+      range.collapse(true)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }, column)
+}
+
+/**
  * The document as text, rebuilt from the rendered lines.
  *
  * SELECT-ALL FIRST, and that is not a trick: the live-preview layer hides
