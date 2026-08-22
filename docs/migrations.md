@@ -21,7 +21,76 @@ core/migrations/versions/
 script. `SET LOCAL check_function_bodies = off` lets functions reference
 tables that pg_dump emits later in the file.
 
-## The 2026-05-25 squash (cutover)
+## The 2026-08-22 squash (current cutover)
+
+The chain had grown back to 99 revisions. It was collapsed again, by the
+same procedure as 2026-05-25 below: a cleaned `pg_dump --schema-only
+--no-owner --exclude-table=public.alembic_version` of the post-`0099`
+schema became the new `0001_baseline.sql`, and revisions `0002..0099`
+were deleted.
+
+Verified before landing: a fresh `alembic upgrade head` on the squashed
+chain produces the same schema as replaying the full chain, down to 64
+lines that differ only in how PostgreSQL re-renders `= ANY (ARRAY[...])`
+inside CHECK constraints and partial indexes (semantically identical, and
+a fixed point from here on — a second dump/restore round trip is byte
+identical).
+
+### What existing deployments must do
+
+```bash
+# once, on every environment that was at 0002..0099
+alembic -c core/alembic.ini stamp 0001
+```
+
+**Do not run `upgrade`** on those: the schema is already there and the
+baseline would try to create it again.
+
+That command only works while the checkout still carries the OLD chain —
+Alembic resolves the CURRENT revision before stamping, and `0099` no
+longer exists once the squash has landed. Production was stamped from the
+running pod, whose image predates the squash, so it resolved fine. From a
+checkout that already has the squashed chain, the same environment needs:
+
+```bash
+alembic -c core/alembic.ini stamp 0001 --purge
+```
+
+`--purge` clears `alembic_version` instead of trying to resolve what is
+in it. Same end state, and it is the form to use for a local database
+that was sitting at an old revision.
+
+### The roundtrip test now wipes the database it runs on
+
+`core/tests/test_migrations.py` does `downgrade -1` then `upgrade head`.
+With a single revision, `-1` is revision zero, so the downgrade drops and
+recreates schema `public` — every row in that database included. It used
+to revert one migration; now it empties the whole thing. Point it at a
+throwaway database, never at one whose contents you want to keep.
+
+### Two latent bugs this exposed
+
+While the chain was long, `downgrade -1` never reached revision zero, so
+the baseline's own `downgrade()` had never run. It had two faults, both
+now fixed:
+
+- it dropped the `mycelium_app` role, which is bootstrapped out of band
+  and whose password a migration does not have — so it could destroy it
+  but never recreate it, and the following `upgrade`'s GRANTs would land
+  on a missing role;
+- it dropped schema `public` including `alembic_version`, then Alembic
+  tried to delete its bookkeeping row from a table that no longer
+  existed (and it requires that delete to match exactly one row).
+
+### The backfill archive
+
+A squash keeps the schema and drops the data transformations. The 16
+revisions that carried them are preserved whole under
+`core/migrations/archive/`, with an index of what each repaired and
+whether it ever ran in production. Four of them had silently no-opped
+there (see below); archiving is what keeps that recoverable.
+
+## The 2026-05-25 squash (first cutover, historical)
 
 Up to v1.0 the chain grew incrementally to 104 revisions, with embedded
 backfills tied to dataset shapes that production has long left behind.
@@ -101,11 +170,32 @@ Migration `0011` shipped exactly that, `0012` then dropped the column
 the backfill was supposed to have copied, and prod note bodies came
 back empty (incident 2026-05-27, task `1cd8bc0a`, recovered by `0013`).
 
-Do not rely on the migration role being exempt: only a superuser (or
-an explicit `BYPASSRLS` attribute) escapes FORCE, and that is a
-per-environment property of the deployed role, not something a
-revision can assume. Write the repair so it is correct for a plain
-owner.
+**Since 2026-08-22 the runner handles this centrally** and the manual
+bracket below is no longer required. `core/migrations/env.py` wraps the
+whole run in `mycelium_core.migration_rls.owner_sees_all_tenants`, which
+lifts `FORCE` for the duration of the migration transaction and restores
+it on the way out — and does nothing at all where the role already
+bypasses RLS (dev, CI), so no locks are taken there.
+
+That fix exists because documenting the trap was not enough. This
+section has described it since the 0011/0013 incident, and `0016`,
+`0022`, `0039`, `0095` and `0099` still shipped without the bracket. All
+five were audited in production on 2026-08-22: `0099` and `0039` had
+really no-opped and were repaired (22 annotations re-anchored; 48 time
+entries realigned), `0022` and `0095` had no rows to touch anyway, and
+`0016` is not recoverable but not a defect either. Per-migration outcomes
+are in `core/migrations/archive/README.md`.
+
+The point stands regardless of how much damage each one did: a rule that
+has to be remembered on every revision is not a defence, and it was
+forgotten five times after being written down.
+
+The reasoning behind the mechanism, and the environment divergence that
+made it invisible (the owner role is a superuser in dev and CI, not on
+managed PostgreSQL), is in the ADR-0015 amendment.
+
+The historical guidance follows, still valid as background and as the
+pattern to use for a one-off repair script run outside Alembic:
 
 Bracket every such statement:
 
