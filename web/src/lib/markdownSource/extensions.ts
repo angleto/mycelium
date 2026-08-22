@@ -11,6 +11,7 @@ import { tableKeymap } from './tableCommands'
 import { markdownCompletion } from './completion'
 import { activeMarks, type ActiveMark } from './commands'
 import { annotationLayer } from './annotationLayer'
+import { entityChips } from './entityChips'
 import { notifySelection } from '../annotationSurface'
 import type { ImageUploadParent } from '../imageUpload'
 import { blockPreview } from './blockPreview'
@@ -193,6 +194,9 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // Comment / suggestion marks. A bare state field: the annotations
     // themselves live in React state and arrive through a StateEffect.
     annotationLayer(),
+    // Clickable chips for a backticked UUID prefix (ADR-0038). Routing is
+    // the global AppShell interceptor, keyed on data-entity-prefix.
+    entityChips(),
     EditorView.lineWrapping,
     baseTheme,
     ...(opts.placeholder ? [cmPlaceholder(opts.placeholder)] : []),

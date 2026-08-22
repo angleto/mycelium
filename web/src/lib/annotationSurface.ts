@@ -1,4 +1,3 @@
-import type { Editor as TiptapEditor } from '@tiptap/core'
 import type { EditorView as CmView } from '@codemirror/view'
 import type { AnchorDomain } from './annotationsApi'
 import { readSourceSelection } from './markdownSource/sourceSelection'
@@ -11,15 +10,15 @@ import { readSourceSelection } from './markdownSource/sourceSelection'
 // cards, the accept/reject/resolve calls, the whole 200-line JSX block --
 // never names the editor at all.
 //
-// So this is the seam, rather than a second copy of the component for the
-// second surface. Two adapters implement it: the legacy tiptap one, which
-// reads a RENDERED projection of the document, and the markdown source one,
-// whose selection already IS a span of the stored bytes.
+// It kept its shape after the WYSIWYG surface was retired, because the seam
+// is what made that retirement a deletion rather than a rewrite: the
+// component was already written against three functions, so removing one
+// adapter removed one adapter.
 //
-// The `domain` field is not decoration. The two adapters capture anchors in
-// two different languages, and the row records which one it was (migration
-// 0099): a quote read in the wrong domain does not merely fail to locate, it
-// can match the WRONG passage.
+// The `domain` field survives for the same reason. Anchors written by the
+// old surface are in a different language, and the row records which one
+// (migration 0099): a quote read in the wrong domain does not merely fail to
+// locate, it can match the WRONG passage.
 
 /** A selection, ready to become an annotation anchor. */
 export type SurfaceSelection = {
@@ -46,52 +45,6 @@ export type AnnotationSurface = {
   markRoot: () => HTMLElement | null
   /** Which projection `readSelection().text` is written in. */
   domain: AnchorDomain
-}
-
-/**
- * The legacy WYSIWYG surface.
- *
- * Its quote is `doc.textBetween(from, to, ' ')`: markup stripped, links
- * reduced to their label, blocks joined by a space. That is a projection of
- * the document rather than a span of it, which is why the server has to keep
- * a matching projection to resolve it, and why this adapter declares
- * `rendered`.
- */
-export function tiptapSurface(editor: TiptapEditor): AnnotationSurface {
-  return {
-    domain: 'rendered',
-    markRoot: () => editor.view.dom as HTMLElement,
-    onSelectionChange: (cb) => {
-      editor.on('selectionUpdate', cb)
-      return () => editor.off('selectionUpdate', cb)
-    },
-    readSelection: () => {
-      const { state, view } = editor
-      const { from, to, empty } = state.selection
-      if (empty || to <= from) return null
-      const doc = state.doc
-      const text = doc.textBetween(from, to, ' ')
-      if (!text.trim()) return null
-      const prefix = doc.textBetween(doc.resolve(from).start(), from, ' ').slice(-24)
-      const suffix = doc.textBetween(to, doc.resolve(to).end(), ' ').slice(0, 24)
-      try {
-        const a = view.coordsAtPos(from)
-        const b = view.coordsAtPos(to)
-        return {
-          from,
-          to,
-          text,
-          prefix,
-          suffix,
-          left: (a.left + b.left) / 2,
-          top: Math.min(a.top, b.top),
-          bottom: Math.max(a.bottom, b.bottom),
-        }
-      } catch {
-        return null
-      }
-    },
-  }
 }
 
 /**

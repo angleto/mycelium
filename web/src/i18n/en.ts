@@ -1230,10 +1230,6 @@ export const en = {
     imageNeedsSave: 'Save the note before adding images.',
     attach: 'Attach / link a file',
     attachNeedsSave: 'Save first to attach files.',
-    toRaw: 'Edit as Markdown',
-    toWysiwyg: 'Rich editor',
-    normalisesOnEdit:
-      'This body was written outside the app and does not survive the rich editor unchanged (paragraph wrapping, escapes, table separators). Reading it here changes nothing; the first edit saves it in normalised form. For byte-exact edits use "Edit as Markdown".',
     downloadMd: 'Download markdown (.md)',
     downloadMdShort: '.md',
     exportPdf: 'Export PDF',

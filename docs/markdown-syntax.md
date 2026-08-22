@@ -73,130 +73,99 @@ Refusing rather than collapsing is deliberate: collapsing the parts into one
 would cascade-delete every comment and suggestion anchored to the parts that
 disappear.
 
-## The visual editor
+## The editor
 
-**The visual editor is a view mode, not a storage format** — it is the
-default one for every body, wherever the body came from, and opening a note
-in it changes nothing on the server.
-
-Writing is the asymmetric half, today. The current editor (tiptap) can only
-save what its markdown serializer produces, and that serialization is not the
-identity, so a body written outside the app is normalised the first time it is
-edited *there*. The editor measures this once per body and says so in a
-notice; content authored in the app is a fixed point by construction, so the
-notice never appears on it.
-
-The measured list is longer than this page used to claim. Beyond hard-wrapped
-paragraphs, display maths (`$$ … $$`), an underscore between non-ASCII
-characters (`Φ_ℓ`) and HTML other than `<sub>` / `<sup>`, the round trip also
-rewrites: setext headings to ATX, `*` and `+` bullets to `-`, `1)` to `1.`,
-`~~~` fences and indented code to ```` ``` ````, padded and **aligned** table
-separators to `| --- |`, tight task lists to loose ones, reference links to
-inline ones, and `[`, `*`, `_` to escaped forms. A few constructs are not
-merely reformatted but corrupted: YAML front matter, footnotes, a fence
-containing a ```` ``` ```` run, an escaped `\|` inside a table cell, and a
-table cell holding only an image.
-
-Practical consequence for anything meant to stay byte-exact: edit it under
-**"Edit as Markdown"**, where what you type is what is stored.
-
-That mode is no longer a bare `<textarea>`. It is a CodeMirror surface whose
-*document is the markdown string itself*: reading it is `state.sliceDoc()`
-and nothing else, so there is no serializer between what you type and what is
+**The editor's document IS the markdown.** Reading it is `state.sliceDoc()`
+and nothing else: there is no serializer between what you type and what is
 stored, and therefore nothing that can be lossy. It never rewrites a byte you
 did not type.
 
-It also renders while you write. Markup recedes on every line the caret is
-not on: `## Titolo` shows as a heading, `**grassetto**` as bold,
-`[label](url)` as an underlined label. Put the caret on the line and the
-source comes straight back, so you are always editing markdown, never a
-rendering of it. The whole layer is decorations; it dispatches no document
-change, which is what the tests assert first.
+This is a change of substrate, not a setting. There used to be two surfaces,
+a visual one and a source one, and the visual one could only save what its
+markdown serializer produced. That serializer was not the identity: measured
+across 82 constructs it re-flowed hard-wrapped paragraphs, rewrote `*` and `+`
+bullets, dropped table alignment, escaped `[` and `_`, and outright corrupted
+YAML front matter, footnotes, a fence containing a ``` run, an escaped `\|`
+inside a table cell and an image-only cell. Opening such a body was safe;
+editing it once was not, and a notice used to say so. Both the surface and the
+notice are gone.
 
-Whole blocks get a real preview: a ` ```mermaid ` fence renders as its
-diagram, a `$$ … $$` block as the typeset formula, a GFM table as a table
-with its alignments, and a setext underline (`======`) folds into the heading
-above it. Put the caret inside one and the source comes back. For a diagram
-and a formula the preview stays visible *underneath* the source while you
-edit it, because writing either of them blind is not writing them.
-
-An image embed (`![alt](…)`) shows the picture, whether the reference is an
-`/attachments/<id>/download` path or a bare filename resolved against this
-note's or task's own attachments. The bytes are held for as long as the
-editor is open, so moving the caret onto and off an image's line never
-re-downloads it.
-
-One construct deliberately keeps its source: an autolink (`<https://…>`),
-which is all URL, so hiding the destination would leave an empty line with no
-label to put in its place.
-
-### The toolbar in source mode
-
-Every formatting button works here too, as a transformation of the source:
-`B` inserts `**`, `H2` puts `## ` on each selected line, the list buttons
-switch marker kind instead of stacking one on top of another, and the link
-button escapes the label it wraps. Undo and redo are the editor's own.
-
-Two behaviours worth knowing. A button **refuses** rather than guessing when
-its range crosses a blank line (one pair of `**` cannot wrap two paragraphs)
-or lands inside a code fence or a table's delimiter row, where those
-characters would not be markup. And a table's columns are re-aligned only
-when you press the re-align button: nothing reformats a table you are merely
-editing, because rewriting bytes nobody typed is the thing this editor
-exists not to do.
-
-Tab and Shift-Tab move between table cells, and do nothing anywhere else, so
-the key keeps its usual meaning outside a table.
-
-### Comments and suggestions
-
-They work here too, and their anchor is the markdown SOURCE: select
-`**importante**` and that is what gets quoted, struck and spliced. The
-visual editor captures a RENDERED quote instead (markup stripped, links
-reduced to their label), so each annotation records which projection it was
-written in and each surface paints only its own. An annotation captured in
-the other one stays listed in the panel, unpainted, rather than being drawn
-over a passage nobody chose.
-
-A selection is grown so it never covers one delimiter of a pair without the
-other: dragging from the middle of a word to inside the closing `**` quotes
-the whole `**run**`, because half a delimiter is markup with nothing to close
-it. A selection covering NEITHER delimiter is left alone, since commenting on
-just the word inside a bold run is the ordinary thing to want.
-
-One limit worth knowing: an annotation whose passage sits inside a block that
-is currently shown as a widget (a rendered table, a diagram) is not
-highlighted until you put the caret in that block and its source comes back.
-The annotation is still there and still accepts.
-
-### Typeaheads and pasting
-
-`@` followed by a title searches this workspace's tasks, notes and tags and
-inserts `[label](@kind:uuid)`. `[[` followed by a title, or by an 8-character
-id prefix, inserts the backticked chip (`` `91cf6aaa` ``). Both insert exactly
-what the visual editor inserts, so a body reads the same whichever surface
-wrote it, and both escape the label they wrap.
-
-Pasting markdown source finally works: the document IS the text, so a
-reference, a table or a whole document lands as itself. (In the visual editor
-a pasted `![name](/attachments/…)` arrived as literal text and the serializer
-escaped it on the way out, so the stored body held `!\[name\](…)` and readers
-saw the characters instead of the image.) Pasting a URL over a selection
-still wraps it as a link, and pasting or dropping an image file uploads it.
-
-`web/test/markdown-corpus/` holds one fixture per construct the visual editor
-damages, and `pnpm test` asserts that every one of them comes back out of the
-source editor exactly as it went in. There is no allowlist of known-lossy
-cases: a fixture that cannot round-trip is a bug. The corpus runs in the
-`web` CI job, needs no backend, and takes about two seconds.
+`web/test/markdown-corpus/` holds one fixture per construct that used to
+break, and `pnpm test` asserts that every one of them comes back out of the
+editor exactly as it went in. There is no allowlist of known-lossy cases: a
+fixture that cannot round-trip is a bug. The corpus runs in the `web` CI job,
+needs no backend, and takes about two seconds.
 
 The one stated limit is line endings. A uniformly-LF body and a uniformly-CRLF
 body are both exact. A body that MIXES the two displays correctly and writes
 nothing when opened, but normalises to LF on the first edit: pinning CRLF for
 such a body would make CodeMirror split on `\r\n` only, collapsing the whole
-document into a single line with no block structure at all. (The visual editor
-destroys every CRLF unconditionally, so this is strictly narrower.)
+document into a single line with no block structure at all.
 
-The visual editor is being moved onto the same substrate, with rich rendering
-as a decoration layer over the source rather than a second document model.
-When that lands, the notice and this whole section go with it.
+### It renders while you write
+
+Markup recedes on every line the caret is not on: `## Titolo` shows as a
+heading, `**grassetto**` as bold, `[label](url)` as an underlined label. Put
+the caret on the line and the source comes straight back, so you are always
+editing markdown, never a rendering of it. The whole layer is decorations; it
+dispatches no document change, which is what the tests assert first.
+
+Whole blocks get a real preview: a ` ```mermaid ` fence renders as its
+diagram, a `$$ … $$` block as the typeset formula, a GFM table as a table with
+its alignments, an `![alt](…)` embed as the picture, and a setext underline
+folds into the heading above it. For a diagram and a formula the preview stays
+visible *underneath* the source while you edit it, because writing either of
+them blind is not writing them.
+
+One construct deliberately keeps its source: an autolink (`<https://…>`),
+which is all URL, so hiding the destination would leave an empty line with no
+label to put in its place.
+
+### The toolbar
+
+Every formatting button is a transformation of the source: `B` inserts `**`,
+`H2` puts `## ` on each selected line, the list buttons switch marker kind
+instead of stacking one on top of another, and the link button escapes the
+label it wraps. Undo and redo are the editor's own.
+
+Two behaviours worth knowing. A button **refuses** rather than guessing when
+its range crosses a blank line (one pair of `**` cannot wrap two paragraphs)
+or lands inside a code fence or a table's delimiter row, where those
+characters would not be markup. And a table's columns are re-aligned only when
+you press the re-align button: nothing reformats a table you are merely
+editing, because rewriting bytes nobody typed is the thing this editor exists
+not to do.
+
+Tab and Shift-Tab move between table cells, and do nothing anywhere else, so
+the key keeps its usual meaning outside a table.
+
+### Typeaheads and pasting
+
+`@` followed by a title searches this workspace's tasks, notes and tags and
+inserts `[label](@kind:uuid)`. `[[` followed by a title, or by an 8-character
+id prefix, inserts the backticked chip (`` `91cf6aaa` ``). Both escape the
+label they wrap.
+
+Pasting markdown source works: the document IS the text, so a reference, a
+table or a whole document lands as itself. (The visual editor took a pasted
+`![name](/attachments/…)` as literal text and escaped it on the way out, so
+the stored body held `!\[name\](…)` and readers saw the characters instead of
+the image.) Pasting a URL over a selection wraps it as a link, and pasting or
+dropping an image file uploads it.
+
+### Comments and suggestions
+
+Their anchor is the markdown SOURCE: select `**importante**` and that is what
+gets quoted, struck and spliced. A selection is grown so it never covers one
+delimiter of a pair without the other, since half a delimiter is markup with
+nothing to close it; a selection covering neither is left alone, because
+commenting on just the word inside a bold run is the ordinary thing to want.
+
+Annotations written by the retired visual editor quoted a RENDERED projection
+instead. Migration 0099 converted every one it could; the rest stay listed in
+the panel, unpainted, rather than being drawn over a passage nobody chose.
+
+One limit: an annotation whose passage sits inside a block currently shown as
+a widget (a rendered table, a diagram) is not highlighted until you put the
+caret in that block and its source comes back. The annotation is still there
+and still accepts.

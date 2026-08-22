@@ -69,7 +69,7 @@ test('task: an out-of-band edit surfaces the reload banner and reload shows it',
 
   await login(page)
   await page.goto(`/tasks/${task.id}`)
-  const editor = page.locator('.ProseMirror').first()
+  const editor = page.locator('.cm-content').first()
   await expect(editor).toContainText('original body', { timeout: 15_000 })
   await page.waitForTimeout(1000)
 
@@ -114,7 +114,7 @@ test('note part: an out-of-band part edit surfaces the reload banner and reload 
 
   await login(page)
   await page.goto(`/notes/${note.id}`)
-  const editor = page.locator('.parts-editor .ProseMirror').first()
+  const editor = page.locator('.parts-editor .cm-content').first()
   await expect(editor).toContainText('part original', { timeout: 15_000 })
   // Let NotePartsEditor lift its parts signature before we move it.
   await page.waitForTimeout(1200)

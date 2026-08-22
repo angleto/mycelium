@@ -98,7 +98,7 @@ test('dead-key accents survive in the rich editor', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await expect(pm).toBeVisible()
   await pm.click()
   await page.keyboard.type('citt')
@@ -115,7 +115,7 @@ test('a dead-key accent survives the autosave landing mid-composition', async ({
   await login(page)
   await openFreshNoteEditor(page)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await pm.click()
   await page.keyboard.type('citt')
   // Hold the composition open across the 1.2s autosave debounce, so the
@@ -132,7 +132,7 @@ test('a dead-key accent survives typing after an autosave round-trip', async ({
   await login(page)
   await openFreshNoteEditor(page)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await pm.click()
   await page.keyboard.type('citt')
   // Let the debounced PATCH land and the parent adopt whatever comes back.
@@ -152,7 +152,7 @@ test('a dead-key accent survives an entity-prefix lookup resolving mid-compositi
   await login(page)
   await openFreshNoteEditor(page)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await pm.click()
   // A backticked hex prefix makes EntityPrefix fire an async lookup whose
   // resolution dispatches a transaction into the editor.
@@ -166,7 +166,7 @@ test('an accented word survives the save round-trip', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await pm.click()
   await page.keyboard.type('perch')
   await typeDeadKeyAccent(page, '`', 'è')
@@ -182,7 +182,7 @@ test('an accented word survives the save round-trip', async ({ page }) => {
   await page.reload()
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
 
-  await expect(page.locator('.ProseMirror').first()).toHaveText(
+  await expect(page.locator('.cm-content').first()).toHaveText(
     /perchè la città è così: più accenti, é acuto, ò grave\./,
   )
 })
@@ -218,7 +218,7 @@ test('a dead-key accent survives on a large, decoration-heavy note', async ({
   await login(page)
   await page.goto(`/notes/${noteId}`)
 
-  const pm = page.locator('.ProseMirror').first()
+  const pm = page.locator('.cm-content').first()
   await expect(pm).toBeVisible({ timeout: 15_000 })
   await expect(pm).toContainText('Sezione 0', { timeout: 15_000 })
 
@@ -231,11 +231,10 @@ test('a dead-key accent survives on a large, decoration-heavy note', async ({
   await expect(pm).toContainText('la città', { timeout: 15_000 })
 })
 
-test('dead-key accents survive in markdown mode', async ({ page }) => {
+test('dead-key accents survive in the editor', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
 
-  await page.getByRole('button', { name: /Edit as Markdown/ }).first().click()
   const src = sourceContent(page)
   await expect(src).toBeVisible()
   await src.click()

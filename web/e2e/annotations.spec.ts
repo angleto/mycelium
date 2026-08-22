@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 import { authedApi } from './api'
-import { inSourceMode, readSource, sourceContent } from './source-editor'
+import { readSource, sourceContent } from './source-editor'
 
 // Regression for the inline annotation UX (InlineAnnotator over the
 // task-description RichEditor):
@@ -79,7 +79,7 @@ test('inline suggest: toolbar → propose → inline diff → click mark → acc
   await login(page)
   await page.goto(`/tasks/${taskId}`)
 
-  const editor = page.locator('.ProseMirror').first()
+  const editor = page.locator('.cm-content').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
   await expect(editor).toContainText('beta', { timeout: 10_000 })
   await page.waitForTimeout(2000)
@@ -128,7 +128,7 @@ test('cancel discards a half-written suggestion', async ({ page }) => {
   await login(page)
   await page.goto(`/tasks/${taskId}`)
 
-  const editor = page.locator('.ProseMirror').first()
+  const editor = page.locator('.cm-content').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
   await expect(editor).toContainText('two', { timeout: 10_000 })
 
@@ -161,21 +161,26 @@ test('inline-mark suggestion: decoration spans the mark and accept keeps the mar
 }) => {
   const errors: string[] = []
   watch(page, errors)
-  // 'beta' is rendered text INSIDE bold; the old single-text-node finder
-  // could decorate it, but the old accept spliced the rendered quote into
-  // the markdown and would corrupt/stale the **. md_anchor fixes accept;
-  // renderDocWithMap keeps the decoration consistent.
+  // 'beta' sits inside a bold run. The old surface captured the RENDERED
+  // word and spliced it into the markdown, which is how the `**` used to be
+  // corrupted or the suggestion staled. Here the quote is the source, and
+  // the selection is snapped so it can never cover one `**` without the
+  // other.
   const taskId = await createTask('alpha **beta** gamma')
   await login(page)
   await page.goto(`/tasks/${taskId}`)
 
-  const editor = page.locator('.ProseMirror').first()
+  const editor = page.locator('.cm-content').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
   await expect(editor).toContainText('beta', { timeout: 10_000 })
   await page.waitForTimeout(1500)
 
-  // Select the bold word by double-clicking the <strong>.
-  await editor.locator('strong').first().dblclick()
+  // Select the bold word. There is no <strong> to double-click: the source
+  // reads `alpha **beta** gamma`, so select it by position.
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+ArrowUp')
+  for (let i = 0; i < 'alpha **'.length; i += 1) await page.keyboard.press('ArrowRight')
+  for (let i = 0; i < 'beta'.length; i += 1) await page.keyboard.press('Shift+ArrowRight')
   const suggestBtn = page.locator('.rte__annotate--suggest').first()
   await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
   await suggestBtn.click()
@@ -185,7 +190,7 @@ test('inline-mark suggestion: decoration spans the mark and accept keeps the mar
   await pop.getByRole('button', { name: /Propose|Proponi/i }).click()
   await page.waitForTimeout(800)
 
-  // The decoration draws over the bold word (multi-node rendered domain).
+  // The decoration draws over the quoted source.
   const del = page.locator('.anno-mark--del').first()
   await expect(del).toBeVisible({ timeout: 5000 })
   await del.click()
@@ -210,7 +215,7 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
   // The note page renders the part body as a RichEditor inside the parts
   // editor. This is the surface where #2 used to fail: after Accept the
   // local ``editingBody`` draft shadowed the freshly spliced body.
-  const editor = page.locator('.parts-editor .ProseMirror').first()
+  const editor = page.locator('.parts-editor .cm-content').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
   await expect(editor).toContainText('beta', { timeout: 10_000 })
   await page.waitForTimeout(1500)
@@ -243,7 +248,7 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
   await expect(editor).not.toContainText('beta gamma delta')
 })
 
-test('inline suggest in MARKDOWN mode: the anchor is the source, and accept splices it', async ({
+test('inline suggest: the anchor is the markdown source, and accept splices it', async ({
   page,
 }) => {
   // The capability this whole move exists for. Until now the annotation UI
@@ -261,12 +266,6 @@ test('inline suggest in MARKDOWN mode: the anchor is the source, and accept spli
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1500)
 
-  // Into markdown mode.
-  const toggle = page.getByRole('button', { name: /Edit as Markdown|Rich editor/ }).first()
-  if (!(await toggle.isVisible().catch(() => false))) {
-    await page.locator('.rte__collapse').first().click()
-  }
-  if (!(await inSourceMode(page))) await toggle.click()
   await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
 
   // Select the whole line, which in this surface quotes the markup too.

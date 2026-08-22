@@ -1888,7 +1888,6 @@ button.btn--danger:hover {
   flex-direction: column;
   min-height: 0;
 }
-.modal__body .grow .rte .ProseMirror,
 .modal__body .grow .rte .rte__raw {
   flex: 1 1 auto;
   /* No floor on the leaf: it fills the .grow wrapper exactly (which
@@ -2133,49 +2132,6 @@ button.btn--danger:hover {
 /* Code-block node view in the WYSIWYG editor. The editable <pre><code>
    mirrors the read-side .md pre; the mermaid variant stacks a live diagram
    preview beneath the source, separated by a hairline. */
-.rte-cb pre {
-  margin: 0.4rem 0;
-  background: var(--surface-2);
-  padding: 0.7rem;
-  border-radius: 7px;
-  overflow: auto;
-}
-.rte-cb pre code {
-  background: none;
-  padding: 0;
-}
-.rte-cb__preview {
-  margin: 0.2rem 0 0.6rem;
-  padding-top: 0.4rem;
-  border-top: 1px dashed var(--border);
-}
-/* Graph-only default for a mermaid block: hide the editable source <pre>
-   (kept mounted for ProseMirror) and drop the hairline that separated it
-   from the preview, so the editor matches the read-side diagram. The `>`
-   only targets the source pre, never the error-fallback pre nested inside
-   .rte-cb__preview. */
-.rte-cb--rendered > pre {
-  display: none;
-}
-.rte-cb--rendered .rte-cb__preview {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
-.rte-cb__toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.2rem;
-}
-.rte-cb__toggle {
-  font-size: 0.78em;
-  color: var(--muted);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.1rem 0.5rem;
-  cursor: pointer;
-}
 .rte-cb__toggle:hover {
   color: var(--text);
   background: var(--surface-2);
@@ -3034,21 +2990,12 @@ button.btn--danger:hover {
   min-width: 0;
 }
 /* Comfortable, roomy editor (notes): a big box, not a caselina. */
-.rte--lg .rte__raw,
-.rte--lg .ProseMirror {
+.rte--lg .rte__raw {
   min-height: 22rem;
 }
 .rte__err {
   margin: 0.25rem 0 0;
   font-size: 0.82rem;
-}
-/* "This body is verbatim source, the rich editor would rewrite it": shown
- * when the markdown round-trip is not a fixed point and the editor has
- * therefore withheld the WYSIWYG surface. */
-.rte__notice {
-  margin: 0.25rem 0 0;
-  font-size: 0.82rem;
-  opacity: 0.85;
 }
 /* Embedded markdown images: capped at the editor/view width so a
  * full-resolution screenshot does not blow up the layout. ``--loading``
@@ -3256,80 +3203,6 @@ button.btn--danger:hover {
 }
 .rte__raw:focus {
   border-color: var(--accent);
-}
-.rte .ProseMirror {
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0.55rem 0.7rem;
-  min-height: 7rem;
-  background: var(--surface);
-  outline: none;
-  /* The toolbar ⤒ jump: land the top edge below the app topbar + the
-     sticky .rte__bar instead of underneath them (cf. .rte__raw, .anno). */
-  scroll-margin-top: calc(var(--header-h) + 2.6rem);
-}
-.rte .ProseMirror:focus-within {
-  border-color: var(--accent);
-}
-.rte .ProseMirror p {
-  margin: 0 0 0.5rem;
-}
-.rte .ProseMirror a {
-  color: var(--accent);
-}
-.rte .ProseMirror code {
-  font-family: var(--mono);
-  background: var(--surface-2);
-  padding: 0.1rem 0.3rem;
-  border-radius: 4px;
-}
-/* GFM task lists. The TaskList extension renders <ul data-type="taskList">
-   with each <li data-type="taskItem"> containing a <label><input
-   type="checkbox"></label><div>. Hide the default bullet, align the
-   checkbox to the first line of content, allow ticking inline. */
-.rte .ProseMirror ul[data-type='taskList'] {
-  list-style: none;
-  padding-left: 0;
-}
-.rte .ProseMirror ul[data-type='taskList'] li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
-}
-.rte .ProseMirror ul[data-type='taskList'] li > label {
-  flex: 0 0 auto;
-  margin-top: 0.3rem;
-  user-select: none;
-}
-.rte .ProseMirror ul[data-type='taskList'] li > div {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.rte .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-/* GFM tables in the editor. */
-.rte .ProseMirror table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 0.5rem 0;
-  table-layout: fixed;
-}
-.rte .ProseMirror th,
-.rte .ProseMirror td {
-  border: 1px solid var(--border);
-  padding: 0.35rem 0.5rem;
-  vertical-align: top;
-  text-align: left;
-}
-.rte .ProseMirror th {
-  background: var(--surface-2);
-  font-weight: 600;
-}
-/* The active cell selection highlight (table editing). */
-.rte .ProseMirror .selectedCell {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .mention-pop {
   position: fixed;
@@ -5203,8 +5076,7 @@ button.btn--danger:hover {
 .parts-editor__remove {
   margin-left: 0.3rem;
 }
-.parts-editor__body .rte .ProseMirror
-  > :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote) {
+.parts-editor__body .rte .cm-content > .cm-line {
   /* Cap the reading measure on flow text only; the editor box, tables
      and code fences stay full width. */
   max-width: 72ch;

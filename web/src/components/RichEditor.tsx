@@ -1,75 +1,28 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Editor as CoreEditor, Extension, Node } from '@tiptap/core'
-import {
-  EditorContent,
-  NodeViewWrapper,
-  ReactNodeViewRenderer,
-  useEditor,
-  type NodeViewProps,
-} from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Code from '@tiptap/extension-code'
-import Link from '@tiptap/extension-link'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
-import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
-import { Markdown } from 'tiptap-markdown'
-import { CodeBlockMermaid } from './MermaidCodeBlock'
-import Suggestion, {
-  type SuggestionKeyDownProps,
-  type SuggestionProps,
-} from '@tiptap/suggestion'
-import { PluginKey, type Transaction } from '@tiptap/pm/state'
-import { InlineMath, BlockMath } from './MarkdownMath'
-import {
-  AnnotationDecorations,
-  annotationKey,
-  annotationFlashKey,
-  locateAnchor,
-  type AnchorQuery,
-  type AnnotationAnchor,
-} from '../lib/annotationDecorations'
+import { EditorView as CmEditorView, type EditorView as CmView } from '@codemirror/view'
 import { InlineAnnotator, type InlineAnnotatorHandle } from './InlineAnnotator'
 import { anchorDomainOf, type Annotation, type DocKind } from '../lib/useAnnotations'
-import { EntityPrefix } from '../lib/entityPrefixExtension'
-import {
-  sourceSurface,
-  tiptapSurface,
-  type AnnotationSurface,
-} from '../lib/annotationSurface'
+import { sourceSurface, type AnnotationSurface } from '../lib/annotationSurface'
 import {
   flashAnnotation,
   locateSourceAnchor,
   setAnnotations as setSourceAnnotations,
+  type AnchorQuery,
+  type AnnotationAnchor,
 } from '../lib/markdownSource/annotationLayer'
 import { authFetch } from '../api/client'
-import { formatMentionHref } from '../lib/mentions'
-import {
-  searchCandidates,
-  searchEntities,
-  type Cand,
-  type EntityCand,
-} from '../lib/mentionSearch'
-import { useAttachmentImage } from '../lib/useAuthBlobUrl'
 import { invalidateAttachmentManifest } from '../lib/attachmentManifest'
 import {
   ACCEPTED_IMAGE_MIME,
   isAcceptedImage,
   uploadImage,
   type ImageUploadParent,
-  type UploadedAttachment,
 } from '../lib/imageUpload'
-import {
-  attachmentMarkdownRef,
-  attachmentRefFor,
-  parseAttachmentMarkdownRef,
-  type AttachmentRef,
-} from '../lib/attachmentRef'
+import { attachmentMarkdownRef } from '../lib/attachmentRef'
 import { AttachmentPicker } from './AttachmentPicker'
-import { isEditorHref } from '../lib/editorHref'
+import { renderMarkdownToHtml } from '../lib/markdownSource/renderForPrint'
 import { mdLink } from '../lib/markdownInline'
-import { EditorView as CmEditorView, type EditorView as CmView } from '@codemirror/view'
 import {
   SourceEditor,
   type SourceEditorHandle,
@@ -95,7 +48,6 @@ import {
   deleteTable as srcDelTable,
   formatTable as srcFormatTable,
 } from '../lib/markdownSource/tableCommands'
-import { Subscript, Superscript } from '../lib/subSupMarks'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
 // all editors). Defaults to shown; collapsing is the opt-in for a
@@ -107,35 +59,6 @@ function readToolbarPref(): boolean {
   } catch {
     return true
   }
-}
-
-// tiptap-markdown augments editor.storage at runtime; type the access.
-type MdStorage = { markdown: { getMarkdown: () => string } }
-function getMd(ed: CoreEditor): string {
-  return (ed.storage as unknown as MdStorage).markdown.getMarkdown()
-}
-
-// The serializer drops whatever trailing newline the body arrived with —
-// the one round-trip difference that is pure formatting and carries no
-// information, and the one every file written by a tool (MCP, CLI, an
-// import, an editor on disk) has. Re-attaching the source's own trailing
-// run makes those bodies fixed points instead of near-misses, and stops a
-// real edit from silently eating the last byte of a file.
-//
-// Emptying the document is not "keep the newlines": an empty body is
-// empty, or the part would read as dirty forever against a stored "".
-function keepTrailingNewlines(md: string, source: string): string {
-  const body = md.replace(/\n+$/, '')
-  if (!body) return ''
-  const tail = /\n+$/.exec(source)
-  return body + (tail ? tail[0] : '')
-}
-
-// The markdown this editor would write back for ``source``. The fixed-point
-// measurement and the emit path MUST go through this same function, or the
-// editor would advertise a body it does not actually produce.
-function serializeLike(ed: CoreEditor, source: string): string {
-  return keepTrailingNewlines(getMd(ed), source)
 }
 
 // Strip characters that are unsafe or awkward in filenames across
@@ -165,10 +88,29 @@ function downloadText(filename: string, mime: string, content: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-// Bearer-auth attachment routes 401 from inside a print iframe (no
-// Authorization header propagates). Fetch each ``/attachments/...``
-// image with the SPA's authFetch and rewrite the src to a data URL
-// so the printable copy is fully self-contained.
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result))
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(blob)
+  })
+}
+
+// Make every image in the printable copy self-contained.
+//
+// Two shapes reach here, and the second one only started to once the export
+// began rendering through the READ-SIDE renderer.
+//
+// A bearer-auth ``/attachments/...`` path 401s from inside a print iframe:
+// no Authorization header propagates, so the bytes are fetched with the
+// SPA's authFetch and inlined.
+//
+// A ``blob:`` URL is what the reader's own <img> carries -- useAttachmentImage
+// has already fetched the bytes and wrapped them in an object URL. That URL
+// belongs to THIS document and means nothing to the backend, so it has to be
+// read back and inlined too, or every attachment image would silently vanish
+// from the PDF.
 async function inlineAuthImages(html: string): Promise<string> {
   const tmp = document.createElement('div')
   tmp.innerHTML = html
@@ -176,18 +118,14 @@ async function inlineAuthImages(html: string): Promise<string> {
   await Promise.all(
     imgs.map(async (img) => {
       const src = img.getAttribute('src')
-      if (!src || !src.startsWith('/')) return
+      if (!src) return
+      const isAuthPath = src.startsWith('/')
+      const isBlob = src.startsWith('blob:')
+      if (!isAuthPath && !isBlob) return
       try {
-        const res = await authFetch(src)
+        const res = isBlob ? await fetch(src) : await authFetch(src)
         if (!res.ok) return
-        const blob = await res.blob()
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader()
-          r.onload = () => resolve(String(r.result))
-          r.onerror = () => reject(r.error)
-          r.readAsDataURL(blob)
-        })
-        img.setAttribute('src', dataUrl)
+        img.setAttribute('src', await blobToDataUrl(await res.blob()))
       } catch {
         // Leave the original src; the print view will show a broken
         // image rather than blocking the export.
@@ -246,320 +184,6 @@ function filenameFromContentDisposition(header: string | null): string {
 // EvidenceMentionExtension: type @ -> search Mycelium tasks/tags ->
 // inserts a [label](@kind:id) link that serializes as the DSL.
 
-const MentionExt = Extension.create({
-  name: 'myceliumMention',
-  addProseMirrorPlugins() {
-    return [
-      Suggestion<Cand>({
-        editor: this.editor,
-        char: '@',
-        allowSpaces: false,
-        items: ({ query }) => searchCandidates(query),
-        command: ({ editor, range, props }) => {
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              {
-                type: 'text',
-                text: props.label,
-                marks: [
-                  {
-                    type: 'link',
-                    attrs: { href: formatMentionHref(props.kind, props.id) },
-                  },
-                ],
-              },
-              { type: 'text', text: ' ' },
-            ])
-            .run()
-        },
-        render: () => {
-          let box: HTMLDivElement | null = null
-          let list: Cand[] = []
-          let sel = 0
-          let pick: ((c: Cand) => void) | null = null
-
-          const draw = () => {
-            const el = box
-            if (!el) return
-            el.innerHTML = ''
-            list.forEach((c, i) => {
-              const row = document.createElement('div')
-              row.className =
-                'mention-pop__row' + (i === sel ? ' mention-pop__row--sel' : '')
-              row.id = `mention-opt-${i}`
-              row.setAttribute('role', 'option')
-              row.setAttribute('aria-selected', i === sel ? 'true' : 'false')
-              row.textContent = `@${c.kind}: ${c.label}`
-              row.addEventListener('mousedown', (e) => {
-                e.preventDefault()
-                pick?.(c)
-              })
-              el.append(row)
-            })
-            // Point the listbox at the active option for screen readers.
-            if (list.length > 0) el.setAttribute('aria-activedescendant', `mention-opt-${sel}`)
-            else {
-              el.removeAttribute('aria-activedescendant')
-              el.textContent = '...'
-            }
-          }
-          const place = (rect: DOMRect | null | undefined) => {
-            if (!box || !rect) return
-            box.style.left = `${rect.left}px`
-            box.style.top = `${rect.bottom + 4}px`
-          }
-
-          return {
-            onStart: (p: SuggestionProps<Cand>) => {
-              box = document.createElement('div')
-              box.className = 'mention-pop'
-              box.setAttribute('role', 'listbox')
-              document.body.append(box)
-              list = p.items
-              sel = 0
-              pick = (c) => p.command(c)
-              place(p.clientRect?.())
-              draw()
-            },
-            onUpdate: (p: SuggestionProps<Cand>) => {
-              list = p.items
-              sel = 0
-              pick = (c) => p.command(c)
-              place(p.clientRect?.())
-              draw()
-            },
-            onKeyDown: (p: SuggestionKeyDownProps) => {
-              if (p.event.key === 'ArrowDown') {
-                sel = list.length ? (sel + 1) % list.length : 0
-                draw()
-                return true
-              }
-              if (p.event.key === 'ArrowUp') {
-                sel = list.length ? (sel - 1 + list.length) % list.length : 0
-                draw()
-                return true
-              }
-              if (p.event.key === 'Enter') {
-                if (list[sel] && pick) pick(list[sel])
-                return true
-              }
-              if (p.event.key === 'Escape') return true
-              return false
-            },
-            onExit: () => {
-              box?.remove()
-              box = null
-            },
-          }
-        },
-      }),
-    ]
-  },
-})
-
-// EntityAutocomplete (ADR-0038 layer E): type ``[[`` then a title or a
-// UUID prefix -> autocomplete of matching tasks / notes -> inserts the
-// backtick-prefix code span (the pervasive roadmap convention). The
-// EntityPrefix decoration then renders it as a live chip and the
-// markdown round-trip serializes it as `` `91cf6aaa` ``. This is the
-// authoring counterpart of that read-side chip: it prevents wrong
-// references at the source. Distinct from the @-mention above, which
-// inserts a title-baked link; a backtick-prefix resolves its title
-// live, so it never goes stale.
-
-// Imperative floating listbox for the [[ suggestion. Mirrors the
-// inline render MentionExt uses (same .mention-pop styling + keyboard
-// model); kept separate so the working @-mention render is untouched.
-function entitySuggestionRender() {
-  let box: HTMLDivElement | null = null
-  let list: EntityCand[] = []
-  let sel = 0
-  let pick: ((c: EntityCand) => void) | null = null
-
-  const draw = () => {
-    const el = box
-    if (!el) return
-    el.innerHTML = ''
-    list.forEach((c, i) => {
-      const row = document.createElement('div')
-      row.className =
-        'mention-pop__row' + (i === sel ? ' mention-pop__row--sel' : '')
-      row.id = `entity-opt-${i}`
-      row.setAttribute('role', 'option')
-      row.setAttribute('aria-selected', i === sel ? 'true' : 'false')
-      row.textContent = `${c.kind === 'task' ? '✓' : '◆'} ${c.label}`
-      row.addEventListener('mousedown', (e) => {
-        e.preventDefault()
-        pick?.(c)
-      })
-      el.append(row)
-    })
-    if (list.length > 0)
-      el.setAttribute('aria-activedescendant', `entity-opt-${sel}`)
-    else {
-      el.removeAttribute('aria-activedescendant')
-      el.textContent = '...'
-    }
-  }
-  const place = (rect: DOMRect | null | undefined) => {
-    if (!box || !rect) return
-    box.style.left = `${rect.left}px`
-    box.style.top = `${rect.bottom + 4}px`
-  }
-
-  return {
-    onStart: (p: SuggestionProps<EntityCand>) => {
-      box = document.createElement('div')
-      box.className = 'mention-pop'
-      box.setAttribute('role', 'listbox')
-      document.body.append(box)
-      list = p.items
-      sel = 0
-      pick = (c) => p.command(c)
-      place(p.clientRect?.())
-      draw()
-    },
-    onUpdate: (p: SuggestionProps<EntityCand>) => {
-      list = p.items
-      sel = 0
-      pick = (c) => p.command(c)
-      place(p.clientRect?.())
-      draw()
-    },
-    onKeyDown: (p: SuggestionKeyDownProps) => {
-      if (p.event.key === 'ArrowDown') {
-        sel = list.length ? (sel + 1) % list.length : 0
-        draw()
-        return true
-      }
-      if (p.event.key === 'ArrowUp') {
-        sel = list.length ? (sel - 1 + list.length) % list.length : 0
-        draw()
-        return true
-      }
-      if (p.event.key === 'Enter') {
-        if (list[sel] && pick) pick(list[sel])
-        return true
-      }
-      if (p.event.key === 'Escape') return true
-      return false
-    },
-    onExit: () => {
-      box?.remove()
-      box = null
-    },
-  }
-}
-
-const EntityAutocompleteExt = Extension.create({
-  name: 'myceliumEntityAutocomplete',
-  addProseMirrorPlugins() {
-    return [
-      Suggestion<EntityCand>({
-        editor: this.editor,
-        // Distinct key: @tiptap/suggestion defaults every instance to the
-        // 'suggestion' PluginKey, so without this the @-mention plugin and
-        // this one collide ("Adding different instances of a keyed plugin").
-        pluginKey: new PluginKey('myceliumEntityAutocompleteSuggestion'),
-        char: '[[',
-        allowSpaces: false,
-        startOfLine: false,
-        items: ({ query }) => searchEntities(query),
-        command: ({ editor, range, props }) => {
-          // Insert the 8-char id prefix as inline code (the backtick
-          // convention), then a trailing unmarked space so typing
-          // continues outside the code mark.
-          const code = props.id.replace(/-/g, '').slice(0, 8)
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              { type: 'text', text: code, marks: [{ type: 'code' }] },
-              { type: 'text', text: ' ' },
-            ])
-            .run()
-        },
-        render: entitySuggestionRender,
-      }),
-    ]
-  },
-})
-
-// Live preview of an embedded image inside the editor. The src is either
-// "/attachments/<id>/download" (bearer-auth route, inserted by the
-// picker/upload) or a bare filename the author typed for a file uploaded
-// to this note/task; useAttachmentImage resolves the latter against the
-// parent's attachments (read from the extension storage set by the host
-// editor) and auth-fetches either way. An unresolvable reference shows a
-// broken-image placeholder instead of spinning forever.
-function ImageNodeView({ node, extension }: NodeViewProps) {
-  const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
-  const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
-  const title = typeof node.attrs.title === 'string' ? node.attrs.title : undefined
-  const getParent = extension.options.getParent as
-    | (() => ImageUploadParent | undefined)
-    | undefined
-  const parent = getParent?.()
-  const { url, loading } = useAttachmentImage(src, parent)
-  if (loading) {
-    return <NodeViewWrapper as="span" className="md-img md-img--loading" />
-  }
-  if (!url) {
-    return (
-      <NodeViewWrapper as="span" className="md-img md-img--broken">
-        {alt || src || '?'}
-      </NodeViewWrapper>
-    )
-  }
-  return (
-    <NodeViewWrapper as="span" className="md-img-wrap">
-      <img src={url} alt={alt} title={title} className="md-img" />
-    </NodeViewWrapper>
-  )
-}
-
-// Inline image node. Same shape prosemirror-markdown / tiptap-markdown
-// expect (``name: 'image'``, attrs ``src/alt/title``), so the round-trip
-// to `![alt](src "title")` markdown is automatic. ``atom`` keeps the
-// node selectable-as-a-whole; the node view handles preview.
-const ImageExt = Node.create({
-  name: 'image',
-  inline: true,
-  group: 'inline',
-  draggable: true,
-  selectable: true,
-  atom: true,
-  // The host editor injects a getter for the owning note/task so the
-  // node view can resolve `![alt](filename.png)` references against its
-  // attachments. A getter (not a static value) keeps it current as the
-  // parent id arrives after a first save.
-  addOptions() {
-    return { getParent: () => undefined as ImageUploadParent | undefined }
-  },
-  addAttributes() {
-    return {
-      src: { default: '' },
-      alt: { default: null },
-      title: { default: null },
-    }
-  },
-  parseHTML() {
-    return [{ tag: 'img[src]' }]
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ['img', HTMLAttributes]
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(ImageNodeView)
-  },
-})
-
-// Imperative surface for navigating to an annotation's anchored passage
-// from outside the editor (the AnnotationsPanel's "go to text" button).
-// The host shares one ref between the editor and the panel; see
-// PartAnnotated / TaskDetailRoute.
 export interface AnnotationViewHandle {
   /** Scroll the editor so the annotation's anchored text is in view and
    * briefly flash it. Returns false when there is nothing to jump to
@@ -634,28 +258,6 @@ export function RichEditor({
   viewRef?: Ref<AnnotationViewHandle>
 }) {
   const { t } = useTranslation()
-  // The rich editor is the default view for EVERY body. This is the opt-in
-  // away from it: a plain markdown textarea, for pasting long blocks or
-  // editing a verbatim body byte-exactly. Both modes read/write the same
-  // `value` markdown string (bitvision EvidenceEditor pattern).
-  const [rawMode, setRawMode] = useState(false)
-  // A body that arrived from outside the app (an MCP upload, the CLI, an
-  // import) is markdown SOURCE, and the WYSIWYG surface can only ever write
-  // back what its serializer produces. That round-trip is not the identity:
-  // prosemirror-markdown re-flows a hard-wrapped paragraph onto one line,
-  // escapes ``[`` and ``_`` and rewrites table separators as ``| --- |``.
-  // So a body that is not a FIXED POINT of the round-trip gets normalised
-  // the moment somebody edits it here.
-  //
-  // The guarantee is on the WRITE, not on the view. Merely opening such a
-  // body cannot rewrite it: ``trailingNode`` is off and ``onUpdate`` emits
-  // only for a transaction that itself carried a document change, so with
-  // no human input there is no emit, hence no dirty part and no PATCH. What
-  // this flag drives is the notice below — what a real edit will cost, and
-  // where to go for a byte-exact one. Everything authored in the app is a
-  // fixed point (its serializer produced it), so the notice never shows up
-  // there. Measured once per editor instance, below.
-  const [lossyRoundTrip, setLossyRoundTrip] = useState(false)
   // Collapse the formatting buttons to reclaim writing space (a single
   // tap on a phone, where the wrapped bar otherwise eats several rows).
   // Persisted so the choice sticks across editors and sessions.
@@ -699,13 +301,6 @@ export function RichEditor({
   // synchronously (``editor.isActive``); CodeMirror has no equivalent that
   // re-renders React, so the state is pushed instead of pulled.
   const [srcMarks, setSrcMarks] = useState<Set<ActiveMark>>(() => new Set())
-  // Latest rawMode for the scroll handle (built once, must see the live
-  // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
-  // to scroll to.
-  const rawModeRef = useRef(rawMode)
-  useEffect(() => {
-    rawModeRef.current = rawMode
-  }, [rawMode])
   // Latest ``value`` for the editor's own onUpdate closure (built once):
   // the emit path re-attaches the trailing newline the incoming body
   // carries, so it has to read the live one, not the mount-time one.
@@ -757,69 +352,6 @@ export function RichEditor({
 
   // Whether the caret sits somewhere that must keep pasted text VERBATIM:
   // inside a fenced code block (```mermaid included, it is a code node with
-  // its own live preview) or inside an inline `code` mark. Converting a
-  // reference to a node there would silently corrupt a snippet whose whole
-  // point is to show the markdown syntax -- which is exactly what a user
-  // documenting the reference format is doing. Keyed on the schema's own
-  // ``spec.code`` rather than on an extension name, so a future code-ish
-  // node is covered without touching this.
-  const inCodeContext = (ed: CoreEditor): boolean => {
-    if (ed.isActive('code')) return true
-    const parent = ed.state.selection.$from.parent
-    return parent.type.spec.code === true
-  }
-
-  // Insert an attachment reference as a NODE at the WYSIWYG caret: an
-  // image embed for an image attachment, a link otherwise. Both carry the
-  // same bearer-auth /attachments href (resolved through authFetch at
-  // render time); neither exposes a public URL. Either node serializes
-  // back through tiptap-markdown as the same `![name](href)` /
-  // `[name](href)` reference attachmentMarkdownRef emits.
-  const insertAttachmentNode = (ed: CoreEditor, ref: AttachmentRef) => {
-    if (ref.image) {
-      ed.chain()
-        .focus()
-        .insertContent({
-          type: 'image',
-          attrs: { src: ref.href, alt: ref.label, title: null },
-        })
-        .run()
-      return
-    }
-    // Text node carrying a link mark, plus a trailing unmarked space so
-    // the caret lands outside the link and typing does not extend it.
-    ed.chain()
-      .focus()
-      .insertContent([
-        {
-          type: 'text',
-          text: ref.label,
-          marks: [{ type: 'link', attrs: { href: ref.href } }],
-        },
-        { type: 'text', text: ' ' },
-      ])
-      .run()
-  }
-
-  // Insert a reference to the attachment picked in the AttachmentPicker.
-  // Raw mode takes the markdown string, WYSIWYG the equivalent node —
-  // both derived from attachmentRef.ts, so this path and the Attachments
-  // panel's "Copy ref" cannot drift on the image predicate or the route.
-  const insertRef = (att: UploadedAttachment) => {
-    const meta = {
-      id: att.id,
-      filename: att.filename,
-      mime_type: att.mimeType,
-    }
-    if (rawMode) {
-      insertRawSnippet(attachmentMarkdownRef(meta))
-      return
-    }
-    const ed = editorRef.current
-    if (!ed) return
-    insertAttachmentNode(ed, attachmentRefFor(meta))
-  }
-
   const doUpload = async (file: File): Promise<void> => {
     const parent = parentRef.current
     if (!parent) {
@@ -834,18 +366,7 @@ export function RichEditor({
       // A new file exists now; drop the cached name->id map so a later
       // `![alt](filename)` reference to it resolves.
       invalidateAttachmentManifest(parent)
-      if (rawMode) {
-        insertRawSnippet(mdLink(up.filename, up.url, { image: true }))
-      } else if (editorRef.current) {
-        editorRef.current
-          .chain()
-          .focus()
-          .insertContent({
-            type: 'image',
-            attrs: { src: up.url, alt: up.filename, title: null },
-          })
-          .run()
-      }
+      insertRawSnippet(mdLink(up.filename, up.url, { image: true }))
     } catch (e) {
       setUploadErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -865,232 +386,14 @@ export function RichEditor({
     return true
   }
 
-  // Stable ref to the editor for paste/drop handlers (which are bound
-  // at editor-build time and must not capture a stale editor instance).
-  const editorRef = useRef<CoreEditor | null>(null)
-
-  // Markdown the editor currently holds. Updated on every emit
-  // (onUpdate) and after an external setContent, so the value-sync
-  // effect can tell an *external* value change (a different part/note
-  // loaded, a raw-mode edit, a conflict reload) from the editor's own
-  // content echoing back through the parent. Re-running setContent on
-  // our own echo is what rebuilt the document on every keystroke and
-  // moved the caret on every autosave.
-  const lastEmittedRef = useRef(value)
-
-  const editorProps = useMemo(
-    () => ({
-      handlePaste: (_view: unknown, event: ClipboardEvent) => {
-        const data = event.clipboardData
-        // Pasted image FILE -> upload it as an attachment of this
-        // note/task (hence the parent gate) and embed the result.
-        const items = parentRef.current ? data?.items : undefined
-        if (items) {
-          for (let i = 0; i < items.length; i += 1) {
-            const it = items[i]
-            if (it.kind === 'file') {
-              const f = it.getAsFile()
-              if (f && isAcceptedImage(f)) {
-                event.preventDefault()
-                void doUpload(f)
-                return true
-              }
-            }
-          }
-        }
-        // Pasted attachment REFERENCE -> the node it denotes. This is the
-        // string the Attachments panel's "Copy ref", the MCP `attach_file`
-        // tool and the CLI hand over, and pasting it is exactly how a user
-        // consumes it. Without this it would land as a literal text node
-        // and be saved with its brackets backslash-escaped
-        // (`!\[name\](/attachments/…)`), so every reader would get those
-        // raw characters instead of the image or the link.
-        // The reference carries the attachment id, so unlike the file
-        // branch above this needs no parent.
-        // Anything that is not one whole reference (parse returns null)
-        // falls through to ProseMirror's own paste, unchanged.
-        const ed = editorRef.current
-        const ref = parseAttachmentMarkdownRef(data?.getData('text/plain') ?? '')
-        if (ed && ref && !inCodeContext(ed)) {
-          event.preventDefault()
-          insertAttachmentNode(ed, ref)
-          return true
-        }
-        return false
-      },
-      handleDrop: (
-        _view: unknown,
-        event: DragEvent,
-        _slice: unknown,
-        moved: boolean,
-      ) => {
-        if (moved) return false
-        if (!parentRef.current) return false
-        const files = event.dataTransfer?.files
-        if (!files || files.length === 0) return false
-        let any = false
-        for (let i = 0; i < files.length; i += 1) {
-          const f = files[i]
-          if (isAcceptedImage(f)) {
-            void doUpload(f)
-            any = true
-          }
-        }
-        if (any) event.preventDefault()
-        return any
-      },
-    }),
-    // doUpload closes over `rawMode` etc. but parentRef/editorRef are
-    // refs; keeping handlers stable for the editor's lifetime is fine
-    // because they read everything they need through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  )
-
-  const editor = useEditor({
-    extensions: [
-      // StarterKit v3 bundles its own Link mark; disable it so our
-      // single configured Link wins. With both registered the
-      // StarterKit one (openOnClick: true) took over and clicking a
-      // mention did window.open('@note:uuid') -> broken tab instead
-      // of letting the app-side interceptor route it (the reason a
-      // note opened from a converted task was unreachable).
-      // Disable StarterKit's bundled code block: CodeBlockMermaid below
-      // replaces it (same node name + ```fence round-trip) so a ```mermaid
-      // block renders its diagram live while every other code block keeps
-      // the default behaviour.
-      // ``trailingNode`` is DELIBERATELY off. StarterKit bundles it, and its
-      // plugin appends a paragraph to any document whose last block is not
-      // one — on the FIRST transaction of any kind, meta-only transactions
-      // included (see @tiptap/extensions trailing-node: appendTransaction
-      // never checks docChanged). The annotation-decoration dispatch below
-      // is exactly such a transaction, so merely MOUNTING an editor over a
-      // note part mutated the document, which emitted ``update``, which the
-      // host read as "the user edited this", which autosaved a full lossy
-      // re-serialisation over verbatim content nobody had touched.
-      StarterKit.configure({
-        link: false,
-        codeBlock: false,
-        trailingNode: false,
-        code: false,
-      }),
-      // StarterKit's ``code`` mark declares ``excludes: '_'`` (excludes every
-      // other mark), so a link whose label is inline code — the ordinary way
-      // to write [`00-overview.md`](00-overview.md) — loses its ``link`` mark
-      // at PARSE time and serialises back as a bare code span with the
-      // destination gone. Exclude the formatting marks (CommonMark has no
-      // emphasis inside code) but not ``link``.
-      Code.extend({ excludes: 'bold italic strike underline' }),
-      // ``x<sub>0</sub>`` / ``2<sup>t</sup>``: the cheapest notation for
-      // light maths in prose, and what the read-side renderer shows. Only
-      // these two tags; all other inline HTML stays literal text.
-      Superscript,
-      Subscript,
-      Link.configure({
-        openOnClick: false,
-        autolink: false,
-        // ``isAllowedUri`` is the parse/render gate in tiptap v3. The
-        // ``validate`` option that used to live here is NOT this gate any
-        // more: v3 aliases it onto ``shouldAutoLink``, which only feeds the
-        // autolink plugin — off, one line above. So the custom policy was
-        // dead code and tiptap's default (which rejects every relative path
-        // containing a ``/``) silently governed the round-trip instead.
-        isAllowedUri: (url: string) => isEditorHref(url),
-        shouldAutoLink: () => false,
-      }),
-      // GitHub-flavored task lists: round-trip via tiptap-markdown's
-      // built-in task_list / task_item serializers (`- [ ]` / `- [x]`).
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      // GFM tables. tiptap-markdown carries a table serializer keyed on
-      // these node names, so pasting/typing a `| a | b |` table in raw
-      // mode round-trips to a real table in WYSIWYG and back.
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      // Code blocks, with a live diagram preview for ```mermaid (replaces
-      // StarterKit's codeBlock, disabled above).
-      CodeBlockMermaid,
-      Markdown.configure({ html: false }),
-      // LaTeX math (``$inline$`` and ``$$block$$``): KaTeX NodeView in
-      // the editor + markdown-it round-trip, so what /garden's
-      // MarkdownView renders read-side is what the author saw write-side.
-      InlineMath,
-      BlockMath,
-      // Embedded images via /attachments uploads. Round-trips to the
-      // standard `![alt](src)` markdown; the node view auth-fetches the
-      // bytes for live preview and resolves bare-filename refs against
-      // the parent's attachments (read live through parentRef). The
-      // getter is invoked later from the node view, never during render.
-      // eslint-disable-next-line react-hooks/refs
-      ImageExt.configure({ getParent: () => parentRef.current }),
-      MentionExt,
-      EntityAutocompleteExt,
-      // Clickable UUID-prefix chips for backticked codes (ADR-0038
-      // convention) read inside the editor. Decoration-only; routing
-      // is the global AppShell interceptor (data-entity-prefix).
-      EntityPrefix,
-      // Inline comment/suggestion decorations (presentational; updated
-      // via a meta transaction in the effect below).
-      AnnotationDecorations.configure({ anchors: annotations ?? [] }),
-    ],
-    content: value,
-    editorProps,
-    // Is the body this editor was built on a FIXED POINT of the markdown
-    // round-trip? Measured once, on the exact bytes the server handed us,
-    // before any transaction, so it reports on the stored body rather than
-    // on anything the session has since done to it. If it is not, editing
-    // here normalises it, and the notice says so. Measured at create rather
-    // than in an effect because "when the editor is created" is exactly the
-    // moment that matters, and ``value`` changes on every source-mode
-    // keystroke -- re-serialising a large part per keystroke would be pure
-    // waste.
-    onCreate: ({ editor: ed }: { editor: CoreEditor }) => {
-      setLossyRoundTrip(serializeLike(ed, value) !== value)
-    },
-    onUpdate: ({
-      editor,
-      transaction,
-    }: {
-      editor: CoreEditor
-      transaction: Transaction
-    }) => {
-      // Emit ONLY when the transaction that started this batch carried the
-      // document change. tiptap fires ``update`` when ANY transaction in
-      // the batch touched the doc, appended plugin transactions included,
-      // so without this guard a plugin rewriting the document behind the
-      // user's back is indistinguishable from typing — and gets autosaved.
-      // This guard is what lets the WYSIWYG surface mount over a verbatim
-      // body at all: no human edit, no emit, no write.
-      if (!transaction.docChanged) return
-      const md = serializeLike(editor, valueRef.current)
-      lastEmittedRef.current = md
-      onChange(md)
-    },
-  })
-
-  useEffect(() => {
-    editorRef.current = editor
-  }, [editor])
-
-  // Scroll the located range into view (without disturbing the selection /
-  // caret) and pulse it via a real PM decoration. A decoration survives
-  // ProseMirror's view reconciliation, unlike a class hand-added to a
-  // decoration node (which PM reverts on its next update). The clear is
-  // coalesced so a rapid repeat / prev-next sequence always pulses fully.
-  // Locate an anchor in whichever surface is showing. The two layers refuse
-  // each other's domain rather than guessing, so an anchor captured in the
-  // WYSIWYG editor simply does not resolve in the source one and vice versa
-  // -- it stays listed in the panel, unpainted, instead of being drawn over
-  // a passage nobody chose.
+  // Locate an anchor in the document. An anchor captured in the RETIRED
+  // WYSIWYG surface quotes a rendered projection, so it does not resolve
+  // here and is refused rather than guessed at: it stays listed in the
+  // panel, unpainted, instead of being drawn over a passage nobody chose.
+  // Migration 0099 converted every such row it could.
   const locateIn = useCallback((a: AnchorQuery): { from: number; to: number } | null => {
-    if (rawModeRef.current) {
-      const view = srcHandleRef.current?.view()
-      return view ? locateSourceAnchor(view.state.sliceDoc(), a) : null
-    }
-    const ed = editorRef.current
-    return ed ? locateAnchor(ed.state.doc, a) : null
+    const view = srcHandleRef.current?.view()
+    return view ? locateSourceAnchor(view.state.sliceDoc(), a) : null
   }, [])
 
   // Scroll a located range into view and pulse it, in the source surface.
@@ -1113,21 +416,6 @@ export function RichEditor({
     }, 1500)
   }, [])
 
-  const flashRange = useCallback((ed: CoreEditor, r: { from: number; to: number }) => {
-    const dom = ed.view.domAtPos(r.from)
-    // nodeType 3 = Text; ``Node`` is shadowed by @tiptap/core's import here,
-    // so use the numeric constant.
-    const el = dom.node.nodeType === 3 ? dom.node.parentElement : (dom.node as HTMLElement)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    ed.view.dispatch(ed.state.tr.setMeta(annotationFlashKey, r))
-    if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
-    flashClearRef.current = window.setTimeout(() => {
-      const e = editorRef.current
-      if (e) e.view.dispatch(e.state.tr.setMeta(annotationFlashKey, null))
-      flashClearRef.current = null
-    }, 1500)
-  }, [])
-
   // Annotations that have a locatable passage, in document order — the
   // domain both the panel's "go to text" and the toolbar prev/next walk.
   const orderedAnchored = useCallback(() => {
@@ -1142,10 +430,7 @@ export function RichEditor({
   // flash it; wraps at the ends. ``dir`` is +1 (▼, first→last) or -1 (▲).
   const navigateAnnotations = useCallback(
     (dir: 1 | -1) => {
-      // Both surfaces navigate now. This used to bail in markdown mode
-      // because there was no ProseMirror to flash a range in; the source
-      // editor has its own flash effect.
-      if (!editorRef.current && !srcHandleRef.current) return
+      if (!srcHandleRef.current) return
       const items = orderedAnchored()
       if (!items.length) {
         // No locatable passage to jump to. If open annotations exist but
@@ -1172,13 +457,12 @@ export function RichEditor({
       if (idx < 0) idx = items.length - 1
       if (idx >= items.length) idx = 0
       navIdRef.current = items[idx].row.id
-      if (rawModeRef.current) flashSourceRange(items[idx])
-      else if (editorRef.current) flashRange(editorRef.current, items[idx])
+      flashSourceRange(items[idx])
       // Reveal the comment/suggestion body, not just its passage: the
       // toolbar buttons read "go to the next comment", so show it.
       annoRef.current?.openAnnotation(items[idx].row.id)
     },
-    [orderedAnchored, flashRange, flashSourceRange, inlineAnnotations?.rows],
+    [orderedAnchored, flashSourceRange, inlineAnnotations?.rows],
   )
 
   // Imperative "go to this annotation" for the panel's per-card button:
@@ -1195,13 +479,11 @@ export function RichEditor({
         // the card the user jumped to (by ID; if it's resolved and thus
         // outside the open-only walk, the next step restarts from the end).
         navIdRef.current = a.id
-        if (rawModeRef.current) flashSourceRange(r)
-        else if (editorRef.current) flashRange(editorRef.current, r)
-        else return false
+        flashSourceRange(r)
         return true
       },
     }),
-    [flashRange, flashSourceRange, locateIn],
+    [flashSourceRange, locateIn],
   )
 
   // Any OPEN anchored annotation to navigate? Gates the toolbar prev/next.
@@ -1216,32 +498,7 @@ export function RichEditor({
   // content proportionally (it has an inner scrollbar), so the controls
   // keep working there too.
   const goToFraction = useCallback((f: number) => {
-    const clamped = Math.max(0, Math.min(1, f))
-    if (rawModeRef.current) {
-      srcHandleRef.current?.scrollToFraction(clamped)
-      return
-    }
-    const ed = editorRef.current
-    if (!ed) return
-    if (clamped <= 0) {
-      // Some hosts (the note modal) make the ProseMirror element its own
-      // scroll container; scrollIntoView on a scroll container only moves
-      // its ancestors, so also reset its own scrollTop (a no-op when the
-      // page scrolls instead).
-      ed.view.dom.scrollTo({ top: 0, behavior: 'smooth' })
-      ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return
-    }
-    if (clamped >= 1) {
-      ed.view.dom.scrollTo({ top: ed.view.dom.scrollHeight, behavior: 'smooth' })
-      ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'end' })
-      return
-    }
-    const size = ed.state.doc.content.size
-    const pos = Math.max(1, Math.min(size - 1, Math.round(clamped * size)))
-    const dom = ed.view.domAtPos(pos)
-    const el = dom.node.nodeType === 3 ? dom.node.parentElement : (dom.node as HTMLElement)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    srcHandleRef.current?.scrollToFraction(Math.max(0, Math.min(1, f)))
   }, [])
 
   const goToPercent = () => {
@@ -1260,139 +517,60 @@ export function RichEditor({
     [],
   )
 
-  // Push the current annotation anchors into the decoration plugin
-  // whenever they change. This is a meta-only transaction (no doc
-  // change), so it never affects the markdown round-trip or the caret.
+  // Push the current annotation anchors onto the editor whenever they
+  // change. A pure effect transaction: it carries no document change, so it
+  // cannot look like an edit to the autosave.
   useEffect(() => {
-    if (editor) {
-      editor.view.dispatch(editor.state.tr.setMeta(annotationKey, annotations ?? []))
-    }
-    // The same anchors go to the source layer, which ignores the ones
-    // captured in the other domain. Both editors can be alive across a mode
-    // switch, and pushing to both keeps whichever is showing correct.
     const view = srcHandle?.view()
     if (view) view.dispatch({ effects: setSourceAnnotations.of(annotations ?? []) })
-  }, [annotations, editor, srcHandle])
-
-  // Reflect *external* value changes (a different part/note loaded, a
-  // raw-mode edit, a conflict reload) onto the editor, while leaving
-  // the editor untouched when the incoming ``value`` is just its own
-  // content echoing back through the parent.
-  //
-  // The previous implementation compared ``value`` against the last
-  // prop it had seen, but it still ran ``setContent`` on every
-  // keystroke (each keystroke emits a new markdown string, so the prop
-  // genuinely changed) — rebuilding the document every time. Because
-  // the Markdown↔ProseMirror round-trip is not idempotent at the
-  // character level (trailing newlines, escape ordering), and because
-  // NotePartsEditor used to feed the server's re-normalised body back
-  // into ``value`` on save, that rebuild moved the caret to a wrong
-  // position on autosave / manual save.
-  //
-  // The fix: skip the rebuild whenever ``value`` equals the markdown
-  // the editor itself last produced (``lastEmittedRef``). Only a
-  // genuinely external value triggers ``setContent``, and there we
-  // preserve and clamp the prior selection so the caret stays put.
-  useEffect(() => {
-    if (!editor) return
-    if (value === lastEmittedRef.current) return
-    lastEmittedRef.current = value
-    const { from, to } = editor.state.selection
-    editor.commands.setContent(value, { emitUpdate: false })
-    const max = editor.state.doc.content.size
-    editor.commands.setTextSelection({
-      from: Math.min(from, max),
-      to: Math.min(to, max),
-    })
-  }, [value, editor])
+  }, [annotations, srcHandle])
 
   // Both surfaces format now. In source mode the commands are string
   // transformations (lib/markdownSource/commands.ts) and the handle exists
   // as soon as the editor mounts.
-  // The editing surface the annotation UI is layered over: the markdown one
-  // when that is showing, the WYSIWYG one otherwise. Rebuilt when the mode
-  // flips, which is what re-subscribes the annotator's selection listener to
-  // the editor the user is actually in.
+  // The editing surface the annotation UI is layered over.
   const annotationSurface = useMemo<AnnotationSurface | null>(() => {
-    if (rawMode) {
-      const view = srcHandle?.view() ?? null
-      return view ? sourceSurface(view) : null
-    }
-    return editor ? tiptapSurface(editor) : null
-  }, [rawMode, srcHandle, editor])
+    const view = srcHandle?.view() ?? null
+    return view ? sourceSurface(view) : null
+  }, [srcHandle])
 
-  const fmt = rawMode ? srcHandle != null : editor != null
-
-  /** Is this button's construct active under the caret, in whichever
-   *  surface is showing? */
-  const isOn = (
-    activeName?: string,
-    activeAttrs?: Record<string, unknown>,
-    srcMark?: ActiveMark,
-  ): boolean =>
-    rawMode
-      ? !!srcMark && srcMarks.has(srcMark)
-      : !!activeName && !!editor?.isActive(activeName, activeAttrs)
+  const fmt = srcHandle != null
 
   const tb = (
     label: string,
     titleKey: string,
-    run: () => void,
-    activeName?: string,
-    activeAttrs?: Record<string, unknown>,
+    run: (v: CmView) => boolean,
     srcMark?: ActiveMark,
   ) => (
     <button
       type="button"
       className={
-        'btn--ghost btn--sm rte__fmt' + (isOn(activeName, activeAttrs, srcMark) ? ' rte__fmt--on' : '')
+        'btn--ghost btn--sm rte__fmt' +
+        (srcMark && srcMarks.has(srcMark) ? ' rte__fmt--on' : '')
       }
       title={t(titleKey)}
       disabled={!fmt}
-      onClick={run}
+      onClick={() => srcHandle?.run(run)}
     >
       {label}
     </button>
   )
 
-  /** One button, two surfaces: run the tiptap chain or the source command
-   *  depending on which one is mounted. */
-  const dual = (wysiwyg: () => void, source: (v: CmView) => boolean) => () => {
-    if (rawMode) {
-      srcHandle?.run(source)
-      return
-    }
-    wysiwyg()
-  }
-
   // Link insert/edit: prompt for a URL (empty clears the link). The
-  // editor's own Link.validate rejects unsafe schemes.
+  // source command reads the destination out of the link the caret is in
+  // (if any) and writes it back through the shared escaper, so a label
+  // containing `]` cannot emit something that is not a link.
   const setLink = () => {
-    if (rawMode) {
-      // Same prompt, different surface: the source command reads the
-      // destination out of the link the caret is in (if any) and writes it
-      // back through the shared escaper.
-      srcHandle?.run((v) =>
-        srcSetLink(v, (current) => window.prompt(t('editor.linkPrompt'), current)),
-      )
-      return
-    }
-    if (!editor) return
-    const prev = (editor.getAttributes('link').href as string | undefined) ?? ''
-    const url = window.prompt(t('editor.linkPrompt'), prev)
-    if (url === null) return
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run()
-      return
-    }
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+    srcHandle?.run((v) =>
+      srcSetLink(v, (current) => window.prompt(t('editor.linkPrompt'), current)),
+    )
   }
 
   // Image button: opens the hidden file input. Disabled when no parent
   // is available (e.g. note-create form before save) — drop/paste are
   // also gated by parentRef inside the handlers.
   const imageDisabled =
-    (!fmt && !rawMode) || uploading || !imageUploadParent
+    !fmt || uploading || !imageUploadParent
   const imageTitle = imageUploadParent
     ? t('editor.image')
     : t('editor.imageNeedsSave')
@@ -1553,43 +731,27 @@ export function RichEditor({
               <span className="rte__sep" aria-hidden="true" />
             </>
           )}
-          {tb('B', 'editor.bold',
-            dual(() => editor?.chain().focus().toggleBold().run(), srcWrap('bold')),
-            'bold', undefined, 'bold')}
-          {tb('I', 'editor.italic',
-            dual(() => editor?.chain().focus().toggleItalic().run(), srcWrap('italic')),
-            'italic', undefined, 'italic')}
-          {tb('S', 'editor.strike',
-            dual(() => editor?.chain().focus().toggleStrike().run(), srcWrap('strike')),
-            'strike', undefined, 'strike')}
-          {tb('H1', 'editor.h1',
-            dual(() => editor?.chain().focus().toggleHeading({ level: 1 }).run(), srcHeading(1)),
-            'heading', { level: 1 }, 'heading1')}
-          {tb('H2', 'editor.h2',
-            dual(() => editor?.chain().focus().toggleHeading({ level: 2 }).run(), srcHeading(2)),
-            'heading', { level: 2 }, 'heading2')}
-          {tb('H3', 'editor.h3',
-            dual(() => editor?.chain().focus().toggleHeading({ level: 3 }).run(), srcHeading(3)),
-            'heading', { level: 3 }, 'heading3')}
-          {tb('•', 'editor.bullet',
-            dual(() => editor?.chain().focus().toggleBulletList().run(), srcBullet),
-            'bulletList', undefined, 'bulletList')}
-          {tb('1.', 'editor.ordered',
-            dual(() => editor?.chain().focus().toggleOrderedList().run(), srcOrdered),
-            'orderedList', undefined, 'orderedList')}
-          {tb('☑', 'editor.checklist',
-            dual(() => editor?.chain().focus().toggleTaskList().run(), srcTask),
-            'taskList', undefined, 'taskList')}
-          {tb('❝', 'editor.quote',
-            dual(() => editor?.chain().focus().toggleBlockquote().run(), srcQuote),
-            'blockquote', undefined, 'blockquote')}
-          {tb('</>', 'editor.code',
-            dual(() => editor?.chain().focus().toggleCode().run(), srcWrap('code')),
-            'code', undefined, 'code')}
-          {tb('{ }', 'editor.codeBlock',
-            dual(() => editor?.chain().focus().toggleCodeBlock().run(), srcCodeBlock),
-            'codeBlock', undefined, 'codeBlock')}
-          {tb('🔗', 'editor.link', setLink, 'link', undefined, 'link')}
+          {tb('B', 'editor.bold', srcWrap('bold'), 'bold')}
+          {tb('I', 'editor.italic', srcWrap('italic'), 'italic')}
+          {tb('S', 'editor.strike', srcWrap('strike'), 'strike')}
+          {tb('H1', 'editor.h1', srcHeading(1), 'heading1')}
+          {tb('H2', 'editor.h2', srcHeading(2), 'heading2')}
+          {tb('H3', 'editor.h3', srcHeading(3), 'heading3')}
+          {tb('•', 'editor.bullet', srcBullet, 'bulletList')}
+          {tb('1.', 'editor.ordered', srcOrdered, 'orderedList')}
+          {tb('☑', 'editor.checklist', srcTask, 'taskList')}
+          {tb('❝', 'editor.quote', srcQuote, 'blockquote')}
+          {tb('</>', 'editor.code', srcWrap('code'), 'code')}
+          {tb('{ }', 'editor.codeBlock', srcCodeBlock, 'codeBlock')}
+          <button
+            type="button"
+            className={'btn--ghost btn--sm rte__fmt' + (srcMarks.has('link') ? ' rte__fmt--on' : '')}
+            title={t('editor.link')}
+            disabled={!fmt}
+            onClick={setLink}
+          >
+            🔗
+          </button>
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
@@ -1612,44 +774,28 @@ export function RichEditor({
           >
             📎
           </button>
-          {tb('―', 'editor.hr',
-            dual(() => editor?.chain().focus().setHorizontalRule().run(), srcHr))}
+          {tb('―', 'editor.hr', srcHr)}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
             title={t('editor.table')}
             disabled={!fmt}
-            onClick={dual(
-              () =>
-                editor
-                  ?.chain()
-                  .focus()
-                  .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                  .run(),
-              srcInsertTable,
-            )}
+            onClick={() => srcHandle?.run(srcInsertTable)}
           >
             ▦
           </button>
-          {isOn('table', undefined, 'table') && (
+          {srcMarks.has('table') && (
             <>
-              {tb('+row', 'editor.tableRow',
-                dual(() => editor?.chain().focus().addRowAfter().run(), srcAddRow))}
-              {tb('+col', 'editor.tableCol',
-                dual(() => editor?.chain().focus().addColumnAfter().run(), srcAddCol))}
-              {tb('✕tbl', 'editor.tableDel',
-                dual(() => editor?.chain().focus().deleteTable().run(), srcDelTable))}
+              {tb('+row', 'editor.tableRow', srcAddRow)}
+              {tb('+col', 'editor.tableCol', srcAddCol)}
+              {tb('✕tbl', 'editor.tableDel', srcDelTable)}
               {/* Re-aligning rewrites bytes nobody typed, so it is a button
-                  the author presses and never something Tab does. Source
-                  mode only: the tiptap grid has no source to align. */}
-              {rawMode &&
-                tb('⇔tbl', 'editor.tableFormat', () => srcHandle?.run(srcFormatTable))}
+                  the author presses and never something Tab does. */}
+              {tb('⇔tbl', 'editor.tableFormat', srcFormatTable)}
             </>
           )}
-          {tb('↶', 'editor.undo',
-            dual(() => editor?.chain().focus().undo().run(), srcUndo))}
-          {tb('↷', 'editor.redo',
-            dual(() => editor?.chain().focus().redo().run(), srcRedo))}
+          {tb('↶', 'editor.undo', srcUndo)}
+          {tb('↷', 'editor.redo', srcRedo)}
           </span>
           )}
         </div>
@@ -1670,17 +816,19 @@ export function RichEditor({
           <button
             type="button"
             className="btn--ghost btn--sm"
-            disabled={pdfBusy || !editor}
+            disabled={pdfBusy}
             title={t('editor.exportPdf', {
               defaultValue: 'Esporta PDF',
             })}
             onClick={() => {
-              if (!editor) return
-              const html = editor.getHTML()
               const slug = slugifyFilename(filename)
               setPdfBusy(true)
               setPdfErr(null)
-              void exportPdfViaServer(slug, html)
+              // Through the READ-SIDE renderer, so the PDF is what the note
+              // looks like rather than what a second renderer thought it
+              // should look like.
+              void renderMarkdownToHtml(value, imageUploadParent)
+                .then((html) => exportPdfViaServer(slug, html))
                 .catch((e: unknown) =>
                   setPdfErr(e instanceof Error ? e.message : String(e)),
                 )
@@ -1691,22 +839,8 @@ export function RichEditor({
               ? '⏳'
               : t('editor.exportPdfShort', { defaultValue: '.pdf' })}
           </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={() => setRawMode((v) => !v)}
-          >
-            {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
-          </button>
         </span>
       </div>
-      {/* Only while the rich surface is the one that would write: in source
-          mode the edit already is byte-exact, so the warning is noise. */}
-      {lossyRoundTrip && !rawMode && (
-        <p className="rte__notice">
-          {t('editor.normalisesOnEdit')}
-        </p>
-      )}
       <input
         ref={imgInput}
         type="file"
@@ -1721,7 +855,14 @@ export function RichEditor({
       {pickerOpen && imageUploadParent && (
         <AttachmentPicker
           parent={imageUploadParent}
-          onPick={insertRef}
+          onPick={(meta) => {
+            // One insertion path: the markdown reference the rest of the app
+            // hands out. The WYSIWYG branch used to convert it into a
+            // ProseMirror node instead, which is the asymmetry that made a
+            // PASTED reference need its own special case.
+            insertRawSnippet(attachmentMarkdownRef(meta))
+            setPickerOpen(false)
+          }}
           onClose={() => setPickerOpen(false)}
         />
       )}
@@ -1732,20 +873,16 @@ export function RichEditor({
           {pdfErr}
         </p>
       )}
-      {rawMode ? (
-        <SourceEditor
-          handleRef={setSrcHandle}
-          className="rte__raw rte__src"
-          value={value}
-          placeholder={placeholder}
-          onChange={onChange}
-          onPasteFiles={handleDroppedFiles}
-          getParent={() => parentRef.current}
-          onActive={setSrcMarks}
-        />
-      ) : (
-        <EditorContent editor={editor} />
-      )}
+      <SourceEditor
+        handleRef={setSrcHandle}
+        className="rte__raw rte__src"
+        value={value}
+        placeholder={placeholder}
+        onChange={onChange}
+        onPasteFiles={handleDroppedFiles}
+        getParent={() => parentRef.current}
+        onActive={setSrcMarks}
+      />
       {annotationSurface && inlineAnnotations && (
         <InlineAnnotator
           ref={annoRef}

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
-import { inSourceMode, readSource, setSource, sourceContent } from './source-editor'
+import { readSource, setSource, sourceContent } from './source-editor'
 
 // Linkable attachments in the note/task body. The load-bearing risk is
 // the tiptap Link `validate` predicate: a relative
@@ -36,67 +36,42 @@ async function openFreshNoteEditor(page: Page) {
 }
 
 // Markdown <-> WYSIWYG toggle. It lives in `.rte__actions` and carries no
-// title; its label flips between "Edit as Markdown" and "Rich editor". The
-// old `.rte__bar > button` selector broke when the toolbar became
-// collapsible (the bar's buttons are now nested under .rte__bar-left /
-// .rte__tools, and that first button is the collapse toggle, not this one).
-async function toggleEditorMode(page: Page) {
-  await page
-    .locator('.rte__actions button')
-    .filter({ hasText: /Edit as Markdown|Rich editor/i })
-    .first()
-    .click()
-  await page.waitForTimeout(300)
-}
-
+/** One surface now; this only waits for it. */
 async function enterMarkdownMode(page: Page) {
-  if (!(await inSourceMode(page))) {
-    await toggleEditorMode(page)
-  }
-  await expect(sourceContent(page)).toBeVisible()
+  await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
 }
 
-test('attachment link survives the markdown round-trip (keystone)', async ({
-  page,
-}) => {
+test('an attachment link keeps its destination (keystone)', async ({ page }) => {
+  // The original failure was silent link LOSS: the WYSIWYG surface parsed
+  // this, dropped the mark, and serialised back the bare word `doc.pdf`.
+  // There is no parse and no serialise now, so the assertion is the one that
+  // always mattered -- the bytes -- plus the preview reading it as a link.
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
   const id = '11111111-1111-1111-1111-111111111111'
   const href = `/attachments/${id}/download`
-  await setSource(page, `[doc.pdf](${href})`)
-  // -> WYSIWYG: the Link mark must be kept by validate (the fix), so the
-  // parsed prose carries a real anchor with the relative href.
-  await toggleEditorMode(page)
-  await expect(
-    page.locator(`.ProseMirror a[href="${href}"]`),
-  ).toBeVisible()
-  // -> back to markdown: the link must serialize back intact, not as the
-  // bare word "doc.pdf" (the pre-fix failure: silent link loss).
-  await toggleEditorMode(page)
-  await expect(sourceContent(page)).toBeVisible()
-  const back = await readSource(page)
-  expect(back).toContain(`[doc.pdf](${href})`)
+  const md = `[doc.pdf](${href})`
+  await setSource(page, md)
+  await page.locator('.cm-content').first().click()
+  await page.keyboard.press('ControlOrMeta+ArrowDown')
+  await expect(page.locator('.cm-md-linklabel').first()).toBeVisible()
+  expect(await readSource(page)).toBe(md)
 })
 
-test('a bare-filename attachment link survives the round-trip', async ({
-  page,
-}) => {
+test('a bare-filename attachment link keeps its destination', async ({ page }) => {
+  // A relative path with no directory separator: tiptap's default
+  // isAllowedUri rejected the version WITH one, which is how this class of
+  // link used to be demoted to bare text.
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
-  // A link whose href is a plain filename (an attachment of this note
-  // referenced by name). Link.validate must keep the mark so it is not
-  // demoted to bare text on parse-back.
-  await setSource(page, '[the figure](Fig02_donne.png)')
-  await toggleEditorMode(page)
-  await expect(
-    page.locator('.ProseMirror a[href="Fig02_donne.png"]'),
-  ).toBeVisible()
-  await toggleEditorMode(page)
-  await expect(sourceContent(page)).toBeVisible()
-  const back = await readSource(page)
-  expect(back).toContain('[the figure](Fig02_donne.png)')
+  const md = '[the figure](Fig02_donne.png)'
+  await setSource(page, md)
+  await page.locator('.cm-content').first().click()
+  await page.keyboard.press('ControlOrMeta+ArrowDown')
+  await expect(page.locator('.cm-md-linklabel').first()).toBeVisible()
+  expect(await readSource(page)).toBe(md)
 })
 
 test('the attach/link toolbar button opens the attachment picker', async ({

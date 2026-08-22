@@ -1,10 +1,14 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
-import { inSourceMode, readSource, setSource, sourceContent } from './source-editor'
+import { readSource, setSource, sourceContent } from './source-editor'
 
-// Regression coverage for the note rich editor (RichEditor + tiptap):
-// the layout overlap, the <label>-forwarded double-click bold, and the
-// GFM table round-trip — all bugs that reached production.
+// Regression coverage for the note editor. There is ONE editing surface now
+// -- the markdown source, live-previewed -- so the mode toggle these tests
+// used to flip is gone with the surface it flipped to.
+//
+// The bugs pinned here reached production: the layout overlap, the
+// <label>-forwarded double-click bold, the silent rewrite of a verbatim body
+// on open, and the lost link destination.
 
 async function login(page: Page) {
   await page.goto('/login')
@@ -28,30 +32,12 @@ async function openFreshNoteEditor(page: Page) {
   await page.waitForTimeout(1000)
 }
 
-// The WYSIWYG<->Markdown mode toggle lives in the collapsible toolbar;
-// its label flips between "Edit as Markdown" and "Rich editor".
-const toggleBtn = (page: Page) =>
-  page.getByRole('button', { name: /Edit as Markdown|Rich editor/ }).first()
-
-// The toolbar tools (incl. the mode toggle) collapse behind the "Aa"
-// button per a saved preference; expand them if the toggle is hidden.
-async function ensureToolbar(page: Page) {
-  if (!(await toggleBtn(page).isVisible().catch(() => false))) {
-    await page.locator('.rte__collapse').first().click()
-    await expect(toggleBtn(page)).toBeVisible()
-  }
-}
-
+/** The editor is the markdown surface; this only waits for it. */
 async function enterMarkdownMode(page: Page) {
-  await ensureToolbar(page)
-  if (!(await inSourceMode(page))) {
-    await toggleBtn(page).click()
-    await page.waitForTimeout(300)
-  }
-  await expect(sourceContent(page)).toBeVisible()
+  await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
 }
 
-test('rich editor is not wrapped in a <label> (double-click must not bold)', async ({
+test('the editor is not wrapped in a <label> (double-click must not bold)', async ({
   page,
 }) => {
   await login(page)
@@ -64,22 +50,24 @@ test('rich editor is not wrapped in a <label> (double-click must not bold)', asy
   expect(wrappedInLabel).toBe(false)
 })
 
-test('markdown table round-trips through the editor', async ({ page }) => {
+test('a markdown table previews as a table, and the source is untouched', async ({
+  page,
+}) => {
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
-  const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |'].join('\n')
+  // A trailing paragraph so the caret has somewhere to be that is NOT the
+  // table: a block whose lines the selection touches shows its source, which
+  // is the whole reveal rule.
+  const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |', '', 'dopo'].join('\n')
   await setSource(page, md)
-  await toggleBtn(page).click() // -> WYSIWYG
-  // WYSIWYG renders a real table.
-  await expect(page.locator('.ProseMirror table').first()).toBeVisible()
-  expect(await page.locator('.ProseMirror th').count()).toBe(2)
-  // Back to markdown: serializes to a pipe table again.
-  await toggleBtn(page).click()
-  await expect(sourceContent(page)).toBeVisible()
-  const back = await readSource(page)
-  expect(back).toContain('| Name')
-  expect(back).toContain('| Alice')
+  // The table is PREVIEWED as a table -- a widget over the source, not a
+  // second document model -- so there is nothing to serialise back.
+  await page.locator('.cm-content').first().click()
+  await page.keyboard.press('ControlOrMeta+ArrowDown')
+  await expect(page.locator('.cm-md-table table').first()).toBeVisible()
+  expect(await page.locator('.cm-md-table th').count()).toBe(2)
+  expect(await readSource(page)).toBe(md)
 })
 
 // Markdown that is deliberately NOT a fixed point of the editor's
@@ -123,55 +111,50 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
   })
   await page.reload()
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
-  // The rich editor is the default view for every body, verbatim ones
-  // included: rendering is a mode, not a property of how the bytes arrived.
-  await expect(page.locator('.ProseMirror').first()).toBeVisible()
-  await expect(page.locator('.rte__src')).toHaveCount(0)
-  // Rendering that body must still write nothing. Well past the autosave
+  await expect(sourceContent(page)).toBeVisible()
+  // Opening the body must still write nothing. Well past the autosave
   // debounce.
   await page.waitForTimeout(3500)
   expect(writes).toEqual([])
 
-  // The body is not a fixed point of the round-trip, so an edit made HERE
-  // would normalise it. Said once, in a notice; it withholds nothing.
-  await expect(page.locator('.rte__notice').first()).toBeVisible()
+  // There is no notice any more, because there is nothing to warn about:
+  // the surface that would have normalised this body on the first edit is
+  // gone, and the string the editor holds IS the string that was stored.
+  await expect(page.locator('.rte__notice')).toHaveCount(0)
 
-  // And the source is still the bytes we uploaded, byte for byte.
+  // The source is still the bytes we uploaded, byte for byte.
   await enterMarkdownMode(page)
   expect(await readSource(page)).toBe(VERBATIM)
 })
 
-test('links keep their destination through the rich editor', async ({ page }) => {
+test('links keep their destination', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
-  // Both arms used to lose the destination: the first because the `code`
-  // mark excluded `link`, the second because tiptap's default isAllowedUri
-  // rejects a relative path containing a directory separator.
+  // Both arms used to LOSE the destination on the round trip: the first
+  // because the `code` mark excluded `link`, the second because tiptap's
+  // default isAllowedUri rejects a relative path containing a directory
+  // separator. Neither can happen now -- there is no round trip -- so what
+  // this asserts is the preview reading them as links and the source being
+  // exactly what was typed.
   const md = '[`00-overview.md`](00-overview.md) e [testo](docs/00-overview.md)'
   await setSource(page, md)
-  await toggleBtn(page).click() // -> WYSIWYG
-  await expect(page.locator('.ProseMirror a').first()).toBeVisible()
-  expect(await page.locator('.ProseMirror a').count()).toBe(2)
-  await toggleBtn(page).click() // -> back to markdown
+  await page.locator('.cm-content').first().click()
+  await page.keyboard.press('ControlOrMeta+ArrowDown')
+  expect(await page.locator('.cm-md-linklabel').count()).toBe(2)
   expect(await readSource(page)).toBe(md)
 })
 
-test('sub/sup render as real elements and round-trip, but stay literal in code', async ({
-  page,
-}) => {
+test('sub/sup survive as the bytes the author wrote', async ({ page }) => {
+  // The visual editor turned these into real <sub>/<sup> elements and
+  // serialised them back. The editor no longer interprets them -- the READER
+  // still does, which is where they are meant to be seen -- so what matters
+  // here is that the source is untouched, code span included.
   await login(page)
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
   const md = 'x<sub>0</sub> e 2<sup>t</sup>, ma `x<sup>2</sup>` resta letterale'
   await setSource(page, md)
-  await toggleBtn(page).click() // -> WYSIWYG
-  await expect(page.locator('.ProseMirror sup').first()).toBeVisible()
-  expect(await page.locator('.ProseMirror sup').count()).toBe(1)
-  expect(await page.locator('.ProseMirror sub').count()).toBe(1)
-  // Inside a code span the author asked for the characters, not the markup.
-  expect(await page.locator('.ProseMirror code sup').count()).toBe(0)
-  await toggleBtn(page).click() // -> back to markdown
   expect(await readSource(page)).toBe(md)
 })
 

@@ -137,7 +137,7 @@ test('notes: create, client auto-assigned, convert to task', async ({
   const dialog = page.locator('.modal__panel')
   await expect(dialog).toBeVisible()
   await dialog.locator('input').first().fill(title)
-  await dialog.locator('.ProseMirror').first().click()
+  await dialog.locator('.cm-content').first().click()
   await page.keyboard.type('A note created by the E2E suite.')
   await dialog
     .getByRole('button', { name: /create note|crea nota/i })
@@ -331,7 +331,7 @@ test('task work note: open from task + billable timer in the note', async ({
   await page.getByRole('button', { name: /new note|nuova nota/i }).click()
   const dialog = page.locator('.modal__panel')
   await dialog.locator('input').first().fill(title)
-  await dialog.locator('.ProseMirror').first().click()
+  await dialog.locator('.cm-content').first().click()
   await page.keyboard.type('seed')
   await dialog
     .getByRole('button', { name: /create note|crea nota/i })

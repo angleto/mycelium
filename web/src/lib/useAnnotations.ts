@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { authFetch } from '../api/client'
 import type { components } from '../api/schema'
-import type { AnnotationAnchor } from './annotationDecorations'
+import type { AnnotationAnchor } from './markdownSource/annotationLayer'
 
 export type Annotation = components['schemas']['AnnotationOut']
 export type DocKind = 'note_part' | 'task_description'
