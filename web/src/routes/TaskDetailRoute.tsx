@@ -25,6 +25,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
+import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { pushRecent } from '../lib/recents'
 
@@ -1005,16 +1006,21 @@ export function TaskDetailRoute() {
     )
     .slice(0, 10)
 
-  if (err && !task) return <p className="err">{err}</p>
-  if (!task) return <p>{t('tasks.loading')}</p>
-
   // Autosave covers every field. A "save now" button is intentionally
   // gone — the debounced effect above flushes title/description ~1s
   // after the user stops typing, and onSave is kept only as the form's
   // onSubmit fallback (Enter in the title input still saves
   // immediately instead of waiting for the debounce).
+  //
+  // Computed ABOVE the early returns because useUnsavedGuard is a hook:
+  // a debounce window still pending is exactly the moment an automatic
+  // reload onto a new build would eat the user's typing.
   const dirty =
-    title !== task.title || description !== (task.description ?? '')
+    !!task && (title !== task.title || description !== (task.description ?? ''))
+  useUnsavedGuard(dirty)
+
+  if (err && !task) return <p className="err">{err}</p>
+  if (!task) return <p>{t('tasks.loading')}</p>
 
   async function copyId() {
     try {

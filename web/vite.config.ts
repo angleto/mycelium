@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // The browser talks to the backend through `/api`, which Vite proxies
@@ -12,8 +12,77 @@ import react from '@vitejs/plugin-react'
 // MYCELIUM_API_URL at the API and dev + E2E follow it.
 const API_TARGET = process.env.MYCELIUM_API_URL ?? 'http://localhost:8000'
 
+// Identity of THIS bundle, decided before Rollup hashes anything (so it
+// can be baked into the code AND written to a sidecar file without the
+// circularity of hashing a value derived from the hash).
+//
+// The git SHA is preferred because it is the same identity the backend
+// reports at /api/buildinfo and the images carry as a label, so a stale
+// tab can be traced to a commit. CI passes it (build-images.yml already
+// forwards --build-arg MYCELIUM_GIT_SHA to every image). A local
+// `pnpm build` has no SHA, so fall back to the build clock: distinct per
+// build, which is exactly the question the client is asking ("is what
+// the server serves still what I am running?").
+const BUILD_ID =
+  process.env.MYCELIUM_GIT_SHA ||
+  process.env.MYCELIUM_VERSION ||
+  `dev-${Date.now()}`
+
+// The app imports its own identity from here (see src/lib/buildId.ts).
+const VIRTUAL_ID = 'virtual:mycelium-build-id'
+const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID
+
+/**
+ * Publish the bundle identity twice: once INSIDE the bundle, once beside
+ * it at a fixed URL. The running app compares the two and knows whether
+ * it is still the frontend the server serves.
+ *
+ * `/version.json` is the outside half. It is the only stable-named file
+ * the SPA can poll — index.html would work too, but that means parsing
+ * HTML for a script tag; a 40-byte JSON document states the fact
+ * directly and is cheap enough to fetch on a timer. Deliberately NOT a
+ * file in `public/`: its content is generated, and a checked-in copy
+ * would go stale the moment someone forgot to regenerate it.
+ *
+ * The inside half is a virtual module rather than a `define`, because
+ * Vite's `define` substitution does not run in dev — the served module
+ * still carries the raw identifier, so the whole mechanism would be dead
+ * in `pnpm dev` and in the Playwright suite (which runs against the dev
+ * server) and alive only in production, i.e. exactly the configuration
+ * nobody exercises before shipping. A virtual module resolves the same
+ * way in both modes.
+ */
+function buildIdentity(): Plugin {
+  const body = JSON.stringify({ buildId: BUILD_ID }) + '\n'
+  return {
+    name: 'mycelium-build-identity',
+    resolveId(id) {
+      return id === VIRTUAL_ID ? RESOLVED_VIRTUAL_ID : null
+    },
+    load(id) {
+      if (id !== RESOLVED_VIRTUAL_ID) return null
+      return `export const BUILD_ID = ${JSON.stringify(BUILD_ID)}\n`
+    },
+    // `generateBundle` (not writeBundle) so `vite build --watch` and any
+    // consumer reading the bundle map both see the file as an output.
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: body })
+    },
+    configureServer(server) {
+      // Same URL in dev, so the polling path is exercised by `pnpm dev`
+      // and E2E. The id never changes within a dev session, so it never
+      // fires there — HMR already owns the dev refresh loop.
+      server.middlewares.use('/version.json', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json')
+        res.setHeader('Cache-Control', 'no-store')
+        res.end(body)
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), buildIdentity()],
   server: {
     proxy: {
       '/api': {

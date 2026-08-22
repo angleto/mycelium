@@ -1,10 +1,37 @@
-// Mycelium PWA service worker. Cache-on-fetch for the SPA shell so the
-// home screen icon opens to a usable surface even with no network.
+// Mycelium PWA service worker. Caches the SPA shell so the home screen
+// icon opens to a usable surface even with no network.
 // Stays out of the way for /api/* and /mcp* — those always go to the
 // network so an offline backend yields a real error, not a stale UI.
+//
+// CACHING STRATEGY — the shape here is load-bearing, do not collapse it
+// back into one rule:
+//
+//   navigation (index.html)  network-first, cache as fallback
+//   /assets/<name>-<hash>.*  cache-first (the hash IS the version)
+//   everything else static   stale-while-revalidate
+//
+// v5 served navigations stale-while-revalidate, i.e. cache-first. Because
+// index.html is the ONE unhashed file, a cached copy pinned the whole app
+// to the deploy it came from: it named /assets/index-<oldhash>.js, that
+// file was in the cache too, and every subsequent reload replayed the old
+// bundle. The background revalidate refreshed the cache but the user had
+// already been served — and a plain reload hit the same cache-first path
+// again. Only Cmd+Shift+R, which bypasses the SW entirely, escaped. Hence
+// "I have to hard-reload all the time". Navigations must reach the
+// network whenever there IS a network.
 
 // Bump on every behaviour change so old SWs are replaced atomically.
-const CACHE = 'mycelium-shell-v5'
+const CACHE = 'mycelium-shell-v6'
+
+// Content-hashed build output: the filename changes whenever the bytes
+// change, so a cache hit can never be stale and network-first would only
+// add latency.
+const IMMUTABLE_PREFIX = '/assets/'
+
+// Never intercepted: these must reflect the server, not a cache.
+// /version.json is what the running app polls to notice a new deploy —
+// serving it from cache would defeat the very mechanism.
+const PASSTHROUGH = ['/api/', '/mcp', '/auth/', '/admin-api/', '/version.json']
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
@@ -34,45 +61,97 @@ function offlineFallback() {
   )
 }
 
+// Only real, same-origin, success responses are cacheable. Opaque / 30x /
+// 404 / 5xx must not poison the cache.
+function cacheable(res) {
+  return !!res && res.status === 200 && res.type === 'basic'
+}
+
+/** Network-first: the freshest answer wins; the cache is the offline
+ * safety net. Used for navigations (index.html). */
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE)
+  try {
+    const res = await fetch(req)
+    if (cacheable(res)) cache.put(req, res.clone())
+    return res
+  } catch {
+    // Offline (or the server is unreachable): fall back to whatever
+    // shell we last saw. `ignoreSearch` because a navigation may carry
+    // query params the cached entry does not.
+    const hit =
+      (await cache.match(req)) ||
+      (await cache.match(req, { ignoreSearch: true })) ||
+      (await cache.match('/index.html'))
+    return hit || offlineFallback()
+  }
+}
+
+/** Cache-first: for content-hashed assets, where a hit is by
+ * construction the right bytes. */
+async function cacheFirst(req) {
+  const cache = await caches.open(CACHE)
+  const hit = await cache.match(req)
+  if (hit) return hit
+  try {
+    const res = await fetch(req)
+    if (cacheable(res)) cache.put(req, res.clone())
+    return res
+  } catch {
+    return offlineFallback()
+  }
+}
+
+/** Stale-while-revalidate: instant from cache, refreshed behind the
+ * user's back. Safe for unversioned auxiliaries (icons, manifest) where
+ * being one visit behind costs nothing. */
+async function staleWhileRevalidate(req) {
+  const cache = await caches.open(CACHE)
+  const hit = await cache.match(req)
+  const networkPromise = fetch(req)
+    .then((res) => {
+      if (cacheable(res)) cache.put(req, res.clone())
+      return res
+    })
+    .catch(() => null)
+  if (hit) return hit
+  const fresh = await networkPromise
+  return fresh ?? offlineFallback()
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET') return
   const url = new URL(req.url)
-  // Never intercept API / MCP / auth — these must always touch the
-  // network. The SW serves only the bundled SPA assets + index.html.
-  if (
-    url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/mcp') ||
-    url.pathname.startsWith('/auth/') ||
-    url.pathname.startsWith('/admin-api/')
-  ) {
+  // Cross-origin (fonts, third-party) is not ours to cache or to break.
+  if (url.origin !== self.location.origin) return
+  if (PASSTHROUGH.some((p) => url.pathname.startsWith(p))) return
+
+  // Critical invariant for every branch below: respondWith MUST resolve
+  // to a Response, never undefined — otherwise the browser logs "Failed
+  // to convert value to 'Response'" and the entire SW context throws
+  // (every subsequent navigation in this tab fails). Each helper ends in
+  // a Response or offlineFallback().
+  if (req.mode === 'navigate') {
+    event.respondWith(networkFirst(req))
     return
   }
-  // Stale-while-revalidate for the SPA shell: serve cached if present,
-  // refresh in the background. New tab on a fresh install bootstraps
-  // the cache. Critical invariant: respondWith MUST resolve to a
-  // Response, never undefined — otherwise the browser logs
-  // "Failed to convert value to 'Response'" and the entire SW context
-  // throws (every subsequent navigation in this tab fails).
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(CACHE)
-      const hit = await cache.match(req)
-      const networkPromise = fetch(req)
-        .then((res) => {
-          // Only cache real, same-origin, success responses (200 +
-          // basic). Opaque / 30x / 404 / 5xx must not poison the cache.
-          if (res && res.status === 200 && res.type === 'basic') {
-            cache.put(req, res.clone())
-          }
-          return res
-        })
-        .catch(() => null)
-      if (hit) return hit
-      const fresh = await networkPromise
-      return fresh ?? offlineFallback()
-    })(),
-  )
+  if (url.pathname.startsWith(IMMUTABLE_PREFIX)) {
+    event.respondWith(cacheFirst(req))
+    return
+  }
+  event.respondWith(staleWhileRevalidate(req))
+})
+
+// The page asks for a clean slate before reloading onto a new build
+// (lib/useBuildWatch.ts). Dropping the shell cache guarantees the
+// reload cannot be answered from anything this SW kept.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'MYCELIUM_DROP_CACHE') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))),
+    )
+  }
 })
 
 // Web Push (#D): the backend sends {title, body} via the Push API. Show it

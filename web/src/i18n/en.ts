@@ -163,6 +163,8 @@ export const en = {
       'Changed elsewhere. Reloading discards your unsaved edits.',
     reload: 'Reload',
     reloadAnyway: 'Reload anyway',
+    newVersion:
+      'A new version of Mycelium is deployed. Reload to get it — your unsaved edits are not saved yet.',
     dismiss: 'Dismiss',
     save: 'Save',
     edit: 'Edit',

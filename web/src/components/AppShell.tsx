@@ -38,6 +38,7 @@ import {
   type LookupOut,
 } from '../lib/prefixLookup'
 import { CommandPalette } from './CommandPalette'
+import { UpdateBanner } from './UpdateBanner'
 import { useFocus } from '../lib/focus'
 import { ClientSearch } from './ClientSearch'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
@@ -605,6 +606,11 @@ export function AppShell() {
   return (
     <div className={'app' + (sidebarOpen ? ' app--sidebar-open' : '')}>
       <CommandPalette />
+      {/* Mounted at the shell, not per-route: a new deploy is a property
+          of the app, not of the page you happen to be on. Renders nothing
+          in the ordinary case (the watcher reloads silently when nothing
+          is unsaved) — see lib/useBuildWatch.ts. */}
+      <UpdateBanner />
       <header className="topbar">
         <button
           type="button"

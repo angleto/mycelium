@@ -162,6 +162,8 @@ export const it: Catalog = {
       'Modificato altrove. Ricaricando perderai le modifiche non salvate.',
     reload: 'Ricarica',
     reloadAnyway: 'Ricarica comunque',
+    newVersion:
+      'È stata rilasciata una nuova versione di Mycelium. Ricarica per averla: le modifiche non salvate andranno perse.',
     dismiss: 'Ignora',
     save: 'Salva',
     edit: 'Modifica',

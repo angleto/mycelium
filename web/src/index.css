@@ -1819,6 +1819,13 @@ button.btn--danger:hover {
   font-size: 0.88rem;
 }
 
+/* The new-build banner sits at the app shell, above the topbar, so it is
+   visible from any route. Only ever shown when the automatic reload was
+   withheld because something is unsaved (lib/useBuildWatch.ts). */
+.banner--update {
+  margin: 0.4rem 0.75rem 0;
+}
+
 /* ---- modal (notes editor: leave only on purpose) ---- */
 .modal__backdrop {
   position: fixed;

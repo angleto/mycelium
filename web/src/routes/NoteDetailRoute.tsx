@@ -24,6 +24,7 @@ import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useEditSession } from '../lib/useEditSession'
+import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useStaleWatch } from '../lib/useStaleWatch'
 import { MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
@@ -541,6 +542,9 @@ export function NoteDetailRoute() {
     note.kind !== 'conversation' &&
     (eTitle !== savedSnap.current.title || eText !== savedSnap.current.text)
   const anyDirty = noteDirty || partsDirty
+  // Block the automatic reload-onto-a-new-build while the debounce still
+  // owes the server a write (lib/unsavedGuard.ts).
+  useUnsavedGuard(anyDirty)
 
   // The Save button covers BOTH the note row (title) and every dirty
   // part body: save parts first, then chain into the note PATCH so a

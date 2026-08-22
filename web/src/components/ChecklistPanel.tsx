@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
 import { RichEditor } from './RichEditor'
+import { useUnsavedGuard } from '../lib/unsavedGuard'
 
 type ChecklistItem = components['schemas']['TaskChecklistItemOut']
 type ChecklistOwner = { kind: 'task' | 'note'; id: string }
@@ -386,6 +387,10 @@ function ChecklistRow({
     setBodyDraft(item.body ?? '')
   }
   const bodyDirty = bodyDraft.trim() !== (item.body ?? '').trim()
+  // The item body is committed on an explicit Save, so an unsaved draft
+  // here can sit for minutes. Hold off the automatic reload onto a new
+  // build while it does (lib/unsavedGuard.ts).
+  useUnsavedGuard(bodyDirty)
   return (
     <li className={`checklist__row${item.done ? ' is-done' : ''}`}>
       <div className="checklist__row-main">
