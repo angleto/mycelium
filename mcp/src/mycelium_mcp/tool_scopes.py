@@ -167,6 +167,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "memory_write": "memory:write",
     "garden_classify": "notes:read",
     "garden_review_pending": "notes:read",
+    "garden_review_rejected": "notes:read",
     "get_note": "notes:read",
     "get_note_part": "notes:read",
     "get_note_part_body_capability": "notes:read",

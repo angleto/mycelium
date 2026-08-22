@@ -27,6 +27,7 @@ import type { components } from '../api/schema'
 type CandidateNode = components['schemas']['GardenCandidateNode']
 type CandidateEdge = components['schemas']['GardenCandidateEdge']
 type ReviewItem = components['schemas']['GardenReviewPendingItem']
+type RejectedItem = components['schemas']['GardenReviewRejectedItem']
 
 const NODE_GLYPH: Record<string, string> = {
   distill: '⚗️',
@@ -35,21 +36,25 @@ const NODE_GLYPH: Record<string, string> = {
 }
 
 export function GardenReviewRoute() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [nodes, setNodes] = useState<CandidateNode[]>([])
   const [edges, setEdges] = useState<CandidateEdge[]>([])
   const [pending, setPending] = useState<ReviewItem[]>([])
+  const [rejected, setRejected] = useState<RejectedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     setErr('')
-    const [cand, rev] = await Promise.all([
+    const [cand, rev, bin] = await Promise.all([
       api.GET('/garden/candidates', {
         params: { header: workspaceHeader(), query: { kind: 'all', limit: 50 } },
       }),
       api.GET('/garden/review/pending', {
+        params: { header: workspaceHeader(), query: { limit: 50 } },
+      }),
+      api.GET('/garden/review/rejected', {
         params: { header: workspaceHeader(), query: { limit: 50 } },
       }),
     ])
@@ -61,6 +66,8 @@ export function GardenReviewRoute() {
     }
     if (rev.error) setErr((e) => e || errMessage(rev.error))
     else setPending(rev.data ?? [])
+    if (bin.error) setErr((e) => e || errMessage(bin.error))
+    else setRejected(bin.data ?? [])
   }, [])
 
   useEffect(() => {
@@ -114,7 +121,27 @@ export function GardenReviewRoute() {
     [reload],
   )
 
-  const total = nodes.length + edges.length + pending.length
+  // Undoing a rejection is the ordinary note restore: rejecting soft-deletes
+  // the note and leaves it 'proposed', so putting it back is exactly what
+  // clearing deleted_at means, and the note lands in the inbox again.
+  const onUndoReject = useCallback(
+    async (noteId: string, expectedVersion: number) => {
+      setBusy(`undo:${noteId}`)
+      setErr('')
+      const { error } = await api.POST('/notes/{note_id}/restore', {
+        params: { header: workspaceHeader(), path: { note_id: noteId } },
+        body: { expected_version: expectedVersion },
+      })
+      setBusy(null)
+      // Reload FIRST, then report: reload() clears the error banner as its
+      // first statement, so setting the message before it would swallow it.
+      await reload()
+      if (error) setErr(errMessage(error))
+    },
+    [reload],
+  )
+
+  const total = nodes.length + edges.length + pending.length + rejected.length
 
   return (
     <div className="ghreview">
@@ -283,6 +310,55 @@ export function GardenReviewRoute() {
                       onClick={() => void onReview(r.note_id, 'reject', r.version)}
                     >
                       × {t('gardenReview.reject')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* ---- Rifiutate ----------------------------------------------- */}
+          <section className="ghreview__section">
+            <header className="ghreview__sectionhead">
+              <h2>{t('gardenReview.rejected.title')}</h2>
+              <span className="muted">({rejected.length})</span>
+            </header>
+            <p className="hint">{t('gardenReview.rejected.hint')}</p>
+            {rejected.length === 0 ? (
+              <p className="hint">{t('gardenReview.none')}</p>
+            ) : (
+              <ul className="ghreview__list">
+                {rejected.map((r) => (
+                  <li key={r.note_id} className="ghreview__item">
+                    <span className="ghreview__glyph" aria-hidden="true">
+                      🗑️
+                    </span>
+                    <span className="ghreview__body">
+                      <span className="ghreview__title">{r.title || r.note_id.slice(0, 8)}</span>
+                      <span className="ghreview__reason">{r.preview}</span>
+                    </span>
+                    {r.humus_kind && <span className="chip">{r.humus_kind}</span>}
+                    {r.origin_model_id && (
+                      <span className="muted" title={t('gardenReview.pending.model')}>
+                        {r.origin_model_id}
+                      </span>
+                    )}
+                    <span className="muted" title={t('gardenReview.rejected.at')}>
+                      {new Date(r.rejected_at).toLocaleString(i18n.language, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      disabled={busy === `undo:${r.note_id}`}
+                      title={t('gardenReview.undoReject')}
+                      onClick={() => void onUndoReject(r.note_id, r.version)}
+                    >
+                      ↩ {t('gardenReview.undoReject')}
                     </button>
                   </li>
                 ))}

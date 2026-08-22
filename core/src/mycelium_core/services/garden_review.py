@@ -45,6 +45,11 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.rbac import require_role
 
 _PROPOSED = "proposed"
+#: ``payload["review"]`` of the event that takes a rejection back. It rides
+#: on ``kind='propose'``: after the undo the node is a pending proposal
+#: again, which is exactly what that kind means -- no new event kind, no
+#: migration of the outbox CHECK, and every existing consumer renders it.
+_UNREJECT = "unreject"
 _APPROVED = "approved"
 _PREVIEW_CHARS = 280
 
@@ -100,6 +105,82 @@ async def list_pending(
                 origin_model_id=n.origin_model_id,
                 preview=(body or "").strip()[:_PREVIEW_CHARS],
                 created_at=n.created_at,
+                version=n.version,
+            )
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class RejectedNode:
+    """One REJECTED proposal: the review bin's row. ``reject_node`` rejects
+    by soft-deleting while leaving ``review_state='proposed'``, and that
+    pair of states is invisible everywhere -- the inbox filters
+    ``deleted_at IS NULL``, the trash filters the proposed leg -- so
+    without this list an undo is unreachable even though it works."""
+
+    note_id: uuid.UUID
+    title: str | None
+    humus_kind: str | None
+    origin_model_id: str | None
+    preview: str
+    created_at: dt.datetime
+    #: ``notes.deleted_at``: non-NULL by construction, this IS the moment
+    #: the human declined it.
+    rejected_at: dt.datetime
+    #: The same TOCTOU pin ``PendingNode`` carries, to echo back to the
+    #: restore that undoes the rejection.
+    version: int
+
+
+async def list_rejected(
+    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50
+) -> list[RejectedNode]:
+    """The review BIN: proposals a human declined, most recently rejected
+    first. Mirror of :func:`list_pending` on the other leg of the
+    perimeter (``deleted_at IS NOT NULL`` instead of ``IS NULL``).
+
+    The undo is not a verb of its own: it is ``notes.restore_note``, which
+    accepts exactly this state and puts the node back in the inbox. This
+    list is what makes that reachable. RLS-scoped; a pure read.
+
+    These rows are soft-deleted notes like any other, so emptying the
+    workspace trash purges them too even though that view does not show
+    them, and the retention sweep reaches them on its own schedule.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(Note)
+                .where(
+                    Note.org_id == org_id,
+                    Note.review_state == _PROPOSED,
+                    Note.deleted_at.is_not(None),
+                )
+                # Most recently declined first: the order an undo is looked
+                # for in, and the one ``note_parts.list_trashed`` uses for
+                # the other bin. The id tiebreak keeps paging stable.
+                .order_by(Note.deleted_at.desc(), Note.id.asc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: list[RejectedNode] = []
+    for n in rows:
+        body = await notes_svc.get_body(session, note_id=n.id)
+        # Non-NULL by the WHERE above; the fallback keeps the type honest.
+        rejected_at = n.deleted_at or n.created_at
+        out.append(
+            RejectedNode(
+                note_id=n.id,
+                title=n.title,
+                humus_kind=n.humus_kind,
+                origin_model_id=n.origin_model_id,
+                preview=(body or "").strip()[:_PREVIEW_CHARS],
+                created_at=n.created_at,
+                rejected_at=rejected_at,
                 version=n.version,
             )
         )
@@ -172,7 +253,11 @@ async def approve_node(
             "humus_kind": note.humus_kind,
         },
         applied_state="committed",
-        idempotency_key=f"garden_review:approve:{note_id}",
+        # Versioned: a node decided again after an un-reject is a NEW
+        # decision, not a retry the 24h window should swallow. A true retry
+        # never reaches here -- the idempotent short-circuit above returns
+        # first -- so nothing is double-counted.
+        idempotency_key=f"garden_review:approve:{note_id}:{note.version}",
     )
     return note
 
@@ -185,6 +270,7 @@ async def reject_node(
     note_id: uuid.UUID,
     reason: str | None = None,
     expected_version: int | None = None,
+    attribute_to_model: bool = True,
 ) -> Note:
     """Reject a ``proposed`` node: soft-delete it (it never pollutes the
     corpus) and emit a bus ``reject`` event carrying ``origin_model_id`` (so
@@ -194,7 +280,15 @@ async def reject_node(
 
     ``expected_version`` mirrors :func:`approve_node` (TOCTOU guard, task
     2e36e732): checked before the idempotent short-circuit, ``None`` =
-    legacy unguarded behaviour."""
+    legacy unguarded behaviour.
+
+    ``attribute_to_model=False`` drops ``origin_model_id`` from the event,
+    which is what the accept-ratio groups by, so the rejection stays in the
+    audit trail without counting against the model. It is for the one
+    caller that retires a node for a reason that is not a verdict on what
+    the model wrote: :func:`restore_source` withdrawing an atom to bring
+    its sources back up. Charging that to the model would make a
+    provenance decision read as a quality signal."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await session.get(Note, note_id)
     if note is None or note.org_id != org_id:
@@ -228,14 +322,92 @@ async def reject_node(
         node_id=note_id,
         payload={
             "review": "reject",
-            "origin_model_id": note.origin_model_id,
+            "origin_model_id": note.origin_model_id if attribute_to_model else None,
             "humus_kind": note.humus_kind,
             "reason": reason,
         },
         applied_state="rejected",
-        idempotency_key=f"garden_review:reject:{note_id}",
+        # Versioned, same reason as approve: after an un-reject, rejecting
+        # again must count again.
+        idempotency_key=f"garden_review:reject:{note_id}:{note.version}",
     )
     return note
+
+
+async def record_unreject(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, note: Note
+) -> None:
+    """Emit the event that takes a rejection back, for a note whose restore
+    has just put it back in the review inbox.
+
+    The reliability signal (ADR-0043 D4) counts EVENTS, so a rejection the
+    human undid has to leave its own mark or the model keeps paying for a
+    decision that no longer stands -- and, once the node is approved on the
+    second look, pays twice over.
+
+    It rides on ``kind='propose'`` rather than a new kind: after the undo
+    the node IS a pending proposal again, which is what that kind means in
+    ADR-0036's vocabulary, and ``payload['review']`` is what the ratio
+    query actually discriminates on. The alternative would cost a
+    migration of the outbox CHECK, the ``EventKind`` literal, the API
+    schema and the generated SPA types to say something the existing
+    vocabulary already says. ``applied_state`` stays NULL: nobody
+    adjudicated anything, the node is pending again.
+
+    ``parent_event_id`` points at the reject being undone, so the pair is
+    readable without archaeology on the payload -- and that same lookup is
+    where the attribution comes from, because an undo has to mirror the
+    rejection it cancels rather than re-derive it. The idempotency key
+    carries the version, so a second undo after a second reject is its own
+    event rather than a duplicate swallowed by the 24h window.
+
+    It rides a WRITE kind, so an agent restoring at more than the bus quota
+    would meet a 429 on a restore -- a restore by an agent is a write and
+    belongs under the same anti-runaway cap; humans are not capped.
+
+    Lives here, not in ``notes``: this is review vocabulary. ``restore_note``
+    calls it because it is the only door that clears ``deleted_at``, and it
+    already knows -- by hand, on the one state that means it -- that this
+    particular restore is an un-reject.
+    """
+    row = (
+        await session.execute(
+            select(EventOutbox.id, EventOutbox.payload["origin_model_id"].astext)
+            .where(
+                EventOutbox.org_id == org_id,
+                EventOutbox.node_id == note.id,
+                EventOutbox.payload["review"].astext == "reject",
+            )
+            # Newest first, id as the tiebreak: two events emitted inside one
+            # transaction share ``ts`` (Postgres ``now()`` is the transaction
+            # clock), so the order needs something else to be total.
+            .order_by(EventOutbox.ts.desc(), EventOutbox.id.desc())
+            .limit(1)
+        )
+    ).first()
+    parent, attributed_model = (row[0], row[1]) if row is not None else (None, None)
+    actor_kind = await event_bus.session_actor_kind(session)
+    await event_bus.emit_event(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        actor_kind=actor_kind,
+        kind="propose",
+        node_kind="note",
+        node_id=note.id,
+        parent_event_id=parent,
+        payload={
+            # MIRROR the rejection being undone, do not re-derive it. A
+            # withdrawal that was deliberately not charged to the model
+            # (``restore_source``) carries no model id, and an undo that
+            # named one anyway would subtract a rejection the model never
+            # got -- cancelling a real one from another node.
+            "review": _UNREJECT,
+            "origin_model_id": attributed_model,
+            "humus_kind": note.humus_kind,
+        },
+        idempotency_key=f"garden_review:unreject:{note.id}:{note.version}",
+    )
 
 
 # ── D4 earned-autonomy telemetry: per-model accept ratio ───────────────────
@@ -263,7 +435,14 @@ async def accept_ratio_by_model(
     approve/reject events ``approve_node`` / ``reject_node`` emit (each
     carrying ``origin_model_id`` in its payload): a reject soft-deletes the
     node, so the EVENTS -- not the note table -- are the complete record of
-    both outcomes. Most-decided model first. RLS-scoped."""
+    both outcomes. Most-decided model first. RLS-scoped.
+
+    A rejection the human then TOOK BACK is not a rejection: restoring a
+    rejected proposal emits its own compensating event, and each one
+    cancels a reject for that model. Without the subtraction the sequence
+    reject -> restore -> approve would charge the model a decision that
+    was undone AND credit it with the approval, which is a worse reading
+    of reliability than either outcome alone."""
     model = EventOutbox.payload["origin_model_id"].astext
     review = EventOutbox.payload["review"].astext
     rows = (
@@ -272,18 +451,23 @@ async def accept_ratio_by_model(
                 model,
                 func.count().filter(review == "approve"),
                 func.count().filter(review == "reject"),
+                func.count().filter(review == _UNREJECT),
             )
             .where(
                 EventOutbox.org_id == org_id,
-                review.in_(("approve", "reject")),
+                review.in_(("approve", "reject", _UNREJECT)),
                 model.isnot(None),
             )
             .group_by(model)
         )
     ).all()
     out: list[ModelAcceptRatio] = []
-    for model_id, approved, rejected in rows:
-        a, r = int(approved), int(rejected)
+    for model_id, approved, rejected, undone in rows:
+        # A count of decisions never goes below zero. With the attribution
+        # mirrored and the decision keys versioned there should be no undo
+        # without its reject, so this is the floor of a metric, not a
+        # correction: if it ever bites, the pairing upstream is broken.
+        a, r = int(approved), max(0, int(rejected) - int(undone))
         total = a + r
         out.append(
             ModelAcceptRatio(
@@ -400,6 +584,11 @@ async def restore_source(
             note_id=atom_note_id,
             reason=reason or "restore_source",
             expected_version=atom.version,
+            # Retiring the lens to bring its sources back up is a choice
+            # about which layer to look at, not a verdict on the model that
+            # wrote the atom: it stays in the audit trail and out of the
+            # accept ratio.
+            attribute_to_model=False,
         )
         retired = True
     return RestoreSourceResult(
@@ -426,9 +615,11 @@ async def accept_ratio_overall(session: AsyncSession, *, org_id: uuid.UUID) -> f
 __all__ = [
     "ModelAcceptRatio",
     "PendingNode",
+    "RejectedNode",
     "accept_ratio_by_model",
     "accept_ratio_overall",
     "approve_node",
     "list_pending",
+    "list_rejected",
     "reject_node",
 ]

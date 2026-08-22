@@ -58,6 +58,7 @@ from mycelium_api.schemas import (
     GardenReviewActionIn,
     GardenReviewActionOut,
     GardenReviewPendingItem,
+    GardenReviewRejectedItem,
     GardenTagSuggestionOut,
     GardenWalkOut,
     GardenWalkStep,
@@ -470,6 +471,33 @@ async def garden_review_pending(
             version=p.version,
         )
         for p in pending
+    ]
+
+
+@router.get("/review/rejected", response_model=list[GardenReviewRejectedItem])
+async def garden_review_rejected(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[GardenReviewRejectedItem]:
+    """The review BIN (ADR-0043): proposals a human declined, most recently
+    declined first. Rejecting soft-deletes the node while leaving it
+    ``proposed``, a pair of states no other listing shows -- the inbox wants
+    the live ones, the trash refuses proposals -- so this is what makes an
+    undo reachable. The undo itself is ``POST /notes/{note_id}/restore``,
+    echoing ``version``. A pure read; RLS-scoped."""
+    rejected = await review_svc.list_rejected(ctx.session, org_id=ctx.org_id, limit=limit)
+    return [
+        GardenReviewRejectedItem(
+            note_id=r.note_id,
+            title=r.title,
+            humus_kind=r.humus_kind,
+            origin_model_id=r.origin_model_id,
+            preview=r.preview,
+            created_at=r.created_at,
+            rejected_at=r.rejected_at,
+            version=r.version,
+        )
+        for r in rejected
     ]
 
 

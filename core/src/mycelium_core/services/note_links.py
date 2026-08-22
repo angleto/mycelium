@@ -44,6 +44,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
@@ -70,9 +71,9 @@ _VALID_MATURITY: frozenset[str] = frozenset(m.value for m in NoteMaturity)
 
 
 async def _get_note(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
-    """The write-side guard of this module (link, unlink-adjacent flows,
-    set_maturity, promote/derive/start/record): the note must be
-    EFFECTIVE (task a186c989).
+    """The write-side guard of this module -- link AND unlink, set_maturity,
+    promote / derive / start / record: the note must be EFFECTIVE
+    (task a186c989).
 
     The ``deleted_at`` leg was here from the start; the ADR-0043 leg was
     not, so ``promote_note_to_task`` -- which copies the body into
@@ -320,7 +321,21 @@ async def unlink_notes(
     child_note_id: uuid.UUID,
     kind: str,
 ) -> bool:
+    """Remove one typed edge. ``False`` when there was none to remove --
+    that is the idempotency the callers rely on, not an error.
+
+    Both endpoints must be EFFECTIVE, exactly as ``link_notes`` requires
+    to create the edge (task a186c989). Creating an edge was gated and
+    destroying it was not, which is the wrong way round for an asymmetry:
+    nothing in the codebase unlinks as cleanup -- the hard-delete paths
+    ride the FK cascade, merge writes its ``supersedes`` by hand, review
+    leaves the edges standing so a restore brings them back -- so the only
+    callers are the three user doors, and ``candidates`` already refuses
+    to suggest pruning a pair with an ineffective endpoint.
+    """
     await require_role(session, org_id, actor_id, Role.member)
+    await _get_note(session, org_id=org_id, note_id=parent_note_id)
+    await _get_note(session, org_id=org_id, note_id=child_note_id)
     # Match the canonical orientation used on creation for undirected
     # kinds, so unlinking (b, a) finds the row stored as (a, b).
     if kind in NOTE_NOTE_LINK_UNDIRECTED_KINDS and str(parent_note_id) > str(child_note_id):
@@ -359,9 +374,28 @@ async def list_workspace_note_links(
     garden mindmap to render the full edge set in one round-trip
     instead of N per-note queries (docs/adr/0029 D6: workspace-scoped
     notes are few-per-tenant, so a single query is preferable to
-    server-side aggregation)."""
+    server-side aggregation).
+
+    Both endpoints must be EFFECTIVE (task a186c989): this feeds the
+    mindmap, and an edge to a node no surface admits is a node the map
+    would draw. It is also what keeps the unlink gate honest -- an edge
+    listed but not removable would be worse than either.
+    """
+    parent = aliased(Note)
+    child = aliased(Note)
     return list(
-        (await session.execute(select(NoteNoteLink).where(NoteNoteLink.org_id == org_id)))
+        (
+            await session.execute(
+                select(NoteNoteLink)
+                .join(parent, parent.id == NoteNoteLink.parent_note_id)
+                .join(child, child.id == NoteNoteLink.child_note_id)
+                .where(
+                    NoteNoteLink.org_id == org_id,
+                    effective_note_clause(entity=parent),
+                    effective_note_clause(entity=child),
+                )
+            )
+        )
         .scalars()
         .all()
     )
@@ -374,13 +408,25 @@ async def list_note_links(
     note_id: uuid.UUID,
 ) -> tuple[list[NoteNoteLink], list[NoteNoteLink]]:
     """Return ``(outgoing, incoming)``: links where this note is the
-    parent (outgoing) and where it is the child (incoming / backlinks)."""
+    parent (outgoing) and where it is the child (incoming / backlinks).
+
+    BOTH endpoints must be EFFECTIVE (task a186c989): the far one because a
+    backlink from a note in the bin or awaiting review is not one the
+    reader may follow, and the anchor because the panel that renders these
+    carries an unlink button that answers to the same perimeter -- an edge
+    listed but not removable would be worse than either.
+    """
+    await _get_note(session, org_id=org_id, note_id=note_id)
+    far = aliased(Note)
     outgoing = list(
         (
             await session.execute(
-                select(NoteNoteLink).where(
+                select(NoteNoteLink)
+                .join(far, far.id == NoteNoteLink.child_note_id)
+                .where(
                     NoteNoteLink.org_id == org_id,
                     NoteNoteLink.parent_note_id == note_id,
+                    effective_note_clause(entity=far),
                 )
             )
         )
@@ -390,9 +436,12 @@ async def list_note_links(
     incoming = list(
         (
             await session.execute(
-                select(NoteNoteLink).where(
+                select(NoteNoteLink)
+                .join(far, far.id == NoteNoteLink.parent_note_id)
+                .where(
                     NoteNoteLink.org_id == org_id,
                     NoteNoteLink.child_note_id == note_id,
+                    effective_note_clause(entity=far),
                 )
             )
         )
@@ -758,10 +807,19 @@ async def list_note_task_links(
     task_id: uuid.UUID | None = None,
 ) -> list[NoteTaskLink]:
     """One of ``note_id`` / ``task_id`` must be set. Returns the
-    typed links touching that anchor."""
+    typed links touching that anchor.
+
+    The NOTE endpoint must be effective (task a186c989): asked from a
+    task, this is the list of its notes, and a note in the bin or awaiting
+    review is not one of them. The task endpoint keeps its own lifecycle.
+    """
     if note_id is None and task_id is None:
         raise DomainError(MessageCode.NOTE_TASK_LINK_ANCHOR_REQUIRED)
-    stmt = select(NoteTaskLink).where(NoteTaskLink.org_id == org_id)
+    stmt = (
+        select(NoteTaskLink)
+        .join(Note, Note.id == NoteTaskLink.note_id)
+        .where(NoteTaskLink.org_id == org_id, effective_note_clause())
+    )
     if note_id is not None:
         stmt = stmt.where(NoteTaskLink.note_id == note_id)
     if task_id is not None:
@@ -783,7 +841,11 @@ async def unlink_note_task(
     Promoted notes are read-only at the service layer, so removing a
     ``promoted_from`` link is refused (the original promotion is the only
     way to mark a note transplanted, and unlinking it would orphan the
-    ``promoted_at`` timestamp)."""
+    ``promoted_at`` timestamp).
+
+    Symmetric on the perimeter too (task a186c989): the note endpoint must
+    be EFFECTIVE, as it is for every writer in this module.
+    """
     if kind not in NOTE_TASK_LINK_KINDS:
         raise DomainError(
             MessageCode.NOTE_TASK_LINK_KIND_INVALID,
@@ -791,6 +853,7 @@ async def unlink_note_task(
             valid=", ".join(sorted(NOTE_TASK_LINK_KINDS)),
         )
     await require_role(session, org_id, actor_id, Role.member)
+    await _get_note(session, org_id=org_id, note_id=note_id)
     row = (
         await session.execute(
             select(NoteTaskLink).where(

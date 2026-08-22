@@ -49,6 +49,7 @@ from collections.abc import Iterable
 
 from sqlalchemy import ColumnElement, and_, not_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.util import AliasedClass
 
 from mycelium_core.models.note import Note
 
@@ -65,7 +66,10 @@ _AMONG_CHUNK = 5000
 
 
 def effective_note_clause(
-    *, include_deleted: bool = False, include_proposed: bool = False
+    *,
+    include_deleted: bool = False,
+    include_proposed: bool = False,
+    entity: type[Note] | AliasedClass[Note] = Note,
 ) -> ColumnElement[bool]:
     """SQL predicate selecting the EFFECTIVE notes (ADR-0043 D1):
     ``review_state IS DISTINCT FROM 'proposed' AND deleted_at IS NULL``.
@@ -88,15 +92,20 @@ def effective_note_clause(
     The review inbox itself does not use this: it selects
     ``review_state = 'proposed'`` positively.
 
+    ``entity`` is the mapped ``Note`` by default and an ``aliased(Note)``
+    when a query has to speak about two notes at once -- the two ends of
+    a link, say. It is what keeps this a single definition instead of a
+    hand-written copy per self-join.
+
     Both legs are NULL-safe booleans (``IS DISTINCT FROM`` / ``IS NULL``
     never evaluate to NULL), so :func:`ineffective_note_ids` can negate
     the whole clause without the usual three-valued-logic hazard.
     """
     legs: list[ColumnElement[bool]] = []
     if not include_proposed:
-        legs.append(Note.review_state.is_distinct_from(PROPOSED))
+        legs.append(entity.review_state.is_distinct_from(PROPOSED))
     if not include_deleted:
-        legs.append(Note.deleted_at.is_(None))
+        legs.append(entity.deleted_at.is_(None))
     if not legs:
         return true()
     if len(legs) == 1:

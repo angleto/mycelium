@@ -1931,8 +1931,12 @@ export interface paths {
         head?: never;
         /**
          * Update Annotation Revision Summary
-         * @description Set / clear the ``summary`` label on a revision. Mirror of the
-         *     /notes and /tasks endpoints; see those for the contract.
+         * @description Set / clear the ``summary`` label on a revision. Same summary
+         *     contract as the /notes and /tasks endpoints, with one difference: a
+         *     comment's snapshot quotes the document it hangs on, so for a note
+         *     anchor this follows the NOTE's perimeter -- where the note and task
+         *     twins keep the bin readable for their own restore flow, a thread on a
+         *     binned note is unreachable until the note is restored.
          */
         patch: operations["update_annotation_revision_summary_annotations__annotation_id__revisions__rev_id__patch"];
         trace?: never;
@@ -5340,6 +5344,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/review/rejected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review Rejected
+         * @description The review BIN (ADR-0043): proposals a human declined, most recently
+         *     declined first. Rejecting soft-deletes the node while leaving it
+         *     ``proposed``, a pair of states no other listing shows -- the inbox wants
+         *     the live ones, the trash refuses proposals -- so this is what makes an
+         *     undo reachable. The undo itself is ``POST /notes/{note_id}/restore``,
+         *     echoing ``version``. A pure read; RLS-scoped.
+         */
+        get: operations["garden_review_rejected_garden_review_rejected_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/review/approve": {
         parameters: {
             query?: never;
@@ -7590,6 +7619,12 @@ export interface components {
             anchor_prefix?: string | null;
             /** Anchor Suffix */
             anchor_suffix?: string | null;
+            /**
+             * Anchor Domain
+             * @default source
+             * @enum {string}
+             */
+            anchor_domain?: "source" | "rendered";
             /** Parent Id */
             parent_id?: string | null;
         };
@@ -7630,6 +7665,11 @@ export interface components {
             anchor_prefix?: string | null;
             /** Anchor Suffix */
             anchor_suffix?: string | null;
+            /**
+             * Anchor Domain
+             * @default source
+             */
+            anchor_domain?: string;
             /** Original Text */
             original_text?: string | null;
             /** Proposed Text */
@@ -9620,6 +9660,39 @@ export interface components {
             created_at: string;
             /** Version */
             version: number;
+        };
+        /**
+         * GardenReviewRejectedItem
+         * @description One proposal a human DECLINED: the review bin's row. ``rejected_at``
+         *     is when it was declined; ``version`` is the pin to echo back to the
+         *     restore that undoes the rejection.
+         */
+        GardenReviewRejectedItem: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Preview */
+            preview: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Version */
+            version: number;
+            /**
+             * Rejected At
+             * Format: date-time
+             */
+            rejected_at: string;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -13131,6 +13204,12 @@ export interface components {
             anchor_prefix?: string | null;
             /** Anchor Suffix */
             anchor_suffix?: string | null;
+            /**
+             * Anchor Domain
+             * @default source
+             * @enum {string}
+             */
+            anchor_domain?: "source" | "rendered";
         };
         /** SyncResultOut */
         SyncResultOut: {
@@ -26506,6 +26585,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenReviewPendingItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_rejected_garden_review_rejected_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewRejectedItem"][];
                 };
             };
             /** @description Validation Error */

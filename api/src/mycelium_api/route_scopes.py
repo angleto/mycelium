@@ -282,6 +282,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/garden/review/approve"): "notes:write",
     ("GET", "/garden/review/pending"): "notes:read",
     ("POST", "/garden/review/reject"): "notes:write",
+    ("GET", "/garden/review/rejected"): "notes:read",
     ("POST", "/garden/review/restore-source"): "notes:write",
     ("GET", "/garden/walk"): "notes:read",
     # --- invoices ---

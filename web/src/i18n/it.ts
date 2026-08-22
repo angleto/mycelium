@@ -227,6 +227,12 @@ export const it: Catalog = {
       hint: 'Atomi prodotti in autonomia, trattenuti finché non li approvi (ADR-0043).',
       model: 'modello produttore',
     },
+    rejected: {
+      title: 'Rifiutate',
+      at: 'rifiutata il',
+      hint: "Proposte che hai rifiutato: non compaiono in nessun'altra lista, nemmeno nel cestino. Annulla per rimetterle in attesa di revisione.",
+    },
+    undoReject: 'Annulla rifiuto',
   },
   gardenSuggest: {
     title: 'Suggerimenti del giardino',

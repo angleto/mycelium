@@ -6176,6 +6176,33 @@ async def garden_review_pending(token: str, org_id: str, limit: int = 50) -> dic
 
 
 @mcp.tool()
+async def garden_review_rejected(token: str, org_id: str, limit: int = 50) -> dict[str, Any]:
+    """Review BIN (ADR-0043): the proposals a human DECLINED, most recently
+    declined first. A reject soft-deletes the node and leaves it
+    ``proposed``, a pair of states no other listing shows -- ``list_notes``
+    hides proposals even in the trash view -- so this is the only way to
+    find one again. Undo it with ``restore_note``, echoing ``version``.
+    A pure read. Member role; RLS-scoped."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rejected = await garden_review_svc.list_rejected(s, org_id=org, limit=limit)
+        return {
+            "rejected": [
+                {
+                    "note_id": str(r.note_id),
+                    "title": r.title,
+                    "humus_kind": r.humus_kind,
+                    "origin_model_id": r.origin_model_id,
+                    "preview": r.preview,
+                    "created_at": r.created_at.isoformat(),
+                    "rejected_at": r.rejected_at.isoformat(),
+                    "version": r.version,
+                }
+                for r in rejected
+            ]
+        }
+
+
+@mcp.tool()
 async def garden_review_approve(
     token: str, org_id: str, note_id: str, expected_version: int | None = None
 ) -> dict[str, Any]:
@@ -8365,7 +8392,9 @@ async def unlink_notes(
     kind: str,
 ) -> dict[str, Any]:
     """Remove a typed note-to-note link. Returns ``removed`` true/false
-    (false when the link did not exist)."""
+    (false when the link did not exist). Both notes must be visible ones:
+    NOT_FOUND if either is in the trash or awaiting review, the same rule
+    that governs creating the link."""
     async with _tenant(token, org_id) as (s, org, user):
         removed = await note_links_svc.unlink_notes(
             s,
@@ -8485,7 +8514,8 @@ async def unlink_note_task(
     """Remove a typed note↔task link (``subject``, ``artifact``,
     ``derived_from``). ``promoted_from`` is refused: a transplant cannot
     be undone via unlink. Idempotent: returns ``removed`` false when no
-    matching row exists."""
+    matching row exists; NOT_FOUND when the note is in the trash or
+    awaiting review, as for creating the link."""
     async with _tenant(token, org_id) as (s, org, user):
         removed = await note_links_svc.unlink_note_task(
             s,

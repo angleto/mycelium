@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.note_link import NoteTaskLink
 from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
 from mycelium_core.services import agent_runtime as runtime
 from mycelium_core.services import note_links as note_links_svc
@@ -202,8 +203,14 @@ async def test_notes_for_task_is_effective_by_default_with_a_trash_opt_in() -> N
             )
         ) == {live.id, trashed.id}
         # The link rows are all still there: the perimeter is derived, not
-        # written.
-        assert len(await note_links_svc.list_note_task_links(s, org_id=org, task_id=task.id)) == 3
+        # written. Read them raw -- the listing answers to the perimeter now
+        # too, so it is no longer the way to observe the underlying rows.
+        rows = (
+            (await s.execute(select(NoteTaskLink.note_id).where(NoteTaskLink.task_id == task.id)))
+            .scalars()
+            .all()
+        )
+        assert len(list(rows)) == 3
 
 
 async def test_work_note_reuse_skips_a_gated_artifact() -> None:

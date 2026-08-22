@@ -410,8 +410,20 @@ async def detach_tag(
     instead. The PROJECT may go -- that is the un-share path, and it
     sends the note's blobs back to the personal (NULL project)
     perimeter at once rather than at the next content edit (task
-    1d152747, core/tests/test_f6b_notes.py)."""
+    1d152747, core/tests/test_f6b_notes.py).
+
+    Requires an EFFECTIVE note, like its twin ``attach_tag`` already did
+    (task a186c989). It is not symmetry for its own sake: dropping the
+    project of a note in the bin re-scopes its indexed blobs to the
+    personal perimeter, which is a retrieval-visible change made through a
+    door that no read surface opens. The structural REPAIR paths
+    (``taxonomy`` re-homing the survivors of a purged client) deliberately
+    keep reaching trashed notes and do not come through here -- they must,
+    since the DB trigger requires every note row, binned ones included, to
+    carry exactly one client tag.
+    """
     await require_role(session, org_id, actor_id, Role.member)
+    await get_note(session, org_id=org_id, note_id=note_id)
     tag_kind = (
         await session.execute(select(Tag.kind).where(Tag.id == tag_id))
     ).scalar_one_or_none()
@@ -1269,7 +1281,7 @@ async def restore_note(
     rejected = note.review_state == "proposed" and note.deleted_at is not None
     if note.review_state == "proposed" and not rejected:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-    return await _note_set(
+    new_version = await _note_set(
         session,
         org_id=org_id,
         actor_id=actor_id,
@@ -1280,6 +1292,19 @@ async def restore_note(
         include_deleted=True,
         include_proposed=rejected,
     )
+    if rejected:
+        # The undo has to leave a mark of its own, or the per-model
+        # reliability signal keeps counting a rejection the human took back
+        # (and, after a second look that approves, counts the node twice).
+        # Local import: ``garden_review`` owns the review vocabulary and
+        # imports this module.
+        from mycelium_core.services import garden_review as garden_review_svc
+
+        note.version = new_version
+        await garden_review_svc.record_unreject(
+            session, org_id=org_id, actor_id=actor_id, note=note
+        )
+    return new_version
 
 
 async def create_note(

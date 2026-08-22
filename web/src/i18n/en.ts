@@ -228,6 +228,12 @@ export const en = {
       hint: 'Autonomously-produced atoms held until you approve them (ADR-0043).',
       model: 'producing model',
     },
+    rejected: {
+      title: 'Rejected',
+      at: 'rejected on',
+      hint: 'Proposals you declined: they show in no other list, not even the trash. Undo to put one back in the review queue.',
+    },
+    undoReject: 'Undo rejection',
   },
   gardenSuggest: {
     title: 'Garden suggestions',

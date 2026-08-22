@@ -127,6 +127,38 @@ async def test_reject_soft_deletes_the_proposal(_wire: None) -> None:
         assert (await c.get(f"/notes/{nid}", headers=h)).status_code == 404
 
 
+async def test_the_review_bin_makes_a_rejection_undoable(_wire: None) -> None:
+    """A rejected proposal shows in no other listing -- the inbox wants the
+    live ones, the trash view refuses proposals -- so the bin is what makes
+    the undo reachable, and the undo is the ordinary note restore."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        assert (await c.get("/garden/review/rejected", headers=h)).json() == []
+
+        await c.post("/garden/review/reject", headers=h, json={"note_id": nid, "reason": "weak"})
+        # Neither the inbox nor the trash view of /notes shows it.
+        assert nid not in {
+            p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
+        }
+        trashed = (await c.get("/notes", headers=h, params={"include_deleted": True})).json()
+        assert nid not in {n["id"] for n in trashed}
+
+        binned = (await c.get("/garden/review/rejected", headers=h)).json()
+        assert [b["note_id"] for b in binned] == [nid]
+        assert binned[0]["rejected_at"] and binned[0]["preview"]
+
+        undo = await c.post(
+            f"/notes/{nid}/restore", headers=h, json={"expected_version": binned[0]["version"]}
+        )
+        assert undo.status_code == 200, undo.text
+        assert (await c.get("/garden/review/rejected", headers=h)).json() == []
+        assert nid in {
+            p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
+        }
+
+
 async def test_review_of_a_plain_note_is_404(_wire: None) -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

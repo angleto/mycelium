@@ -35,6 +35,7 @@ from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import Note, NoteKind, NoteTurn, TurnRole
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.models.tag import TagKind
 from mycelium_core.services import (
     annotations,
     billing,
@@ -43,6 +44,7 @@ from mycelium_core.services import (
     kg,
     memory,
     note_links,
+    taxonomy,
 )
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import note_parts as parts_svc
@@ -658,3 +660,106 @@ async def test_a_rejected_proposal_can_be_un_rejected() -> None:
         assert fresh.review_state == "proposed"  # back in the inbox, not silently approved
         pending = await garden_review.list_pending(s, org_id=org)
         assert note.id in {p.note_id for p in pending}
+
+
+async def test_the_link_family_is_symmetric_on_the_perimeter() -> None:
+    """Creating an edge was gated and destroying it was not, which is the
+    wrong way round: nothing in the codebase unlinks as cleanup (the hard
+    deletes ride the FK cascade, merge writes its own row, review leaves
+    the edges standing so a restore brings them back). And the listings
+    that feed the mindmap and the links panel now agree, so no edge is
+    shown with an unlink button that would refuse."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        live = await _note(s, org, user, "live body WHISKEY")
+        gated = await _note(s, org, user, "gated body XRAY")
+        task = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="T")
+        await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=live.id,
+            child_note_id=gated.id,
+            kind="related",
+        )
+        await note_links.ensure_artifact_link(
+            s, org_id=org, actor_id=user, note_id=gated.id, task_id=task.id
+        )
+        outgoing, incoming = await note_links.list_note_links(s, org_id=org, note_id=live.id)
+        assert len(outgoing) + len(incoming) == 1
+        assert len(await note_links.list_workspace_note_links(s, org_id=org)) == 1
+        assert len(await note_links.list_note_task_links(s, org_id=org, task_id=task.id)) == 1
+
+        await _propose(s, gated.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        # The edge is no longer listed anywhere...
+        outgoing, incoming = await note_links.list_note_links(s, org_id=org, note_id=live.id)
+        assert outgoing == [] and incoming == []
+        assert await note_links.list_workspace_note_links(s, org_id=org) == []
+        assert await note_links.list_note_task_links(s, org_id=org, task_id=task.id) == []
+        # ... and cannot be removed either, on either side of the family.
+        with pytest.raises(NotFoundError):
+            await note_links.unlink_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=live.id,
+                child_note_id=gated.id,
+                kind="related",
+            )
+        with pytest.raises(NotFoundError):
+            await note_links.unlink_note_task(
+                s, org_id=org, actor_id=user, note_id=gated.id, task_id=task.id, kind="artifact"
+            )
+        # The gate is on BOTH ends: gated as parent refuses too, not just
+        # gated as child.
+        with pytest.raises(NotFoundError):
+            await note_links.unlink_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=gated.id,
+                child_note_id=live.id,
+                kind="related",
+            )
+        # Two live notes are unaffected, and unlinking stays idempotent:
+        # False for an edge that is not there, not an error.
+        other = await _note(s, org, user, "another live body ZULU")
+        assert (
+            await note_links.unlink_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=live.id,
+                child_note_id=other.id,
+                kind="related",
+            )
+            is False
+        )
+
+
+async def test_a_tag_does_not_come_off_a_gated_note() -> None:
+    """``attach_tag`` was gated and ``detach_tag`` was not. Dropping the
+    project of a note in the bin re-scopes its indexed blobs to the personal
+    perimeter: a retrieval-visible change through a door no reader opens."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "tagged body YANKEE")
+        tag = await taxonomy.create_tag(
+            s, org_id=org, actor_id=user, kind=TagKind.generic, name=f"t-{uuid.uuid4().hex[:6]}"
+        )
+        await nt.attach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=tag.id)
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError):
+            await nt.detach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=tag.id)
+        with pytest.raises(NotFoundError):
+            await nt.attach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=tag.id)

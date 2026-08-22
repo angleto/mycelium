@@ -37,6 +37,7 @@ from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.services import billing, graph, lookup, memory
 from mycelium_core.services import decomposition as decomp
 from mycelium_core.services import garden_review as review
@@ -399,6 +400,205 @@ async def test_accept_ratio_by_model_counts_approve_and_reject() -> None:
         # most-decided model first (model-x has 2 decisions, model-y has 1).
         assert ratios[0].model_id == "model-x"
         assert await review.accept_ratio_overall(s, org_id=org) == round(2 / 3, 4)
+
+
+async def test_the_review_bin_lists_what_was_rejected_and_the_restore_undoes_it() -> None:
+    """Rejecting soft-deletes while leaving the node ``proposed``, a pair of
+    states no listing shows: the inbox wants the live ones, the trash view
+    refuses proposals. The bin is what makes the undo reachable, and the
+    undo is the ordinary restore."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note_id = await _proposed(s, org, user, model="model-z")
+        assert {p.note_id for p in await review.list_pending(s, org_id=org)} == {note_id}
+        assert await review.list_rejected(s, org_id=org) == []
+
+        # An ordinary trashed note is NOT a rejected proposal: the bin
+        # selects the pair of states, not just the soft-delete.
+        plain = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="plain", text="ordinary"
+        )
+        await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=plain.id,
+            expected_version=plain.version,
+        )
+        older = await _proposed(s, org, user, model="model-z")
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=older)
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        assert await review.list_pending(s, org_id=org) == []
+        binned = await review.list_rejected(s, org_id=org)
+        # Most recently rejected first, and the plain trashed note is absent.
+        assert [r.note_id for r in binned] == [note_id, older]
+        assert plain.id not in {r.note_id for r in binned}
+        assert binned[0].origin_model_id == "model-z"
+        assert binned[0].preview  # the body is readable to decide on the undo
+        assert binned[0].rejected_at >= binned[0].created_at
+
+        # The undo: the ordinary restore, echoing the pin the bin serves.
+        await nt.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note_id,
+            expected_version=binned[0].version,
+        )
+        assert {r.note_id for r in await review.list_rejected(s, org_id=org)} == {older}
+        assert {p.note_id for p in await review.list_pending(s, org_id=org)} == {note_id}
+
+
+async def test_a_rejection_taken_back_stops_counting_against_the_model() -> None:
+    """A reject the human undid is not a reject. Without the compensating
+    event the sequence reject -> restore -> approve would charge the model a
+    decision that was reversed AND credit it with the approval, a worse
+    reading of reliability than either outcome alone."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note_id = await _proposed(s, org, user, model="model-undo")
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-undo"].approved, by["model-undo"].rejected) == (0, 1)
+
+        version = (await review.list_rejected(s, org_id=org))[0].version
+        await nt.restore_note(
+            s, org_id=org, actor_id=user, note_id=note_id, expected_version=version
+        )
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-undo"].approved, by["model-undo"].rejected) == (0, 0)
+
+        # Second look, this time a yes: one decision, not one of each.
+        note = (await s.execute(select(Note).where(Note.id == note_id))).scalar_one()
+        await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=note_id, expected_version=note.version
+        )
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-undo"].approved, by["model-undo"].rejected, by["model-undo"].ratio) == (
+            1,
+            0,
+            1.0,
+        )
+
+
+async def test_a_second_rejection_after_an_undo_counts_again() -> None:
+    """The decision keys carry the version for this: a node rejected, taken
+    back and rejected again has been rejected twice as far as the model is
+    concerned, and the 24h idempotency window must not swallow the second
+    verdict as if it were a retry."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note_id = await _proposed(s, org, user, model="model-twice")
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        version = (await review.list_rejected(s, org_id=org))[0].version
+        await nt.restore_note(
+            s, org_id=org, actor_id=user, note_id=note_id, expected_version=version
+        )
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        # reject(1) - unreject(1) + reject(1): the second verdict stands.
+        assert (by["model-twice"].approved, by["model-twice"].rejected) == (0, 1)
+
+
+async def test_undoing_an_unattributed_withdrawal_stays_unattributed() -> None:
+    """``restore_source`` withdraws without charging the model, so taking
+    THAT back must not credit one either: an undo that named a model would
+    subtract a rejection the model never got, cancelling a real one from
+    another node."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        # A real rejection for the model, on its own node.
+        real = await _proposed(s, org, user, model="model-mix")
+        await review.reject_node(s, org_id=org, actor_id=user, note_id=real)
+
+        # A lens of the same model, withdrawn by restore_source.
+        source = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="src", text="the source"
+        )
+        await nt.archive_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=source.id,
+            archived=True,
+            expected_version=source.version,
+        )
+        atom_id = await _proposed(s, org, user, model="model-mix")
+        atom = (await s.execute(select(Note).where(Note.id == atom_id))).scalar_one()
+        atom.humus_flag = True
+        s.add(
+            NoteNoteLink(
+                org_id=org, parent_note_id=source.id, child_note_id=atom_id, kind="hypha_of"
+            )
+        )
+        await s.flush()
+        await review.approve_node(s, org_id=org, actor_id=user, note_id=atom_id)
+        await review.restore_source(s, org_id=org, actor_id=user, atom_note_id=atom_id)
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-mix"].approved, by["model-mix"].rejected) == (1, 1)
+
+        # Undo the WITHDRAWAL: the real rejection on the other node stands.
+        binned = {r.note_id: r for r in await review.list_rejected(s, org_id=org)}
+        await nt.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=atom_id,
+            expected_version=binned[atom_id].version,
+        )
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-mix"].approved, by["model-mix"].rejected) == (1, 1)
+
+
+async def test_retiring_a_lens_is_not_a_verdict_on_its_model() -> None:
+    """``restore_source`` retires an approved atom to bring its sources back
+    up. That is a choice about which layer to look at, so it stays in the
+    audit trail and out of the model's accept ratio."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="src", text="the source"
+        )
+        await nt.archive_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=source.id,
+            archived=True,
+            expected_version=source.version,
+        )
+        atom_id = await _proposed(s, org, user, model="model-lens")
+        atom = (await s.execute(select(Note).where(Note.id == atom_id))).scalar_one()
+        atom.humus_flag = True
+        s.add(
+            NoteNoteLink(
+                org_id=org, parent_note_id=source.id, child_note_id=atom_id, kind="hypha_of"
+            )
+        )
+        await s.flush()
+        await review.approve_node(s, org_id=org, actor_id=user, note_id=atom_id)
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-lens"].approved, by["model-lens"].rejected) == (1, 0)
+
+        res = await review.restore_source(s, org_id=org, actor_id=user, atom_note_id=atom_id)
+        assert res.atom_retired and res.restored_source_ids == [source.id]
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-lens"].approved, by["model-lens"].rejected) == (1, 0)
+        # The withdrawal is still on the record, just not attributed.
+        withdrawn = (
+            (
+                await s.execute(
+                    select(EventOutbox).where(
+                        EventOutbox.node_id == atom_id,
+                        EventOutbox.payload["review"].astext == "reject",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(withdrawn) == 1
+        assert withdrawn[0].payload["origin_model_id"] is None
 
 
 async def test_accept_ratio_is_none_without_reviews() -> None:
