@@ -14,6 +14,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+from mycelium_core.migration_rls import owner_sees_all_tenants
 from mycelium_core.models import Base
 
 config = context.config
@@ -55,7 +56,13 @@ def run_migrations_online() -> None:
             compare_type=True,
         )
         with context.begin_transaction():
-            context.run_migrations()
+            # Senza questo, su un deployment dove il ruolo proprietario non
+            # e' superuser (PostgreSQL gestito), ogni backfill su una
+            # tabella org-scoped tocca zero righe e non lo dice. Vedi
+            # mycelium_core.migration_rls: e' la correzione centrale del
+            # problema che la 0037 aveva aggirato a mano per le sole `tasks`.
+            with owner_sees_all_tenants(connection):
+                context.run_migrations()
     engine.dispose()
 
 

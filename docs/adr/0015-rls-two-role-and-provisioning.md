@@ -43,6 +43,47 @@ make it non-trivial:
 - `activity_log` is append-only via a trigger that forbids
   UPDATE/DELETE.
 
+## Amendment (2026-08-22): the owner is NOT a superuser in production
+
+Fact 1 above ("a superuser always bypasses RLS") is load-bearing: it is
+what lets a migration read and write across tenants. On **managed**
+PostgreSQL it does not hold, because the provider does not hand out
+superuser:
+
+    dev / CI (postgres image)   mycelium: rolsuper=t  rolbypassrls=t
+    production (Scaleway)       mycelium: rolsuper=f  rolbypassrls=f
+
+So in production the migration role is subject to `FORCE`, the policies
+are fail-closed on an unset `app.current_org`, and **every backfill on an
+org-scoped table updates zero rows and raises nothing**. The defect is
+invisible in dev and CI — where the role *is* a superuser and the tests
+pass — and only manifests in production.
+
+This was first hit at 0011 — which shipped the bug and cost a data
+recovery in 0013 — then again at 0035/0036, worked around inside 0037
+alone (see its docstring). The runner was never fixed, so the bracket had
+to be remembered on every later revision, and five forgot it: 0016, 0022,
+0039, 0095, 0099.
+
+Audited in production on 2026-08-22: 0099 and 0039 had really no-opped
+and were repaired (22 annotations re-anchored to the source domain, 48
+time entries realigned); 0022 and 0095 had no rows to touch; 0016 is not
+retroactively verifiable (it dropped the source column) but its residue
+is legal under the asymmetric note invariant. Per-migration outcomes are
+in `core/migrations/archive/README.md`.
+
+The runner now closes it centrally (`mycelium_core.migration_rls`): when
+the role does not already bypass RLS, `FORCE` is lifted for the duration
+of the migration transaction and restored on the way out. `FORCE` exists
+to constrain the OWNER — a non-owner is subject to the policies with or
+without it — so this restores exactly the semantics this ADR assumed,
+leaves `mycelium_app` isolation untouched, and needs no superuser. Where
+the role already bypasses RLS (dev, CI) it does nothing at all.
+
+Granting the migration role `BYPASSRLS` would be the smaller change and
+is preferable where the platform allows it; Scaleway does not, since
+setting that attribute itself requires superuser.
+
 ## Alternatives rejected
 
 - App as superuser/owner: RLS would not be enforced (bypass).
