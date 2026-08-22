@@ -577,7 +577,16 @@ export function InvoicesRoute() {
     const h = workspaceHeader()
     const [pr, cl, iv] = await Promise.all([
       api.GET('/issuer-profiles', { params: { header: h } }),
-      api.GET('/clients', { params: { header: h } }),
+      // Archived included on purpose. This array is not a picker: it is the
+      // ONLY source for an invoice's client name (InvoiceOut carries just
+      // client_tag_id) and for its hourly rate when billing tracked time.
+      // Archiving a client does not unbill last quarter's invoices, so
+      // dropping the row here would render a raw uuid in the list and, worse,
+      // write new lines at unit_price 0. The new-invoice select filters
+      // archived out itself, below.
+      api.GET('/clients', {
+        params: { header: h, query: { include_archived: true } },
+      }),
       api.GET('/invoices', {
         params: {
           header: h,
@@ -604,7 +613,9 @@ export function InvoicesRoute() {
       const h = workspaceHeader()
       const [pr, cl, iv] = await Promise.all([
         api.GET('/issuer-profiles', { params: { header: h } }),
-        api.GET('/clients', { params: { header: h } }),
+        api.GET('/clients', {
+          params: { header: h, query: { include_archived: true } },
+        }),
         api.GET('/invoices', {
           params: {
             header: h,
@@ -1168,6 +1179,10 @@ export function InvoicesRoute() {
   const toggleSelectAllRows = () =>
     setTriSel(triAllSelected ? new Set() : new Set(triSelectableKeys))
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? id
+  // The picker's half of the deal: ``clients`` holds the archived rows so
+  // history stays readable, and a NEW invoice may only be addressed to a
+  // live client.
+  const activeClients = clients.filter((c) => c.status !== 'archived')
   const dField = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v)
     setDirty(true)
@@ -1190,7 +1205,7 @@ export function InvoicesRoute() {
         <form onSubmit={(e) => void createDraft(e)} className="row">
           <select value={niClient} onChange={(e) => setNiClient(e.target.value)}>
             <option value="">{t('invoices.client')}</option>
-            {clients.map((c) => (
+            {activeClients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>

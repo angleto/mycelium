@@ -72,7 +72,15 @@ function ProjectFocus() {
       // Projects only. The client list used to be fetched whole just to fill
       // a dropdown; with the search there is nothing to enumerate, and one
       // request per app load disappears with it.
-      const p = await api.GET('/projects', { params: { header: h } })
+      //
+      // Archived projects are asked for explicitly: this list is both the
+      // focus PICKER (which filters them out, below) and the project ->
+      // name map used to label an ALREADY active focus. A focus record
+      // survives its project being archived, and losing the name there
+      // silently degrades the "Scoped to ..." chip to the client.
+      const p = await api.GET('/projects', {
+        params: { header: h, query: { include_archived: true } },
+      })
       if (!active) return
       if (p.data) setProjects(p.data)
     })()
@@ -81,9 +89,10 @@ function ProjectFocus() {
     }
   }, [session?.workspaceId])
 
-  // Archived projects never appear in the focus picker: /projects does not
-  // filter them server-side. Clients are searched, and that endpoint already
-  // excludes archived ones.
+  // Archived projects never appear in the focus picker. /clients and
+  // /projects both exclude them server-side now; this list opts back in
+  // (see the fetch) for the name lookup below, so the picker filters them
+  // out here.
   const visibleProjects = projects.filter((p) => p.status !== 'archived')
   const ofClient = visibleProjects.filter((p) => p.client_tag_id === clientId)
   // Keep the provider's effective allow-list in sync with the data.

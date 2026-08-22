@@ -12,19 +12,25 @@ projects_app = typer.Typer(no_args_is_help=True, help="Projects (tag kind=projec
 
 
 @clients_app.command("list")
-def client_list() -> None:
+def client_list(
+    include_archived: bool = typer.Option(False, "--archived/--no-archived"),
+) -> None:
     """List workspace clients (includes the auto-provisioned 'Personal')."""
+    params = {"include_archived": str(include_archived).lower()}
     with client() as c:
-        rows = get_json(c.get("/clients"))
+        rows = get_json(c.get("/clients", params=params))
     if json_mode():
         emit_json(rows)
         return
     if not rows:
         info("[dim]no clients.[/dim]")
         return
+    # ``status`` is in the table because the listing can now hold archived
+    # rows (with --archived) and "Acme" twice over two lines, one of them
+    # dead, is worse than one extra column.
     emit_table(
         None,
-        ["id", "name", "rate", "currency", "billable"],
+        ["id", "name", "rate", "currency", "billable", "status"],
         [
             (
                 short_id(r.get("id") or r.get("tag_id")),
@@ -32,6 +38,7 @@ def client_list() -> None:
                 r.get("hourly_rate") or "",
                 r.get("currency") or "",
                 r.get("default_billable"),
+                r.get("status") or "",
             )
             for r in rows
         ],
@@ -41,8 +48,10 @@ def client_list() -> None:
 @clients_app.command()
 def show(name_or_id: str = typer.Argument(...)) -> None:
     """Show a client's billing details."""
+    # A resolver, not a picker: ``client show`` on an archived client has to
+    # keep answering, otherwise the only way to inspect one is to un-archive it.
     with client() as c:
-        rows = get_json(c.get("/clients"))
+        rows = get_json(c.get("/clients", params={"include_archived": "true"}))
     match = next(
         (
             r
@@ -63,6 +72,10 @@ def show(name_or_id: str = typer.Argument(...)) -> None:
         f"[bold]{match.get('name')}[/bold]  ({short_id(match.get('id') or match.get('tag_id'))})"
     )
     for k in (
+        # ``status`` first and unconditionally: this resolver now finds
+        # archived clients (that is the point), so the output has to say
+        # which one you are looking at.
+        "status",
         "legal_name",
         "tax_code",
         "address",
@@ -90,12 +103,18 @@ def project_list(
     client_name: str | None = typer.Option(
         None, "--client", "-c", help="Filter by client name or UUID."
     ),
+    include_archived: bool = typer.Option(False, "--archived/--no-archived"),
 ) -> None:
     """List workspace projects, optionally narrowed to one client."""
-    params: dict[str, str] = {}
+    params: dict[str, str] = {"include_archived": str(include_archived).lower()}
     with client() as c:
         if client_name:
-            clients = get_json(c.get("/clients"))
+            # The client here is being RESOLVED, not offered: asking about
+            # the projects of an archived client is a legitimate question.
+            # (Pre-existing and unrelated: ``client_tag_id`` below is not a
+            # declared query parameter of GET /projects, so FastAPI drops it
+            # and the narrowing never happens. Left alone here.)
+            clients = get_json(c.get("/clients", params={"include_archived": "true"}))
             match = next(
                 (
                     r

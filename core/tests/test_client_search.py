@@ -88,8 +88,9 @@ async def test_the_limit_caps_what_a_picker_can_render() -> None:
 
     async with tenant_session(str(org_id), str(user_id)) as s:
         assert len(await taxonomy.list_clients(s, org_id=org_id, limit=5)) == 5
-        # Unbounded by default: the Clients page, MCP and reports still want
-        # every row, and only the pickers pass a limit.
+        # Unbounded in COUNT by default: the Clients page, MCP and reports
+        # still want every LIVE row, and only the pickers pass a limit.
+        # (Archived rows are a separate axis, see the archived test below.)
         assert len(await taxonomy.list_clients(s, org_id=org_id)) >= 12
 
 
@@ -155,3 +156,81 @@ async def test_search_and_recency_compose_on_the_tag_surface() -> None:
         rossi = await taxonomy.list_tags(s, org_id=org_id, kind=TagKind.client, q="rossi", limit=10)
         assert {t.name for t in rossi} == {"Rossi Costruzioni", "Rossi Impianti"}
         assert len(await taxonomy.list_tags(s, org_id=org_id, kind=TagKind.client, limit=2)) == 2
+
+
+async def _archive(org_id: uuid.UUID, user_id: uuid.UUID, tag_id: uuid.UUID) -> None:
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        tag = await taxonomy.get_tag(s, org_id=org_id, tag_id=tag_id)
+        await taxonomy.update_tag(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            tag_id=tag_id,
+            expected_version=tag.version,
+            status="archived",
+        )
+
+
+async def test_an_archived_client_is_gone_from_every_picker() -> None:
+    """The reported bug: the client dropdown offered archived clients.
+
+    A client is a tag, and archiving one means "stop offering it". The
+    exclusion lives in ``list_clients`` and not in one dropdown because
+    there are four of them (the focus search, the quick-add select, the
+    new-invoice select, the connector triage) plus MCP and the CLI --
+    filtering per surface leaves the other five leaking.
+
+    Every knob is exercised: the picker's empty box is ``recent=True``,
+    its typed box is ``q``, and both carry a ``limit``. A status filter
+    applied AFTER the limit would silently return fewer live clients
+    than asked for, which is why the predicate goes first.
+    """
+    org_id, user_id = await _org()
+    live = await _client(org_id, user_id, "Alfa Viva", "66666666666")
+    dead = await _client(org_id, user_id, "Alfa Chiusa", "77777777777")
+    await _archive(org_id, user_id, dead)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert dead not in [t.id for t, _p in await taxonomy.list_clients(s, org_id=org_id)]
+        for kwargs in (
+            {"q": "alfa"},
+            {"recent": True},
+            {"limit": 20},
+            {"q": "alfa", "recent": True, "limit": 20},
+        ):
+            rows = await taxonomy.list_clients(s, org_id=org_id, **kwargs)  # type: ignore[arg-type]
+            ids = [t.id for t, _p in rows]
+            assert dead not in ids, f"archived client leaked with {kwargs}"
+            assert live in ids, f"live client lost with {kwargs}"
+
+        # And it is not deleted, only hidden: the Clients page has to see it
+        # to offer un-archive and purge, and the invoice list has to resolve
+        # its name and its tariffa on last quarter's invoices.
+        back = [
+            t.id for t, _p in await taxonomy.list_clients(s, org_id=org_id, include_archived=True)
+        ]
+        assert dead in back and live in back
+
+
+async def test_an_archived_project_is_gone_from_every_picker() -> None:
+    """Same rule for projects, which had the same omission."""
+    org_id, user_id = await _org()
+    client_tag = await _client(org_id, user_id, "Committente", "88888888888")
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        live = await taxonomy.create_project(
+            s, org_id=org_id, actor_id=user_id, name="Vivo", client_tag_id=client_tag
+        )
+        dead = await taxonomy.create_project(
+            s, org_id=org_id, actor_id=user_id, name="Chiuso", client_tag_id=client_tag
+        )
+        live_id, dead_id = live.id, dead.id
+    await _archive(org_id, user_id, dead_id)
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        ids = [t.id for t, _p in await taxonomy.list_projects(s, org_id=org_id)]
+        assert live_id in ids and dead_id not in ids
+
+        back = [
+            t.id for t, _p in await taxonomy.list_projects(s, org_id=org_id, include_archived=True)
+        ]
+        assert dead_id in back

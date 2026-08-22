@@ -822,18 +822,32 @@ def _project(t: Tag, p: ProjectProfile) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def list_clients(token: str, org_id: str) -> list[dict[str, Any]]:
-    """List clients with their invoicing profile."""
+async def list_clients(
+    token: str, org_id: str, include_archived: bool = False
+) -> list[dict[str, Any]]:
+    """List clients with their invoicing profile.
+
+    Archived clients are excluded by default: an archived client is one
+    the workspace stopped working with, and offering it back to an agent
+    is the same mistake as offering it in a dropdown. Pass
+    ``include_archived`` to resolve a historical reference.
+    """
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await taxonomy.list_clients(s, org_id=org)
+        rows = await taxonomy.list_clients(s, org_id=org, include_archived=include_archived)
         return [_client(t, p) for t, p in rows]
 
 
 @mcp.tool()
-async def list_projects(token: str, org_id: str) -> list[dict[str, Any]]:
-    """List projects with their profile (client link, budget, color)."""
+async def list_projects(
+    token: str, org_id: str, include_archived: bool = False
+) -> list[dict[str, Any]]:
+    """List projects with their profile (client link, budget, color).
+
+    Archived projects are excluded by default; ``include_archived``
+    brings them back for a historical lookup.
+    """
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await taxonomy.list_projects(s, org_id=org)
+        rows = await taxonomy.list_projects(s, org_id=org, include_archived=include_archived)
         return [_project(t, p) for t, p in rows]
 
 

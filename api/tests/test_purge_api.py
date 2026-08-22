@@ -65,8 +65,11 @@ async def test_delete_project_endpoint() -> None:
         assert ok.status_code == 200
         gone = await c.delete(f"/projects/{pr['id']}", headers=h)
         assert gone.status_code == 204
-        # Listing no longer surfaces it.
-        rows = (await c.get("/projects", headers=h)).json()
+        # Listing no longer surfaces it -- asked with include_archived=true on
+        # purpose. The default listing now excludes archived rows, and this
+        # project was archived one step earlier: querying the default surface
+        # would pass whether or not the purge did anything at all.
+        rows = (await c.get("/projects?include_archived=true", headers=h)).json()
         assert all(r["id"] != pr["id"] for r in rows)
 
 
@@ -111,7 +114,12 @@ async def test_delete_client_recurses_projects() -> None:
         )
         gone = await c.delete(f"/clients/{cl['id']}", headers=h)
         assert gone.status_code == 204
-        clients = (await c.get("/clients", headers=h)).json()
+        # include_archived=true for the client: it was archived to make the
+        # purge legal, so the default listing hides it either way and would
+        # not notice a purge that silently did nothing. ``p1`` was never
+        # archived, so the default listing is the honest question there --
+        # and it also proves the recursion reached the child.
+        clients = (await c.get("/clients?include_archived=true", headers=h)).json()
         assert all(r["id"] != cl["id"] for r in clients)
-        projects = (await c.get("/projects", headers=h)).json()
+        projects = (await c.get("/projects?include_archived=true", headers=h)).json()
         assert all(r["id"] != p1["id"] for r in projects)

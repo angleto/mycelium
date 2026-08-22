@@ -20,8 +20,15 @@ app = typer.Typer(no_args_is_help=True, help="Invoices: draft, transmit (SdICoop
 
 
 def _resolve_client_tag(c: object, name_or_id: str) -> str:
-    """Accept a client name or a (short) UUID, return its tag id."""
-    rows = get_json(c.get("/clients"))  # type: ignore[attr-defined]
+    """Accept a client name or a (short) UUID, return its tag id.
+
+    Archived clients are fetched on purpose and then REFUSED by name: a
+    new invoice must not be addressed to a client the workspace archived,
+    but "no client matches 'Acme'" would be a lie about a client that is
+    sitting right there. Same rule as the archived-note resolver -- it
+    resolves and says so instead of passing for absent.
+    """
+    rows = get_json(c.get("/clients", params={"include_archived": "true"}))  # type: ignore[attr-defined]
     match = next(
         (
             r
@@ -33,6 +40,8 @@ def _resolve_client_tag(c: object, name_or_id: str) -> str:
     )
     if match is None:
         raise CLIError(f"no client matches '{name_or_id}'.")
+    if match.get("status") == "archived":
+        raise CLIError(f"client '{match.get('name')}' is archived; un-archive it to invoice it.")
     return str(match.get("id") or match.get("tag_id"))
 
 

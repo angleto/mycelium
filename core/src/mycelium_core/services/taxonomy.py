@@ -774,6 +774,7 @@ async def list_clients(
     q: str | None = None,
     limit: int | None = None,
     recent: bool = False,
+    include_archived: bool = False,
 ) -> list[tuple[Tag, ClientProfile]]:
     """Clients, searchable and capped.
 
@@ -781,6 +782,24 @@ async def list_clients(
     identifier an operator has in hand is often the fiscal one -- from a bank
     line, a provider dashboard, a customer's email -- and searching a client by
     name they cannot remember is the case this is for.
+
+    ``include_archived`` is False by default, for the same reason as in
+    ``list_tags``: a client is a tag, archiving one means "stop offering
+    it", and this is the endpoint behind every client picker (the focus
+    search, the quick-add select, the new-invoice select). Excluding it
+    here is the single root fix -- filtering in one dropdown would leave
+    the other three leaking.
+
+    The opt-in is for the two callers that ask a different question:
+    the Clients page (which must still see an archived client to
+    un-archive or purge it) and any caller resolving a HISTORICAL
+    reference -- the invoice list turning ``client_tag_id`` into a name
+    and a tariffa, ``mycelium client show``. Archiving hides a client
+    from the pickers; it never orphans what it already holds.
+
+    The status predicate deliberately precedes ``q``/``recent``/``limit``:
+    a ``limit`` applied on top of an unfiltered set would silently return
+    fewer than ``limit`` live clients.
     """
     stmt = (
         select(Tag, ClientProfile)
@@ -788,6 +807,8 @@ async def list_clients(
         .where(Tag.kind == TagKind.client, Tag.org_id == org_id)
         .order_by(Tag.name)
     )
+    if not include_archived:
+        stmt = stmt.where(Tag.status == _TAG_ACTIVE)
     if q:
         needle = f"%{q.strip().lower()}%"
         stmt = stmt.where(
@@ -816,14 +837,26 @@ async def list_clients(
 
 
 async def list_projects(
-    session: AsyncSession, *, org_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, include_archived: bool = False
 ) -> list[tuple[Tag, ProjectProfile]]:
-    rows = await session.execute(
+    """Projects with their profile. Archived excluded by default.
+
+    Same rule as ``list_clients`` / ``list_tags``, and the same opt-in:
+    the Clients & projects page needs the archived rows to un-archive or
+    purge them, and a caller that reads this list as the project ->
+    client MAP (the focus chip's project name, the client<->project
+    coupling behind a task's or a note's tag picker) needs the row of a
+    project an existing entity still carries.
+    """
+    stmt = (
         select(Tag, ProjectProfile)
         .join(ProjectProfile, ProjectProfile.tag_id == Tag.id)
         .where(Tag.kind == TagKind.project, Tag.org_id == org_id)
         .order_by(Tag.name)
     )
+    if not include_archived:
+        stmt = stmt.where(Tag.status == _TAG_ACTIVE)
+    rows = await session.execute(stmt)
     return [(t, p) for t, p in rows.all()]
 
 

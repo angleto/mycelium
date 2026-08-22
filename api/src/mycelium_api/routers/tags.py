@@ -254,19 +254,35 @@ async def list_clients(
     q: Annotated[str | None, Query(max_length=120)] = None,
     limit: Annotated[int | None, Query(ge=1, le=500)] = None,
     recent: bool = False,
+    include_archived: bool = False,
 ) -> list[ClientOut]:
     """Clients, optionally searched and capped.
 
-    Unbounded by default, because callers that legitimately want every client
-    exist (the Clients page, MCP, a report). The pickers pass ``limit`` and
-    either ``q`` or ``recent``: a workspace invoicing through a payment
-    connector has one client per paying customer, and a control that enumerates
-    them stops being usable long before the data does.
+    Unbounded in COUNT by default, because callers that legitimately want
+    every client exist (the Clients page, MCP, a report). The pickers pass
+    ``limit`` and either ``q`` or ``recent``: a workspace invoicing through a
+    payment connector has one client per paying customer, and a control that
+    enumerates them stops being usable long before the data does.
+
+    Archived clients are excluded by default, exactly like GET /tags: this
+    endpoint is what feeds every client picker, and an archived client must
+    not be offered by any of them. ``include_archived=true`` is for the
+    Clients page (un-archive, purge) and for callers resolving a historical
+    ``client_tag_id`` into a name or a tariffa -- the invoice list, which has
+    no other source for either.
     """
-    # A workspace always has the default "Personal" client.
+    # A workspace always HAS the default "Personal" client -- ensured here,
+    # not merely assumed. It is still subject to the filter below: a Personal
+    # that has itself been archived is absent from the default listing, which
+    # is the honest answer rather than a special case.
     await taxonomy.ensure_default_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
     rows = await taxonomy.list_clients(
-        ctx.session, org_id=ctx.org_id, q=q, limit=limit, recent=recent
+        ctx.session,
+        org_id=ctx.org_id,
+        q=q,
+        limit=limit,
+        recent=recent,
+        include_archived=include_archived,
     )
     return [_client_out(t, p) for t, p in rows]
 
@@ -274,8 +290,14 @@ async def list_clients(
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_archived: bool = False,
 ) -> list[ProjectOut]:
-    rows = await taxonomy.list_projects(ctx.session, org_id=ctx.org_id)
+    """Projects. Archived excluded by default (see GET /clients); the
+    opt-in is for the Clients page and for callers that read this list
+    as the project -> client map rather than as a picker."""
+    rows = await taxonomy.list_projects(
+        ctx.session, org_id=ctx.org_id, include_archived=include_archived
+    )
     return [_project_out(t, p) for t, p in rows]
 
 

@@ -653,11 +653,18 @@ export interface paths {
          * List Clients
          * @description Clients, optionally searched and capped.
          *
-         *     Unbounded by default, because callers that legitimately want every client
-         *     exist (the Clients page, MCP, a report). The pickers pass ``limit`` and
-         *     either ``q`` or ``recent``: a workspace invoicing through a payment
-         *     connector has one client per paying customer, and a control that enumerates
-         *     them stops being usable long before the data does.
+         *     Unbounded in COUNT by default, because callers that legitimately want
+         *     every client exist (the Clients page, MCP, a report). The pickers pass
+         *     ``limit`` and either ``q`` or ``recent``: a workspace invoicing through a
+         *     payment connector has one client per paying customer, and a control that
+         *     enumerates them stops being usable long before the data does.
+         *
+         *     Archived clients are excluded by default, exactly like GET /tags: this
+         *     endpoint is what feeds every client picker, and an archived client must
+         *     not be offered by any of them. ``include_archived=true`` is for the
+         *     Clients page (un-archive, purge) and for callers resolving a historical
+         *     ``client_tag_id`` into a name or a tariffa -- the invoice list, which has
+         *     no other source for either.
          */
         get: operations["list_clients_clients_get"];
         put?: never;
@@ -676,7 +683,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Projects */
+        /**
+         * List Projects
+         * @description Projects. Archived excluded by default (see GET /clients); the
+         *     opt-in is for the Clients page and for callers that read this list
+         *     as the project -> client map rather than as a picker.
+         */
         get: operations["list_projects_projects_get"];
         put?: never;
         /** Create Project */
@@ -15739,6 +15751,7 @@ export interface operations {
                 q?: string | null;
                 limit?: number | null;
                 recent?: boolean;
+                include_archived?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -15811,7 +15824,9 @@ export interface operations {
     };
     list_projects_projects_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_archived?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;

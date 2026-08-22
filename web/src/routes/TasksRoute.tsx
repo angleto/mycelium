@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, searchTasksByText, workspaceHeader } from '../api/client'
@@ -335,9 +335,17 @@ export function TasksRoute() {
     filterProjectsByClient,
   } = useLinkedClientProject(projectsByClient)
 
-  // Clients from /clients (always includes the ensured Personal default);
+  // Clients from /clients (which ensures the Personal default exists);
   // projects still come from /tags filtered by the selected client.
-  const clients = clientsList
+  //
+  // ``clients`` is what the select offers: live clients, plus the current
+  // selection when it has since been archived (see the fetch). ``clientsList``
+  // is the raw response and must not be rendered directly.
+  const clients = useMemo(() => {
+    const live = clientsList.filter((c) => c.status !== 'archived')
+    const cur = clientsList.find((c) => c.id === clientId)
+    return cur && !live.some((c) => c.id === cur.id) ? [cur, ...live] : live
+  }, [clientsList, clientId])
   const projects = filterProjectsByClient(tags.filter((x) => x.kind === 'project'))
   // The only tags a bulk action may attach/detach: the structural pair
   // is per-task and moves the task (see bulkApplyTag).
@@ -408,12 +416,32 @@ export function TasksRoute() {
             },
           }),
           api.GET('/tags', { params: { header: h } }),
-          api.GET('/projects', { params: { header: h } }),
+          // Archived included: this payload is NOT the project picker (that
+          // one is /tags-fed, already archived-free) — it is the project ->
+          // client MAP behind useLinkedClientProject. The focus record can
+          // still name a since-archived project, and with its row missing
+          // `profileFor` returns undefined, so the guard that drops a
+          // project the newly picked client does not own stops firing and
+          // the create is refused with TAG_CLIENT_PROJECT_MISMATCH.
+          api.GET('/projects', {
+            params: { header: h, query: { include_archived: true } },
+          }),
           // /clients is the authoritative client list and side-effects
-          // ``ensure_default_client``, so its response always includes the
-          // Personal default. It drives the client picker + pre-select
+          // ``ensure_default_client``, so the Personal default always
+          // EXISTS (it is still absent from the response if it has itself
+          // been archived). It drives the client picker + pre-select
           // (clientsList) — see the note on that state.
-          api.GET('/clients', { params: { header: h } }),
+          //
+          // Archived included, then filtered locally for the select: the
+          // focus record lives in localStorage and is not cleared when its
+          // client is archived, so the quick-add row can be handed an id
+          // the live list no longer contains. A `required` select whose
+          // value matches no option renders blank and refuses to submit —
+          // the archived client has to stay reachable as the CURRENT
+          // value, exactly like TagPicker does for an attached tag.
+          api.GET('/clients', {
+            params: { header: h, query: { include_archived: true } },
+          }),
         ])
         if (!active) return
         if (tk.data) setTasks(tk.data)

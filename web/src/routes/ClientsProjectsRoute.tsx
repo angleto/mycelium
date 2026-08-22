@@ -146,8 +146,16 @@ export function ClientsProjectsRoute() {
   const load = useCallback(async () => {
     const h = workspaceHeader()
     const [c, p] = await Promise.all([
-      api.GET('/clients', { params: { header: h } }),
-      api.GET('/projects', { params: { header: h } }),
+      // The one surface that ASKS for the archived rows: this is where a
+      // client or a project is un-archived and where purge lives (both
+      // gated on status === 'archived'). Everywhere else the endpoints
+      // now answer with the live corpus only.
+      api.GET('/clients', {
+        params: { header: h, query: { include_archived: true } },
+      }),
+      api.GET('/projects', {
+        params: { header: h, query: { include_archived: true } },
+      }),
     ])
     if (c.data) setClients(c.data)
     if (p.data) setProjects(p.data)
@@ -158,8 +166,12 @@ export function ClientsProjectsRoute() {
     void (async () => {
       const h = workspaceHeader()
       const [c, p] = await Promise.all([
-        api.GET('/clients', { params: { header: h } }),
-        api.GET('/projects', { params: { header: h } }),
+        api.GET('/clients', {
+          params: { header: h, query: { include_archived: true } },
+        }),
+        api.GET('/projects', {
+          params: { header: h, query: { include_archived: true } },
+        }),
       ])
       if (!active) return
       if (c.data) setClients(c.data)
@@ -292,6 +304,20 @@ export function ClientsProjectsRoute() {
   )
   const projectsOf = (clientId: string) =>
     visProjects.filter((p) => p.client_tag_id === clientId)
+  // Options for the "which client owns this project" select. NOT
+  // ``visClients``: that one follows the show-archived toggle, and a
+  // reassignment target must never be an archived client whichever way
+  // the toggle happens to sit. The project's OWN client is unshifted
+  // when it is archived, mirroring TagPicker: archiving hides a client
+  // from the pickers, it never orphans what it already holds -- and an
+  // uncontrolled select whose defaultValue matches no option falls back
+  // to index 0, which would silently re-tag every task and note of the
+  // project on a plain rename.
+  const clientOptsFor = (ownerId: string) => {
+    const opts = clients.filter((c) => c.status !== 'archived')
+    const owner = clients.find((c) => c.id === ownerId)
+    return owner && !opts.some((c) => c.id === owner.id) ? [owner, ...opts] : opts
+  }
   function toggleClient(id: string) {
     setExpanded((s) => {
       const n = new Set(s)
@@ -374,7 +400,7 @@ export function ClientsProjectsRoute() {
           <label>
             {t('cp.clientLabel')}
             <select name="client_tag_id" defaultValue={p.client_tag_id ?? ''}>
-              {clients.map((c) => (
+              {clientOptsFor(p.client_tag_id).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>

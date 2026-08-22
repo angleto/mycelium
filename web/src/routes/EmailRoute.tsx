@@ -51,7 +51,12 @@ export function EmailRoute() {
       }),
       api.GET('/tags', { params: { header: h } }),
       api.GET('/email/drafts', { params: { header: h } }),
-      api.GET('/projects', { params: { header: h } }),
+      // Archived included: a default-tag bag stores the pair, and the
+      // owning client is DERIVED from the project profile below. A missing
+      // row would persist a bag with a project and no client.
+      api.GET('/projects', {
+        params: { header: h, query: { include_archived: true } },
+      }),
     ])
     if (a.data) setAccounts(a.data)
     if (m.data) setMessages(m.data)
@@ -71,7 +76,9 @@ export function EmailRoute() {
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/email/drafts', { params: { header: h } }),
-        api.GET('/projects', { params: { header: h } }),
+        api.GET('/projects', {
+          params: { header: h, query: { include_archived: true } },
+        }),
       ])
       if (!active) return
       if (a.data) setAccounts(a.data)

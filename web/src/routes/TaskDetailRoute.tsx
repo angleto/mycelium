@@ -336,7 +336,11 @@ export function TaskDetailRoute() {
           params: { header: h, path: { task_id: id } },
         }),
         api.GET('/tags', { params: { header: h } }),
-        api.GET('/projects', { params: { header: h } }),
+        // Archived included, as on the note detail: the payload is the
+        // project -> client map behind TagPicker, not its option list.
+        api.GET('/projects', {
+          params: { header: h, query: { include_archived: true } },
+        }),
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
         api.GET('/workspaces/me', { params: { header: h } }),

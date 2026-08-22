@@ -143,7 +143,13 @@ export function NoteDetailRoute() {
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
-        api.GET('/projects', { params: { header: h } }),
+        // Archived included: this feeds TagPicker's structural pair as the
+        // project -> client MAP. The picker filters archived out of its own
+        // options; without the row the client<->project coupling silently
+        // stops enforcing on a note whose project was archived.
+        api.GET('/projects', {
+          params: { header: h, query: { include_archived: true } },
+        }),
       ])
       if (!active) return
       if (n.error || !n.data) {

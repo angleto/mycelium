@@ -135,6 +135,71 @@ async def test_archived_tag_excluded_by_default_and_everywhere() -> None:
         assert t["id"] in {x["id"] for x in (await c.get("/tags", headers=h)).json()}
 
 
+async def test_archived_client_and_project_excluded_from_their_own_endpoints() -> None:
+    """The same rule, on the two endpoints that had forgotten it.
+
+    ``/clients`` and ``/projects`` are not "the tag list with a profile
+    attached" as far as the SPA is concerned: they are what feeds the
+    client search in the focus bar, the quick-add client select, the
+    new-invoice select and the connector triage. They were returning
+    archived rows, so a client archived on the Clients page kept being
+    offered by all four. The exclusion is in ``taxonomy.list_clients`` /
+    ``list_projects``; this is the gate that keeps it there.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        oh = _owner(h)
+
+        cl = (
+            await c.post("/clients", headers=oh, json={"name": "Chiuso", "legal_name": "C srl"})
+        ).json()
+        pj = (
+            await c.post(
+                "/projects", headers=oh, json={"name": "Finito", "client_tag_id": cl["id"]}
+            )
+        ).json()
+
+        assert cl["id"] in {x["id"] for x in (await c.get("/clients", headers=h)).json()}
+        assert pj["id"] in {x["id"] for x in (await c.get("/projects", headers=h)).json()}
+
+        for row in (cl, pj):
+            pa = await c.patch(
+                f"/tags/{row['id']}",
+                headers=oh,
+                json={"expected_version": row["version"], "status": "archived"},
+            )
+            assert pa.status_code == 200, pa.text
+
+        # Gone from the pickers, on every knob one of them uses.
+        assert cl["id"] not in {x["id"] for x in (await c.get("/clients", headers=h)).json()}
+        assert cl["id"] not in {
+            x["id"] for x in (await c.get("/clients?recent=true&limit=20", headers=h)).json()
+        }
+        assert cl["id"] not in {
+            x["id"] for x in (await c.get("/clients?q=chiuso&limit=20", headers=h)).json()
+        }
+        assert pj["id"] not in {x["id"] for x in (await c.get("/projects", headers=h)).json()}
+
+        # Back for the Clients page, which is the only way to un-archive
+        # or purge, and for the invoice list resolving a historical
+        # client_tag_id into a name and a tariffa.
+        full_c = (await c.get("/clients?include_archived=true", headers=h)).json()
+        full_p = (await c.get("/projects?include_archived=true", headers=h)).json()
+        assert cl["id"] in {x["id"] for x in full_c}
+        assert pj["id"] in {x["id"] for x in full_p}
+
+        # Un-archive from there: it comes back to the pickers.
+        cur = next(x for x in full_c if x["id"] == cl["id"])
+        pr = await c.patch(
+            f"/tags/{cl['id']}",
+            headers=oh,
+            json={"expected_version": cur["version"], "status": "active"},
+        )
+        assert pr.status_code == 200, pr.text
+        assert cl["id"] in {x["id"] for x in (await c.get("/clients", headers=h)).json()}
+
+
 # --- Item 2: focus (client/project) scoping of the tag list ----------
 
 
