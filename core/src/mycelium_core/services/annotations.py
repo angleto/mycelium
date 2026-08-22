@@ -257,21 +257,41 @@ def _splice(
     proposed: str,
     prefix: str | None,
     suffix: str | None,
+    domain: str = "source",
 ) -> str | None:
-    """Apply ``original -> proposed`` to the markdown ``body`` at the
-    anchor pinned by the (rendered-domain) original + optional
-    prefix/suffix. Returns the new body, or None when the anchor can no
-    longer be located faithfully (the suggestion is stale).
+    """Apply ``original -> proposed`` to the markdown ``body`` at the anchor
+    pinned by ``original`` + optional prefix/suffix. Returns the new body, or
+    None when the anchor can no longer be located faithfully (the suggestion
+    is stale).
 
-    Delegates to ``md_anchor``: the quote/prefix/suffix the SPA captured
-    are *rendered* text (markdown stripped, links->text, blocks joined by
-    a space), so they are resolved in that same rendered domain and mapped
-    back to the markdown source. This is what makes accept faithful across
-    inline formatting (``**bold**``, links, code, math) and multi-block
-    selections; a non-locatable or structure-changing splice declines to
-    None rather than corrupt the body. No persisted offsets: the map is
-    recomputed from the live body, so the anchor survives prior edits."""
-    return md_anchor.splice(
+    ``domain`` says which projection the anchor triple is written in.
+
+    ``source`` is what everything captured since the markdown editor's
+    document became the markdown itself. A selection IS a source span, so
+    locating is ``str.find`` on the body and no projection is involved. The
+    splice is then guarded by a BLOCK-SHAPE check, which is what stands in
+    for the old path's re-render equality: an agent can propose any string
+    through MCP, and one that changes the document's block structure corrupts
+    it even though it applies cleanly (a table row gaining a cell, a list item
+    splitting, a fence truncated, a paragraph promoted to a heading).
+
+    ``rendered`` is the legacy projection: markdown stripped, links reduced to
+    their label, blocks joined by a space, resolved through md_anchor's
+    per-character source map. Migration 0099 converted every row it could;
+    what is left here could not be located in its own domain either, so this
+    branch overwhelmingly declines. It stays because relabelling those rows
+    would let the source locator read a quote in a domain it was not written
+    in, and that turns a visibly stale anchor into one that may match the
+    WRONG passage.
+
+    No persisted offsets in either domain: the anchor is re-located against
+    the live body every time, so it survives prior edits and goes stale only
+    when its quote is no longer uniquely there."""
+    if domain == "rendered":
+        return md_anchor.splice(
+            body, original=original, proposed=proposed, prefix=prefix, suffix=suffix
+        )
+    return md_anchor.splice_source(
         body, original=original, proposed=proposed, prefix=prefix, suffix=suffix
     )
 
@@ -290,6 +310,7 @@ async def create_comment(
     anchor_quote: str | None = None,
     anchor_prefix: str | None = None,
     anchor_suffix: str | None = None,
+    anchor_domain: str = "source",
     parent_id: uuid.UUID | None = None,
     author_identity_id: uuid.UUID | None = None,
 ) -> Annotation:
@@ -318,6 +339,7 @@ async def create_comment(
         anchor_quote=anchor_quote,
         anchor_prefix=anchor_prefix,
         anchor_suffix=anchor_suffix,
+        anchor_domain=anchor_domain,
         parent_id=parent_id,
         status="open",
         author_identity_id=author,
@@ -357,6 +379,7 @@ async def propose_suggestion(
     rationale: str = "",
     anchor_prefix: str | None = None,
     anchor_suffix: str | None = None,
+    anchor_domain: str = "source",
     author_identity_id: uuid.UUID | None = None,
 ) -> Annotation:
     """A proposed edit (``original_text`` -> ``proposed_text``) on a
@@ -383,13 +406,17 @@ async def propose_suggestion(
         anchor_quote=original_text,
         anchor_prefix=anchor_prefix,
         anchor_suffix=anchor_suffix,
+        anchor_domain=anchor_domain,
         original_text=original_text,
-        # Normalise edge whitespace: a proposed replacement for an inline
-        # rendered span carries no meaning in leading/trailing spaces (the
-        # markdown renderer strips them), yet an un-stripped value makes the
-        # accept-time re-render gate asymmetric and STALEs an otherwise
-        # valid suggestion. One source point covers web/CLI/MCP authors.
-        proposed_text=proposed_text.strip(),
+        # NOT stripped. The strip was a repair for the rendered domain: edge
+        # whitespace carried no meaning there (the renderer dropped it) and an
+        # un-stripped value made the accept-time re-render gate asymmetric,
+        # STALEing an otherwise valid suggestion. In the source domain edge
+        # whitespace IS markdown -- a two-space hard break, the indentation of
+        # a nested list item, the leading spaces of an indented code block --
+        # and the gate it was compensating for no longer runs. Stripping here
+        # would silently rewrite the author's proposal.
+        proposed_text=proposed_text,
         status="open",
         author_identity_id=author,
     )
@@ -1137,6 +1164,7 @@ async def _apply_to_document(
             proposed=proposed,
             prefix=ann.anchor_prefix,
             suffix=ann.anchor_suffix,
+            domain=ann.anchor_domain,
         )
         if new_body is None:
             raise DomainError(MessageCode.SUGGESTION_STALE)
@@ -1160,6 +1188,7 @@ async def _apply_to_document(
         proposed=proposed,
         prefix=ann.anchor_prefix,
         suffix=ann.anchor_suffix,
+        domain=ann.anchor_domain,
     )
     if new_desc is None:
         raise DomainError(MessageCode.SUGGESTION_STALE)

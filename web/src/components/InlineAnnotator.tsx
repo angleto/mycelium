@@ -271,6 +271,16 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const submitCompose = async () => {
     if (!compose) return
     const s = compose.sel
+    // RENDERED, declared explicitly. This component reads its anchor off the
+    // ProseMirror tree (`doc.textBetween(from, to, ' ')`): markup stripped,
+    // links reduced to their label, blocks joined by a space. Everything else
+    // that writes an annotation -- the API, MCP, the CLI, and the markdown
+    // source editor, whose document IS the markdown -- quotes the SOURCE, and
+    // that is the server's default. Saying so here is what keeps the two
+    // surfaces from writing the same field in two different languages.
+    //
+    // When this surface is retired the flag goes with it, and migration 0099
+    // has already converted every row it could to the source domain.
     const r =
       compose.kind === 'comment'
         ? await annoApi.createComment({
@@ -280,6 +290,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             anchorQuote: s.text,
             anchorPrefix: s.prefix,
             anchorSuffix: s.suffix,
+            anchorDomain: 'rendered',
           })
         : await annoApi.createSuggestion({
             docKind,
@@ -289,6 +300,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             rationale: cWhy,
             anchorPrefix: s.prefix,
             anchorSuffix: s.suffix,
+            anchorDomain: 'rendered',
           })
     if (!r.ok) {
       setErr(r.error ?? 'Error')

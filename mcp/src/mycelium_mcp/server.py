@@ -2275,7 +2275,24 @@ async def propose_suggestion(
     with ``proposed_text`` (with an optional rationale). Nothing changes
     in the document until the suggestion is accepted. ``doc_kind`` is
     ``note_part`` or ``task_description``. The natural output of an LLM
-    review pass."""
+    review pass.
+
+    ``original_text`` is MARKDOWN SOURCE: quote the body exactly as
+    ``get_note_part`` / ``get_task`` handed it to you, markup included.
+    Quote ``**bold**``, not ``bold``. It must occur exactly once in the body
+    (a little more context makes it unique); otherwise the suggestion is
+    declined as stale rather than applied to a passage nobody chose.
+
+    Until migration 0099 this was resolved in a RENDERED projection with the
+    markup stripped, so quoting the source -- the only thing an agent can
+    actually read -- silently failed with SUGGESTION_STALE whenever the span
+    contained any markup at all.
+
+    A proposal that would change the document's BLOCK STRUCTURE is refused on
+    accept: a ``|`` that adds a cell to a table row, a blank line that splits
+    a list item, a ``` run inside a fence, a leading ``#`` that promotes a
+    paragraph. Edit inline content; restructure with the part/description
+    writers."""
     async with _tenant(token, org_id) as (s, org, user):
         author_id, _tok = await _resolve_agent_context(s, org)
         a = await annotations_svc.propose_suggestion(

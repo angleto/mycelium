@@ -31,6 +31,9 @@ async function call(
   }
 }
 
+/** The projection an anchor's quote is written in (server: `anchor_domain`). */
+export type AnchorDomain = 'source' | 'rendered'
+
 export function createComment(args: {
   docKind: DocKind
   docId: string
@@ -38,6 +41,15 @@ export function createComment(args: {
   anchorQuote?: string | null
   anchorPrefix?: string | null
   anchorSuffix?: string | null
+  /** Which projection the quote is written in.
+   *
+   *  `'source'` is the markdown itself, and is the default everywhere: the
+   *  markdown editor's document IS the source, so a selection is a source
+   *  span. The legacy WYSIWYG surface captures the RENDERED text (markup
+   *  stripped, links reduced to their label, blocks joined by a space) and
+   *  must say `'rendered'`, because a quote read in the wrong domain either
+   *  fails to locate or matches the wrong passage. */
+  anchorDomain?: AnchorDomain
   parentId?: string | null
 }): Promise<ApiResult> {
   return call('/annotations/comment', 'POST', {
@@ -47,6 +59,7 @@ export function createComment(args: {
     anchor_quote: args.anchorQuote ?? null,
     anchor_prefix: args.anchorPrefix ?? null,
     anchor_suffix: args.anchorSuffix ?? null,
+    anchor_domain: args.anchorDomain ?? 'source',
     parent_id: args.parentId ?? null,
   })
 }
@@ -59,6 +72,15 @@ export function createSuggestion(args: {
   rationale?: string
   anchorPrefix?: string | null
   anchorSuffix?: string | null
+  /** Which projection the quote is written in.
+   *
+   *  `'source'` is the markdown itself, and is the default everywhere: the
+   *  markdown editor's document IS the source, so a selection is a source
+   *  span. The legacy WYSIWYG surface captures the RENDERED text (markup
+   *  stripped, links reduced to their label, blocks joined by a space) and
+   *  must say `'rendered'`, because a quote read in the wrong domain either
+   *  fails to locate or matches the wrong passage. */
+  anchorDomain?: AnchorDomain
 }): Promise<ApiResult> {
   return call('/annotations/suggestion', 'POST', {
     doc_kind: args.docKind,
@@ -68,6 +90,7 @@ export function createSuggestion(args: {
     rationale: args.rationale ?? '',
     anchor_prefix: args.anchorPrefix ?? null,
     anchor_suffix: args.anchorSuffix ?? null,
+    anchor_domain: args.anchorDomain ?? 'source',
   })
 }
 

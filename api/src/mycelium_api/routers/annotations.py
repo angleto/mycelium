@@ -119,6 +119,7 @@ def annotation_out(
         anchor_quote=a.anchor_quote,
         anchor_prefix=a.anchor_prefix,
         anchor_suffix=a.anchor_suffix,
+        anchor_domain=a.anchor_domain,
         original_text=a.original_text,
         proposed_text=a.proposed_text,
         status=a.status,
@@ -266,6 +267,7 @@ async def create_comment(
         anchor_quote=body.anchor_quote,
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
+        anchor_domain=body.anchor_domain,
         parent_id=body.parent_id,
         author_identity_id=author,
     )
@@ -330,6 +332,7 @@ async def propose_suggestion(
         rationale=body.rationale,
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
+        anchor_domain=body.anchor_domain,
         author_identity_id=author,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)

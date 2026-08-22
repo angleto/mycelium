@@ -114,6 +114,19 @@ class Annotation(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
     #     diary entry. Offsets are deliberately NOT stored: the live
     #     body is re-anchored by text search (the editor uses
     #     ProseMirror positions in-session). -----------------------
+    # Which DOMAIN the anchor triple below is expressed in.
+    #
+    # 'source'   the quote is markdown source, located with str.find on the
+    #            body. The editor's document is the markdown, so this is what
+    #            every anchor captured since that change is.
+    # 'rendered' the quote is the editor's RENDERED text (markdown stripped,
+    #            links reduced to their label, blocks joined by a space),
+    #            resolved through md_anchor's source map. Only rows the
+    #            migration could not convert are left here: a rendered anchor
+    #            that no longer resolves is already un-paintable, and marking
+    #            it keeps the fact that it was not converted rather than
+    #            silently re-reading it in the wrong domain.
+    anchor_domain: Mapped[str] = mapped_column(String(16), nullable=False, server_default="source")
     anchor_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
     anchor_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
     anchor_suffix: Mapped[str | None] = mapped_column(Text, nullable=True)

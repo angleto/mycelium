@@ -180,36 +180,43 @@ async def test_suggestion_goes_stale_when_target_gone() -> None:
 
 
 async def _accept_suggestion(
-    c: AsyncClient, h: dict[str, str], pid: str, original: str, proposed: str
+    c: AsyncClient,
+    h: dict[str, str],
+    pid: str,
+    original: str,
+    proposed: str,
+    *,
+    anchor_domain: str | None = None,
 ):
-    sug = (
-        await c.post(
-            "/annotations/suggestion",
-            headers=h,
-            json={
-                "doc_kind": "note_part",
-                "doc_id": pid,
-                "original_text": original,
-                "proposed_text": proposed,
-            },
-        )
-    ).json()
+    payload: dict[str, object] = {
+        "doc_kind": "note_part",
+        "doc_id": pid,
+        "original_text": original,
+        "proposed_text": proposed,
+    }
+    if anchor_domain is not None:
+        payload["anchor_domain"] = anchor_domain
+    sug = (await c.post("/annotations/suggestion", headers=h, json=payload)).json()
     return await c.post(
         f"/annotations/{sug['id']}/accept", headers=h, json={"expected_version": sug["version"]}
     )
 
 
-async def test_accept_is_markdown_aware() -> None:
-    """End-to-end through the real stack: a suggestion whose rendered
-    ``original_text`` (what the SPA captures) sits inside inline markup or
-    spans blocks now splices faithfully into the markdown source — the old
-    raw str.find would have gone stale."""
+async def test_accept_splices_markdown_source() -> None:
+    """End-to-end through the real stack: a suggestion's ``original_text`` is
+    markdown SOURCE, and accepting replaces exactly that span.
+
+    Until migration 0099 the quote was resolved in a RENDERED projection with
+    the markup stripped, so an agent quoting what it had actually read went
+    stale the moment the span touched any markup. Quoting the source is now
+    the contract, and the SPA captures in the same domain because its
+    document IS the source."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
 
-        # inline mark: 'quick' is the rendered text inside **...**; accept
-        # must keep the bold delimiters and replace only the word.
+        # Inside an inline mark: the delimiters are not part of the quote,
+        # so they stay and only the word is replaced.
         nid, pid = await _note_with_part(c, h, "The **quick** brown fox.")
         acc = await _accept_suggestion(c, h, pid, "quick", "lazy")
         assert acc.status_code == 200, acc.text
@@ -217,7 +224,17 @@ async def test_accept_is_markdown_aware() -> None:
             "body"
         ] == "The **lazy** brown fox."
 
-        # link text: the URL is preserved, only the link label changes.
+        # A quote that INCLUDES the markup works too, which is the case the
+        # rendered domain could not express at all: `**quick**` did not exist
+        # in the projection an agent was made to search.
+        nid, pid = await _note_with_part(c, h, "The **quick** brown fox.")
+        acc = await _accept_suggestion(c, h, pid, "**quick**", "_slow_")
+        assert acc.status_code == 200, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
+            "body"
+        ] == "The _slow_ brown fox."
+
+        # Link label: the destination is outside the quote and is preserved.
         nid, pid = await _note_with_part(c, h, "see [docs](http://x) now")
         acc = await _accept_suggestion(c, h, pid, "docs", "HERE")
         assert acc.status_code == 200, acc.text
@@ -225,30 +242,44 @@ async def test_accept_is_markdown_aware() -> None:
             "body"
         ] == "see [HERE](http://x) now"
 
-        # multi-block selection (rendered text joins blocks with a space).
+        # A deliberately MULTI-BLOCK quote still applies. The structural gate
+        # exempts it: an anchor containing a blank line was written across a
+        # boundary on purpose, and merging the paragraphs is the edit asked
+        # for, not an inline edit restructuring the document by accident.
         nid, pid = await _note_with_part(c, h, "Para one here.\n\nPara two there.")
-        acc = await _accept_suggestion(c, h, pid, "here. Para two", "X")
+        acc = await _accept_suggestion(c, h, pid, "here.\n\nPara two", "X")
         assert acc.status_code == 200, acc.text
         assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
             "body"
         ] == "Para one X there."
 
 
-async def test_accept_straddle_swallows_run_formatting() -> None:
-    """A selection that straddles an inline-mark edge (one delimiter inside the
-    span, its partner outside) applies by swallowing the whole run and dropping
-    the now-meaningless formatting -- render-faithful, never an orphaned
-    delimiter. This is the deliberate contract of commit 8998deb; the splice
-    layer is pinned by core/tests/test_md_anchor.py::test_splice_straddle_drops_formatting
-    and the never-corrupts invariant by test_splice_never_corrupts_on_unmodellable_input.
-    This case asserts it end-to-end through the accept endpoint."""
+async def test_accept_refuses_a_structural_change() -> None:
+    """The gate that replaces the rendered path's re-render equality, asserted
+    at the endpoint.
+
+    A proposal can apply cleanly and still corrupt: `foo | bar` inside a
+    two-column table row makes a three-cell row, and GFM renders only as many
+    cells as the header has -- so the author's last cell silently disappears.
+    markdown-it emits the same token stream either way, which is why the gate
+    compares the rows' SOURCE cell counts too."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
-        nid, pid = await _note_with_part(c, h, "a **b** c")
-        acc = await _accept_suggestion(c, h, pid, "b c", "X Y")
+        table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+        nid, pid = await _note_with_part(c, h, table)
+        acc = await _accept_suggestion(c, h, pid, "1", "1 | X")
+        assert acc.status_code == 400, acc.text
+        assert "suggestion_stale" in acc.text
+        # Refused means refused: the body is untouched.
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == table
+
+        # A plain replacement in the same cell is fine.
+        acc = await _accept_suggestion(c, h, pid, "1", "uno")
         assert acc.status_code == 200, acc.text
-        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == "a X Y"
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
+            "body"
+        ] == "| a | b |\n| --- | --- |\n| uno | 2 |\n"
 
 
 async def test_lifecycle_resolve_reopen_edit_delete() -> None:
@@ -531,3 +562,44 @@ async def test_ui_state_is_per_user_and_org_scoped() -> None:
             f"/annotations/{a['id']}/ui-state", headers=stranger, json={"collapsed": True}
         )
         assert r.status_code == 404
+
+
+async def test_the_anchor_domain_is_declared_by_whoever_captured_it() -> None:
+    """Two surfaces write the same three columns in two different languages,
+    so the row says which one it is.
+
+    An API, MCP or CLI caller reads the markdown SOURCE and quotes it, which
+    is the default. The legacy WYSIWYG editor reads its anchor off a
+    ProseMirror tree -- markup stripped, links reduced to their label -- and
+    declares ``rendered``. Without the flag, one of the two would be silently
+    read in the other's domain, which does not merely fail to locate: it can
+    match the WRONG passage.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        body = "The **quick** brown fox."
+
+        # The rendered quote has no asterisks and does not occur in the
+        # source, so it only resolves when the row says which domain it is.
+        nid, pid = await _note_with_part(c, h, "a **b** c")
+        acc = await _accept_suggestion(c, h, pid, "b c", "X", anchor_domain="rendered")
+        assert acc.status_code == 200, acc.text
+
+        # The same quote WITHOUT the declaration is read as source, is not
+        # there, and declines rather than matching something else.
+        nid, pid = await _note_with_part(c, h, "a **b** c")
+        acc = await _accept_suggestion(c, h, pid, "b c", "X")
+        assert acc.status_code == 400, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == "a **b** c"
+
+        # And a source quote works with the default, which is the case the
+        # rendered domain could not express at all.
+        nid, pid = await _note_with_part(c, h, body)
+        acc = await _accept_suggestion(c, h, pid, "**quick**", "_slow_")
+        assert acc.status_code == 200, acc.text
+
+        # The domain is readable back, so a client can tell what it is
+        # looking at rather than guessing.
+        rows = (await c.get(f"/annotations?doc_kind=note_part&doc_id={pid}", headers=h)).json()
+        assert rows and all(r["anchor_domain"] in ("source", "rendered") for r in rows)

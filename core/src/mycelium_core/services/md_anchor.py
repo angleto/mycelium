@@ -28,6 +28,7 @@ exactly degrade to STALE (a safe no-op), never to a corrupting splice.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
@@ -495,3 +496,164 @@ def splice(
     if loc is None:
         return None
     return body[: loc.src_start] + proposed + body[loc.src_end :]
+
+
+# --------------------------------------------------------------------------
+# SOURCE-domain anchoring (the current one).
+#
+# Everything above resolves an anchor captured from the editor's RENDERED
+# text and maps it back to source offsets. That machinery exists because the
+# editor's domain and the storage domain differed: the SPA captured
+# ``doc.textBetween(...)`` off a ProseMirror tree while the body was markdown.
+#
+# The markdown editor's document IS the markdown now, so a selection is a
+# source span and the two domains have collapsed into one. Locating is
+# ``str.find`` on the body, and the rendered projection is not needed at all.
+#
+# What still has to be defended is the SPLICE. An agent can propose any
+# string through MCP, and a replacement that changes the BLOCK STRUCTURE
+# corrupts the document even though it applies cleanly: `foo | bar` inside a
+# two-column table row makes a three-cell row and GFM drops the extra cell;
+# `\n\n` inside a list item splits the list; a ``` run inside a fence
+# truncates it; a leading `#` promotes a paragraph to a heading. The
+# re-render equality gate used to catch all of those as a side effect. Its
+# replacement is a cheap, explainable structural check.
+# --------------------------------------------------------------------------
+
+
+# Characters of context on each side of a quote. Matches what the SPA
+# captures, so a migrated anchor and a freshly captured one are the same
+# shape and the locator treats them identically.
+_CONTEXT = 24
+
+
+def locate_source_span(
+    body: str, *, original: str, prefix: str | None, suffix: str | None
+) -> tuple[int, int] | None:
+    """Locate a SOURCE-domain anchor in ``body``: ``[start, end)`` or None.
+
+    Same uniqueness rule as the rendered locator, which is the rule the
+    editor's own painting uses: an anchored ``prefix + original + suffix``
+    that occurs exactly once wins; failing that, a bare ``original`` that
+    occurs exactly once; otherwise None (gone, or ambiguous). Ambiguity
+    declines rather than guessing, because guessing here edits the wrong
+    passage of somebody's document.
+    """
+    if not original:
+        return None
+    return _locate(body, original, prefix, suffix)
+
+
+def source_quote_for(
+    body: str, *, original: str, prefix: str | None, suffix: str | None
+) -> tuple[str, str, str] | None:
+    """The SOURCE-domain (quote, prefix, suffix) for an anchor captured in
+    the RENDERED domain, or None when the rendered anchor no longer resolves.
+
+    This is the migration's whole job, and it is deterministic rather than a
+    guess: ``resolve_anchor`` already returns source offsets, so
+    ``body[src_start:src_end]`` IS the source text the rendered quote covers.
+    The surrounding context is taken from the same body, in the same window
+    the SPA uses when it captures one.
+    """
+    loc = resolve_anchor(body, original=original, prefix=prefix, suffix=suffix, proposed=original)
+    if loc is None:
+        return None
+    s, e = loc.src_start, loc.src_end
+    if not (0 <= s < e <= len(body)):
+        return None
+    return body[s:e], body[max(0, s - _CONTEXT) : s], body[e : e + _CONTEXT]
+
+
+def _unescaped_pipes(line: str) -> int:
+    r"""Cell separators in a table row: ``|`` characters not backslash-escaped.
+    ``\|`` is a literal pipe INSIDE a cell, not a separator."""
+    count = 0
+    i = 0
+    while i < len(line):
+        if line[i] == "\\":
+            i += 2
+            continue
+        if line[i] == "|":
+            count += 1
+        i += 1
+    return count
+
+
+def block_shape(body: str) -> tuple[tuple[object, ...], ...]:
+    """The block structure of ``body``, as a comparable value.
+
+    Block tokens only: the inline content is what a suggestion is allowed to
+    change, and the structure around it is what it must not.
+
+    Two things beyond the obvious token stream, both found by tests rather
+    than by reasoning, and both cases where a CORRUPTING change leaves the
+    token sequence untouched:
+
+    ``hidden`` is in the tuple because a TIGHT list and a LOOSE one emit the
+    same tokens -- markdown-it marks a tight item's paragraph hidden rather
+    than omitting it. Without it, inserting a blank line into a list passed
+    the gate while visibly restructuring the list.
+
+    Table rows are compared by their SOURCE cell count, because markdown-it
+    emits one ``td`` per HEADER column and silently drops the rest: a row that
+    gained a cell has a byte-identical token stream, and the author's last
+    cell has simply become invisible. That is precisely the splice an agent
+    produces by proposing ``foo | bar`` for ``foo`` inside a table, which is
+    the case this gate exists for.
+    """
+    md = _build_md()
+    tokens = md.parse(body, {})
+    shape: list[tuple[object, ...]] = [
+        (t.type, t.tag, t.level, t.hidden) for t in tokens if t.type != "inline"
+    ]
+    lines = body.split("\n")
+    for tok in tokens:
+        if tok.type != "table_open" or not tok.map:
+            continue
+        start, end = tok.map
+        for n in range(start, min(end, len(lines))):
+            # Keyed by the row's position WITHIN the table, so an edit
+            # elsewhere that shifts line numbers does not read as a change.
+            shape.append(("table_row", n - start, _unescaped_pipes(lines[n])))
+    return tuple(shape)
+
+
+# A quote containing a blank line spans blocks: its author is editing
+# across a boundary deliberately.
+_MULTI_BLOCK = re.compile(r"\n[ \t]*\n")
+
+
+def splice_source(
+    body: str, *, original: str, proposed: str, prefix: str | None, suffix: str | None
+) -> str | None:
+    """Apply a SOURCE-domain ``original -> proposed`` to ``body``.
+
+    Returns the new body, or None when the anchor cannot be located or the
+    replacement would change the document's block structure. The structural
+    gate is what stands in for the rendered path's re-render equality: it
+    catches a table row gaining a cell, a list item splitting in two, a fence
+    being truncated and a paragraph being promoted to a heading, which are
+    the ways a cleanly-applied splice still corrupts a document.
+
+    What it does NOT catch is an agent-supplied quote that splits an inline
+    delimiter run and leaves the block shape intact -- ``original='ld** and'``
+    inside ``**bold** and more`` yields ``**boX more``. The result is still
+    VALID markdown, which is the guarantee this codebase makes; it is not
+    meaning-preserving, and that residue is deliberate rather than unnoticed.
+    """
+    loc = locate_source_span(body, original=original, prefix=prefix, suffix=suffix)
+    if loc is None:
+        return None
+    s, e = loc
+    candidate = body[:s] + proposed + body[e:]
+    # The gate guards against an INLINE-looking edit restructuring the
+    # document by accident. An anchor that itself spans a blank line is not
+    # that: its author quoted across a block boundary on purpose, and
+    # merging two paragraphs is the edit they asked for. Holding them to an
+    # unchanged block shape would refuse the whole class.
+    if _MULTI_BLOCK.search(original):
+        return candidate
+    if block_shape(candidate) != block_shape(body):
+        return None
+    return candidate

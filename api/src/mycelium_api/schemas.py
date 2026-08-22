@@ -931,6 +931,7 @@ class AnnotationOut(BaseModel):
     anchor_quote: str | None = None
     anchor_prefix: str | None = None
     anchor_suffix: str | None = None
+    anchor_domain: str = "source"
     original_text: str | None = None
     proposed_text: str | None = None
     status: str
@@ -993,6 +994,13 @@ class AnnotationCommentIn(BaseModel):
     anchor_quote: str | None = None
     anchor_prefix: str | None = None
     anchor_suffix: str | None = None
+    # Which projection ``anchor_quote`` / ``original_text`` are written in.
+    # Omit it: an API, MCP or CLI caller reads the markdown SOURCE and quotes
+    # it, which is the default. Only the legacy WYSIWYG surface captures the
+    # RENDERED text (markup stripped, links reduced to their label, blocks
+    # joined by a space) and has to say so, because a quote read in the wrong
+    # domain either fails to locate or, worse, matches the wrong passage.
+    anchor_domain: Literal["source", "rendered"] = "source"
     parent_id: uuid.UUID | None = None
 
 
@@ -1004,6 +1012,13 @@ class SuggestionIn(BaseModel):
     rationale: str = ""
     anchor_prefix: str | None = None
     anchor_suffix: str | None = None
+    # Which projection ``anchor_quote`` / ``original_text`` are written in.
+    # Omit it: an API, MCP or CLI caller reads the markdown SOURCE and quotes
+    # it, which is the default. Only the legacy WYSIWYG surface captures the
+    # RENDERED text (markup stripped, links reduced to their label, blocks
+    # joined by a space) and has to say so, because a quote read in the wrong
+    # domain either fails to locate or, worse, matches the wrong passage.
+    anchor_domain: Literal["source", "rendered"] = "source"
 
 
 class AnnotationEditIn(BaseModel):
@@ -1364,6 +1379,23 @@ class GardenReviewPendingItem(BaseModel):
     # Echo this back as ``expected_version`` on approve/reject: the TOCTOU
     # guard that ensures the reviewer blesses the content they saw.
     version: int
+
+
+class GardenReviewRejectedItem(BaseModel):
+    """One proposal a human DECLINED: the review bin's row. ``rejected_at``
+    is when it was declined; ``version`` is the pin to echo back to the
+    restore that undoes the rejection."""
+
+    note_id: uuid.UUID
+    title: str | None = None
+    humus_kind: str | None = None
+    origin_model_id: str | None = None
+    preview: str
+    created_at: datetime.datetime
+    # Echo this back as ``expected_version`` on the restore that undoes the
+    # rejection.
+    version: int
+    rejected_at: datetime.datetime
 
 
 class GardenCandidateNode(BaseModel):
