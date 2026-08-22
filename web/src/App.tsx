@@ -9,7 +9,6 @@ import { ForgotPasswordRoute } from './routes/ForgotPasswordRoute'
 import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
 import { TasksRoute } from './routes/TasksRoute'
 import { AdminUsersRoute } from './routes/AdminUsersRoute'
-import { WorkspaceRoute } from './routes/WorkspaceRoute'
 import { AuthLayout } from './components/AuthLayout'
 import { TrashRoute } from './routes/TrashRoute'
 import { ClientsProjectsRoute } from './routes/ClientsProjectsRoute'
@@ -33,7 +32,10 @@ import { GardenReviewRoute } from './routes/GardenReviewRoute'
 import { InvoicesRoute } from './routes/InvoicesRoute'
 import { NotificationsRoute } from './routes/NotificationsRoute'
 import { TagManagerRoute } from './routes/TagManagerRoute'
-import { SettingsRoute } from './routes/SettingsRoute'
+import { SettingsLayout } from './routes/SettingsLayout'
+import { SettingsAccountRoute } from './routes/SettingsAccountRoute'
+import { SettingsWorkspaceRoute } from './routes/SettingsWorkspaceRoute'
+import { SettingsPlatformRoute } from './routes/SettingsPlatformRoute'
 import { PrefixOrUuid, PrefixResolver } from './routes/PrefixResolver'
 
 function App() {
@@ -90,8 +92,22 @@ function App() {
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />
             <Route path="/tags" element={<TagManagerRoute />} />
-            <Route path="/settings" element={<SettingsRoute />} />
-            <Route path="/workspace" element={<WorkspaceRoute />} />
+            {/* Settings is a section, not a page: account / workspace /
+                platform are three different SCOPES and the tab you are on
+                is what says which one you are editing. ``/settings`` keeps
+                rendering the account panel so old links and bookmarks
+                still land on something. */}
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index element={<SettingsAccountRoute />} />
+              <Route path="workspace" element={<SettingsWorkspaceRoute />} />
+              <Route path="platform" element={<SettingsPlatformRoute />} />
+            </Route>
+            {/* The workspace surface moved into Settings; the old
+                top-level route stays as a redirect. */}
+            <Route
+              path="/workspace"
+              element={<Navigate to="/settings/workspace" replace />}
+            />
             <Route path="/admin/users" element={<AdminUsersRoute />} />
           </Route>
         </Route>

@@ -80,8 +80,12 @@ const ROUTES = [
   '/invoices',
   '/notifications',
   '/tags',
+  // Redirects into Settings -> Workspace; kept in the list so the old
+  // deep link is asserted to still land somewhere.
   '/workspace',
   '/settings',
+  '/settings/workspace',
+  '/settings/platform',
 ]
 
 test.describe.configure({ mode: 'serial' })
@@ -245,17 +249,18 @@ test('mode chip cycles User → Owner → Admin and gates accordingly', async ({
   // Least privilege by default.
   await expect(chip).toHaveClass(/modechip--user/)
 
-  // Workspace page: the owner is listed as a member, but in user mode
-  // the management controls are gated. The rename field is purely
-  // canManage-gated (the Add-member button also depends on the email
-  // field, so it is not a clean signal).
-  await page.goto('/workspace')
+  // Settings -> Workspace: the owner is listed as a member, but in user
+  // mode the management controls are gated. The rename field is purely
+  // effective-role-gated (the Add-member button also depends on the
+  // email field, so it is not a clean signal). Note the ARCHIVE and
+  // DELETE buttons deliberately do NOT follow it: those endpoints are
+  // pre-tenant and check the raw membership role, so an owner needs no
+  // elevation for them.
+  await page.goto('/settings/workspace')
   await expect(
     page.locator('table.tbl tbody tr', { hasText: EMAIL }).first(),
   ).toBeVisible()
-  const rename = page
-    .locator('.card input:not([readonly])')
-    .first()
+  const rename = page.locator('input.wsident__name')
   await expect(rename).toBeDisabled()
 
   // Cycle → Owner: management enabled.

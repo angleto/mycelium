@@ -760,34 +760,80 @@ export const it: Catalog = {
     builtAt: 'Build del',
     apiDocs: 'Documentazione API REST',
   },
-  switcher: {
-    label: 'Workspace',
-    create: 'Nuovo workspace',
-    newName: 'Nome workspace',
-    creating: 'Creazione...',
-  },
   wsmgr: {
+    label: 'Workspace',
     title: 'Workspace',
     id: 'ID workspace',
     rename: 'Nome workspace',
+    newName: 'Nome workspace',
     save: 'Salva',
     saving: 'Salvataggio…',
     saved: 'Salvato.',
     conflict: 'È cambiato nel frattempo; ricaricato.',
-    showArchived: 'Mostra archiviati',
     loading: 'Caricamento...',
     none: 'Nessun workspace.',
     archived: 'archiviato',
     current: 'corrente',
     switch: 'Passa a',
+    switchHint: 'Cambia workspace',
+    manage: 'Impostazioni workspace',
+    create: 'Nuovo workspace',
+    creating: 'Creazione…',
+    yours: 'I tuoi workspace',
+    yoursNote:
+      'Il passaggio è immediato e non richiede un nuovo accesso. Ogni nota, task e fattura appartiene a un solo workspace.',
+    showArchived: 'Mostra archiviati ({{count}})',
     archive: 'Archivia',
     unarchive: 'Ripristina',
+    confirmArchive:
+      'Archiviare "{{name}}"? Resta intatto e pienamente utilizzabile: viene solo nascosto dal selettore finché non lo ripristini.',
+    archiveMovesYou: 'Sei dentro questo workspace, quindi verrai spostato su "{{name}}".',
+    archiveStayHere:
+      'È il tuo unico altro workspace, quindi ci resterai anche dopo averlo archiviato.',
+    activeArchived:
+      'Questo workspace è archiviato: resta pienamente utilizzabile, ma è nascosto dal selettore. Ripristinalo qui sotto per rimetterlo in elenco.',
     delete: 'Elimina',
-    ownerOnly: 'Solo il proprietario puo eliminare un workspace',
+    deleteTitle: 'Eliminare "{{name}}"?',
+    deleteConfirm: 'Elimina definitivamente',
+    confirmDelete:
+      'Eliminando "{{name}}" tutto il suo contenuto viene cancellato in modo permanente. Operazione irreversibile.',
+    typeToConfirm: 'Scrivi {{name}} per confermare',
+    deleteWhat: {
+      content: 'Tutte le note, i task, le registrazioni di tempo, gli eventi e i tag.',
+      billing: 'Tutti i clienti, i progetti, le fatture e i budget.',
+      files: 'Tutti gli allegati, compresi i file archiviati.',
+      members: "L'accesso di ogni membro del workspace.",
+    },
+    deleteActiveNote:
+      'Sei dentro questo workspace: verrai spostato su un altro.',
+    deleteArchiveInstead:
+      'Se potrebbe servirti ancora, archivialo invece di eliminarlo.',
+    ownerOnly: 'Solo il proprietario può farlo',
     soleHint: 'Non puoi eliminare il tuo unico workspace',
     cancel: 'Annulla',
-    confirmDelete:
-      'Eliminare "{{name}}" e tutti i suoi dati? Operazione irreversibile.',
+    configTitle: 'Configurazione del workspace',
+    configHint:
+      'Condivisa da tutti i membri di questo workspace, e diversa in ogni altro.',
+  },
+  setnav: {
+    account: 'Account',
+    workspace: 'Workspace',
+    platform: 'Piattaforma',
+    platformHint:
+      "Impostazioni dell'intera installazione. Disponibili a un amministratore di piattaforma in modalità admin.",
+  },
+  retrieval: {
+    title: 'Recupero dalla memoria',
+    note: 'Soglia minima di similarità semantica (coseno, 0–1). 0 = disattivata (tutti i vicini vettoriali vengono tenuti). Alzala se la ricerca in memoria restituisce risultati che non corrispondono alla domanda (vicini semantici lontani); abbassala se spariscono risultati semantici pertinenti. Le corrispondenze per parola chiave non vengono mai filtrate.',
+    floorLabel: 'Soglia di similarità semantica',
+    range: 'La soglia deve essere compresa tra 0 e 1.',
+    saved: 'Salvato.',
+  },
+  attachcfg: {
+    title: 'Allegati',
+    note: 'Dimensione massima di un singolo allegato caricato su una nota o un task, in MiB (1–{{max}}). Alzala se i caricamenti falliscono con "supera la dimensione massima". Il file viene tenuto interamente in memoria mentre viene archiviato, quindi il limite superiore è fissato dal deployment.',
+    sizeLabel: 'Dimensione massima allegato (MiB)',
+    range: 'La dimensione deve essere compresa tra 1 e {{max}} MiB.',
   },
   home: {
     title: 'Workspace',
@@ -811,6 +857,8 @@ export const it: Catalog = {
     adding: 'Aggiunta…',
     remove: 'Rimuovi',
     confirmRemove: 'Rimuovere {{email}} da questo workspace?',
+    removeDetail:
+      'Perde l\'accesso a tutto il suo contenuto. Le sue note, i task e le registrazioni di tempo restano nel workspace.',
     none: 'Nessun membro.',
     you: 'tu',
     create: 'Crea workspace',

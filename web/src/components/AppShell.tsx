@@ -41,6 +41,7 @@ import { CommandPalette } from './CommandPalette'
 import { UpdateBanner } from './UpdateBanner'
 import { useFocus } from '../lib/focus'
 import { ClientSearch } from './ClientSearch'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
@@ -520,7 +521,6 @@ export function AppShell() {
         { to: '/graph', label: t('graph.nav'), icon: 'graph' },
         { to: '/tags', label: t('tagmgr.nav'), icon: 'tags' },
         { to: '/clients', label: t('cp.nav'), icon: 'clients' },
-        { to: '/workspace', label: t('members.nav'), icon: 'home' },
       ],
     },
     {
@@ -649,6 +649,10 @@ export function AppShell() {
       <div className="layout">
         <aside className="sidebar">
           <div className="sidebar__ws">
+            {/* Which workspace you are in comes FIRST: the focus below it
+                (client/project) only means anything inside one, and a
+                client id carried into another tenant names nothing. */}
+            <WorkspaceSwitcher />
             <ProjectFocus />
           </div>
           <nav

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { saveWorkspaceSettings, useMyWorkspace } from '../auth/useMyWorkspace'
 import type { components } from '../api/schema'
 
 type Req = components['schemas']['DispatchRequestOut']
@@ -29,10 +30,15 @@ export function DispatchPanel({
   onChanged?: () => void
 }) {
   const { t } = useTranslation()
+  const { ws } = useMyWorkspace()
   const [reqs, setReqs] = useState<Req[]>([])
-  const [mode, setMode] = useState<Auto>('approval_required')
-  const [wsVersion, setWsVersion] = useState(0)
-  const [presets, setPresets] = useState<(number | string)[]>([])
+  // The stored policy is the truth; `pending` only holds the value the
+  // user just picked, so the select does not snap back while the write
+  // is in flight. The workspace version and the estimate presets the
+  // PATCH has to restate are the shared snapshot's business now, not
+  // this panel's (a private copy of `version` was what made a save here
+  // 409 after any save on the settings page).
+  const [pending, setPending] = useState<Auto | null>(null)
   const [last, setLast] = useState<Tick | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -42,16 +48,8 @@ export function DispatchPanel({
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [ws, rq] = await Promise.all([
-        api.GET('/workspaces/me', { params: { header: h } }),
-        api.GET('/dispatch/requests', { params: { header: h } }),
-      ])
+      const rq = await api.GET('/dispatch/requests', { params: { header: h } })
       if (!active) return
-      if (ws.data) {
-        setMode(ws.data.settings?.autonomous_dispatch ?? 'approval_required')
-        setWsVersion(ws.data.version)
-        setPresets(ws.data.settings?.estimate_presets ?? [])
-      }
       if (rq.error) {
         setErr(errMessage(rq.error))
         return
@@ -79,18 +77,24 @@ export function DispatchPanel({
 
   const h = () => workspaceHeader()
 
+  // What the select shows: the value being written if there is one,
+  // otherwise the workspace's stored policy.
+  const mode: Auto = pending ?? ws?.settings?.autonomous_dispatch ?? 'approval_required'
+
   function changeMode(v: Auto) {
-    setMode(v)
-    void run(() =>
-      api.PATCH('/workspaces/me/settings', {
-        params: { header: h() },
-        body: {
-          expected_version: wsVersion,
-          estimate_presets: presets,
-          autonomous_dispatch: v,
-        },
-      }),
-    )
+    setPending(v)
+    setBusy(true)
+    setErr(null)
+    void saveWorkspaceSettings({ autonomous_dispatch: v }).then((res) => {
+      setBusy(false)
+      setPending(null)
+      if (!res.ok) {
+        setErr(res.message)
+        return
+      }
+      setTick((n) => n + 1)
+      onChanged?.()
+    })
   }
 
   const approve = (r: Req) =>

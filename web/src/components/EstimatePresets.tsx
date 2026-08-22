@@ -1,71 +1,34 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
-import { useSession } from '../auth/useSession'
+import { saveWorkspaceSettings, useMyWorkspace } from '../auth/useMyWorkspace'
 import { formatHours } from '../lib/estimate'
 
 // Per-workspace task-estimate presets (the task form dropdown values).
-// Persisted and shared (workspace settings), optimistic-concurrency
-// guarded like the workspace rename.
+// Shared workspace settings, written through the shared snapshot so the
+// version this card sends is always the one the last write returned.
 export function EstimatePresets() {
   const { t } = useTranslation()
-  const session = useSession()
-  const activeId = session?.workspaceId
-  // Decimal serializes as string over the API; keep presets as
-  // strings end-to-end (like the task estimate field).
-  const [presets, setPresets] = useState<string[]>([])
-  const [version, setVersion] = useState<number | null>(null)
+  const { ws } = useMyWorkspace()
   const [add, setAdd] = useState('')
+  const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET('/workspaces/me', {
-      params: { header: workspaceHeader() },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setPresets(data.settings?.estimate_presets ?? [])
-    setVersion(data.version)
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const { data } = await api.GET('/workspaces/me', {
-        params: { header: workspaceHeader() },
-      })
-      if (active && data) {
-        setPresets(data.settings?.estimate_presets ?? [])
-        setVersion(data.version)
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [activeId])
+  // Decimal serializes as string over the API; keep presets as strings
+  // end-to-end (like the task estimate field).
+  const presets = (ws?.settings?.estimate_presets ?? []).map(String)
 
   async function save(next: string[]) {
-    if (version === null) return
+    setBusy(true)
     setErr(null)
     setMsg(null)
-    const { error, response } = await api.PATCH('/workspaces/me/settings', {
-      params: { header: workspaceHeader() },
-      body: { expected_version: version, estimate_presets: next },
-    })
-    if (response.status === 409) {
-      setErr(t('tagmgr.conflict'))
-      await load()
-      return
-    }
-    if (error) {
-      setErr(errMessage(error))
+    const res = await saveWorkspaceSettings({ estimate_presets: next })
+    setBusy(false)
+    if (!res.ok) {
+      setErr(res.message)
       return
     }
     setMsg(t('tasks.saved'))
-    await load()
   }
 
   function onAdd() {
@@ -88,6 +51,7 @@ export function EstimatePresets() {
             <button
               type="button"
               className="btn--ghost btn--sm"
+              disabled={busy}
               onClick={() => void save(presets.filter((_, j) => j !== i))}
             >
               {t('estpre.remove')}
@@ -104,7 +68,7 @@ export function EstimatePresets() {
           value={add}
           onChange={(e) => setAdd(e.target.value)}
         />
-        <button type="button" className="btn--sm" onClick={onAdd}>
+        <button type="button" className="btn--sm" disabled={busy} onClick={onAdd}>
           {t('estpre.add')}
         </button>
       </div>

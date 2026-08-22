@@ -10,6 +10,7 @@ import {
   updateSessionTokens,
 } from '../auth/session'
 import i18n from '../i18n'
+import { initialWorkspaceId } from '../lib/workspaceChoice'
 
 // Single-flight refresh promise: many in-flight requests may all
 // 401 at once when the access JWT expires; without coalescing, each
@@ -297,7 +298,10 @@ export async function establishSession(
   if (error || !data || data.length === 0) {
     throw new Error(errMessage(error))
   }
-  const remembered = lastWorkspaceId()
-  const pick = data.find((w) => w.id === remembered) ?? data[0]
-  setSession({ token, workspaceId: pick.id, refreshToken })
+  // Never land in an archived workspace: the list is name-ordered and
+  // includes archived rows, so the old ``data[0]`` fallback dropped a
+  // fresh browser straight into one whenever it sorted first.
+  const pick = initialWorkspaceId(data, lastWorkspaceId())
+  if (!pick) throw new Error(errMessage(error))
+  setSession({ token, workspaceId: pick, refreshToken })
 }

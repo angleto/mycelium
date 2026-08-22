@@ -48,11 +48,16 @@ async function pickFocusClient(page: Page, name: string) {
   await expect(focusClient(page)).toHaveValue(name)
 }
 
+// Switching happens in the sidebar now (the settings page no longer
+// carries a duplicate <select>), so the spec drives the real control.
 async function switchWorkspace(page: Page, name: string) {
-  await page.goto('/workspace')
-  const picker = page.locator('label.row select')
-  await expect(picker).toBeVisible({ timeout: 10_000 })
-  await picker.selectOption({ label: name })
+  const trigger = page.locator('.wssw__trigger')
+  await expect(trigger).toBeVisible({ timeout: 10_000 })
+  await trigger.click()
+  const row = page.locator('.wssw__row', { hasText: name })
+  await expect(row).toBeVisible({ timeout: 10_000 })
+  await row.click()
+  await expect(trigger).toContainText(name, { timeout: 10_000 })
 }
 
 test('focus does not leak across workspaces', async ({ page }) => {

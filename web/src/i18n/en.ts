@@ -762,34 +762,84 @@ export const en = {
     builtAt: 'Built at',
     apiDocs: 'REST API documentation',
   },
-  switcher: {
-    label: 'Workspace',
-    create: 'New workspace',
-    newName: 'Workspace name',
-    creating: 'Creating...',
-  },
   wsmgr: {
+    // The sidebar switcher and Settings -> Workspace share this
+    // namespace on purpose: they are two views of one thing, and the
+    // three near-duplicate namespaces they used to have (switcher.*,
+    // wsmgr.*, home.*) is how the two drifted apart.
+    label: 'Workspace',
     title: 'Workspace',
     id: 'Workspace ID',
     rename: 'Workspace name',
+    newName: 'Workspace name',
     save: 'Save',
     saving: 'Saving…',
     saved: 'Saved.',
     conflict: 'It changed meanwhile; reloaded.',
-    showArchived: 'Show archived',
     loading: 'Loading...',
     none: 'No workspaces.',
     archived: 'archived',
     current: 'current',
     switch: 'Switch to',
+    switchHint: 'Switch workspace',
+    manage: 'Workspace settings',
+    create: 'New workspace',
+    creating: 'Creating…',
+    yours: 'Your workspaces',
+    yoursNote:
+      'Switching is instant and needs no new login. Every note, task and invoice belongs to exactly one workspace.',
+    showArchived: 'Show archived ({{count}})',
     archive: 'Archive',
-    unarchive: 'Unarchive',
+    unarchive: 'Restore',
+    confirmArchive:
+      'Archive "{{name}}"? It stays intact and fully usable; it is only hidden from the switcher until you restore it.',
+    archiveMovesYou: 'You are in this workspace, so you will be moved to "{{name}}".',
+    archiveStayHere:
+      'This is your only other workspace, so you will stay in it after archiving.',
+    activeArchived:
+      'This workspace is archived: it stays fully usable, but it is hidden from the switcher. Restore it below to bring it back.',
     delete: 'Delete',
-    ownerOnly: 'Only the owner can delete a workspace',
+    deleteTitle: 'Delete "{{name}}"?',
+    deleteConfirm: 'Delete permanently',
+    confirmDelete:
+      'Deleting "{{name}}" erases everything it contains, permanently. This cannot be undone.',
+    typeToConfirm: 'Type {{name}} to confirm',
+    deleteWhat: {
+      content: 'Every note, task, time entry, event and tag.',
+      billing: 'Every client, project, invoice and budget.',
+      files: 'Every attachment, including the stored files.',
+      members: 'Access for every member of the workspace.',
+    },
+    deleteActiveNote:
+      'You are currently in this workspace: you will be moved to another one.',
+    deleteArchiveInstead:
+      'To hide a workspace you may need again, archive it instead.',
+    ownerOnly: 'Only the owner can do this',
     soleHint: 'Cannot delete your only workspace',
     cancel: 'Cancel',
-    confirmDelete:
-      'Delete "{{name}}" and all its data? This cannot be undone.',
+    configTitle: 'Workspace configuration',
+    configHint:
+      'Shared by everyone in this workspace, and different in every other one.',
+  },
+  setnav: {
+    account: 'Account',
+    workspace: 'Workspace',
+    platform: 'Platform',
+    platformHint:
+      'Deployment-wide settings. Available to a platform admin acting in admin mode.',
+  },
+  retrieval: {
+    title: 'Memory retrieval',
+    note: 'Semantic similarity floor (cosine, 0–1). 0 = off (every vector neighbour kept). Raise it if memory search returns results that do not match the query (far semantic neighbours); lower it if relevant semantic matches start disappearing. Keyword matches are never filtered.',
+    floorLabel: 'Semantic similarity floor',
+    range: 'The threshold must be between 0 and 1.',
+    saved: 'Saved.',
+  },
+  attachcfg: {
+    title: 'Attachments',
+    note: 'Maximum size of a single attachment uploaded to a note or task, in MiB (1–{{max}}). Raise it if uploads fail with "exceeds the maximum size". The whole file is held in memory while it is stored, so the ceiling is set by the deployment.',
+    sizeLabel: 'Maximum attachment size (MiB)',
+    range: 'The size must be between 1 and {{max}} MiB.',
   },
   home: {
     title: 'Workspaces',
@@ -813,6 +863,8 @@ export const en = {
     adding: 'Adding…',
     remove: 'Remove',
     confirmRemove: 'Remove {{email}} from this workspace?',
+    removeDetail:
+      'They lose access to everything in it. Their notes, tasks and time entries stay in the workspace.',
     none: 'No members.',
     you: 'you',
     create: 'Create workspace',

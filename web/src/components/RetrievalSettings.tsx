@@ -1,96 +1,57 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, errMessage, workspaceHeader } from '../api/client'
-import { useSession } from '../auth/useSession'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { saveWorkspaceSettings, useMyWorkspace } from '../auth/useMyWorkspace'
 
 // Per-workspace semantic-similarity floor for memory retrieval (cosine,
 // 0..1). 0 disables the gate (every vector neighbour is kept, the
 // historical behaviour); a positive value drops far semantic neighbours
 // so a keyword / proper-noun query is not flooded by noise that ties
 // with the real lexical hits under rank-only RRF. Lexical (keyword)
-// matches are NEVER gated, so keyword search stays complete. Admin knob,
-// tuned live; optimistic-concurrency guarded like the other settings.
+// matches are NEVER gated, so keyword search stays complete.
+//
+// Reads and writes the SHARED workspace snapshot: it used to fetch
+// /workspaces/me for itself and hold its own `expected_version`, which
+// meant saving in a sibling settings card left this one stale and its
+// next save 409'd.
 export function RetrievalSettings() {
-  const session = useSession()
-  const activeId = session?.workspaceId
-  const [floor, setFloor] = useState('0')
-  // estimate_presets is a required field of the settings PATCH; restate
-  // the current value so saving the floor doesn't clobber it (same
-  // pattern as DispatchPanel).
-  const [presets, setPresets] = useState<string[]>([])
-  const [version, setVersion] = useState<number | null>(null)
+  const { t } = useTranslation()
+  const { ws } = useMyWorkspace()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET('/workspaces/me', {
-      params: { header: workspaceHeader() },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setFloor(String(data.settings?.retrieval_semantic_min_similarity ?? 0))
-    setPresets(data.settings?.estimate_presets ?? [])
-    setVersion(data.version)
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const { data } = await api.GET('/workspaces/me', {
-        params: { header: workspaceHeader() },
-      })
-      if (active && data) {
-        setFloor(String(data.settings?.retrieval_semantic_min_similarity ?? 0))
-        setPresets(data.settings?.estimate_presets ?? [])
-        setVersion(data.version)
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [activeId])
+  const stored = String(ws?.settings?.retrieval_semantic_min_similarity ?? 0)
+  // Derived, not mirrored into state by an effect: the field shows the
+  // user's edit while there is one, and the stored value otherwise — so
+  // a save elsewhere is reflected without a second source of truth.
+  const floor = draft ?? stored
 
   async function save() {
-    if (version === null) return
     const v = Number(floor.replace(',', '.'))
     if (!Number.isFinite(v) || v < 0 || v > 1) {
-      setErr('Threshold must be between 0 and 1')
+      setErr(t('retrieval.range'))
       return
     }
+    setBusy(true)
     setErr(null)
     setMsg(null)
-    const { error, response } = await api.PATCH('/workspaces/me/settings', {
-      params: { header: workspaceHeader() },
-      body: {
-        expected_version: version,
-        estimate_presets: presets,
-        retrieval_semantic_min_similarity: v,
-      },
+    const res = await saveWorkspaceSettings({
+      retrieval_semantic_min_similarity: v,
     })
-    if (response.status === 409) {
-      setErr('Saved elsewhere — reloaded, retry')
-      await load()
+    setBusy(false)
+    if (!res.ok) {
+      setErr(res.message)
       return
     }
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setMsg('Saved')
-    await load()
+    setDraft(null)
+    setMsg(t('retrieval.saved'))
   }
 
   return (
     <section className="card">
-      <h2>Memory retrieval</h2>
-      <p className="hint">
-        Semantic similarity floor (cosine, 0–1). 0 = off (every vector
-        neighbour kept). Raise it if memory search returns results that
-        don&apos;t match the query (far semantic neighbours); lower it if
-        relevant semantic matches start disappearing. Keyword matches are
-        never filtered.
-      </p>
+      <h2>{t('retrieval.title')}</h2>
+      <p className="hint">{t('retrieval.note')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
       <div className="row">
@@ -100,11 +61,16 @@ export function RetrievalSettings() {
           max={1}
           step="0.05"
           value={floor}
-          onChange={(e) => setFloor(e.target.value)}
-          aria-label="Semantic similarity floor"
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label={t('retrieval.floorLabel')}
         />
-        <button type="button" className="btn--sm" onClick={() => void save()}>
-          Save
+        <button
+          type="button"
+          className="btn--sm"
+          disabled={busy || !ws}
+          onClick={() => void save()}
+        >
+          {busy ? t('wsmgr.saving') : t('wsmgr.save')}
         </button>
       </div>
     </section>

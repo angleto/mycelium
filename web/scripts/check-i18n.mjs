@@ -14,9 +14,17 @@
 // which is why a missing key is treated as a failure even when a fallback
 // makes it look harmless: the fallback IS the bug, it just fails quietly.
 //
-// en.ts is the reference. it.ts cannot drift from it -- `export const it:
-// Catalog` where `type Catalog = typeof en` makes a divergence a compile
-// error -- so tsc already covers en<->it and this covers code<->catalogue.
+// en.ts is the reference. it.ts cannot drift from it in SHAPE -- `export
+// const it: Catalog` where `type Catalog = typeof en` makes a divergence a
+// compile error -- so tsc already covers en<->it keys and this covers
+// code<->catalogue.
+//
+// What tsc canNOT see is the inside of the strings: both sides are just
+// `string`, so a translation that drops an interpolation placeholder
+// compiles and ships. That is not cosmetic -- the worst case is a
+// confirmation dialog that stops naming the thing it is about to destroy
+// ("Delete {{name}} and everything in it") and asks the user to approve a
+// blank. So placeholder PARITY is checked here too.
 //
 // Scope, deliberately: only string-literal keys. Keys built from template
 // literals or variables are unresolvable without evaluating the program,
@@ -32,6 +40,7 @@ import ts from 'typescript'
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = join(WEB, 'src')
 const CATALOG = join(SRC, 'i18n', 'en.ts')
+const IT_CATALOG = join(SRC, 'i18n', 'it.ts')
 
 /** Every .ts/.tsx under src/, excluding generated declaration files. */
 function sources(dir) {
@@ -57,10 +66,26 @@ function parse(file) {
   )
 }
 
-/** Flat leaf keys of the exported catalogue object ("a.b.c"). */
-function catalogKeys() {
-  const sf = parse(CATALOG)
-  const keys = new Set()
+/** The static text of a catalogue value, or null when it is not a plain
+ * literal (a concatenation of literals counts; anything computed does
+ * not, and is simply not placeholder-checked). */
+function literalText(node) {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = literalText(node.left)
+    const right = literalText(node.right)
+    return left === null || right === null ? null : left + right
+  }
+  return null
+}
+
+/** Flat leaf entries of a catalogue object: path -> literal text (or
+ * null when the value is not a plain literal). */
+function catalogEntries(file, exportName) {
+  const sf = parse(file)
+  const entries = new Map()
 
   const walkObject = (node, prefix) => {
     for (const prop of node.properties) {
@@ -76,10 +101,12 @@ function catalogKeys() {
         walkObject(prop.initializer, path)
       } else if (ts.isArrayLiteralExpression(prop.initializer)) {
         // Arrays are addressed by index (t('x.0')); register each slot.
-        keys.add(path)
-        prop.initializer.elements.forEach((_, i) => keys.add(`${path}.${i}`))
+        entries.set(path, null)
+        prop.initializer.elements.forEach((el, i) =>
+          entries.set(`${path}.${i}`, literalText(el)),
+        )
       } else {
-        keys.add(path)
+        entries.set(path, literalText(prop.initializer))
       }
     }
   }
@@ -92,7 +119,7 @@ function catalogKeys() {
       for (const decl of node.declarationList.declarations) {
         if (
           ts.isIdentifier(decl.name) &&
-          decl.name.text === 'en' &&
+          decl.name.text === exportName &&
           decl.initializer &&
           ts.isObjectLiteralExpression(decl.initializer)
         ) {
@@ -103,7 +130,16 @@ function catalogKeys() {
     ts.forEachChild(node, findExport)
   }
   findExport(sf)
-  return keys
+  return entries
+}
+
+/** The {{placeholders}} a translated string must keep, as a sorted set.
+ * i18next also accepts formatting suffixes ({{count, number}}); only the
+ * variable name is compared. */
+function placeholders(text) {
+  const out = new Set()
+  for (const m of text.matchAll(/\{\{\s*([^},\s]+)/g)) out.add(m[1])
+  return [...out].sort()
 }
 
 /** Static t('...') keys, plus a count of the dynamic ones we skip. */
@@ -138,7 +174,9 @@ function usedKeys(files) {
   return { used, dynamic }
 }
 
-const defined = catalogKeys()
+const enEntries = catalogEntries(CATALOG, 'en')
+const itEntries = catalogEntries(IT_CATALOG, 'it')
+const defined = new Set(enEntries.keys())
 const { used, dynamic } = usedKeys(sources(SRC))
 
 // i18next resolves a counted key to a SUFFIXED entry: t('a.b', {count})
@@ -178,4 +216,36 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-console.log('i18n: every static key resolves.')
+// Placeholder parity: a translation may reword freely, but it may not
+// drop (or invent) an interpolation. tsc cannot see this -- both sides
+// are `string` -- and the failure is silent at runtime: i18next simply
+// renders the sentence without the value.
+const drift = []
+for (const [key, enText] of enEntries) {
+  if (typeof enText !== 'string') continue
+  const itText = itEntries.get(key)
+  if (typeof itText !== 'string') continue
+  const a = placeholders(enText)
+  const b = placeholders(itText)
+  if (a.join('|') !== b.join('|')) drift.push({ key, en: a, it: b })
+}
+
+if (drift.length > 0) {
+  console.error(
+    `\n${drift.length} key(s) whose {{placeholders}} differ between en.ts and it.ts:\n`,
+  )
+  for (const d of drift) {
+    console.error(`  ${d.key}`)
+    console.error(`      en: ${d.en.join(', ') || '(none)'}`)
+    console.error(`      it: ${d.it.join(', ') || '(none)'}`)
+  }
+  console.error(
+    '\nA translation may reword the sentence but not drop the value it\n' +
+      'interpolates: the string renders without it, silently.\n',
+  )
+  process.exit(1)
+}
+
+console.log(
+  `i18n: every static key resolves; placeholders match across en/it.`,
+)

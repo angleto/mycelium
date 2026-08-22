@@ -94,8 +94,28 @@ export function setSession(s: Session): void {
   emit()
 }
 
+/** Switch the active workspace. THE entry point — call this, never
+ * `setActiveWorkspace`, from UI.
+ *
+ * Beyond writing the new id it drops the "acting as" elevation. That
+ * signal is per-BROWSER, not per-workspace: carried into a tenant where
+ * you are a plain member it made the mode chip claim Owner until the
+ * membership resolved. It never escalated anything (the server clamps
+ * `X-Workspace-Role` to the real membership) — it just lied, and
+ * least privilege is the right default in a workspace you just
+ * arrived in anyway. */
+export function switchWorkspace(workspaceId: string): void {
+  if (!cache) return
+  if (wsRoleCache) {
+    wsRoleCache = ''
+    localStorage.removeItem(WS_ROLE)
+  }
+  setActiveWorkspace(workspaceId)
+}
+
 export function setActiveWorkspace(workspaceId: string): void {
   if (!cache) return
+  if (cache.workspaceId === workspaceId) return
   cache = { ...cache, workspaceId }
   localStorage.setItem(KEY, JSON.stringify(cache))
   localStorage.setItem(LAST_WS, workspaceId)
@@ -123,6 +143,11 @@ export function clearSession(): void {
   localStorage.removeItem(KEY)
   localStorage.removeItem(ADMIN_MODE)
   localStorage.removeItem(WS_ROLE)
+  // Also the remembered workspace: it only ever matters across an
+  // explicit logout (a reload still has the session), and leaving it
+  // behind means the NEXT account on this browser starts from the
+  // previous user's last workspace id.
+  localStorage.removeItem(LAST_WS)
   emit()
 }
 

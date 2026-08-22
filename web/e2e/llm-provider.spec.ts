@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 
 // Per-org LLM provider selection (task d2c60a83). The admin-gated
-// LlmProviderSettings card in /settings lets a workspace admin pick a
+// LlmProviderSettings card in Settings -> Platform lets an admin pick a
 // hosted provider (here Scaleway) on the platform key (our_key) and have
 // it persist. BYOK + the fail-closed key probe hit the backend->provider
 // network and are covered by backend respx tests; this e2e stays offline:
@@ -30,7 +30,7 @@ test('admin selects Scaleway on the platform key and it persists', async ({
   page,
 }) => {
   await loginAsAdmin(page)
-  await page.goto('/settings')
+  await page.goto('/settings/platform')
 
   const card = page.locator('section.card', { hasText: 'AI model provider' })
   await expect(card.locator('h2')).toHaveText('AI model provider')
@@ -46,7 +46,7 @@ test('admin selects Scaleway on the platform key and it persists', async ({
   await expect(card.locator('.ok')).toContainText('Saved')
 
   // Reload: the selection persisted (provider + model round-trip).
-  await page.goto('/settings')
+  await page.goto('/settings/platform')
   const card2 = page.locator('section.card', { hasText: 'AI model provider' })
   await expect(card2.locator('select').first()).toHaveValue('scaleway')
   await expect(card2.locator('input[list="scw-models"]')).toHaveValue(
@@ -56,7 +56,7 @@ test('admin selects Scaleway on the platform key and it persists', async ({
 
 test('switching to BYOK requires a key before saving', async ({ page }) => {
   await loginAsAdmin(page)
-  await page.goto('/settings')
+  await page.goto('/settings/platform')
 
   const card = page.locator('section.card', { hasText: 'AI model provider' })
   await card.locator('select').first().selectOption('scaleway')

@@ -258,6 +258,147 @@ a:hover {
 .focus select {
   width: 100%;
 }
+
+/* ---- workspace switcher (top of the sidebar) ----
+   An anchored menu, not a <select>: the rows carry a role tag, an
+   "archived" tag and a check for the current one, and the same panel
+   holds "new workspace" and the link into Settings -> Workspace.
+   Every button here sets BOTH background and color: the global
+   `button` rule paints an accent fill, and undoing only the fill
+   leaves accent ink on a plain surface (scripts/check-button-ink.mjs
+   fails the build for exactly that). */
+.wssw {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.wssw__trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-weight: 600;
+  text-align: left;
+}
+.wssw__trigger:hover {
+  border-color: var(--accent);
+}
+.wssw__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wssw__caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.wssw__menu {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  min-width: 100%;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.wssw__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wssw__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  background: none;
+  color: var(--text);
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.wssw__row:hover,
+.wssw__row:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.wssw__row[aria-current='true'] {
+  font-weight: 600;
+}
+.wssw__check {
+  flex: 0 0 1rem;
+  color: var(--accent);
+  text-align: center;
+}
+.wssw__rowname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wssw__hint {
+  padding: 0.3rem 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.wssw__sep {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
+.wssw__create {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+}
+.wssw__create input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- settings sub-navigation (account / workspace / platform) ---- */
+.setnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+.setnav__link {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.setnav__link:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.setnav__link--active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  border-color: var(--accent);
+  color: var(--text-h);
+}
 .running {
   display: flex;
   align-items: center;
@@ -1865,6 +2006,30 @@ button.btn--danger:hover {
 }
 .modal__sp {
   flex: 1;
+}
+/* A dialog that is as tall as its content, for the confirm-style panels.
+   `.modal__panel` is pinned at 92vh because the notes editor wants the
+   screen; a four-line confirmation in a full-height column reads as a
+   bug. */
+.modal__panel--auto {
+  height: auto;
+  max-height: 86vh;
+}
+.confirm__intro {
+  margin: 0;
+  font-weight: 600;
+}
+.confirm__intro--danger {
+  color: var(--err);
+}
+.confirm__what {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 /* Only the body scrolls; head + foot stay put. */
 .modal__body {

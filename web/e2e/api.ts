@@ -31,10 +31,27 @@ export async function authedApi(
     await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
   ).json()
   const token = auth.token as string
-  const ws = await (
+  const ws = (await (
     await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
-  ).json()
-  const workspaceId = ws[0].id as string
+  ).json()) as { id: string; name: string; status: string }[]
+  // The workspace the APP will be in, not merely the first row.
+  //
+  // This used to be `ws[0]`, which silently agreed with the SPA only
+  // because the SPA also took the first row. It no longer does: landing
+  // a fresh login inside an ARCHIVED workspace was a bug, so
+  // `establishSession` now prefers the first ACTIVE one (see
+  // src/lib/workspaceChoice.ts, `initialWorkspaceId`). The rule is
+  // mirrored rather than imported because the e2e project does not
+  // compile src/.
+  //
+  // Get this wrong and a spec seeds a task, an invoice or a client into
+  // a workspace the browser is not in: nothing errors, the seeded row
+  // is simply never rendered, and the spec dies of a timeout on a page
+  // that looks fine. Archived leftovers accumulate in a long-lived e2e
+  // database (each focus-isolation run archives two), and they sort
+  // before "Personal".
+  const home = ws.find((w) => w.status !== 'archived') ?? ws[0]
+  const workspaceId = home.id
   return {
     ctx,
     headers: {
