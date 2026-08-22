@@ -20,11 +20,15 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.task import Task
+from mycelium_core.models.task_collaborator import TaskCollaborator
 from mycelium_core.models.task_participant import TaskParticipant
+from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import actors as actors_svc
 from mycelium_core.services import identities as identities_svc
@@ -369,3 +373,152 @@ async def test_spawn_carries_extra_participants() -> None:
             .all()
         )
         assert set(participants) == {owner_ident.id, collab_ident.id}
+
+
+async def test_spawn_drops_an_assignee_whose_principal_was_deactivated() -> None:
+    """A spawn is a NEW assignment, not preserved history.
+
+    The resolver refuses to bind a deactivated principal on every write
+    path, but ``maybe_spawn_next`` builds its successor as a raw ORM row
+    and never goes through it. Left alone, a recurring task would keep
+    minting fresh, un-actionable occurrences for someone who cannot log
+    in, forever. It now spawns UNASSIGNED, where the work is at least
+    visible in the unassigned queue.
+
+    The TEMPLATE keeps its assignee: deactivating hides a principal from
+    the pickers, it never rewrites what they already hold.
+    """
+    owner_email = _email()
+    bot_email = _email()
+    async with admin_session() as s:
+        a = await signup(s, email=owner_email, password="pw-strong-123", org_name="R")
+        b = await signup(s, email=bot_email, password="pw-strong-123", org_name="O")
+    org, owner = a.org_id, a.user_id
+    async with tenant_session(str(org), str(owner)) as s:
+        await mem_svc.add_member(s, org_id=org, actor_id=owner, email=bot_email, role="member")
+        await actors_svc.mint_user_handle(s, user_id=owner, seed=owner_email)
+        await actors_svc.mint_user_handle(s, user_id=b.user_id, seed=bot_email)
+        leaver_ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=b.user_id)
+        anchor_start = dt.datetime(2026, 9, 14, 10, 0, tzinfo=dt.UTC)
+        t = await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=owner,
+            title="Weekly handover",
+            assignee_id=leaver_ident.id,
+            start_at=anchor_start,
+            duration_minutes=30,
+            recurrence={"kind": "weekly"},
+        )
+        await tasks.assign(s, org_id=org, actor_id=owner, task_id=t.id, user_id=b.user_id)
+        task_id, task_v = t.id, t.version
+
+    async with admin_session() as s:
+        await s.execute(update(User).where(User.id == b.user_id).values(is_active=False))
+
+    async with tenant_session(str(org), str(owner)) as s:
+        from mycelium_core.services import workflow as wf_svc
+
+        wf = await wf_svc.effective_workflow_for_task(s, org, task_id)
+        states = {
+            ws.name: ws
+            for ws in (
+                await s.execute(select(WorkflowState).where(WorkflowState.workflow_id == wf.id))
+            )
+            .scalars()
+            .all()
+        }
+        ver = await tasks.set_state(
+            s,
+            org_id=org,
+            actor_id=owner,
+            task_id=task_id,
+            expected_version=task_v,
+            state_id=states["in_progress"].id,
+        )
+        await tasks.set_state(
+            s,
+            org_id=org,
+            actor_id=owner,
+            task_id=task_id,
+            expected_version=ver,
+            state_id=states["done"].id,
+        )
+        spawned = (
+            await s.execute(
+                select(Task).where(
+                    Task.title == "Weekly handover",
+                    Task.start_at == anchor_start + dt.timedelta(weeks=1),
+                )
+            )
+        ).scalar_one()
+        assert spawned.assignee_id is None, "a new occurrence must not go to a dead handle"
+        template = (await s.execute(select(Task).where(Task.id == task_id))).scalar_one()
+        assert template.assignee_id == leaver_ident.id, "history is not rewritten"
+        # Same rule one door over: the collaborator set is cloned onto the
+        # new occurrence too, and cloning a dead one would write work at
+        # one door that the reminder scan then discards at another.
+        spawned_collabs = (
+            (
+                await s.execute(
+                    select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == spawned.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert b.user_id not in set(spawned_collabs)
+        template_collabs = (
+            (
+                await s.execute(
+                    select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == task_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert b.user_id in set(template_collabs), "the template keeps its own history"
+
+
+async def test_add_participant_by_identity_id_refuses_a_deactivated_principal() -> None:
+    """The explicit-id door. ``add_participant`` accepts either a handle
+    (resolved, hence gated) or a raw ``identity_id`` straight off the
+    request body -- gating only the first would be the "one door
+    filtered, the other five open" mistake."""
+    owner_email = _email()
+    guest_email = _email()
+    async with admin_session() as s:
+        a = await signup(s, email=owner_email, password="pw-strong-123", org_name="R")
+        g = await signup(s, email=guest_email, password="pw-strong-123", org_name="O")
+    org, owner = a.org_id, a.user_id
+    async with tenant_session(str(org), str(owner)) as s:
+        await mem_svc.add_member(s, org_id=org, actor_id=owner, email=guest_email, role="member")
+        await actors_svc.mint_user_handle(s, user_id=owner, seed=owner_email)
+        await actors_svc.mint_user_handle(s, user_id=g.user_id, seed=guest_email)
+        guest_ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=g.user_id)
+        guest_ident_id, guest_handle = guest_ident.id, guest_ident.handle
+        t = await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=owner,
+            title="Standup",
+            start_at=dt.datetime(2026, 9, 21, 9, 0, tzinfo=dt.UTC),
+            duration_minutes=15,
+        )
+        task_id = t.id
+
+    async with admin_session() as s:
+        await s.execute(update(User).where(User.id == g.user_id).values(is_active=False))
+
+    async with tenant_session(str(org), str(owner)) as s:
+        with pytest.raises(DomainError) as by_id:
+            await p_svc.add_participant(
+                s, org_id=org, actor_id=owner, task_id=task_id, identity_id=guest_ident_id
+            )
+        assert by_id.value.code is MessageCode.IDENTITY_INACTIVE
+    async with tenant_session(str(org), str(owner)) as s:
+        with pytest.raises(DomainError) as by_handle:
+            await p_svc.add_participant(
+                s, org_id=org, actor_id=owner, task_id=task_id, handle=guest_handle
+            )
+        assert by_handle.value.code is MessageCode.IDENTITY_INACTIVE

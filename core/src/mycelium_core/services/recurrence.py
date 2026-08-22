@@ -38,18 +38,21 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.identity import Identity
+from mycelium_core.models.membership import Membership
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
 from mycelium_core.models.task_participant import TaskParticipant
 from mycelium_core.models.task_tag import TaskTag
+from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import tag_assignment
 from mycelium_core.services import workflow as wf_svc
 
@@ -224,6 +227,16 @@ async def maybe_spawn_next(
         )
     ).scalar_one()
 
+    # The spawn is a NEW assignment, not preserved history: cloning the
+    # assignee of a template whose principal has since been deactivated
+    # would mint fresh, un-actionable tasks for them forever, past the
+    # resolver that refuses exactly that on every other write path. An
+    # inactive assignee spawns UNASSIGNED, where the task is at least
+    # visible in the unassigned queue instead of parked on a dead handle.
+    carry_assignee = task.assignee_id is not None and await identities_svc.identity_is_bindable(
+        session, org_id=org_id, identity_id=task.assignee_id
+    )
+
     new_task = Task(
         org_id=org_id,
         title=task.title,
@@ -237,7 +250,7 @@ async def maybe_spawn_next(
         state_id=initial.id,
         parent_task_id=task.parent_task_id,
         owner_id=task.owner_id,
-        assignee_id=task.assignee_id,
+        assignee_id=task.assignee_id if carry_assignee else None,
         executor_kind=task.executor_kind,
         estimate_effort_h=task.estimate_effort_h,
         required_capabilities=list(task.required_capabilities or []),
@@ -289,10 +302,23 @@ async def maybe_spawn_next(
 
     # Copy task_collaborators (the M:N "extra hands" set; the singular
     # assignee is on tasks.assignee_id and already copied above).
+    # Live members only, for the same reason the assignee is dropped
+    # above: these are NEW rows on a NEW task. Cloning a collaborator who
+    # was deactivated or removed would write work at one door that the
+    # reminder scan then silently discards at another.
     collab_rows = (
         (
             await session.execute(
-                select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == task.id)
+                select(TaskCollaborator.user_id)
+                .join(User, User.id == TaskCollaborator.user_id)
+                .join(
+                    Membership,
+                    and_(
+                        Membership.user_id == TaskCollaborator.user_id,
+                        Membership.org_id == org_id,
+                    ),
+                )
+                .where(TaskCollaborator.task_id == task.id, User.is_active.is_(True))
             )
         )
         .scalars()

@@ -168,6 +168,7 @@ class MessageCode(enum.StrEnum):
     EXECUTOR_INVALID = "executor.invalid"
     AGENT_RUN_NOT_FOUND = "agent_run.not_found"
     AGENT_RUN_NOT_DISPATCHABLE = "agent_run.not_dispatchable"
+    AGENT_RUN_ASSIGNEE_INACTIVE = "agent_run.assignee_inactive"
     AGENT_RUN_ALREADY_ACTIVE = "agent_run.already_active"
     AGENT_RUN_TERMINAL = "agent_run.terminal"
     HANDOFF_NOT_FOUND = "handoff.not_found"
@@ -178,6 +179,8 @@ class MessageCode(enum.StrEnum):
     AUTONOMOUS_POLICY_INVALID = "dispatch.autonomous_policy_invalid"
     TASK_NOT_OFFERED = "task.not_offered"
     TASK_ALREADY_CLAIMED = "task.already_claimed"
+    TASK_OFFER_NO_RECIPIENTS = "task.offer_no_recipients"
+    TASK_OWNER_NOT_MEMBER = "task.owner_not_member"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -235,6 +238,8 @@ class MessageCode(enum.StrEnum):
     EVENT_NODE_NOT_INERT = "event.node_not_inert"
     IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
     IDENTITY_NOT_FOUND = "identity.not_found"
+    IDENTITY_INACTIVE = "identity.inactive"
+    IDENTITY_NOT_MEMBER = "identity.not_member"
     ANNOTATION_NOT_FOUND = "annotation.not_found"
     ANNOTATION_FORBIDDEN = "annotation.forbidden"
     ANNOTATION_DELETED = "annotation.deleted"
@@ -533,6 +538,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.EXECUTOR_NOT_FOUND: "Executor not found",
         MessageCode.EXECUTOR_INVALID: "Invalid executor: {detail}",
         MessageCode.AGENT_RUN_NOT_FOUND: "Agent run not found",
+        MessageCode.AGENT_RUN_ASSIGNEE_INACTIVE: (
+            "@{handle} can no longer act, so this task cannot be run. "
+            "Reassign it, or reactivate the assistant."
+        ),
         MessageCode.AGENT_RUN_NOT_DISPATCHABLE: (
             "Task is not dispatchable to an agent: it must be an llm_agent "
             "task with an assigned, dispatchable executor"
@@ -546,6 +555,13 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTONOMOUS_DISABLED: ("Autonomous dispatch is disabled for this workspace"),
         MessageCode.AUTONOMOUS_POLICY_INVALID: ("Invalid autonomous dispatch policy: {detail}"),
         MessageCode.TASK_NOT_OFFERED: ("Task is not offered (nothing to claim or decline)"),
+        MessageCode.TASK_OFFER_NO_RECIPIENTS: (
+            "Nobody in this workspace can take this task on: every member is "
+            "deactivated. The task was not offered."
+        ),
+        MessageCode.TASK_OWNER_NOT_MEMBER: (
+            "The owner of a task must be an active member of this workspace."
+        ),
         MessageCode.TASK_ALREADY_CLAIMED: ("Task has already been claimed by a member"),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
@@ -679,6 +695,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Cannot create an identity for a {kind} without a handle."
         ),
         MessageCode.IDENTITY_NOT_FOUND: "Identity not found",
+        # Every raise site fills BOTH params. A template rendered with a
+        # missing key falls back to the raw braces (see ``render``), which
+        # is how a user once got literal "{current}" on screen.
+        MessageCode.IDENTITY_INACTIVE: (
+            "@{handle} is deactivated and cannot be assigned ({kind})."
+        ),
+        MessageCode.IDENTITY_NOT_MEMBER: (
+            "@{handle} is no longer a member of this workspace ({kind})."
+        ),
         MessageCode.ANNOTATION_NOT_FOUND: "Annotation not found",
         MessageCode.ANNOTATION_FORBIDDEN: (
             "Only the author or an admin can edit or delete this annotation"

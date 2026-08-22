@@ -75,8 +75,13 @@ async def add_participant(
         identity_id = identity.id
     if identity_id is None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    # Identity must belong to this org (FK alone is org-agnostic).
-    await identities_svc.get_identity(session, org_id=org_id, identity_id=identity_id)
+    # Identity must belong to this org (FK alone is org-agnostic) AND its
+    # principal must still be bindable -- active, and for a user still a
+    # member. The handle branch above goes through the resolver, and
+    # leaving the explicit-id branch ungated would be the same "one door
+    # filtered, the other five open" mistake.
+    ident = await identities_svc.get_identity(session, org_id=org_id, identity_id=identity_id)
+    await identities_svc.require_bindable_identity(session, org_id=org_id, ident=ident)
 
     existing = (
         await session.execute(

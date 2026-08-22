@@ -2480,7 +2480,10 @@ async def list_assigned_annotations(
 
     async with _tenant(token, org_id) as (s, org, user):
         if assignee_handle:
-            ident_row = await identities_svc.lookup_by_handle(s, org_id=org, handle=assignee_handle)
+            # A read about someone's backlog, deactivated included.
+            ident_row = await identities_svc.lookup_by_handle(
+                s, org_id=org, handle=assignee_handle, include_inactive=True
+            )
             if ident_row is None:
                 return []
             ident_id = ident_row.id
@@ -3553,7 +3556,10 @@ async def list_running_timers(
         if user_id:
             target = uuid.UUID(user_id)
         elif handle:
-            ident_row = await identities_svc.lookup_by_handle(s, org_id=org, handle=handle)
+            # A read about someone's timers, deactivated included.
+            ident_row = await identities_svc.lookup_by_handle(
+                s, org_id=org, handle=handle, include_inactive=True
+            )
             if ident_row is None or ident_row.user_id is None:
                 return []
             target = ident_row.user_id

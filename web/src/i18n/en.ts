@@ -1540,6 +1540,7 @@ export const en = {
     unreason: {
       no_capable_agent: 'no capable agent',
       budget_exhausted: 'budget exhausted',
+      assignee_inactive: 'assignee deactivated',
       none: 'unassignable',
     },
     legendChain:

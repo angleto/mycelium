@@ -47,7 +47,7 @@ from decimal import Decimal
 import pytest
 from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests_helpers import seed_ai_assistant_identity
 
@@ -56,6 +56,7 @@ from mycelium_core.ai_providers import LLMResult, set_llm_override
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import DomainError, ForbiddenError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.dependency import DependencyType
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.membership import Membership, Role
@@ -63,6 +64,7 @@ from mycelium_core.models.notification import Notification
 from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.task_collaborator import TaskCollaborator
 from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
+from mycelium_core.models.user import User
 from mycelium_core.security import decode_token
 from mycelium_core.services import agent_runtime as runtime
 from mycelium_core.services import coordination as coord
@@ -829,3 +831,67 @@ async def test_handoff_not_found_message_code_registered() -> None:
     assert render(MessageCode.HANDOFF_NOT_FOUND) == "Handoff not found"
     assert "offered" in render(MessageCode.TASK_NOT_OFFERED)
     assert "claimed" in render(MessageCode.TASK_ALREADY_CLAIMED)
+
+
+# --- offering to principals who cannot take the task ------------------
+
+
+async def test_offer_skips_deactivated_members_and_refuses_when_nobody_is_left(
+    _fake_embedder: None,
+) -> None:
+    """A ``task_offer`` notification is the ONLY discovery channel for an
+    offer: there is no bid table and no offered-tasks queue, so an offer
+    that reaches nobody sets ``offered=True``, tells no one, and strands
+    the task -- precisely what the "never strand a task" fallback in
+    ``_eligible_member_users`` exists to prevent. So a deactivated member
+    is skipped, and an offer with no one left to receive it is refused to
+    a caller who can act on the refusal.
+    """
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="OF")
+        live = await signup(s, email=_email(), password="pw-strong-123", org_name="L")
+        dead = await signup(s, email=_email(), password="pw-strong-123", org_name="D")
+    org, owner = a.org_id, a.user_id
+
+    async with tenant_session(str(org), str(owner)) as s:
+        s.add(Membership(org_id=org, user_id=live.user_id, role=Role.member))
+        s.add(Membership(org_id=org, user_id=dead.user_id, role=Role.member))
+        t = await tasks_svc.create_task(
+            s, org_id=org, actor_id=owner, title="T", estimate_effort_h=Decimal(1)
+        )
+        tid = t.id
+
+    async with admin_session() as s:
+        await s.execute(update(User).where(User.id == dead.user_id).values(is_active=False))
+
+    async with tenant_session(str(org), str(owner)) as s:
+        await coord.offer_task(s, org_id=org, actor_id=owner, task_id=tid)
+        offered_to = {
+            n.user_id
+            for n in (
+                await s.execute(select(Notification).where(Notification.kind == "task_offer"))
+            )
+            .scalars()
+            .all()
+        }
+        assert live.user_id in offered_to
+        assert dead.user_id not in offered_to, "a deactivated member cannot claim it"
+
+    # Now deactivate everyone: the offer has nowhere to go and must refuse
+    # rather than silently mark the task offered.
+    async with admin_session() as s:
+        await s.execute(
+            update(User).where(User.id.in_([owner, live.user_id])).values(is_active=False)
+        )
+    async with tenant_session(str(org), str(owner)) as s:
+        t2 = await tasks_svc.create_task(
+            s, org_id=org, actor_id=owner, title="T2", estimate_effort_h=Decimal(1)
+        )
+        t2_id = t2.id
+    async with tenant_session(str(org), str(owner)) as s:
+        with pytest.raises(DomainError) as exc:
+            await coord.offer_task(s, org_id=org, actor_id=owner, task_id=t2_id)
+        assert exc.value.code is MessageCode.TASK_OFFER_NO_RECIPIENTS
+    async with tenant_session(str(org), str(owner)) as s:
+        untouched = await tasks_svc.get_task(s, org_id=org, task_id=t2_id)
+        assert untouched.offered is False, "a refused offer must not mark the task"

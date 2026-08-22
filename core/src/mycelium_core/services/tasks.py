@@ -288,7 +288,15 @@ async def create_task(
         )
     # ``owner_id`` defaults to the creator. Same rule as the
     # migration backfill: every task has an explicit human owner.
+    #
+    # Validated when stated: it is a bare FK to ``users``, so without
+    # this an owner from another workspace is accepted and every later
+    # patch reads that stranger's timezone. Not validated when it falls
+    # back to ``actor_id``, which require_role already established as a
+    # member two lines up.
     effective_owner = owner_id or actor_id
+    if owner_id is not None:
+        await identities_svc.require_owner_user(session, org_id=org_id, user_id=owner_id)
     # A date-only due is anchored to end-of-day in the owner's timezone.
     due_date = await _promote_due(session, due_date, owner_id=effective_owner)
     # Default ``created_by_identity_id`` to the user identity of the
@@ -810,6 +818,12 @@ async def update_task(
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
     current = await get_task(session, org_id=org_id, task_id=task_id)
+    if values.get("owner_id") is not None:
+        await identities_svc.require_owner_user(session, org_id=org_id, user_id=values["owner_id"])
+    elif "owner_id" in values:
+        # Explicit null. A task always has a human accountable for it
+        # (the column is NOT NULL); clearing it is not a legal edit.
+        raise DomainError(MessageCode.TASK_OWNER_NOT_MEMBER)
     if "due_date" in values:
         # Same date-only -> end-of-day-in-owner's-tz promotion as create
         # (the owner is the task's existing owner).

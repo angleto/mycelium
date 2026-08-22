@@ -30,12 +30,13 @@ import uuid
 from decimal import Decimal
 
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from tests_helpers import seed_ai_assistant_identity
 
 from mycelium_api.main import app
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import ConflictError, DomainError, ForbiddenError
+from mycelium_core.models.ai_assistant import AiAssistant
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.task import ExecKind, SchedulePolicy
@@ -689,3 +690,82 @@ async def test_service_mutations_owner_gated_in_session() -> None:
             raise AssertionError("a member must not create an executor")
         except ForbiddenError:
             pass
+
+
+async def test_a_task_addressed_to_a_deactivated_assistant_is_a_visible_gap() -> None:
+    """Not excluded from routing -- FLAGGED.
+
+    Dropping such a task from the agent queue would leave a schedule row
+    still claiming ``unassignable=false`` with an assigned executor and a
+    start time, i.e. the Gantt says planned and on time while nothing
+    ever dispatches it, and any pending request is retired as
+    ``not_admitted`` (which reads as "the scheduler dropped it" when the
+    scheduler in fact admitted it). Deleting the agent that could do the
+    work already lands on ``unassignable``; addressing a task to an
+    assistant that can no longer act is the same class of event, and gets
+    its own reason so the owner is not sent hunting for a capability tag.
+
+    Order matters: the task is created FIRST, because ``create_task``
+    resolves the assignee through the identities resolver, which refuses
+    a deactivated assistant outright.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "DEACT"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
+        org_id = uuid.UUID(a["workspace_id"])
+        async with tenant_session(str(org_id), a["user_id"]) as s:
+            ai_ident = await seed_ai_assistant_identity(
+                s, org_id=org_id, user_id=uuid.UUID(a["user_id"])
+            )
+            assistant_id = ai_ident.ai_assistant_id
+
+        r = await c.post(
+            "/tasks",
+            headers=h,
+            json={"title": "Bot work", "estimate_effort_h": "2", "assignee_id": str(ai_ident.id)},
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["id"]
+
+        # It schedules normally while the assistant is live.
+        rec = await c.post(
+            "/schedule/recompute",
+            headers=h,
+            json={"as_of": "2026-01-12T08:00:00+00:00", "policy": "balanced"},
+        )
+        assert rec.json()["unassignable_count"] == 0
+
+        async with tenant_session(str(org_id), a["user_id"]) as s:
+            await s.execute(
+                update(AiAssistant).where(AiAssistant.id == assistant_id).values(is_active=False)
+            )
+
+        rec2 = await c.post(
+            "/schedule/recompute",
+            headers=h,
+            json={"as_of": "2026-01-12T08:00:00+00:00", "policy": "balanced"},
+        )
+        assert rec2.json()["unassignable_count"] == 1
+        sched = (await c.get("/schedule", headers=h)).json()
+        row = next(x for x in sched if x["task_id"] == task_id)
+        assert row["unassignable"] is True
+        assert row["unassignable_reason"] == "assignee_inactive"
+        assert row["assigned_executor_id"] is None
+        assert row["scheduled_start"] is None
+
+        # And the run door refuses by name rather than with the generic
+        # "not dispatchable", which would say nothing about which
+        # assistant is dead.
+        run = await c.post(f"/tasks/{task_id}/run", headers=h)
+        assert run.status_code == 400, run.text
+        assert run.json()["code"] == "agent_run.assignee_inactive"

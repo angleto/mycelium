@@ -65,6 +65,7 @@ from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.task import ExecKind, Task
 from mycelium_core.services import audit, billing
 from mycelium_core.services import coordination as coordination_svc
+from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import notes as notes_svc
@@ -429,6 +430,15 @@ async def start_run(
             await session.execute(select(Identity).where(Identity.id == task.assignee_id))
         ).scalar_one_or_none()
         is_llm = identity is not None and identity.kind is IdentityKind.ai_assistant
+        # Live re-check on top of the scheduler snapshot, the same
+        # defense-in-depth the dispatch loop applies to WIP: the schedule
+        # row that flags ``assignee_inactive`` is only as fresh as the
+        # last recompute, and POST /agent-runs reads whatever it left.
+        # Its own code, not the generic not_dispatchable, because "it must
+        # be an llm_agent task with an assigned, dispatchable executor"
+        # tells an owner nothing about WHICH assistant is dead.
+        if is_llm and identity is not None:
+            await identities_svc.require_assistant_runnable(session, ident=identity)
     else:
         is_llm = task.executor_kind is ExecKind.llm_agent
     if not is_llm:

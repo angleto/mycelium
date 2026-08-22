@@ -62,6 +62,7 @@ from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
 from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
+from mycelium_core.models.user import User
 from mycelium_core.services import audit
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import notifications as notif_svc
@@ -475,9 +476,22 @@ async def _eligible_member_users(
     ``required_capabilities``; if the task requires no capability (or no
     human executor is capability-tagged), ALL members of the workspace.
     Deterministic order: sorted by ``str(uuid)``."""
+    # Live members only, and filtered HERE rather than at the end: the
+    # capability narrowing below falls back to ``member_ids`` when no
+    # tagged human matches, so filtering afterwards would defeat that
+    # fallback exactly when the capable humans are the deactivated ones.
+    # Same ordering argument as the archived-client fix -- a narrowing
+    # applied over a set that still holds dead rows silently returns
+    # fewer live candidates than intended.
     member_ids = sorted(
         set(
-            (await session.execute(select(Membership.user_id).where(Membership.org_id == org_id)))
+            (
+                await session.execute(
+                    select(Membership.user_id)
+                    .join(User, User.id == Membership.user_id)
+                    .where(Membership.org_id == org_id, User.is_active.is_(True))
+                )
+            )
             .scalars()
             .all()
         ),
@@ -520,10 +534,20 @@ async def offer_task(
     ).scalar_one_or_none()
     if task is None:
         raise DomainError(MessageCode.TASK_NOT_FOUND)
+    # Resolve the audience BEFORE marking the task offered. A
+    # ``task_offer`` notification is the only discovery channel there is
+    # (there is no bid table and no offered-tasks queue), so an offer with
+    # zero recipients would set ``offered=True``, tell nobody, and leave
+    # the task exactly as stranded as the "never strand a task" fallback
+    # in ``_eligible_member_users`` exists to prevent. Reachable: an admin
+    # in sudo mode can offer inside a workspace whose members are all
+    # deactivated. Refuse instead, to a caller who can act on it.
+    recipients = await _eligible_member_users(session, org_id=org_id, task=task)
+    if not recipients:
+        raise DomainError(MessageCode.TASK_OFFER_NO_RECIPIENTS)
     task.offered = True
     task.version += 1
     await session.flush()
-    recipients = await _eligible_member_users(session, org_id=org_id, task=task)
     for uid in recipients:
         await notif_svc.enqueue(
             session,

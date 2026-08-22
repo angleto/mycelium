@@ -61,31 +61,58 @@ async def list_actors(
     org_id: uuid.UUID,
     q: str | None = None,
     limit: int = 50,
+    include_inactive: bool = False,
 ) -> list[Actor]:
     """Return the assignable actors visible to the caller's workspace.
     The list folds workspace members (User joined via Membership) and
     AI assistants owned by anyone in the workspace, sorted by handle.
-    A ``q`` substring filters across handle / display_name / label."""
-    members = list(
-        (
-            await session.execute(
-                select(User.id, User.email, User.display_name, User.handle)
-                .join(Membership, Membership.user_id == User.id)
-                .where(Membership.org_id == org_id, User.handle != "")
-            )
-        ).all()
+    A ``q`` substring filters across handle / display_name / label.
+
+    Deactivated principals are excluded by default. The word
+    ASSIGNABLE in the first line is the whole argument: an assistant
+    with ``is_active=false`` cannot authenticate at all (the SECURITY
+    DEFINER ``authenticate_agent_token`` returns no row for it), and a
+    user with ``is_active=false`` cannot log in or hold an API session
+    (``auth.login``, ``deps`` on every request). Offering either in a
+    picker proposes work to someone who cannot pick it up.
+
+    The predicates sit in the two SELECTs rather than in the fold
+    below, because ``q`` is filtered in Python and ``limit`` slices
+    last: a limit applied over a set that still holds dead rows
+    silently returns fewer than ``limit`` live actors.
+
+    ``include_inactive`` is for the readers that resolve a HISTORICAL
+    reference rather than offer a choice -- the owner chip turning a
+    ``task.owner_id`` back into a name, the assignee chip of a task
+    already assigned. Deactivating hides a principal from the pickers;
+    it never rewrites what they already hold.
+
+    Note this filter is the picker half only. The resolver half lives
+    in ``services.identities``, which refuses to bind a deactivated
+    principal on the write path -- a picker that stops offering what
+    the resolver would still accept is a UI trick, not a fix.
+    """
+    m_stmt = (
+        select(User.id, User.email, User.display_name, User.handle)
+        .join(Membership, Membership.user_id == User.id)
+        .where(Membership.org_id == org_id, User.handle != "")
     )
-    assistants = list(
-        (
-            await session.execute(
-                select(
-                    AiAssistant.id,
-                    AiAssistant.label,
-                    AiAssistant.handle,
-                ).where(AiAssistant.handle != "")
-            )
-        ).all()
-    )
+    if not include_inactive:
+        m_stmt = m_stmt.where(User.is_active.is_(True))
+    members = list((await session.execute(m_stmt)).all())
+    # Explicit org predicate on top of RLS, matching the members half
+    # (which is org-scoped through Membership) and ``taxonomy.list_tags``.
+    # ``ai_assistants`` is ENABLE but not FORCE row-level security, so
+    # outside a tenant session this half would silently return nothing
+    # while the members half returned the right rows.
+    a_stmt = select(
+        AiAssistant.id,
+        AiAssistant.label,
+        AiAssistant.handle,
+    ).where(AiAssistant.org_id == org_id, AiAssistant.handle != "")
+    if not include_inactive:
+        a_stmt = a_stmt.where(AiAssistant.is_active.is_(True))
+    assistants = list((await session.execute(a_stmt)).all())
     out: list[Actor] = []
     for uid, email, display, handle in members:
         out.append(

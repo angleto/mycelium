@@ -59,7 +59,12 @@ export function OwnerPicker({
   useEffect(() => {
     let active = true
     void (async () => {
-      const res = await authFetch('/actors?limit=200', {
+      // include_inactive: this fetch is not the picker (that one is
+      // ``search`` above, and it must stay clean) -- it is the ONLY
+      // source the SPA has for owner_id -> name, and its miss path
+      // renders eight hex characters of a raw uuid. Deactivating
+      // someone must not turn every task they own into a uuid.
+      const res = await authFetch('/actors?limit=200&include_inactive=true', {
         headers: workspaceHeader() as Record<string, string>,
       })
       if (!active) return

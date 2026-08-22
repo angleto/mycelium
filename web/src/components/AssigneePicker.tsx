@@ -82,8 +82,12 @@ export function AssigneePicker({
     if (!needsFetch || !value) return
     let cancelled = false
     void (async () => {
+      // include_inactive on the CHIP lookup only: the task is already
+      // assigned to this handle, and losing the row would degrade the
+      // chip to a bare @handle. The search above (``search``) keeps the
+      // default, so the dropdown never offers a deactivated principal.
       const res = await authFetch(
-        `/actors?q=${encodeURIComponent(value)}&limit=5`,
+        `/actors?q=${encodeURIComponent(value)}&limit=5&include_inactive=true`,
         { headers: workspaceHeader() as Record<string, string> },
       )
       if (!res.ok || cancelled) return

@@ -386,7 +386,12 @@ async def list_assigned_annotations(
     ``include_resolved=true``. An unknown handle yields an empty list.
     Declared before ``/{annotation_id}`` so the static path wins."""
     if handle:
-        ident = await identities_svc.lookup_by_handle(ctx.session, org_id=ctx.org_id, handle=handle)
+        # include_inactive: this inbox exists to answer "what is still
+        # assigned to the person we deactivated". Refusing here would
+        # hide exactly the backlog someone needs to redistribute.
+        ident = await identities_svc.lookup_by_handle(
+            ctx.session, org_id=ctx.org_id, handle=handle, include_inactive=True
+        )
         if ident is None:
             return []
         ident_id = ident.id

@@ -37,8 +37,21 @@ async def list_actors(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     q: str | None = None,
     limit: int = 50,
+    include_inactive: bool = False,
 ) -> list[ActorOut]:
-    rows = await svc.list_actors(ctx.session, org_id=ctx.org_id, q=q, limit=max(1, min(limit, 200)))
+    """The assignable directory. Deactivated users and assistants are
+    excluded by default: they cannot log in / cannot authenticate, so a
+    picker must not offer them. ``include_inactive=true`` is for the
+    callers that resolve an EXISTING assignment or ownership back to a
+    name (the owner chip has no other source for it) rather than offer
+    a choice."""
+    rows = await svc.list_actors(
+        ctx.session,
+        org_id=ctx.org_id,
+        q=q,
+        limit=max(1, min(limit, 200)),
+        include_inactive=include_inactive,
+    )
     return [
         ActorOut(
             handle=a.handle,

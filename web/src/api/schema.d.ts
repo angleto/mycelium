@@ -2682,7 +2682,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Actors */
+        /**
+         * List Actors
+         * @description The assignable directory. Deactivated users and assistants are
+         *     excluded by default: they cannot log in / cannot authenticate, so a
+         *     picker must not offer them. ``include_inactive=true`` is for the
+         *     callers that resolve an EXISTING assignment or ownership back to a
+         *     name (the owner chip has no other source for it) rather than offer
+         *     a choice.
+         */
         get: operations["list_actors_actors_get"];
         put?: never;
         post?: never;
@@ -20680,6 +20688,7 @@ export interface operations {
             query?: {
                 q?: string | null;
                 limit?: number;
+                include_inactive?: boolean;
             };
             header: {
                 "x-workspace-id": string;

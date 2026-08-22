@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,11 +138,137 @@ async def ensure_for_ai_assistant(
     return identity
 
 
+async def _subject_is_active(session: AsyncSession, *, ident: Identity) -> bool:
+    """Whether the principal an identity POINTS AT can still act.
+
+    ``identities`` is pure addressing (ADR-0028): it deliberately has no
+    status column of its own, so the answer is read off the subject
+    table every time rather than denormalised into a third copy that
+    would drift from ``users`` / ``ai_assistants``.
+
+    Fails closed. A missing row, an identity with neither FK set, or a
+    NULL flag all count as inactive: ``flag is True`` and not ``flag``,
+    so an unreadable subject can never pass for a live one.
+    """
+    flag: bool | None
+    if ident.user_id is not None:
+        flag = (
+            await session.execute(select(User.is_active).where(User.id == ident.user_id))
+        ).scalar_one_or_none()
+    elif ident.ai_assistant_id is not None:
+        flag = (
+            await session.execute(
+                select(AiAssistant.is_active).where(AiAssistant.id == ident.ai_assistant_id)
+            )
+        ).scalar_one_or_none()
+    else:
+        flag = None
+    return flag is True
+
+
+async def _is_member(session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """Whether a user still holds a membership in this org."""
+    return (
+        await session.execute(
+            select(Membership.user_id).where(
+                Membership.org_id == org_id, Membership.user_id == user_id
+            )
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def require_bindable_identity(
+    session: AsyncSession, *, org_id: uuid.UUID, ident: Identity
+) -> Identity:
+    """Return ``ident``, or refuse BY NAME when its principal can no
+    longer be bound to NEW work in this org.
+
+    ONE question -- "can this be assigned?" -- with two failure modes,
+    deliberately not two helpers: a second predicate would have to be
+    remembered at every future call site, and one of them would be
+    forgotten. That is exactly how the bare-handle fast path below
+    ended up disagreeing with the email branch above it, which has
+    always joined ``memberships``.
+
+    - ``identity.inactive``: the subject is deactivated. A user cannot
+      log in; an assistant cannot authenticate at all.
+    - ``identity.not_member``: a ``user`` identity whose membership was
+      removed. The row SURVIVES removal -- ``remove_org_member`` runs one
+      ``DELETE FROM memberships`` and nothing else -- and it must keep
+      surviving: five FKs into ``identities`` are ON DELETE SET NULL and
+      ``task_participants`` is CASCADE, so dropping the row would
+      silently un-assign every task the person held (``assignee_id``
+      NULL is indistinguishable from "nobody ever picked it up"), erase
+      note-link authorship and task creation attribution, and delete
+      their appointment participation. Irreversibly: a remove-then-re-add
+      mints a fresh identity uuid and the SET NULLs have already fired.
+      An address that stops accepting new mail is still a valid return
+      address.
+
+    ``DomainError`` (400), not ``NotFoundError`` (404): the caller named
+    something real and asked for something it may not do. Answering "no
+    such identity" for a handle sitting right there would be a lie the
+    caller cannot act on -- the same rule as the archived-note resolver
+    and as ``invoice create --client <archived>``.
+    """
+    if not await _subject_is_active(session, ident=ident):
+        raise DomainError(
+            MessageCode.IDENTITY_INACTIVE,
+            handle=ident.handle,
+            kind=str(ident.kind),
+        )
+    if ident.kind == IdentityKind.user and ident.user_id is not None:
+        if not await _is_member(session, org_id=org_id, user_id=ident.user_id):
+            raise DomainError(
+                MessageCode.IDENTITY_NOT_MEMBER,
+                handle=ident.handle,
+                kind=str(ident.kind),
+            )
+    return ident
+
+
+async def require_assistant_runnable(session: AsyncSession, *, ident: Identity) -> Identity:
+    """Refuse to RUN work already addressed to a deactivated assistant.
+
+    Deliberately narrower than ``require_bindable_identity``: this is not
+    a new binding, so membership is irrelevant (an assistant has none)
+    and the task's existing assignment is not being questioned. The only
+    question is whether the named assistant can still act right now.
+
+    Its own message code so the owner is told which assistant is dead
+    rather than the generic "not dispatchable".
+    """
+    if await _subject_is_active(session, ident=ident):
+        return ident
+    raise DomainError(MessageCode.AGENT_RUN_ASSIGNEE_INACTIVE, handle=ident.handle)
+
+
+async def identity_is_bindable(
+    session: AsyncSession, *, org_id: uuid.UUID, identity_id: uuid.UUID
+) -> bool:
+    """Non-raising form of ``require_bindable_identity`` for callers that
+    branch instead of refusing (the recurrence spawn). False when the
+    identity does not exist in this org."""
+    ident = (
+        await session.execute(
+            select(Identity).where(Identity.id == identity_id, Identity.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if ident is None:
+        return False
+    if not await _subject_is_active(session, ident=ident):
+        return False
+    if ident.kind == IdentityKind.user and ident.user_id is not None:
+        return await _is_member(session, org_id=org_id, user_id=ident.user_id)
+    return True
+
+
 async def lookup_by_handle(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     handle: str,
+    include_inactive: bool = False,
 ) -> Identity | None:
     """Resolve a handle to an Identity row in the current org, or None.
 
@@ -161,6 +287,20 @@ async def lookup_by_handle(
     Empty handle returns None defensively (the caller should not pass an
     empty string).
 
+    Refuses a DEACTIVATED principal. This is the resolver every write
+    goes through -- PATCH /tasks with an assignee_handle, MCP
+    set_task_assignee, add_participant, assign_annotation -- so it is
+    the one place that can stop a dead handle from being bound, and
+    filtering the picker alone would have left all of them open. The
+    refusal is ``identity.inactive``, never a bare miss.
+
+    ``include_inactive=True`` is for READS that ask about someone
+    precisely BECAUSE they are gone ("what is still assigned to the
+    person we deactivated"): the assigned-annotations inbox, the
+    running-timers lookup. It relaxes the refusal, never the
+    self-heal below: an identity row is materialised only for a live
+    principal, whichever way the flag is set.
+
     Self-heals legacy/drifted state: ``list_actors`` sources from the
     user/ai_assistant tables directly, but ``identities`` is the
     resolver. Pre-Stage-A signups (and assistants created before the
@@ -177,17 +317,30 @@ async def lookup_by_handle(
     # Email form: resolve via the org member's login email. An ``@``
     # after the leading-strip means the caller passed ``local@domain``.
     if "@" in handle:
-        user_id = (
+        mrow = (
             await session.execute(
-                select(User.id)
+                select(User.id, User.is_active)
                 .join(Membership, Membership.user_id == User.id)
                 .where(
                     Membership.org_id == org_id,
                     func.lower(User.email) == handle.lower(),
                 )
             )
-        ).scalar_one_or_none()
-        if user_id is not None:
+        ).first()
+        if mrow is not None:
+            user_id, is_active = mrow
+            if is_active is not True:
+                if not include_inactive:
+                    raise DomainError(MessageCode.IDENTITY_INACTIVE, handle=handle, kind="user")
+                # Never materialise an identity for a dead principal:
+                # answer with the row that already exists, or nothing.
+                return (
+                    await session.execute(
+                        select(Identity).where(
+                            Identity.org_id == org_id, Identity.user_id == user_id
+                        )
+                    )
+                ).scalar_one_or_none()
             return await ensure_for_user(session, org_id=org_id, user_id=user_id)
         return None
     row = (
@@ -199,27 +352,41 @@ async def lookup_by_handle(
         )
     ).scalar_one_or_none()
     if row is not None:
-        return row
+        if include_inactive:
+            return row
+        return await require_bindable_identity(session, org_id=org_id, ident=row)
     # Fallback: the picker's source-of-truth (users / ai_assistants)
-    # diverged from identities. Re-materialise.
-    user_id = (
+    # diverged from identities. Re-materialise -- but only for a live
+    # principal: a read that opts in must not leave a new identity row
+    # behind for someone who was deactivated.
+    urow = (
         await session.execute(
-            select(User.id)
+            select(User.id, User.is_active)
             .join(Membership, Membership.user_id == User.id)
             .where(Membership.org_id == org_id, User.handle == handle)
         )
-    ).scalar_one_or_none()
-    if user_id is not None:
+    ).first()
+    if urow is not None:
+        user_id, is_active = urow
+        if is_active is not True:
+            if not include_inactive:
+                raise DomainError(MessageCode.IDENTITY_INACTIVE, handle=handle, kind="user")
+            return None
         return await ensure_for_user(session, org_id=org_id, user_id=user_id)
-    assistant_id = (
+    arow = (
         await session.execute(
-            select(AiAssistant.id).where(
+            select(AiAssistant.id, AiAssistant.is_active).where(
                 AiAssistant.org_id == org_id,
                 AiAssistant.handle == handle,
             )
         )
-    ).scalar_one_or_none()
-    if assistant_id is not None:
+    ).first()
+    if arow is not None:
+        assistant_id, is_active = arow
+        if is_active is not True:
+            if not include_inactive:
+                raise DomainError(MessageCode.IDENTITY_INACTIVE, handle=handle, kind="ai_assistant")
+            return None
         return await ensure_for_ai_assistant(session, org_id=org_id, assistant_id=assistant_id)
     return None
 
@@ -248,18 +415,70 @@ async def get_identity(
     return row
 
 
+async def require_owner_user(
+    session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID
+) -> uuid.UUID:
+    """Validate a task OWNER and return it.
+
+    ``owner_id`` is a plain FK to ``users`` (not into ``identities``:
+    only a human is accountable for a task), and it was the one
+    structural reference on a task with NO validation at all -- not
+    membership, not activity. Any uuid satisfying the FK was accepted,
+    including a user of a DIFFERENT workspace, and ``_promote_due`` then
+    read that stranger's timezone on every subsequent patch. ``users``
+    carries no RLS policy, so nothing downstream caught it either.
+
+    Membership is checked before activity so the message is the one the
+    caller can act on: "not a member here" is a different problem from
+    "deactivated", and reporting the second for a stranger would send
+    someone to the wrong admin.
+    """
+    if not await _is_member(session, org_id=org_id, user_id=user_id):
+        raise DomainError(MessageCode.TASK_OWNER_NOT_MEMBER)
+    active = (
+        await session.execute(select(User.is_active).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if active is not True:
+        raise DomainError(MessageCode.IDENTITY_INACTIVE, handle=str(user_id), kind="user")
+    return user_id
+
+
 async def list_handles(session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50) -> list[str]:
     """The identity handles addressable in this org (capped, sorted).
 
     Used to enrich ``identity.not_found`` error params (task 2d3abdc3) so
     a caller who fumbled a handle/id sees what is valid instead of an
-    opaque miss.
+    opaque miss. It reaches MCP clients verbatim, which is why
+    deactivated principals are excluded: a resolver that would refuse a
+    handle must not hand an agent that same handle as "valid".
+
+    The ``or_`` spells out ``require_bindable_identity`` in SQL, and the
+    two arms must stay in step: a user handle counts only when the user
+    is active AND still a member; an assistant handle only when it is
+    active. Exactly one FK is set (CHECK constraint), so the other arm
+    is NULL and drops out, and a dangling identity with neither subject
+    readable fails closed.
     """
     rows = (
         (
             await session.execute(
                 select(Identity.handle)
-                .where(Identity.org_id == org_id)
+                .outerjoin(User, User.id == Identity.user_id)
+                .outerjoin(AiAssistant, AiAssistant.id == Identity.ai_assistant_id)
+                .outerjoin(
+                    Membership,
+                    and_(
+                        Membership.user_id == Identity.user_id,
+                        Membership.org_id == org_id,
+                    ),
+                )
+                .where(
+                    Identity.org_id == org_id,
+                    or_(
+                        and_(User.is_active.is_(True), Membership.user_id.is_not(None)),
+                        AiAssistant.is_active.is_(True),
+                    ),
+                )
                 .order_by(Identity.handle)
                 .limit(limit)
             )
@@ -287,7 +506,11 @@ async def resolve_assignee(
     member of this org (never materialise a non-member's identity).
 
     Raises ``NotFoundError`` naming what was passed, what was expected,
-    and the valid handles in the org.
+    and the valid handles in the org; ``DomainError(identity.inactive)``
+    when the reference is real but its principal is deactivated. No
+    opt-in here: both production callers are WRITES (create_task,
+    update_task), so a parameter nobody could legitimately pass would
+    be invented API.
     """
     ident = (
         await session.execute(
@@ -298,17 +521,22 @@ async def resolve_assignee(
         )
     ).scalar_one_or_none()
     if ident is not None:
-        return ident.id
+        return (await require_bindable_identity(session, org_id=org_id, ident=ident)).id
     member = (
         await session.execute(
-            select(Membership.user_id).where(
+            select(Membership.user_id, User.is_active)
+            .join(User, User.id == Membership.user_id)
+            .where(
                 Membership.org_id == org_id,
                 Membership.user_id == assignee_id,
             )
         )
-    ).scalar_one_or_none()
+    ).first()
     if member is not None:
-        return (await ensure_for_user(session, org_id=org_id, user_id=assignee_id)).id
+        user_id, is_active = member
+        if is_active is not True:
+            raise DomainError(MessageCode.IDENTITY_INACTIVE, handle=str(assignee_id), kind="user")
+        return (await ensure_for_user(session, org_id=org_id, user_id=user_id)).id
     raise NotFoundError(
         MessageCode.IDENTITY_NOT_FOUND,
         passed=str(assignee_id),

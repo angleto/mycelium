@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.ai_assistant import AiAssistant
 from mycelium_core.models.dependency import DependencyType, TaskDependency
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.identity import Identity, IdentityKind
@@ -62,8 +63,13 @@ from mycelium_core.services.rbac import require_role
 #    the task requires (or there is no enabled llm_agent at all).
 #  - budget_exhausted: every eligible enabled agent would exceed its
 #    credit_budget if this task were placed on it within the horizon.
+#  - assignee_inactive: the task is addressed to an ai_assistant that has
+#    since been deactivated. Same class of event as deleting the agent
+#    that could do the work, which already lands here: the scheduler
+#    flags a visible dispatch gap, it never silently reroutes.
 _UNASSIGNABLE_NO_CAPABLE_AGENT = "no_capable_agent"
 _UNASSIGNABLE_BUDGET_EXHAUSTED = "budget_exhausted"
+_UNASSIGNABLE_ASSIGNEE_INACTIVE = "assignee_inactive"
 
 
 @dataclass
@@ -316,15 +322,26 @@ class Scheduler:
                     Task.id,
                     Identity.kind,
                     Identity.user_id,
-                ).join(Identity, Identity.id == Task.assignee_id)
+                    AiAssistant.is_active,
+                )
+                .join(Identity, Identity.id == Task.assignee_id)
+                .outerjoin(AiAssistant, AiAssistant.id == Identity.ai_assistant_id)
             )
         ).all()
         task_kind: dict[uuid.UUID, ExecKind] = {}
         task_human_user: dict[uuid.UUID, uuid.UUID | None] = {}
-        for tid, ikind, iuser in identity_rows:
+        # Tasks addressed to a deactivated assistant. Kept in the llm pool
+        # (the assignment is a fact about the task) and flagged
+        # ``assignee_inactive`` at admission, rather than dropped from
+        # routing: an excluded task would keep a schedule row claiming it
+        # is planned and on time while nothing ever dispatches it.
+        self._assignee_inactive: set[uuid.UUID] = set()
+        for tid, ikind, iuser, a_active in identity_rows:
             if ikind == IdentityKind.ai_assistant:
                 task_kind[tid] = ExecKind.llm_agent
                 task_human_user[tid] = None
+                if a_active is not True:
+                    self._assignee_inactive.add(tid)
             else:
                 task_kind[tid] = ExecKind.human
                 task_human_user[tid] = iuser
@@ -631,6 +648,16 @@ class Scheduler:
         for ln in llm_seq:
             nid = ln.task.id
             pin = _manual_pin_start(ln.task, prev)
+            if nid in self._assignee_inactive:
+                # Addressed to an assistant that can no longer act. Not a
+                # capability problem and not a budget problem, so it gets
+                # its own reason: "no_capable_agent" would send the owner
+                # looking for a missing capability tag.
+                ln.assigned = None
+                ln.unassignable_reason = _UNASSIGNABLE_ASSIGNEE_INACTIVE
+                unassignable_ids.add(nid)
+                sched[nid] = (ln.es, ln.ef)
+                continue
             elig = _eligible_agents(ln)
             if not elig:
                 # No enabled agent advertises every required capability

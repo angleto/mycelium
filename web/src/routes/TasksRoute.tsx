@@ -651,6 +651,7 @@ export function TasksRoute() {
     setErr(null)
     let applied = 0
     let skipped = 0
+    let lastErr = ''
     for (const tk of picked) {
       const body: Record<string, unknown> = { expected_version: tk.version }
       if (field === 'importance' || field === 'urgency') {
@@ -680,12 +681,23 @@ export function TasksRoute() {
         params: { header: workspaceHeader(), path: { task_id: tk.id } },
         body: body as components['schemas']['TaskPatchIn'],
       })
-      if (error) skipped += 1
-      else applied += 1
+      if (error) {
+        skipped += 1
+        // Keep WHY. Bulk assign is the one surface that submits a
+        // free-text handle rather than a picked one, so it is where the
+        // server's refusals land (a deactivated principal, an unknown
+        // handle). A bare "skipped: 3" tells the user nothing they can
+        // act on.
+        lastErr = errMessage(error)
+      } else applied += 1
     }
     setSel(new Set())
     await loadTasks()
-    setBulkMsg(t('tasks.bulkResult', { applied, skipped }))
+    setBulkMsg(
+      lastErr
+        ? `${t('tasks.bulkResult', { applied, skipped })}. ${lastErr}`
+        : t('tasks.bulkResult', { applied, skipped }),
+    )
   }
 
   async function bulkApplyAssignee() {

@@ -1533,6 +1533,7 @@ export const it: Catalog = {
     unreason: {
       no_capable_agent: 'nessun agente idoneo',
       budget_exhausted: 'budget esaurito',
+      assignee_inactive: 'assegnatario disattivato',
       none: 'non assegnabile',
     },
     legendChain:

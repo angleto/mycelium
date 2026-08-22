@@ -9,8 +9,15 @@ tables (``users.handle`` vs ``ai_assistants.handle``).
 Lifecycle:
 
 - One row per ``(org_id, user_id)`` is created when a user becomes a
-  member of the org (signup or invite); dropped on membership
-  removal.
+  member of the org (signup or invite). It is NOT dropped on membership
+  removal: ``remove_org_member`` deletes the membership and nothing
+  else, deliberately. Five FKs into this table are ON DELETE SET NULL
+  and ``task_participants`` is CASCADE, so dropping the row would
+  silently un-assign every task the person held, erase note-link and
+  task-creation attribution, and delete their appointment
+  participation. The row survives as a historical address and
+  ``services.identities.require_bindable_identity`` refuses to bind it
+  to new work (``identity.not_member``).
 - One row per ``ai_assistant`` is created when the assistant is
   defined; dropped on assistant deletion.
 

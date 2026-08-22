@@ -804,13 +804,16 @@ async def assign(
     elif assignee_identity_id is not None:
         found = (
             await session.execute(
-                select(Identity.id).where(
+                select(Identity).where(
                     Identity.id == assignee_identity_id, Identity.org_id == org_id
                 )
             )
         ).scalar_one_or_none()
         if found is None:
             raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        # Same gate the handle branch below inherits from the resolver:
+        # an explicit id must not be a way around it.
+        await identities_svc.require_bindable_identity(session, org_id=org_id, ident=found)
         target = assignee_identity_id
     elif assignee_handle:
         ident = await identities_svc.lookup_by_handle(

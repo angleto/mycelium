@@ -26,7 +26,7 @@ from mycelium_core.errors import DomainError
 from mycelium_core.i18n import DEFAULT_LOCALE, MessageCode, render
 from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.identity import Identity, IdentityKind
-from mycelium_core.models.membership import Role
+from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.notification import (
     Notification,
     NotificationChannelKind,
@@ -766,6 +766,27 @@ async def scan_reminders(
     # no per-pref target (the targets are the subscriptions), so it counts
     # as a usable channel only when the user has subscribed a device.
     users_with_push = set((await session.execute(select(PushSubscription.user_id))).scalars().all())
+    # Members who can still act on what they are reminded about, computed
+    # ONCE here rather than per recipient: the loop below is already
+    # nested and does an N+1 through ``list_prefs``.
+    #
+    # A reminder is a nudge to do something. A deactivated user cannot log
+    # in to do it, and an ex-member has no access to the workspace the task
+    # lives in, so the mail is undeliverable in the sense that matters.
+    # Scoped through ``memberships`` and not through a bare
+    # ``users.is_active`` scan on purpose -- ``users`` carries no RLS
+    # policy, so the unscoped form is a platform-wide read.
+    live_members = set(
+        (
+            await session.execute(
+                select(Membership.user_id)
+                .join(User, User.id == Membership.user_id)
+                .where(Membership.org_id == org_id, User.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     # Deep-link base for the task reference appended to every reminder body
     # (telegram/email render it clickable; the service worker opens it on a
     # webpush notification click). The SPA routes a single task at /tasks/<id>.
@@ -820,7 +841,13 @@ async def scan_reminders(
             ).one_or_none()
             if ident is not None and ident.kind == IdentityKind.user and ident.user_id is not None:
                 recipients.add(ident.user_id)
-        for uid in recipients:
+        # ``recipients & live_members``: the owner, the collaborators and a
+        # human assignee are all users, and any of the three can have been
+        # deactivated or removed since the task was written. Whoever is left
+        # gets the reminder; when nobody is, the task's deadline stops being
+        # watched, which is a real gap and the reason the pickers refuse to
+        # create this state in the first place.
+        for uid in sorted(recipients & live_members, key=str):
             prefs = [
                 p
                 for p in await list_prefs(session, org_id=org_id, user_id=uid)
