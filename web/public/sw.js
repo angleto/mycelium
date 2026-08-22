@@ -33,6 +33,10 @@ const IMMUTABLE_PREFIX = '/assets/'
 // serving it from cache would defeat the very mechanism.
 const PASSTHROUGH = ['/api/', '/mcp', '/auth/', '/admin-api/', '/version.json']
 
+// Bookkeeping entry (not a real URL): records WHICH shell the cached
+// /assets/ belong to, so a deploy can evict the previous build's chunks.
+const SHELL_STAMP = '/__mycelium_shell_stamp'
+
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
   // will be cached on first visit via the fetch handler below.
@@ -67,13 +71,52 @@ function cacheable(res) {
   return !!res && res.status === 200 && res.type === 'basic'
 }
 
+function validatorOf(res) {
+  return res.headers.get('etag') || res.headers.get('last-modified') || ''
+}
+
+/**
+ * Evict the previous build's assets once the shell is seen to change.
+ *
+ * Every entry under /assets/ is content-hashed, so a deploy never
+ * overwrites one — it adds a whole new set, and the old set is cached
+ * forever with nothing left to reference it. One full bundle per deploy
+ * accumulates in Cache Storage (megabytes each) until the browser evicts
+ * the origin under quota pressure. The shell is the only thing that can
+ * tell us a deploy happened, so its validator (ETag, or Last-Modified
+ * where no ETag is served) is what the stamp tracks — one comparison per
+ * BUILD rather than per route, otherwise visiting five stale routes after
+ * a deploy would prune and re-download five times.
+ *
+ * No validator on either side means no evidence, and evicting on no
+ * evidence would re-download the bundle on every navigation. Do nothing.
+ */
+async function pruneStaleAssets(cache, validator) {
+  if (!validator) return
+  const prev = await cache.match(SHELL_STAMP)
+  if (prev && (await prev.text()) === validator) return
+  const keys = await cache.keys()
+  await Promise.all(
+    keys
+      .filter((r) => new URL(r.url).pathname.startsWith(IMMUTABLE_PREFIX))
+      .map((r) => cache.delete(r)),
+  )
+  await cache.put(SHELL_STAMP, new Response(validator))
+}
+
 /** Network-first: the freshest answer wins; the cache is the offline
  * safety net. Used for navigations (index.html). */
 async function networkFirst(req) {
   const cache = await caches.open(CACHE)
   try {
     const res = await fetch(req)
-    if (cacheable(res)) cache.put(req, res.clone())
+    if (cacheable(res)) {
+      await cache.put(req, res.clone())
+      // Before the browser asks for the new build's chunks, so the old
+      // ones go and the new ones land in a cache that stays one build
+      // deep.
+      await pruneStaleAssets(cache, validatorOf(res))
+    }
     return res
   } catch {
     // Offline (or the server is unreachable): fall back to whatever
