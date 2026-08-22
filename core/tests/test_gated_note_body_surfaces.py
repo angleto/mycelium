@@ -31,7 +31,7 @@ from sqlalchemy import select
 from mycelium_core.ai_providers import LLMResult
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
-from mycelium_core.errors import NotFoundError
+from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import Note, NoteKind, NoteTurn, TurnRole
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
@@ -556,6 +556,59 @@ async def test_the_note_family_stops_editing_what_is_in_the_bin() -> None:
         await nt.restore_note(s, org_id=org, actor_id=user, note_id=note.id, expected_version=v)
         fresh = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
         assert fresh.deleted_at is None and fresh.title == "gated-subject"
+
+
+async def test_deleting_what_is_already_in_the_bin_changes_nothing() -> None:
+    """``deleted_at`` is the retention clock, not just a flag: re-stamping
+    it on a retried delete pushed the note's purge date forward one retry
+    at a time, and wrote a second ``_delete`` revision saying nothing had
+    changed. The second call is now a no-op that returns the version."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await _note(s, org, user, "body VICTOR")
+        v1 = await nt.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=await _version(s, note.id),
+        )
+        row = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        stamped_at = row.deleted_at
+        revisions_after_delete = len(
+            await entity_revisions.list_revisions(
+                s,
+                entity_kind=entity_revisions.ENTITY_KIND_NOTE,
+                entity_id=note.id,
+                limit=50,
+            )
+        )
+
+        # The retry: same call, same intent, nothing to do.
+        v2 = await nt.soft_delete_note(
+            s, org_id=org, actor_id=user, note_id=note.id, expected_version=v1
+        )
+        assert v2 == v1
+        again = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
+        assert again.deleted_at == stamped_at  # the retention clock did not move
+        assert (
+            len(
+                await entity_revisions.list_revisions(
+                    s,
+                    entity_kind=entity_revisions.ENTITY_KIND_NOTE,
+                    entity_id=note.id,
+                    limit=50,
+                )
+            )
+            == revisions_after_delete
+        )
+
+        # Idempotent, not unguarded: a caller working from a stale read
+        # still learns it is stale (mirror of garden_review.reject_node).
+        with pytest.raises(ConflictError):
+            await nt.soft_delete_note(
+                s, org_id=org, actor_id=user, note_id=note.id, expected_version=v1 - 1
+            )
 
 
 async def test_a_live_proposal_is_not_restorable() -> None:

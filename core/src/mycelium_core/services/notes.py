@@ -31,7 +31,12 @@ from mycelium_core.ai_providers import (
     get_tts,
 )
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError, NotFoundError, UnprocessableError
+from mycelium_core.errors import (
+    ConflictError,
+    DomainError,
+    NotFoundError,
+    UnprocessableError,
+)
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.models.classification_job import ClassificationJob
@@ -1202,6 +1207,26 @@ async def soft_delete_note(
     note_id: uuid.UUID,
     expected_version: int,
 ) -> int:
+    """Move a note to the bin. IDEMPOTENT: deleting one that is already
+    there returns its current version and changes nothing.
+
+    Not a nicety. ``deleted_at`` is not just a flag, it is the retention
+    clock: the autonomous sweep purges what has been in the bin longer
+    than the window, so re-stamping it on every call meant a retried
+    delete -- the ordinary reaction of an agent to a timeout -- pushed the
+    note's purge date forward, indefinitely, one retry at a time. It also
+    bumped the version and wrote a second ``_delete`` revision saying
+    nothing had changed.
+
+    ``expected_version`` is checked BEFORE the short-circuit, mirroring
+    ``garden_review.reject_node``: a caller working from a stale read
+    learns it is stale instead of being told its delete landed.
+    """
+    note = await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    if note.deleted_at is not None:
+        if note.version != expected_version:
+            raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+        return note.version
     return await _note_set(
         session,
         org_id=org_id,
@@ -1210,8 +1235,8 @@ async def soft_delete_note(
         expected_version=expected_version,
         values={"deleted_at": dt.datetime.now(tz=dt.UTC)},
         action="delete",
-        # Deleting what is already in the bin stays reachable (it re-stamps
-        # ``deleted_at`` today; see the note on idempotency in the task).
+        # Reachable for a note already in the bin so the branch above can
+        # answer; the write itself only ever runs on a live one.
         include_deleted=True,
     )
 
