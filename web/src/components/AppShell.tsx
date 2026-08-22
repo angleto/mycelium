@@ -34,6 +34,7 @@ import type { ImageUploadParent } from '../lib/imageUpload'
 import {
   getCachedLookup,
   lookupPrefix,
+  RESOLVE_ID,
   type LookupOut,
 } from '../lib/prefixLookup'
 import { CommandPalette } from './CommandPalette'
@@ -409,9 +410,12 @@ export function AppShell() {
               res?.matches.find((x) => x.kind === 'task') ?? res?.matches?.[0]
             navigate(m ? m.route_url : `/t/${prefix}`)
           }
-          const cached = getCachedLookup(prefix)
+          const cached = getCachedLookup(prefix, RESOLVE_ID)
           if (cached) go(cached)
-          else void lookupPrefix(prefix).then(go).catch(() => navigate(`/t/${prefix}`))
+          else
+            void lookupPrefix(prefix, RESOLVE_ID)
+              .then(go)
+              .catch(() => navigate(`/t/${prefix}`))
           return
         }
       }

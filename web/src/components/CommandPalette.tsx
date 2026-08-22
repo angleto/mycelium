@@ -5,6 +5,7 @@ import { api, logSearchClick, searchTasksByText, workspaceHeader } from '../api/
 import {
   isPrefixCandidate,
   lookupPrefix,
+  RESOLVE_ID,
   type LookupMatch,
 } from '../lib/prefixLookup'
 import { getRecents, pushRecent } from '../lib/recents'
@@ -172,7 +173,7 @@ export function CommandPalette() {
     const s = q.trim().toLowerCase()
     if (!isPrefixCandidate(s)) return
     let active = true
-    void lookupPrefix(s, { kinds: ['task', 'note'] }).then((res) => {
+    void lookupPrefix(s, { ...RESOLVE_ID, kinds: ['task', 'note'] }).then((res) => {
       if (active) setIdLookup({ prefix: s, matches: res?.matches ?? [] })
     })
     return () => {
@@ -265,7 +266,12 @@ export function CommandPalette() {
             route: m.route_url,
             code: m.id.replace(/-/g, '').slice(0, 8),
             matchedLen: Math.min(bare.length, 8),
-            sub: m.kind === 'task' ? (m.state_name ?? 'task') : 'note',
+            // The id branch resolves the archive shelf too (RESOLVE_ID):
+            // pasting a code must find the entity whether or not it is
+            // shelved, and the subtitle is where that is said.
+            sub:
+              (m.kind === 'task' ? (m.state_name ?? 'task') : 'note') +
+              (m.is_archived ? ` · ${t('common.archived')}` : ''),
           })
         }
       }
@@ -328,7 +334,7 @@ export function CommandPalette() {
       collected.filter((r) => r.section === s),
     )
     return ordered.slice(0, 20)
-  }, [q, idLookup, serverTasks, serverNotes, tasks, notes])
+  }, [q, idLookup, serverTasks, serverNotes, tasks, notes, t])
 
   if (!open) return null
 

@@ -2154,6 +2154,15 @@ button.btn--danger:hover {
   font-size: 0.85em;
   margin-left: 0.1rem;
 }
+/* On the archive shelf (task d12f6217). A reference resolves whether or
+   not its target is archived -- otherwise the chip would fall back to
+   inert code and read as "no such entity" -- so the shelf is shown
+   instead: the label recedes, and the word rides in a .chip__state
+   parenthesis next to it. */
+.chip--archived .chip__label {
+  font-style: italic;
+  color: var(--muted);
+}
 /* Prefix mention chip (task b9924a0d): backticked UUID-prefix in note
    markdown resolves to a clickable chip with a kind glyph and the
    entity title. Pending state keeps a code-like look so the layout
@@ -2221,6 +2230,12 @@ button.btn--danger:hover {
 .entity-ref--closed {
   color: var(--muted);
   text-decoration: line-through;
+}
+/* Same shelf, in the editor: italic + muted, and the word itself in the
+   hover title (no room for a parenthesis inside an inline code span). */
+.entity-ref--archived {
+  font-style: italic;
+  color: var(--muted);
 }
 .entity-ref--loading {
   opacity: 0.85;

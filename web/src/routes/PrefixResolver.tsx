@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { isFullUuid, lookupPrefix, type LookupOut } from '../lib/prefixLookup'
+import { isFullUuid, lookupPrefix, RESOLVE_ID, type LookupOut } from '../lib/prefixLookup'
 
 // Route shim for the short URLs ``/n/:prefix`` and ``/t/:prefix``,
 // plus the prefix-upgrade behaviour on the canonical ``/notes/:id``
@@ -52,7 +52,7 @@ function Resolver({ prefix, kind }: ResolverProps) {
   }
   useEffect(() => {
     let alive = true
-    void lookupPrefix(prefix, { kinds: [kind] }).then((res) => {
+    void lookupPrefix(prefix, { ...RESOLVE_ID, kinds: [kind] }).then((res) => {
       if (alive) setData(res)
     })
     return () => {

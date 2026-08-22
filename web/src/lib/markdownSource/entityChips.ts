@@ -1,10 +1,12 @@
 import { syntaxTree } from '@codemirror/language'
 import { StateEffect, StateField, type EditorState, type Extension, type Range } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import i18n from '../../i18n'
 import {
   getCachedLookup,
   isPrefixCandidate,
   lookupPrefix,
+  RESOLVE_ID,
   type LookupMatch,
   type LookupOut,
 } from '../prefixLookup'
@@ -26,6 +28,10 @@ import {
 type Resolution = {
   state: 'loading' | 'resolved' | 'closed' | 'unresolved'
   title: string | null
+  /** On the archive shelf. Orthogonal to ``state``: an archived entity
+   *  resolves like any other (``RESOLVE_ID``), it is only SHOWN as shelved
+   *  -- hiding it would render the chip identical to a dangling prefix. */
+  archived: boolean
 }
 
 /** One resolved prefix, pushed in when its lookup settles. */
@@ -72,10 +78,16 @@ function collectHits(state: EditorState): Hit[] {
 }
 
 function resolutionFromLookup(res: LookupOut | null): Resolution {
-  if (!res || res.matches.length === 0) return { state: 'unresolved', title: null }
+  if (!res || res.matches.length === 0) {
+    return { state: 'unresolved', title: null, archived: false }
+  }
   const primary: LookupMatch = res.matches.find((m) => m.kind === 'task') ?? res.matches[0]
   const closed = primary.kind === 'task' && primary.is_terminal === true
-  return { state: closed ? 'closed' : 'resolved', title: primary.title?.trim() || null }
+  return {
+    state: closed ? 'closed' : 'resolved',
+    title: primary.title?.trim() || null,
+    archived: primary.is_archived,
+  }
 }
 
 function build(hits: Hit[], resolved: Map<string, Resolution>): DecorationSet {
@@ -92,6 +104,15 @@ function build(hits: Hit[], resolved: Map<string, Resolution>): DecorationSet {
       cls.push('entity-ref--resolved')
       if (r.state === 'closed') cls.push('entity-ref--closed')
       if (r.title) title = r.title
+      if (r.archived) {
+        cls.push('entity-ref--archived')
+        // The i18next instance directly, not the React hook: this runs
+        // inside a CodeMirror state field. The tooltip is built when the
+        // resolution arrives, so a language switch reaches it at the next
+        // document change -- acceptable for a hover label, and the reason
+        // the visible signal is the class and not this string.
+        title = `${title} (${i18n.t('common.archived')})`
+      }
     }
     out.push(
       Decoration.mark({
@@ -166,9 +187,9 @@ const resolverPump = ViewPlugin.fromClass(
             // The editor was destroyed mid-flight. Nothing to update.
           }
         }
-        const cached = getCachedLookup(h.prefix)
+        const cached = getCachedLookup(h.prefix, RESOLVE_ID)
         if (cached) deliver(cached)
-        else void lookupPrefix(h.prefix).then(deliver).catch(() => {})
+        else void lookupPrefix(h.prefix, RESOLVE_ID).then(deliver).catch(() => {})
       }
     }
   },

@@ -13,10 +13,11 @@ an existing task/note in the workspace.
 Safety:
 
 * **Resolver-gated.** A bare token is wrapped only if
-  ``lookup.resolve_prefix`` returns at least one live match (same
-  default scope the SPA chip uses: not archived, not deleted). Random
-  hex that is not an entity -- commit SHAs, ``#ffc800`` colours, a
-  password hash -- never resolves, so it is left untouched.
+  ``lookup.resolve_prefix`` returns at least one live match (the same
+  scope the SPA chip resolves: the archive shelf included -- the chip
+  renders it, labelled -- the bin excluded). Random hex that is not an
+  entity -- commit SHAs, ``#ffc800`` colours, a password hash -- never
+  resolves, so it is left untouched.
 * **Markdown-aware.** Fenced code blocks are skipped entirely; inline
   code, links/images, autolinks and bare URLs are masked before
   matching, so a token already in backticks or inside a link target is
@@ -156,7 +157,13 @@ def _apply_backticks(body: str, allowed: set[str]) -> str:
 async def _resolves(session: AsyncSession, token: str, cache: dict[str, bool]) -> bool:
     """True iff ``token`` is a prefix of at least one live task/note in
     the current tenant scope. Cached per run (the same code recurs across
-    many parts)."""
+    many parts).
+
+    ``include_archived=True``: this asks an IDENTITY question -- is this
+    hex an entity of this workspace? -- and the archive shelf is not an
+    answer to it. The chip the backtick produces resolves on the same
+    terms and shows the shelf, so a reference to an archived note becomes
+    a chip that says so, instead of staying bare prose."""
     if token in cache:
         return cache[token]
     try:
@@ -164,7 +171,9 @@ async def _resolves(session: AsyncSession, token: str, cache: dict[str, bool]) -
     except DomainError:
         cache[token] = False
         return False
-    matches = await lookup_svc.resolve_prefix(session, prefix=prefix, kinds=("task", "note"))
+    matches = await lookup_svc.resolve_prefix(
+        session, prefix=prefix, kinds=("task", "note"), include_archived=True
+    )
     cache[token] = len(matches) > 0
     return cache[token]
 

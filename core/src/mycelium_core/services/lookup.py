@@ -132,6 +132,15 @@ async def resolve_prefix(
     roadmap notes), then most-recent ``updated_at`` so the freshest
     candidate wins the disambiguator's first row.
 
+    ``include_archived`` / ``include_deleted`` mean the SAME thing for
+    both kinds: excluded by default, opted into by the flag, and always
+    reported on the match. Callers whose question is "what entity is this
+    id?" -- chip rendering, the short URLs, the id normaliser -- pass
+    ``include_archived=True``, because a shelved entity is still that
+    entity; callers offering a LIST of candidates (the mention picker,
+    the search surfaces) keep the default, matching what ``list_notes``
+    and ``task_search`` show.
+
     The query relies on the existing UUID PK index: PostgreSQL can use
     a B-tree index on a text-cast UUID column only via a functional
     index, which we don't have. The expected payload size (8-char
@@ -174,16 +183,28 @@ async def resolve_prefix(
         # Distinct local name from the task branch: the two selects have
         # different row shapes and reusing ``q`` makes mypy infer the
         # broader (and wrong) union, breaking strict mode.
-        qn = select(Note.id, Note.title, Note.deleted_at).where(
+        qn = select(Note.id, Note.title, Note.is_archived, Note.deleted_at).where(
             text("notes.id::text LIKE :pat").bindparams(pat=pat)
         )
         # The effective-note predicate: a trashed note only with the opt-in,
         # a 'proposed' one (autonomously generated, pending review) never --
         # the @-mention picker must not offer a node nobody can open.
         qn = qn.where(effective_note_clause(include_deleted=include_deleted))
+        # ``is_archived`` is NOT part of that predicate (see
+        # ``note_effective``: archiving is a shelf, not a bin, and an
+        # archived note stays a full graph node). It is the same
+        # PRESENTATION axis the task branch above applies, and it applies
+        # here on the same terms: hidden by default, opted into by the
+        # flag, and REPORTED either way. It used to be neither -- the
+        # column was not even selected, so ``include_archived`` was
+        # silently ignored for notes and every match claimed
+        # ``is_archived=False``, which is how an archived note reached the
+        # picker labelled as live (task d12f6217).
+        if not include_archived:
+            qn = qn.where(Note.is_archived.is_(False))
         qn = qn.order_by(Note.updated_at.desc()).limit(limit - len(out))
         note_rows = (await session.execute(qn)).all()
-        for nid, title, deleted_at in note_rows:
+        for nid, title, archived, deleted_at in note_rows:
             out.append(
                 LookupMatch(
                     kind="note",
@@ -191,7 +212,7 @@ async def resolve_prefix(
                     title=title,
                     state_name=None,
                     is_terminal=None,
-                    is_archived=False,
+                    is_archived=bool(archived),
                     is_deleted=deleted_at is not None,
                 )
             )

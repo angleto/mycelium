@@ -166,6 +166,7 @@ export const en = {
     dismiss: 'Dismiss',
     save: 'Save',
     edit: 'Edit',
+    archived: 'archived',
   },
   taskLinkKind: {
     subject: 'subject',

@@ -144,6 +144,43 @@ async def test_archived_task_hidden_by_default(_fake_embedder: None) -> None:
         assert any(m["id"] == tid and m["is_archived"] for m in opted["matches"])
 
 
+async def test_archived_note_hidden_by_default_and_reported_when_opted_in(
+    _fake_embedder: None,
+) -> None:
+    """The note twin of the test above (task d12f6217). Both legs were
+    broken on this branch: ``include_archived`` was never applied to
+    notes, and every note match claimed ``is_archived=False`` because the
+    column was not even selected -- so an archived note reached the picker
+    labelled as live."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        note = (
+            await c.post("/notes", headers=h, json={"kind": "text", "title": "Shelf me"})
+        ).json()
+        nid = note["id"]
+        r = await c.post(
+            f"/notes/{nid}/archive",
+            headers=h,
+            json={"expected_version": note["version"]},
+        )
+        assert r.status_code == 200, r.text
+
+        prefix = nid[:8]
+        default = (await c.get(f"/lookup/{prefix}", headers=h, params={"kinds": "note"})).json()
+        assert not any(m["id"] == nid for m in default["matches"]), default
+
+        opted = (
+            await c.get(
+                f"/lookup/{prefix}",
+                headers=h,
+                params={"kinds": "note", "include_archived": "true"},
+            )
+        ).json()
+        assert any(m["id"] == nid and m["is_archived"] for m in opted["matches"]), opted
+
+
 async def test_prefix_validation(_fake_embedder: None) -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

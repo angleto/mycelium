@@ -11,13 +11,23 @@
 // concurrent calls would all see ``inflight`` and await the same
 // promise without spurious network traffic.
 //
-// The cache is keyed by ``${prefix}|${kindsKey}`` because the resolver
-// can be invoked with a different kinds whitelist. We don't expire
-// entries in-process: archived/deleted upgrades or task title edits
-// are eventually consistent for chip rendering, which is acceptable
-// (the user can refresh to re-read). The cache is wiped on logout via
-// the SPA's existing token-change reset path (same module reload model
-// as ``taskMentionCache``).
+// The cache is keyed by ``${prefix}|${kindsKey}|${archivedKey}`` because
+// the resolver can be invoked with a different kinds whitelist AND with a
+// different perimeter. We don't expire entries in-process: archived /
+// deleted upgrades or task title edits are eventually consistent for chip
+// rendering, which is acceptable (the user can refresh to re-read). The
+// cache is wiped on logout via the SPA's existing token-change reset path
+// (same module reload model as ``taskMentionCache``).
+//
+// TWO INTENTS, one endpoint (task d12f6217). Resolving an id -- a chip, a
+// short URL, the palette's code branch -- asks "what entity is this?", and
+// the answer must not depend on whether the entity sits on the archive
+// shelf: those callers pass ``includeArchived`` and render the state the
+// match reports. Offering a LIST of candidates (the mention picker) asks
+// "what may I link to from here?", and keeps the endpoint's default, which
+// is the same perimeter ``GET /notes`` and ``GET /tasks`` show. The flag is
+// therefore never a detail of the fetch: it is which of the two questions
+// the caller is asking.
 
 import { authFetch } from '../api/client'
 
@@ -51,23 +61,34 @@ export function isFullUuid(raw: string): boolean {
 const cache = new Map<string, LookupOut>()
 const inflight = new Map<string, Promise<LookupOut | null>>()
 
-function cacheKey(prefix: string, kinds: readonly ('task' | 'note')[] | undefined): string {
-  const k = kinds && kinds.length ? [...kinds].sort().join(',') : 'task,note'
-  return `${prefix.trim().toLowerCase()}|${k}`
+export interface LookupOpts {
+  kinds?: readonly ('task' | 'note')[]
+  /** Resolve entities on the archive shelf too. They come back with
+   *  ``is_archived: true``, so the caller can (and should) show it. */
+  includeArchived?: boolean
 }
 
-export function getCachedLookup(
-  prefix: string,
-  kinds?: readonly ('task' | 'note')[],
-): LookupOut | undefined {
-  return cache.get(cacheKey(prefix, kinds))
+/** The perimeter for "what entity is this id?": the archive shelf must not
+ *  hide an entity from its own identifier. Spread it (``{...RESOLVE_ID,
+ *  kinds: [...]}``) so every resolution call site says which question it is
+ *  asking instead of leaning on a default. */
+export const RESOLVE_ID: LookupOpts = { includeArchived: true }
+
+function cacheKey(prefix: string, opts: LookupOpts): string {
+  const kinds = opts.kinds
+  const k = kinds && kinds.length ? [...kinds].sort().join(',') : 'task,note'
+  return `${prefix.trim().toLowerCase()}|${k}|${opts.includeArchived ? 'a' : ''}`
+}
+
+export function getCachedLookup(prefix: string, opts: LookupOpts = {}): LookupOut | undefined {
+  return cache.get(cacheKey(prefix, opts))
 }
 
 export async function lookupPrefix(
   prefix: string,
-  opts: { kinds?: readonly ('task' | 'note')[]; signal?: AbortSignal } = {},
+  opts: LookupOpts & { signal?: AbortSignal } = {},
 ): Promise<LookupOut | null> {
-  const key = cacheKey(prefix, opts.kinds)
+  const key = cacheKey(prefix, opts)
   const hit = cache.get(key)
   if (hit) return hit
   const pending = inflight.get(key)
@@ -75,6 +96,7 @@ export async function lookupPrefix(
   const p = (async () => {
     const qs = new URLSearchParams()
     if (opts.kinds && opts.kinds.length) qs.set('kinds', [...opts.kinds].join(','))
+    if (opts.includeArchived) qs.set('include_archived', 'true')
     const url = `/lookup/${encodeURIComponent(prefix.trim().toLowerCase())}${qs.toString() ? `?${qs}` : ''}`
     const res = await authFetch(url, { signal: opts.signal })
     if (!res.ok) return null
@@ -92,8 +114,12 @@ export async function lookupPrefix(
 
 // Test seam: lets unit tests inject a deterministic response without
 // hitting the network. Not exported to the prod barrel.
-export function _seedCacheForTest(prefix: string, payload: LookupOut): void {
-  cache.set(cacheKey(prefix, undefined), payload)
+export function _seedCacheForTest(
+  prefix: string,
+  payload: LookupOut,
+  opts: LookupOpts = {},
+): void {
+  cache.set(cacheKey(prefix, opts), payload)
 }
 
 export function _clearCacheForTest(): void {

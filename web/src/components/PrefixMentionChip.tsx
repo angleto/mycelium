@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import {
   getCachedLookup,
   lookupPrefix,
+  RESOLVE_ID,
   type LookupMatch,
   type LookupOut,
 } from '../lib/prefixLookup'
@@ -23,6 +25,12 @@ import {
 //     wins per resolver order) and a "+N" badge signals ambiguity.
 //     Long-term we'll route this through a disambiguator (Cmd+K) but
 //     in MVP the visible badge is enough to flag the case.
+//
+// The lookup asks for the ARCHIVE too (``RESOLVE_ID``): a reference is an
+// identity, and shelving the note it points at must not turn the chip back
+// into inert code -- the reader would see no difference between "archived"
+// and "no such entity". It is shown instead, in the same muted parenthesis
+// the workflow state uses (task d12f6217).
 
 const KIND_GLYPH: Record<LookupMatch['kind'], string> = {
   task: '✓',
@@ -37,13 +45,14 @@ function pickPrimary(matches: LookupMatch[]): LookupMatch | null {
 }
 
 export function PrefixMentionChip({ prefix }: { prefix: string }) {
+  const { t } = useTranslation()
   const [data, setData] = useState<LookupOut | null | undefined>(() =>
-    getCachedLookup(prefix) ?? undefined,
+    getCachedLookup(prefix, RESOLVE_ID) ?? undefined,
   )
   useEffect(() => {
     if (data !== undefined) return
     let alive = true
-    void lookupPrefix(prefix).then((res) => {
+    void lookupPrefix(prefix, RESOLVE_ID).then((res) => {
       if (alive) setData(res)
     })
     return () => {
@@ -65,14 +74,17 @@ export function PrefixMentionChip({ prefix }: { prefix: string }) {
   }
   const extras = data.matches.length - 1
   const closed = primary.kind === 'task' && primary.is_terminal === true
+  const archived = primary.is_archived
   const cls =
     'chip md-prefix-chip' +
     (closed ? ' chip--task-closed' : '') +
-    (!closed && primary.state_name ? ' chip--task-open' : '')
+    (!closed && primary.state_name ? ' chip--task-open' : '') +
+    (archived ? ' chip--archived' : '')
   const label = primary.title?.trim() || prefix
   const title =
     `${primary.kind} ${primary.id}` +
     (primary.title ? ` — ${primary.title}` : '') +
+    (archived ? ` (${t('common.archived')})` : '') +
     (extras > 0 ? `  (+${extras} other match${extras === 1 ? '' : 'es'})` : '')
 
   return (
@@ -85,6 +97,12 @@ export function PrefixMentionChip({ prefix }: { prefix: string }) {
         <span className="chip__state" aria-label={`state ${primary.state_name}`}>
           {' '}
           ({primary.state_name})
+        </span>
+      )}
+      {archived && (
+        <span className="chip__state" aria-label={t('common.archived')}>
+          {' '}
+          ({t('common.archived')})
         </span>
       )}
       {extras > 0 && (

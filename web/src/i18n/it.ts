@@ -165,6 +165,7 @@ export const it: Catalog = {
     dismiss: 'Ignora',
     save: 'Salva',
     edit: 'Modifica',
+    archived: 'in archivio',
   },
   taskLinkKind: {
     subject: 'oggetto',

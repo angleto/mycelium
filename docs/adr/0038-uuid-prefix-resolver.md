@@ -155,3 +155,32 @@ is explicitly out of scope.
   The backtick is already the adopted convention and is an unambiguous
   opt-in.
 - **Typed wikilinks now** — see the dedicated decision above.
+
+## Amendment (2026-08-22, task d12f6217) — resolving an id is not listing candidates
+
+The resolver serves two questions through one endpoint, and they do not want
+the same perimeter:
+
+- **"What entity is this id?"** — the markdown chip, the in-editor chip, the
+  short URLs `/n/:prefix` and `/t/:prefix`, the Cmd+K code branch, and the
+  `normalize_note_uuids` gate. An entity on the archive shelf is still that
+  entity, so these pass `include_archived=True` and SHOW the state the match
+  reports. Hiding it would render the chip as inert `<code>`, which is what a
+  prefix with no entity behind it looks like: the reader could not tell "you
+  archived this" from "this does not exist".
+- **"What may I link to from here?"** — the `@`-mention picker's prefix
+  branch. It keeps the default (archived excluded), matching what its own
+  title branch gets from `GET /notes` and `GET /tasks`.
+
+So `include_archived` is not a detail of the fetch, it is which question the
+caller is asking; `RESOLVE_ID` in `web/src/lib/prefixLookup.ts` names the
+first one, and the shared lookup cache is keyed on the perimeter as well as
+on the prefix (otherwise whoever asked first would decide what everyone
+sees).
+
+What made this visible: the note branch of `resolve_prefix` never applied
+`include_archived` at all and hardcoded `is_archived=False` in the match it
+returned (the column was not even selected), so archived notes resolved
+everywhere, unlabelled, while archived tasks resolved nowhere. Both branches
+now filter and report the same way; `is_archived` stays a presentation axis
+and never joins the effective-note predicate (ADR-0043 D1).
