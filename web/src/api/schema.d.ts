@@ -2104,6 +2104,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Workflow
+         * @description Create a workflow from an interchange document.
+         *
+         *     ``name`` overrides the one in the file: ``workflow_defs`` is unique
+         *     on ``(org_id, name)``, so it is what lets the same file be imported
+         *     twice into one workspace.
+         */
+        post: operations["import_workflow_workflows_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Into Workflow
+         * @description Replace an existing workflow's configuration with the document.
+         *
+         *     States are matched by NAME so the ones that survive keep their ids
+         *     and their tasks; a state the document drops is deleted, which the
+         *     service still refuses while any task sits in it.
+         */
+        post: operations["import_into_workflow_workflows__workflow_id__import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Workflow
+         * @description The workflow as a downloadable interchange document.
+         */
+        get: operations["export_workflow_workflows__workflow_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -14349,6 +14417,66 @@ export interface components {
             /** Transitions */
             transitions?: components["schemas"]["TransitionIn"][];
         };
+        /**
+         * WorkflowDocIn
+         * @description The body of an import: the file, verbatim. Unknown keys are
+         *     ignored so a document written by a later build still loads
+         *     (docs/adr/0052); ``kind`` and ``version`` are checked in the service,
+         *     which can say WHY it refused instead of emitting a schema mismatch.
+         */
+        WorkflowDocIn: {
+            /** Kind */
+            kind: string;
+            /** Version */
+            version: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** States */
+            states?: components["schemas"]["WorkflowDocStateIn"][];
+            /** Transitions */
+            transitions?: components["schemas"]["WorkflowDocTransitionIn"][];
+        };
+        /**
+         * WorkflowDocStateIn
+         * @description One state of an imported interchange document (docs/adr/0052).
+         *
+         *     ``strict`` is the point of this model: pydantic would otherwise
+         *     read ``"is_terminal": "true"`` as a boolean, and a lifecycle flag
+         *     silently flipped by a string is exactly the import that looks like
+         *     it worked. Lengths and every other rule are checked by
+         *     ``services/workflow_io.normalize`` instead, so the limit applies to
+         *     the TRIMMED name and there is one implementation of the rules.
+         */
+        WorkflowDocStateIn: {
+            /** Name */
+            name: string;
+            /**
+             * Is Initial
+             * @default false
+             */
+            is_initial?: boolean;
+            /**
+             * Is Terminal
+             * @default false
+             */
+            is_terminal?: boolean;
+            /**
+             * Is Hidden
+             * @default false
+             */
+            is_hidden?: boolean;
+            /** Description */
+            description?: string | null;
+        };
+        /** WorkflowDocTransitionIn */
+        WorkflowDocTransitionIn: {
+            /** From State */
+            from_state: string;
+            /** To State */
+            to_state: string;
+        };
         /** WorkflowOut */
         WorkflowOut: {
             /**
@@ -19157,6 +19285,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_workflow_workflows_import_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkflowDocIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_into_workflow_workflows__workflow_id__import_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkflowDocIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_workflow_workflows__workflow_id__export_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

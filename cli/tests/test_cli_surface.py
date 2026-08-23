@@ -52,6 +52,9 @@ _CASES = [
     (["schedule", "list", "--help"], ""),
     (["timer", "report", "--help"], "--group-by"),
     (["task", "graph", "--help"], "predecessors"),
+    (["workflow", "--help"], "export"),
+    (["workflow", "export", "--help"], "--file"),
+    (["workflow", "import", "--help"], "--into"),
 ]
 
 

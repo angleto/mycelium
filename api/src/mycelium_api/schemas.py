@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mycelium_core.models.agent_run import AgentRunStatus
 from mycelium_core.models.billing import CostBasis, RateUnit, StorageKind
@@ -1076,6 +1076,50 @@ class WorkflowPatchIn(BaseModel):
     description: str | None = None
     states: list[WorkflowStateEditIn]
     transitions: list[TransitionIn] = Field(default_factory=list)
+
+
+class WorkflowDocStateIn(BaseModel):
+    """One state of an imported interchange document (docs/adr/0052).
+
+    ``strict`` is the point of this model: pydantic would otherwise
+    read ``"is_terminal": "true"`` as a boolean, and a lifecycle flag
+    silently flipped by a string is exactly the import that looks like
+    it worked. Lengths and every other rule are checked by
+    ``services/workflow_io.normalize`` instead, so the limit applies to
+    the TRIMMED name and there is one implementation of the rules.
+    """
+
+    model_config = ConfigDict(strict=True)
+
+    name: str
+    is_initial: bool = False
+    is_terminal: bool = False
+    is_hidden: bool = False
+    description: str | None = None
+
+
+class WorkflowDocTransitionIn(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    from_state: str
+    to_state: str
+
+
+class WorkflowDocIn(BaseModel):
+    """The body of an import: the file, verbatim. Unknown keys are
+    ignored so a document written by a later build still loads
+    (docs/adr/0052); ``kind`` and ``version`` are checked in the service,
+    which can say WHY it refused instead of emitting a schema mismatch.
+    """
+
+    model_config = ConfigDict(strict=True)
+
+    kind: str
+    version: int
+    name: str
+    description: str | None = None
+    states: list[WorkflowDocStateIn] = Field(default_factory=list)
+    transitions: list[WorkflowDocTransitionIn] = Field(default_factory=list)
 
 
 class WorkflowOut(BaseModel):

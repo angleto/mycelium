@@ -60,3 +60,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0049 Working memory is delegated to the calling agent](0049-working-memory-delegated-to-the-caller.md)
 - [0050 Structural tag cardinality on tasks and notes](0050-structural-tag-cardinality.md) — revises ADR-0003 (silent on cardinality)
 - [0051 Inbound payment connectors (provider webhooks -> FatturaPA)](0051-inbound-payment-connectors.md)
+- [0052 Workflow interchange document (JSON, no database identity)](0052-workflow-interchange-document.md)

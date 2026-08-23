@@ -1,6 +1,6 @@
-"""Workflow service (docs/adr/0004, FR-6): default per Org, optional
-per-project override, state machine. Additive in F2.3; the task
-state-machine cutover is F2.4. RBAC, optimistic, i18n, audit.
+"""Workflow service (FR-6): default per Org, optional per-project
+override, state machine. Additive in F2.3; the task state-machine
+cutover is F2.4. RBAC, optimistic, i18n, audit.
 """
 
 from __future__ import annotations
@@ -78,6 +78,20 @@ async def list_workflows(session: AsyncSession, org_id: uuid.UUID) -> list[Workf
         .scalars()
         .all()
     )
+
+
+async def get_workflow(session: AsyncSession, workflow_id: uuid.UUID) -> WorkflowDefinition:
+    """One workflow by id, or ``WORKFLOW_NOT_FOUND``. RLS scopes the
+    lookup to the caller's org, so an id from another tenant is simply
+    absent rather than readable."""
+    wf = (
+        await session.execute(
+            select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
+        )
+    ).scalar_one_or_none()
+    if wf is None:
+        raise DomainError(MessageCode.WORKFLOW_NOT_FOUND)
+    return wf
 
 
 async def get_states(session: AsyncSession, workflow_id: uuid.UUID) -> list[WorkflowState]:
@@ -475,7 +489,7 @@ async def effective_workflow_for_task(
     session: AsyncSession, org_id: uuid.UUID, task_id: uuid.UUID
 ) -> WorkflowDefinition:
     """A task's effective workflow = the project override of its
-    project-kind tag (if any), else the Org default (docs/adr/0004)."""
+    project-kind tag (if any), else the Org default (FR-6)."""
     project_tag_id = (
         await session.execute(
             select(Tag.id)

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
+import { downloadResponse, sanitizeFilename } from '../lib/downloadFile'
 
 type Workflow = components['schemas']['WorkflowOut']
 type State = components['schemas']['StateOut']
@@ -25,9 +26,24 @@ type Edit = {
   tr: Transition[]
 }
 
+// A workflow document is a few kilobytes of JSON. Anything past this is
+// not one, and shipping it to the server to find out is pointless.
+const MAX_IMPORT_BYTES = 1_000_000
+
 // WorkflowDefinition editor. The backend enforces "exactly one initial
 // state" (workflow.invalid) and the transition rules; errors surface
 // here verbatim from the i18n catalog.
+//
+// Export and Import are SERVER operations (docs/adr/0052): this route
+// posts the file and renders the answer, and every rule about what a
+// valid document is lives in ``services/workflow_io.py``. The SPA has
+// no parser of its own on purpose -- ``mycelium workflow import`` is
+// the other client, and two parsers would be two answers.
+//
+// The consequence is worth stating where the buttons are: Import
+// WRITES. There is no "press Save to apply" step, which is why it asks
+// first. Export downloads the SAVED workflow, so unsaved edits in the
+// panel above are not in the file.
 export function WorkflowsRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -51,8 +67,11 @@ export function WorkflowsRoute() {
   ])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
   const [editing, setEditing] = useState<Edit | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const editImport = useRef<HTMLInputElement>(null)
+  const createImport = useRef<HTMLInputElement>(null)
 
   const loadMeta = useCallback(async (wfs: Workflow[]) => {
     const h = workspaceHeader()
@@ -81,6 +100,12 @@ export function WorkflowsRoute() {
       return
     }
     setList(data)
+    // An editor left open on a workflow that is no longer in the list
+    // (it was just deleted) is broken state twice over: Save would
+    // PATCH a row that is gone, and its panel -- one of the two
+    // surfaces this route renders err/msg on -- is no longer mounted,
+    // so the next failure would have nowhere to show.
+    setEditing((e) => (e && !data.some((w) => w.id === e.id) ? null : e))
     await loadMeta(data)
   }, [loadMeta])
 
@@ -115,10 +140,81 @@ export function WorkflowsRoute() {
     setStates((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
 
+  // The file never gets parsed here: the server owns the rules, and
+  // a second reading of them in the SPA would be a second answer to
+  // "is this document valid" (docs/adr/0052).
+  async function readDocument(file: File): Promise<unknown | null> {
+    setErr(null)
+    setMsg(null)
+    if (file.size > MAX_IMPORT_BYTES) {
+      setErr(t('workflows.importErrTooLarge'))
+      return null
+    }
+    try {
+      return JSON.parse(await file.text()) as unknown
+    } catch {
+      setErr(t('workflows.importErrNotJson'))
+      return null
+    }
+  }
+
+  async function exportWorkflow(w: Workflow) {
+    setErr(null)
+    setMsg(null)
+    const res = await authFetch(`/workflows/${w.id}/export`)
+    if (!res.ok) {
+      setErr(errMessage(await res.json().catch(() => null)))
+      return
+    }
+    await downloadResponse(res, `workflow-${sanitizeFilename(w.name)}.json`)
+  }
+
+  async function importIntoWorkflow(w: Workflow, file: File) {
+    // Unlike Save, this one cannot be walked back with Cancel.
+    if (!window.confirm(t('workflows.confirmImport', { name: w.name }))) return
+    const payload = await readDocument(file)
+    if (payload === null) return
+    setBusy(true)
+    const res = await authFetch(`/workflows/${w.id}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    setBusy(false)
+    if (!res.ok) {
+      setErr(errMessage(await res.json().catch(() => null)))
+      return
+    }
+    setEditing(null)
+    setMsg(t('workflows.imported', { name: w.name }))
+    await load()
+  }
+
+  async function importAsNewWorkflow(file: File) {
+    const payload = await readDocument(file)
+    if (payload === null) return
+    setBusy(true)
+    const res = await authFetch('/workflows/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    setBusy(false)
+    if (!res.ok) {
+      setErr(errMessage(await res.json().catch(() => null)))
+      return
+    }
+    const created = (await res.json()) as Workflow
+    setShowCreate(false)
+    setMsg(t('workflows.imported', { name: created.name }))
+    await load()
+  }
+
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
+    setMsg(null)
     const { error } = await api.POST('/workflows', {
       params: { header: workspaceHeader() },
       body: {
@@ -172,6 +268,7 @@ export function WorkflowsRoute() {
       })),
     })
     setErr(null)
+    setMsg(null)
   }
 
   function patchE(p: Partial<Edit>) {
@@ -182,6 +279,7 @@ export function WorkflowsRoute() {
     if (!editing) return
     setBusy(true)
     setErr(null)
+    setMsg(null)
     const { error } = await api.PATCH('/workflows/{workflow_id}', {
       params: { header: workspaceHeader(), path: { workflow_id: editing.id } },
       body: {
@@ -210,6 +308,7 @@ export function WorkflowsRoute() {
 
   async function setDefault(id: string) {
     setErr(null)
+    setMsg(null)
     const { error } = await api.POST('/workflows/{workflow_id}/default', {
       params: { header: workspaceHeader(), path: { workflow_id: id } },
     })
@@ -223,6 +322,7 @@ export function WorkflowsRoute() {
   async function removeWf(w: Workflow) {
     if (!window.confirm(t('workflows.confirmDelete', { name: w.name }))) return
     setErr(null)
+    setMsg(null)
     const { error } = await api.DELETE('/workflows/{workflow_id}', {
       params: { header: workspaceHeader(), path: { workflow_id: w.id } },
     })
@@ -561,11 +661,45 @@ export function WorkflowsRoute() {
                       <button
                         type="button"
                         className="btn--ghost"
-                        onClick={() => setEditing(null)}
+                        onClick={() => {
+                          setEditing(null)
+                          setErr(null)
+                          setMsg(null)
+                        }}
                       >
                         {t('workflows.cancel')}
                       </button>
+                      <button
+                        type="button"
+                        className="btn--ghost"
+                        title={t('workflows.exportHint')}
+                        onClick={() => void exportWorkflow(w)}
+                      >
+                        {t('workflows.export')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn--ghost"
+                        disabled={busy}
+                        title={t('workflows.importHint')}
+                        onClick={() => editImport.current?.click()}
+                      >
+                        {t('workflows.import')}
+                      </button>
+                      <input
+                        ref={editImport}
+                        type="file"
+                        accept="application/json,.json"
+                        hidden
+                        onChange={(ev) => {
+                          const f = ev.target.files?.[0]
+                          ev.target.value = ''
+                          if (f) void importIntoWorkflow(w, f)
+                        }}
+                      />
                     </div>
+                    {err && <p className="err">{err}</p>}
+                    {msg && <p className="ok">{msg}</p>}
                   </div>
                 )}
               </li>
@@ -573,7 +707,13 @@ export function WorkflowsRoute() {
           })}
         </ul>
       )}
-      {err && <p className="err">{err}</p>}
+      {/* err and msg get exactly one surface, so a message can neither
+          be shown twice nor land somewhere the user is not looking: the
+          open editor panel first, then the create form, then here. The
+          panel is guaranteed to be mounted whenever `editing` is set,
+          because `load` drops an editor whose workflow has gone. */}
+      {!editing && !showCreate && err && <p className="err">{err}</p>}
+      {!editing && !showCreate && msg && <p className="ok">{msg}</p>}
 
       {!showCreate && (
         <button type="button" onClick={() => setShowCreate(true)}>
@@ -722,7 +862,8 @@ export function WorkflowsRoute() {
           {t('workflows.addTransition')}
         </button>
 
-        {err && <p className="err">{err}</p>}
+        {!editing && err && <p className="err">{err}</p>}
+        {!editing && msg && <p className="ok">{msg}</p>}
         <div className="row">
           <button type="submit" disabled={busy}>
             {busy ? t('workflows.creating') : t('workflows.create')}
@@ -730,10 +871,34 @@ export function WorkflowsRoute() {
           <button
             type="button"
             className="btn--ghost"
-            onClick={() => setShowCreate(false)}
+            onClick={() => {
+              setShowCreate(false)
+              setErr(null)
+              setMsg(null)
+            }}
           >
             {t('workflows.cancel')}
           </button>
+          <button
+            type="button"
+            className="btn--ghost"
+            disabled={busy}
+            title={t('workflows.importNewHint')}
+            onClick={() => createImport.current?.click()}
+          >
+            {t('workflows.import')}
+          </button>
+          <input
+            ref={createImport}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(ev) => {
+              const f = ev.target.files?.[0]
+              ev.target.value = ''
+              if (f) void importAsNewWorkflow(f)
+            }}
+          />
         </div>
       </form>
       )}

@@ -1476,6 +1476,18 @@ export const en = {
     confirmDelete: 'Delete workflow "{{name}}"?',
     none: 'No workflows yet.',
     loading: 'Loading...',
+    export: 'Export',
+    exportHint:
+      'Download the saved workflow as a JSON file. Unsaved edits in the panel above are not in it.',
+    import: 'Import',
+    importHint:
+      'Replace this workflow with a JSON document. Applied immediately, not on Save.',
+    importNewHint: 'Create a workflow from a JSON document.',
+    confirmImport:
+      'Replace the configuration of "{{name}}" with this file? It applies immediately and Cancel will not undo it.',
+    imported: 'Imported "{{name}}".',
+    importErrNotJson: 'The file could not be read as JSON.',
+    importErrTooLarge: 'That file is too large to be a workflow document (1 MB max).',
   },
   graph: {
     nav: 'Graph',

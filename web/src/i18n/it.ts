@@ -1469,6 +1469,18 @@ export const it: Catalog = {
     confirmDelete: 'Eliminare il workflow "{{name}}"?',
     none: 'Nessun workflow.',
     loading: 'Caricamento...',
+    export: 'Esporta',
+    exportHint:
+      'Scarica come file JSON il workflow salvato. Le modifiche non salvate qui sopra non ci sono.',
+    import: 'Importa',
+    importHint:
+      'Sostituisce questo workflow con un documento JSON. Si applica subito, non al Salva.',
+    importNewHint: 'Crea un workflow da un documento JSON.',
+    confirmImport:
+      'Sostituire la configurazione di "{{name}}" con questo file? Si applica subito e Annulla non lo annulla.',
+    imported: 'Importato "{{name}}".',
+    importErrNotJson: 'Non è stato possibile leggere il file come JSON.',
+    importErrTooLarge: 'Il file è troppo grande per essere un documento di workflow (max 1 MB).',
   },
   graph: {
     nav: 'Grafo',

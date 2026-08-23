@@ -24,6 +24,11 @@ import { AttachmentPicker } from './AttachmentPicker'
 import { renderMarkdownToHtml } from '../lib/markdownSource/renderForPrint'
 import { mdLink } from '../lib/markdownInline'
 import {
+  downloadText,
+  filenameFromContentDisposition,
+  sanitizeFilename,
+} from '../lib/downloadFile'
+import {
   SourceEditor,
   type SourceEditorHandle,
 } from '../lib/markdownSource/SourceEditor'
@@ -59,33 +64,6 @@ function readToolbarPref(): boolean {
   } catch {
     return true
   }
-}
-
-// Strip characters that are unsafe or awkward in filenames across
-// macOS / Windows / Linux. Falls back to ``untitled`` for an empty
-// title so the download attribute always carries a usable name.
-function slugifyFilename(name: string | undefined): string {
-  const s = (name ?? '').trim()
-  if (!s) return 'untitled'
-  const FORBIDDEN = /[\\/:*?"<>|]/g
-  const cleaned = s
-    .replace(FORBIDDEN, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return (cleaned || 'untitled').slice(0, 120)
-}
-
-function downloadText(filename: string, mime: string, content: string): void {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.rel = 'noopener'
-  document.body.append(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -165,18 +143,12 @@ async function exportPdfViaServer(
   a.href = url
   a.download = filenameFromContentDisposition(
     res.headers.get('content-disposition'),
-  ) || `${slugifyFilename(title)}.pdf`
+  ) || `${sanitizeFilename(title)}.pdf`
   a.rel = 'noopener'
   document.body.append(a)
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-function filenameFromContentDisposition(header: string | null): string {
-  if (!header) return ''
-  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header)
-  return m ? decodeURIComponent(m[1]) : ''
 }
 
 // True WYSIWYG (no preview toggle), markdown round-trip via
@@ -807,7 +779,7 @@ export function RichEditor({
               defaultValue: 'Scarica markdown (.md)',
             })}
             onClick={() => {
-              const slug = slugifyFilename(filename)
+              const slug = sanitizeFilename(filename)
               downloadText(`${slug}.md`, 'text/markdown;charset=utf-8', value)
             }}
           >
@@ -821,7 +793,7 @@ export function RichEditor({
               defaultValue: 'Esporta PDF',
             })}
             onClick={() => {
-              const slug = slugifyFilename(filename)
+              const slug = sanitizeFilename(filename)
               setPdfBusy(true)
               setPdfErr(null)
               // Through the READ-SIDE renderer, so the PDF is what the note

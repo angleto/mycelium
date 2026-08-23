@@ -15,7 +15,6 @@ the network — the export is fully offline and deterministic.
 from __future__ import annotations
 
 import io
-import re
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import unquote, urlparse
@@ -25,6 +24,7 @@ from pydantic import BaseModel, Field
 from weasyprint import HTML, default_url_fetcher  # type: ignore[import-untyped]
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
+from mycelium_api.filenames import slugify_filename
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -70,12 +70,6 @@ class PdfExportIn(BaseModel):
 
     title: str = Field(min_length=1, max_length=240)
     html: str = Field(min_length=1)
-
-
-def _slugify_filename(name: str) -> str:
-    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", name).strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return (cleaned or "untitled")[:120]
 
 
 def _wrap_html(title: str, body_html: str) -> str:
@@ -135,7 +129,7 @@ async def export_pdf(
     html.write_pdf(buf, stylesheets=[str(_PRINT_CSS)])
     pdf_bytes = buf.getvalue()
 
-    filename = _slugify_filename(payload.title) + ".pdf"
+    filename = slugify_filename(payload.title) + ".pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

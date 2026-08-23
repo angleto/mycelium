@@ -1,5 +1,6 @@
-"""Configurable workflow (docs/adr/0004, FR-6): per-Org definitions
-with states and transitions; a project can override the default."""
+"""Configurable workflow (FR-6): per-Org definitions with states and
+transitions; a project can override the default. The portable form of
+one of these definitions is docs/adr/0052."""
 
 from __future__ import annotations
 

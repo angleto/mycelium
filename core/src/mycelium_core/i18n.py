@@ -80,6 +80,18 @@ class MessageCode(enum.StrEnum):
     WORKFLOW_INVALID = "workflow.invalid"
     WORKFLOW_IN_USE = "workflow.in_use"
     TRANSITION_NOT_ALLOWED = "workflow.transition_not_allowed"
+    # Interchange document (docs/adr/0052). One code per rule, each
+    # naming the offending row: an import that fails has to tell the
+    # caller WHICH line to fix, whether the caller is the SPA or the CLI.
+    WORKFLOW_DOC_KIND = "workflow.doc_kind"
+    WORKFLOW_DOC_VERSION = "workflow.doc_version"
+    WORKFLOW_DOC_NAME = "workflow.doc_name"
+    WORKFLOW_DOC_NO_STATES = "workflow.doc_no_states"
+    WORKFLOW_DOC_STATE_NAME = "workflow.doc_state_name"
+    WORKFLOW_DOC_DUPLICATE_STATE = "workflow.doc_duplicate_state"
+    WORKFLOW_DOC_INITIAL_COUNT = "workflow.doc_initial_count"
+    WORKFLOW_DOC_UNKNOWN_STATE = "workflow.doc_unknown_state"
+    WORKFLOW_DOC_DUPLICATE_TRANSITION = "workflow.doc_duplicate_transition"
     DEPENDENCY_CYCLE = "dependency.cycle"
     CALENDAR_NOT_FOUND = "calendar.not_found"
     EVENT_NOT_FOUND = "event.not_found"
@@ -373,6 +385,32 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Workflow in use or default: reassign its tasks / pick another default first"
         ),
         MessageCode.TRANSITION_NOT_ALLOWED: ("Transition not allowed by the workflow"),
+        MessageCode.WORKFLOW_DOC_KIND: (
+            "Not a Mycelium workflow document: expected kind {expected}, got {got}"
+        ),
+        MessageCode.WORKFLOW_DOC_VERSION: (
+            "Workflow document version {version} is newer than this server understands "
+            "(supported: {supported})"
+        ),
+        MessageCode.WORKFLOW_DOC_NAME: (
+            "The workflow name is empty or longer than {maximum} characters"
+        ),
+        MessageCode.WORKFLOW_DOC_NO_STATES: "The workflow document declares no states",
+        MessageCode.WORKFLOW_DOC_STATE_NAME: (
+            "State {position}: the name is empty or longer than {maximum} characters"
+        ),
+        MessageCode.WORKFLOW_DOC_DUPLICATE_STATE: (
+            "Two states are named {name}: state names are unique within a workflow"
+        ),
+        MessageCode.WORKFLOW_DOC_INITIAL_COUNT: (
+            "Exactly one initial state is required, the document has {found}"
+        ),
+        MessageCode.WORKFLOW_DOC_UNKNOWN_STATE: (
+            "Transition {position} points at {name}, which is not one of the states"
+        ),
+        MessageCode.WORKFLOW_DOC_DUPLICATE_TRANSITION: (
+            "The transition {from_state} -> {to_state} appears twice"
+        ),
         MessageCode.DEPENDENCY_CYCLE: ("This dependency would create a cycle"),
         MessageCode.CALENDAR_NOT_FOUND: "Working calendar not found",
         MessageCode.EVENT_NOT_FOUND: "Event not found",

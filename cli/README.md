@@ -68,6 +68,14 @@ mycelium search "release v1.2"
 mycelium what-now --duration 25 --location office
 mycelium schedule list                      # AI-computed plan
 
+# Workflows (states + transitions, portable between workspaces)
+mycelium workflow list
+mycelium workflow export 4a1b -f delivery.json   # portable doc, no database ids
+mycelium workflow import -f delivery.json        # create a new workflow
+mycelium workflow import -f delivery.json --name "Delivery (staging)"
+mycelium workflow import -f delivery.json --into 4a1b  # REPLACES that workflow
+mycelium workflow export 4a1b -f - | jq .states  # '-' is stdin/stdout
+
 # Browsing
 mycelium client list
 mycelium project list --client acme

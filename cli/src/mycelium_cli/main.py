@@ -29,6 +29,7 @@ from mycelium_cli.cmds import tasks as tasks_cmd
 from mycelium_cli.cmds import timer as timer_cmd
 from mycelium_cli.cmds import today as today_cmd
 from mycelium_cli.cmds import what_now as what_now_cmd
+from mycelium_cli.cmds import workflows as workflows_cmd
 from mycelium_cli.cmds import workspace as workspace_cmd
 from mycelium_cli.http import CLIError
 from mycelium_cli.ui import fail, set_json_mode
@@ -87,6 +88,7 @@ app.add_typer(workspace_cmd.app, name="workspace")
 app.add_typer(notif_cmd.app, name="notif")
 app.add_typer(schedule_cmd.app, name="schedule")
 app.add_typer(attachments_cmd.app, name="attachments")
+app.add_typer(workflows_cmd.app, name="workflow")
 
 # Top-level single commands
 app.command(name="today", help="Today's running timer + tasks (+ --date / --tz).")(today_cmd.today)
