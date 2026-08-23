@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
+import { CopyXmlButton, XmlView } from './XmlView'
 import { mailtoHref } from '../lib/mailto'
 
 // Inbound payment connectors (ADR-0051), org-facing surface. A connector turns
@@ -818,6 +819,18 @@ export function ConnectorEvents({
     body: string
   } | null>(null)
   const [copiedPayload, setCopiedPayload] = useState(false)
+  // The shadow document a dry run produced, once someone asks to READ it.
+  // Held apart from ``payload``: they answer different questions (what the
+  // provider sent vs what we would have filed) and both are worth having open
+  // one after the other on the same row.
+  const [shadow, setShadow] = useState<{ id: string; providerId: string; xml: string } | null>(
+    null,
+  )
+  // Which generation of the list is on screen. A reader's fetch that was in
+  // flight across a reload belongs to a list that no longer exists: without
+  // this, clicking XML and then switching the status tab opens a window
+  // labelled with an event id the table is not showing, over an empty list.
+  const listGen = useRef(0)
   // Which row is picking a counterpart, and the clients to pick from.
   const [assigning, setAssigning] = useState<string | null>(null)
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
@@ -842,6 +855,15 @@ export function ConnectorEvents({
         )
         if (!active) return
         setRows(data)
+        // A reader open on a row the new list may not contain is worse than no
+        // reader: it names an event id, so it reads as "this is the current
+        // row". Closed with the list it belongs to -- which also covers the
+        // retry that moves an event out of the filter under the operator's
+        // cursor. (The payload window had this bug since it shipped; the
+        // shadow reader inherits the fix rather than the bug.)
+        listGen.current += 1
+        setPayload(null)
+        setShadow(null)
       } catch (e) {
         if (active) setErr(message(e))
       } finally {
@@ -902,6 +924,23 @@ export function ConnectorEvents({
     }
   }
 
+  // Escape closes whichever reader is open. The house modal contract is three
+  // dismissal paths -- the close button, a backdrop click and Escape -- and
+  // this component had only the first two. ``stopPropagation`` because
+  // AppShell listens for Escape at the window to collapse the mobile drawer:
+  // without it, closing this on a phone would also close the sidebar under it.
+  useEffect(() => {
+    if (!payload && !shadow) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setPayload(null)
+      setShadow(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [payload, shadow])
+
   async function copyPayload(body: string) {
     try {
       await navigator.clipboard.writeText(body)
@@ -920,29 +959,60 @@ export function ConnectorEvents({
       return
     }
     setErr(null)
+    const gen = listGen.current
     try {
       const res = await authFetch(
         `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
           `/events/${eventId}/payload`,
       )
       if (!res.ok) throw new Error(String(res.status))
-      setPayload({ id: eventId, providerId, body: await res.text() })
+      const body = await res.text()
+      if (gen !== listGen.current) return
+      // One window at a time. Both are dialogs with their own backdrop, and
+      // two of those stack into a page nothing dismisses in one action.
+      setShadow(null)
+      setPayload({ id: eventId, providerId, body })
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
+
+  // authFetch, not a plain link: the route needs the tenant + auth headers,
+  // and the sandboxed viewer cannot follow a download the page starts itself.
+  async function fetchDryRunXml(eventId: string): Promise<string> {
+    const res = await authFetch(
+      `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+        `/events/${eventId}/dry-run-xml`,
+    )
+    if (!res.ok) throw new Error(String(res.status))
+    return res.text()
+  }
+
+  async function onShowXml(eventId: string, providerId: string) {
+    // Reading it is the point of a shadow run: this XML exists to be DIFFED
+    // against what the incumbent provider filed for the same payment, and
+    // "download it and open it somewhere else" is a poor way to answer "does
+    // this look right". The download stays, for the diff itself.
+    if (shadow?.id === eventId) {
+      setShadow(null)
+      return
+    }
+    setErr(null)
+    const gen = listGen.current
+    try {
+      const xml = await fetchDryRunXml(eventId)
+      if (gen !== listGen.current) return
+      setPayload(null)
+      setShadow({ id: eventId, providerId, xml })
     } catch (e) {
       setErr(message(e))
     }
   }
 
   async function onDownloadXml(eventId: string) {
-    // authFetch, not a plain link: the route needs the tenant + auth headers,
-    // and the sandboxed viewer cannot follow a download the page starts itself.
     setErr(null)
     try {
-      const res = await authFetch(
-        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
-          `/events/${eventId}/dry-run-xml`,
-      )
-      if (!res.ok) throw new Error(String(res.status))
-      const xml = await res.text()
+      const xml = await fetchDryRunXml(eventId)
       const url = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }))
       const a = document.createElement('a')
       a.href = url
@@ -1123,10 +1193,23 @@ export function ConnectorEvents({
                   <td className="tbl__acts">
                     {/* In shadow mode the XML is the deliverable: this is the
                         artefact you diff against the incumbent provider. */}
+                    {/* Read it, then take it away: the same pair the invoice
+                        document panel offers, because this IS an invoice --
+                        the one that would have been filed. */}
                     {r.has_dry_run_xml && (
                       <button
                         type="button"
                         className="btn--sm"
+                        aria-expanded={shadow?.id === r.id}
+                        onClick={() => void onShowXml(r.id, r.provider_event_id)}
+                      >
+                        {t('paymentConnectors.viewXml')}
+                      </button>
+                    )}
+                    {r.has_dry_run_xml && (
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
                         onClick={() => void onDownloadXml(r.id)}
                       >
                         {t('paymentConnectors.downloadXml')}
@@ -1231,6 +1314,45 @@ export function ConnectorEvents({
             </div>
             <div className="modal__body">
               <pre className="pc-payload">{payload.body}</pre>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* The shadow document, read rather than downloaded. Same window as the
+          received payload above, deliberately: the two are the before and the
+          after of one event, and an operator opens them back to back. */}
+      {shadow && (
+        <div
+          className="modal__backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShadow(null)
+          }}
+        >
+          <div className="modal__panel">
+            <div className="modal__head">
+              <strong>{t('paymentConnectors.shadowXml')}</strong>
+              <code className="pc-id">{shadow.providerId}</code>
+              <span className="modal__sp" />
+              <CopyXmlButton source={shadow.xml} />
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => void onDownloadXml(shadow.id)}
+              >
+                {t('paymentConnectors.downloadXml')}
+              </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => setShadow(null)}
+              >
+                {t('paymentConnectors.cancel')}
+              </button>
+            </div>
+            <div className="modal__body">
+              <XmlView source={shadow.xml} label={t('paymentConnectors.shadowXml')} />
             </div>
           </div>
         </div>

@@ -148,6 +148,18 @@ export const it: Catalog = {
       merged: 'unito',
     },
   },
+  // Il lettore XML condiviso (components/XmlView), usato dal pannello
+  // documento della fattura, dalla notifica SdI che ospita e dal documento
+  // ombra di un connettore di pagamento. Al livello superiore perché non
+  // appartiene a nessuno dei tre.
+  xmlView: {
+    copy: 'Copia',
+    copied: 'OK',
+    unparsed:
+      'Non è XML ben formato, quindi è mostrato esattamente come è arrivato invece che formattato.',
+    truncated:
+      'Mostrate le prime {{shown}} righe su {{total}}. Scarica il file per leggerlo tutto.',
+  },
   common: {
     on: 'sì',
     off: 'no',
@@ -2626,7 +2638,9 @@ export const it: Catalog = {
     statusDead: 'Rinunciato',
     statusIgnored: 'Ignorati',
     statusDone: 'Elaborati',
-    downloadXml: 'XML',
+    viewXml: 'XML',
+    downloadXml: 'Scarica .xml',
+    shadowXml: 'Documento ombra',
     assignClient: 'Associa cliente',
     assignPrompt: 'Scegli il cliente Mycelium da fatturare per il cliente provider {{customer}}. Se non c’è, crealo prima in Clienti: servono partita IVA o codice fiscale, indirizzo completo, e codice destinatario o PEC.',
     assignDone: 'Associato. {{count}} pagamento/i in attesa rimessi in coda.',

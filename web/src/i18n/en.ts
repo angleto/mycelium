@@ -149,6 +149,18 @@ export const en = {
       merged: 'merged',
     },
   },
+  // The shared XML reader (components/XmlView), used by the invoice document
+  // panel, the SdI notification it hosts, and a payment connector's shadow
+  // document. Top level rather than under ``invoices`` because it belongs to
+  // none of them.
+  xmlView: {
+    copy: 'Copy',
+    copied: 'OK',
+    unparsed:
+      'This is not well-formed XML, so it is shown exactly as it arrived rather than formatted.',
+    truncated:
+      'Showing the first {{shown}} lines of {{total}}. Download the file to read it whole.',
+  },
   common: {
     on: 'on',
     off: 'off',
@@ -2640,7 +2652,9 @@ export const en = {
     statusDead: 'Given up',
     statusIgnored: 'Ignored',
     statusDone: 'Processed',
-    downloadXml: 'XML',
+    viewXml: 'XML',
+    downloadXml: 'Download .xml',
+    shadowXml: 'Shadow document',
     assignClient: 'Assign client',
     assignPrompt: 'Choose the Mycelium client to invoice for provider customer {{customer}}. Create it in Clients first if it is not there; it needs a VAT number or codice fiscale, a full address, and a codice destinatario or PEC.',
     assignDone: 'Associated. {{count}} waiting payment(s) queued again.',

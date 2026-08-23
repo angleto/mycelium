@@ -2137,14 +2137,87 @@ button.btn--danger:hover {
   color: var(--err);
 }
 
-.xml {
+/* ---- XML reader (components/XmlView) ----
+   Every FatturaPA this app produces is ONE line, because the bytes are the
+   fiscal document and the builder must not re-indent them. The indentation
+   here is therefore drawn, not stored: one row per line, indented by padding.
+
+   ``pre-wrap`` rather than a horizontal scroll. Once the document is indented
+   its lines are short except for the long ones -- a base64 signature block, a
+   causale -- and those are exactly the ones worth reading whole rather than
+   scrolling sideways to reach. ``anywhere`` because a 3000-character base64
+   run has nowhere to break. */
+.xmlv {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  margin: 0.4rem 0 0;
+  font-family: var(--mono);
   font-size: 0.78rem;
-  max-height: 22rem;
+  line-height: 1.55;
+  max-height: 60vh;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+/* Keyboard users scroll this box by focusing it; say so, the way the rest of
+   the app marks focus. */
+.xmlv:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Indentation is DRAWN here, from the one number the view supplies: the depth.
+   One step of padding is spent on the hanging indent -- a wrapped line resumes
+   under its own nesting instead of returning to the left margin -- so a line at
+   depth N is inset by N+1 steps and the negative text-indent takes one back. */
+.xmlv__l {
+  padding-left: calc((var(--xmlv-d, 0) + 1) * 1.25ch);
+  text-indent: -1.25ch;
+}
+.xmlv__l:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+/* Structure quiet, names and values legible: the three roles a reader is
+   actually separating when they scan a FatturaPA. All from existing tokens,
+   so both themes follow without a second palette. */
+.xmlv__punct {
+  color: var(--muted);
+}
+.xmlv__tag {
+  color: var(--accent);
+}
+.xmlv__attr {
+  color: var(--bark);
+}
+.xmlv__val,
+.xmlv__text {
+  color: var(--text);
+}
+.xmlv__pi,
+.xmlv__comment {
+  color: var(--muted);
+  font-style: italic;
+}
+/* The unparsed fallback is the document exactly as it arrived: no wrapping
+   decisions taken on its behalf, because its line structure may BE the bug. */
+.xmlv--raw {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+/* A window that exists ONLY to show this document: the modal body is already
+   the single scroller, so the reader stretches instead of capping its own
+   height -- two nested scrollbars over one document is a way to lose your place
+   in it. Same rule the received-payload view gets, for the same reason.
+   A DIRECT-child selector, deliberately. The invoice document panel also lives
+   inside a modal body, but there the reader is one section among several (the
+   preview grid, the SdI timeline) and its own bounded box is what keeps the
+   rest of the panel reachable while a long XML is open. */
+.modal__body > .xmlv {
+  max-height: none;
+  border: none;
+  padding: 0;
 }
 
 /* ---- compact data table (invoice lines) ---- */

@@ -14,6 +14,7 @@ import { useSession } from '../auth/useSession'
 import { periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { ConnectorTriage } from '../components/ConnectorTriage'
+import { CopyXmlButton, XmlView } from '../components/XmlView'
 import type { components } from '../api/schema'
 
 type Invoice = components['schemas']['InvoiceOut']
@@ -520,7 +521,11 @@ export function InvoicesRoute() {
   // selected invoice + its lines
   const [sel, setSel] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
-  const [xml, setXml] = useState<string | null>(null)
+  // What the reader is showing, not just its text. The panel hosts two
+  // different documents -- this invoice's XML and any of the signed SdI
+  // notifications about it -- and a viewer that only held a string could not
+  // name the one on screen, nor copy the right bytes.
+  const [xml, setXml] = useState<{ source: string; title: string } | null>(null)
   const xmlRef = useRef<HTMLDivElement>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
 
@@ -1055,7 +1060,7 @@ export function InvoicesRoute() {
     // The viewer renders in the document panel; the effect on ``xml`` brings
     // it into view (both the panel-head and action-row buttons trigger it from
     // far up/down the long modal).
-    setXml(data.xml)
+    setXml({ source: data.xml, title: t('invoices.doc.xml') })
   }
 
   // Filename for the preview .xml. We do not try to mirror the SdI
@@ -1092,7 +1097,7 @@ export function InvoicesRoute() {
 
   // The signed SdI notification XML (RC/MC/NS/...): the XAdES-signed proof of
   // the outcome. View reuses the same document-panel viewer as the invoice XML.
-  async function showNotifXml(notificationId: string) {
+  async function showNotifXml(n: SdiNotif) {
     if (!sel) return
     setErr(null)
     const { data, error } = await api.GET(
@@ -1100,7 +1105,7 @@ export function InvoicesRoute() {
       {
         params: {
           header: workspaceHeader(),
-          path: { invoice_id: sel.id, notification_id: notificationId },
+          path: { invoice_id: sel.id, notification_id: n.id },
         },
       },
     )
@@ -1108,7 +1113,10 @@ export function InvoicesRoute() {
       setErr(errMessage(error))
       return
     }
-    setXml(data.xml)
+    // Named by its outcome and its file: "RC" alone would not tell two
+    // notifications about the same invoice apart.
+    const kind = t(`invoices.sdiStatus.${n.kind}`)
+    setXml({ source: data.xml, title: n.file_name ? `${kind} · ${n.file_name}` : kind })
   }
 
   async function downloadNotifXml(notificationId: string, fileName: string | null) {
@@ -1630,7 +1638,7 @@ export function InvoicesRoute() {
                         <button
                           type="button"
                           className="sdi-timeline__act"
-                          onClick={() => void showNotifXml(n.id)}
+                          onClick={() => void showNotifXml(n)}
                         >
                           {t('invoices.sdi.viewXml')}
                         </button>
@@ -1660,8 +1668,11 @@ export function InvoicesRoute() {
               {xml && (
                 <div className="docpanel__xml" ref={xmlRef}>
                   <div className="docpanel__head">
-                    <strong>{t('invoices.doc.xml')}</strong>
+                    <strong>{xml.title}</strong>
                     <span className="modal__sp" />
+                    {/* Copies the SOURCE, not the rendering below: the bytes
+                        are the document, the indentation is this app's. */}
+                    <CopyXmlButton source={xml.source} />
                     <button
                       type="button"
                       className="btn--sm btn--ghost"
@@ -1670,9 +1681,7 @@ export function InvoicesRoute() {
                       {t('invoices.doc.xmlClose')}
                     </button>
                   </div>
-                  <pre className="xml" aria-label="FatturaPA XML">
-                    {xml}
-                  </pre>
+                  <XmlView source={xml.source} label={xml.title} />
                 </div>
               )}
             </div>
