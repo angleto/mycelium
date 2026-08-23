@@ -2563,6 +2563,7 @@ export const it: Catalog = {
     missingLabel: 'Mancano:',
     fieldOr: ' o ',
     customer: 'Cliente (provider)',
+    actions: 'Azioni',
     assignPick: 'Scegli il cliente…',
     outcomeLabel: {
       accepted: 'Accettata',

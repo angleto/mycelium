@@ -1002,6 +1002,76 @@ async def test_events_are_scoped_to_their_connector_and_hide_the_raw_payload() -
         assert empty.status_code == 200 and empty.json() == []
 
 
+async def test_events_name_the_counterpart_the_payload_named() -> None:
+    """The triage row says WHOSE payment it is, not only which row it is in
+    Stripe.
+
+    Derived from the frozen payload on read, so it answers for events that were
+    already stored -- there is no ingest-time column to be empty. The payload
+    itself stays out of the list: what is lifted is exactly the two fields a
+    human recognises a counterpart by.
+    """
+    async with _client() as c:
+        owner, member, org, issuer = await _setup(c)
+        cid = (await _create(c, owner, issuer))["id"]
+
+        await _ingest(org, cid, event_id="evt_named", payload=_invoice_paid("evt_named"))
+        # A reversal references a document, not a person: nobody to name, and
+        # saying so is the point -- the column must not invent one.
+        await _ingest(
+            org,
+            cid,
+            event_id="evt_anon",
+            event_type="charge.refunded",
+            payload={
+                "id": "evt_anon",
+                "type": "charge.refunded",
+                "data": {"object": {"id": "ch_x", "amount_refunded": 100}},
+            },
+        )
+
+        rows: list[dict[str, Any]] = (
+            await c.get(f"{_base(issuer)}/{cid}/events", headers=member)
+        ).json()
+        by_id = {row["provider_event_id"]: row for row in rows}
+
+        assert by_id["evt_named"]["counterpart_name"] == "Acme SpA"
+        assert by_id["evt_named"]["counterpart_email"] == "amministrazione@acme.test"
+        assert by_id["evt_anon"]["counterpart_name"] is None
+        assert by_id["evt_anon"]["counterpart_email"] is None
+        assert all("payload" not in row for row in rows)
+
+
+async def test_a_native_connector_names_its_counterpart_in_its_own_dialect() -> None:
+    """The projection follows the CONNECTOR's provider, not a hard-coded one:
+    reading a native payload with the Stripe mapper would find nothing, and an
+    empty column would look like a payload that named nobody."""
+    async with _client() as c:
+        owner, member, org, issuer = await _setup(c)
+        cid = (await _create(c, owner, issuer, provider="mycelium"))["id"]
+
+        await _ingest(
+            org,
+            cid,
+            event_id="ev-native",
+            event_type="invoice.issue",
+            payload={
+                "id": "ev-native",
+                "type": "invoice.issue",
+                "data": {
+                    "reference": "ORD-1",
+                    "customer": {"legal_name": "Beta Srl", "email": "beta@beta.test"},
+                },
+            },
+        )
+
+        rows: list[dict[str, Any]] = (
+            await c.get(f"{_base(issuer)}/{cid}/events", headers=member)
+        ).json()
+        assert [row["counterpart_name"] for row in rows] == ["Beta Srl"]
+        assert [row["counterpart_email"] for row in rows] == ["beta@beta.test"]
+
+
 async def test_deliveries_are_scoped_and_refused_only_is_the_security_view() -> None:
     async with _client() as c:
         owner, member, org, issuer = await _setup(c)

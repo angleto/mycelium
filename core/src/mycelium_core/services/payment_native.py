@@ -50,6 +50,7 @@ from mycelium_core.services.payment_events import (
     LineIn,
     MapperConfig,
     ObjectKey,
+    PartyDigest,
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
@@ -242,6 +243,35 @@ class NativeMapper:
         if ctx.payment_sync:
             events.append(ProviderEvent(EVENT_PAYMENT, "payment_sync", required=False))
         return tuple(events)
+
+    def describe_counterpart(self, payload: Mapping[str, Any]) -> PartyDigest:
+        """Who this event is about, for the triage list. Never raises.
+
+        Our own contract, so there is exactly one place to look: the issue
+        event's ``customer`` block. A credit or a payment references the
+        original document rather than restating its counterpart, so those two
+        legitimately name nobody -- the operator reads the parent's name from
+        the invoice the reference points at.
+        """
+        customer = as_mapping(as_mapping(payload.get("data")).get("customer"))
+        if not customer:
+            return PartyDigest()
+        # Same precedence as ``_party``: the legal name when the sender states
+        # one, the personal name assembled only as a fallback. No "Cliente"
+        # placeholder here -- that default exists to satisfy a fiscal field,
+        # and printing it in a read column would claim knowledge we lack.
+        name = as_str(customer.get("legal_name")) or (
+            " ".join(
+                part
+                for part in (as_str(customer.get("first_name")), as_str(customer.get("last_name")))
+                if part
+            )
+            or None
+        )
+        return PartyDigest(
+            name=clamp_field("legal_name", name),
+            email=clamp_field("email", as_str(customer.get("email"))),
+        )
 
     def to_intent(self, payload: Mapping[str, Any], *, config: MapperConfig) -> Intent:
         identity = self.identify(payload)

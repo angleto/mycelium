@@ -87,6 +87,7 @@ from mycelium_core.services.payment_events import (
     Intent,
     LineIn,
     MapperConfig,
+    PartyDigest,
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
@@ -2075,6 +2076,33 @@ async def list_events(
     return list((await session.execute(stmt)).scalars().all())
 
 
+def counterpart_of(event: PaymentConnectorEvent, *, provider: str) -> PartyDigest:
+    """Name the counterpart of a stored event, for the operator's list.
+
+    Derived from the FROZEN payload on read rather than denormalised into
+    columns at ingest. Two reasons, and the second is the decisive one:
+
+    * the payload is on the row already and is loaded with it, so this costs a
+      few dict lookups per row and no query, no migration and no backfill;
+    * a denormalised column would be empty for every event ALREADY parked --
+      precisely the rows an operator is looking at when they ask whose payment
+      this is. Reading the payload answers for the whole history on the first
+      deploy.
+
+    Total by construction: an unknown provider or a payload that names nobody
+    is an empty digest. This is a triage column, and a projection that raised
+    would take the whole list down with the one row it could not read.
+    """
+    try:
+        mapper = get_mapper(provider)
+    except PayloadError:  # pragma: no cover - guarded by the CHECK constraint
+        return PartyDigest()
+    payload = event.payload
+    if not isinstance(payload, Mapping):  # pragma: no cover - JSONB always maps
+        return PartyDigest()
+    return mapper.describe_counterpart(payload)
+
+
 async def assign_customer_client(
     session: AsyncSession,
     *,
@@ -2215,6 +2243,7 @@ __all__ = [
     "body_digest",
     "claim_due",
     "clear_api_key",
+    "counterpart_of",
     "create_connector",
     "discard_dry_run",
     "generate_api_key",

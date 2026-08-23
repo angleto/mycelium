@@ -42,6 +42,7 @@ from mycelium_core.services.payment_events import (
     LineIn,
     MapperConfig,
     ObjectKey,
+    PartyDigest,
     PartyIn,
     PayloadError,
     PaymentSyncIntent,
@@ -185,6 +186,56 @@ def _party(
         sdi_code=clamp_field("sdi_code", first_present(metadata, config.metadata_sdi_keys)),
         pec=clamp_field("pec", first_present(metadata, config.metadata_pec_keys)),
         email=clamp_field("email", as_str(node.get("email"))),
+    )
+
+
+def _expanded_charge(obj: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The Charge inlined in a PaymentIntent, under either API-version spelling.
+
+    Distinct from ``_first_charge``, which wants the charge's ID for an object
+    key. Here only an EXPANDED charge is of any use: an id is a string and
+    carries no billing block. Absent expansion this is empty, which is the
+    honest answer.
+    """
+    latest = obj.get("latest_charge")
+    if isinstance(latest, Mapping):
+        return as_mapping(latest)
+    rows = as_sequence(as_mapping(obj.get("charges")).get("data"))
+    first = as_mapping(rows[0]) if rows else {}
+    return first
+
+
+def _counterpart_nodes(obj: Mapping[str, Any], *, is_customer: bool) -> tuple[Any, ...]:
+    """Every place a Stripe object may spell the counterpart, best first.
+
+    One list rather than a branch per event type, for the same reason ``_party``
+    is one function: the shapes differ in WHERE the pair lives, not in what it
+    means, and a per-event branch would have to be revisited for every event
+    type a future connector subscribes to.
+
+    ``is_customer`` gates reading the object's own ``name``: on a Customer that
+    field IS the counterpart, and on a Product or a Plan it is the article's
+    name. Guessing wrong here would print a subscription's name in the column
+    that answers "whose payment is this?".
+    """
+    charge = _expanded_charge(obj)
+    customer = obj.get("customer")
+    return (
+        # A Checkout Session states the identity it collected at the till.
+        as_mapping(obj.get("customer_details")),
+        # An Invoice spells the counterpart with a ``customer_`` prefix.
+        {"name": obj.get("customer_name"), "email": obj.get("customer_email")},
+        # A Customer object spells it plainly.
+        obj if is_customer else {},
+        # ... and an event whose sender expanded ``customer`` inlines the same.
+        as_mapping(customer) if isinstance(customer, Mapping) else {},
+        # A Charge carries what the payment form collected.
+        as_mapping(obj.get("billing_details")),
+        as_mapping(charge.get("billing_details")),
+        # Last resort: the address Stripe would mail the receipt to. A name is
+        # never derived from it -- the local part of an address is a guess, and
+        # a wrong name reads as a fact.
+        {"email": obj.get("receipt_email") or charge.get("receipt_email")},
     )
 
 
@@ -418,6 +469,36 @@ class StripeMapper:
                     events.append(ProviderEvent(candidate, "payment_sync", required=False))
                     break
         return tuple(events)
+
+    def describe_counterpart(self, payload: Mapping[str, Any]) -> PartyDigest:
+        """Who this event is about, for the triage list. Never raises.
+
+        The name and the email are resolved INDEPENDENTLY, first node wins for
+        each: a Stripe invoice routinely carries ``customer_email`` and a null
+        ``customer_name`` (the address is collected at checkout, the name is
+        typed later, if ever), and stopping at the first node that has anything
+        would throw away a name the expanded customer does carry.
+        """
+        obj = _event_object(payload)
+        if not obj:
+            return PartyDigest()
+        # A Customer event's object IS the counterpart. The ``object``
+        # discriminator is the authority when Stripe sends one; the event type
+        # is the fallback, because it is what routes every other decision here
+        # and it is present on every event.
+        event_type = as_str(payload.get("type")) or ""
+        is_customer = as_str(obj.get("object")) == "customer" or event_type.startswith("customer.")
+        name: str | None = None
+        email: str | None = None
+        for node in _counterpart_nodes(obj, is_customer=is_customer):
+            mapping = as_mapping(node)
+            name = name or as_str(mapping.get("name"))
+            email = email or as_str(mapping.get("email"))
+            if name and email:
+                break
+        # Clamped like everything the mapper emits: a provider string of
+        # unbounded length must not travel into a response unchecked.
+        return PartyDigest(name=clamp_field("legal_name", name), email=clamp_field("email", email))
 
     def to_intent(self, payload: Mapping[str, Any], *, config: MapperConfig) -> Intent:
         identity = self.identify(payload)

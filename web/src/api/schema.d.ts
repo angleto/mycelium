@@ -6611,8 +6611,12 @@ export interface paths {
          * List Events
          * @description The triage list. Filter by ``status=needs_attention`` for the quarantine.
          *
-         *     The raw provider payload is deliberately NOT projected: it carries the
-         *     counterpart's personal data and is only needed by the runner.
+         *     The raw provider payload is still NOT projected: it is a nested vendor
+         *     object carrying the counterpart's full record, and it has its own route for
+         *     when an operator asks to see exactly what arrived. What IS lifted out of it
+         *     is the counterpart's name and email -- deliberately, because the column
+         *     used to show a provider customer id and nothing else, which identifies the
+         *     payment in Stripe's database and not in the operator's head.
          */
         get: operations["list_events_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events_get"];
         put?: never;
@@ -11891,6 +11895,10 @@ export interface components {
             invoice_id: string | null;
             /** Provider Customer Id */
             provider_customer_id: string | null;
+            /** Counterpart Name */
+            counterpart_name: string | null;
+            /** Counterpart Email */
+            counterpart_email: string | null;
             /** Dry Run */
             dry_run: boolean;
             /** Has Dry Run Xml */

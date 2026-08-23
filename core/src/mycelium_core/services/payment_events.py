@@ -215,6 +215,28 @@ class PartyIn:
 
 
 @dataclass(frozen=True, slots=True)
+class PartyDigest:
+    """Who the counterpart IS, in the two fields a human recognises them by.
+
+    Deliberately NOT :class:`PartyIn`. That one is fiscal input and requires a
+    ``legal_name``, so a payload carrying nothing but an email would have to be
+    given an invented name to be expressed at all. This is a READ projection for
+    the operator's triage list: both halves are optional because "the provider
+    told us nothing" is a real and frequent answer, and saying so is the point.
+
+    It carries no fiscal identifiers on purpose. A name and an email answer
+    "whose payment is this?"; the VAT number and the codice destinatario answer
+    "can it be invoiced?", which the reason column already reports.
+    """
+
+    name: str | None = None
+    email: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.name is not None or self.email is not None
+
+
+@dataclass(frozen=True, slots=True)
 class LineIn:
     """One invoice line, per unit, in major units.
 
@@ -465,6 +487,23 @@ class PaymentEventMapper(Protocol):
         """Translate a recognised event into a neutral intent."""
         ...
 
+    def describe_counterpart(self, payload: Mapping[str, Any]) -> PartyDigest:
+        """Name the counterpart a payload is about, for a human to read.
+
+        TOTAL and never raising, unlike ``to_intent``: it is called on rows that
+        are already parked, several of which are parked precisely BECAUSE the
+        payload could not be mapped, and a projection that threw on those would
+        blank the column exactly when the operator needs it. A payload that
+        names nobody is an empty digest, not an error.
+
+        Separate from ``to_intent`` rather than read off its result: three of
+        the five intents carry no party at all (a refund, a reconciliation, an
+        ignored event), yet their payloads still name a customer, and building
+        an entire intent -- lines, VAT arithmetic, object keys -- to read two
+        strings would make a 200-row list pay for work it discards.
+        """
+        ...
+
     def subscription(self, ctx: SubscriptionContext) -> tuple[ProviderEvent, ...]:
         """Exactly the events this configuration needs the provider to deliver.
 
@@ -649,6 +688,7 @@ __all__ = [
     "LineIn",
     "MapperConfig",
     "ObjectKey",
+    "PartyDigest",
     "PartyIn",
     "PayloadError",
     "PaymentEventMapper",

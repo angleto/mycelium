@@ -355,7 +355,14 @@ unauthenticated webhook and whose fiscal work happens in a worker.
   org's name is the same chicken-and-egg carve-out that keeps issuer keys
   and agent tokens off the assistant surface. The triage list deliberately
   does not project the raw provider payload (it carries the counterpart's
-  personal data).
+  full record); it has its own route, for when an operator asks to see
+  exactly what arrived. Two fields ARE lifted out of it onto every row --
+  the counterpart's name and email, via a total `describe_counterpart` on
+  the mapper -- because a provider customer id identifies the payment in
+  the provider's database and nobody in the operator's head. Derived on
+  read from the frozen payload rather than denormalised at ingest: a
+  column would be empty for every event already parked, which is exactly
+  the set an operator is looking at when they ask whose payment this is.
 - Config knobs: `payment_connectors_enabled`, `payment_connector_base_url`,
   `payment_connector_tolerance_seconds`, `payment_connector_max_body_bytes`,
   `payment_connector_poll_interval_seconds`,

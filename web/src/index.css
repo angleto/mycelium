@@ -1784,6 +1784,22 @@ button.btn--danger:hover {
   color: var(--muted);
   font-size: 0.85rem;
 }
+/* Present to a screen reader, absent to the eye. For labels the layout already
+   makes obvious and the accessibility tree does not -- a table's action column
+   has a heading cell whether or not it has a visible title, and an empty <th>
+   leaves the column unnamed for anyone navigating the table by header. Clipped
+   rather than ``display:none``, which would remove it from the tree too. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 .codes {
   font-family: var(--mono);
@@ -2148,6 +2164,237 @@ button.btn--danger:hover {
 .tbl th {
   color: var(--muted);
   font-weight: 600;
+}
+
+/* A data table may scroll sideways; the page may not. ``.card`` is a flex
+   column, so a table whose min-content exceeds the card does not shrink -- it
+   overflows the viewport and takes the sticky topbar and the sidebar with it.
+   This box absorbs that at EVERY width, where the shared
+   ``@media (max-width: 820px) .tbl { overflow-x: auto }`` rule only covers
+   below the tablet breakpoint. ``min-width: 0`` because a flex item defaults
+   to its min-content width and would otherwise refuse to be the narrower box
+   the scroll depends on. */
+.tblwrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- readable variant: ``tbl--stack`` ----
+   Opt-in, not a change to ``.tbl``: the invoice-line tables it was written for
+   are three short numeric columns and are already fine. This variant is for the
+   operator's ledgers (payment-connector triage, delivery log), where a row is a
+   paragraph -- a name, an email, a sentence explaining a refusal -- and the
+   defaults produce a wall of ragged text. Two things change: the row becomes a
+   scannable unit (roomier cells, a hover band, header separated by a rule), and
+   below 640px the row becomes a CARD, because six columns of horizontal
+   scrolling is not a table anybody reads on a phone. */
+.tbl--stack th,
+.tbl--stack td {
+  /* Roomier than ``.tbl`` vertically, because a row here is several lines and
+     needs the separation; NOT roomier horizontally, because six columns pay
+     that twice each and it is width this table does not have. */
+  padding: 0.45rem 0.5rem;
+}
+.tbl--stack thead th {
+  /* A rule under the headings, not just another row separator: this is where
+     the record starts. */
+  border-bottom-width: 2px;
+}
+.tbl--stack tbody tr:hover td {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+/* Figures compared down a column, not read as words: right-aligned so the
+   units line up, and tabular so they do not shimmy row to row. Written as
+   ``th.``/``td.`` because ``.tbl th`` already sets text-align and outranks a
+   bare class -- the alignment silently did nothing until it was qualified. */
+.tbl th.tbl__num,
+.tbl td.tbl__num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* A timestamp is a fixed-width fact and must not be the reason a row wraps: it
+   would take width from the columns that carry meaning. The ``nowrap`` is what
+   makes the ``width: 1%`` hint below mean "one line" rather than "the
+   narrowest this can be squeezed to" -- dropping it does not free the column,
+   it just breaks the date across three lines. The overflow it can cause is
+   handled where it belongs, by ``.tblwrap``. */
+.tbl__when {
+  white-space: nowrap;
+  color: var(--muted);
+}
+/* Row controls: right-aligned against the edge and free to WRAP. Holding them
+   on one line is what pushed the table past its card -- an auto-layout table
+   grows to fit a cell that refuses to break, and the columns carrying sentences
+   are the ones that pay for it. The inline assign panel is a form, not a
+   control, so it keeps reading left to right. */
+.tbl td.tbl__acts {
+  /* Qualified with ``td`` for the same reason ``.tbl__num`` is: ``.tbl td``
+     already sets text-align, and a bare class loses to it on specificity
+     regardless of source order. Unqualified, this rule did nothing. */
+  text-align: right;
+}
+.tbl__acts > button {
+  margin: 0 0 0.25rem 0.3rem;
+  /* Each control is one unbroken label; the SET of them wraps. Letting a
+     button break internally ("Make / sendable") makes a column of buttons read
+     as a paragraph. */
+  white-space: nowrap;
+}
+.tbl__acts .pc-assign {
+  text-align: left;
+}
+/* Column shares. Auto layout left to itself hands the width to whichever
+   column holds the longest unbreakable token -- a provider id, a timestamp --
+   and squeezes the ones carrying sentences, which are the ones an operator
+   actually reads. So the short fixed-shape columns are told to shrink to their
+   content (the 1% + nowrap idiom) and the prose columns are given a share.
+   Hints, not fixed widths: a table with room to spare still distributes it. */
+.tbl--stack th.tbl__num,
+.tbl--stack th.tbl__when {
+  width: 1%;
+}
+.tbl--stack th.tbl__prose {
+  width: 22%;
+}
+/* An event type is a stable identifier (``invoice.paid``): it is recognised at
+   a glance and breaking it across lines destroys that. */
+.pc-evt {
+  white-space: nowrap;
+  /* One notch down from the table's own size: it is an identifier scanned for
+     recognition, like the id under it, and at the table's size the longest one
+     (``payment_intent.succeeded``) sets the widest column on the row. */
+  font-size: 0.82rem;
+}
+/* The counterpart, as the provider's payload named them: who first, how to
+   reach them second, and only then the provider's own id. Capped so a long
+   ragione sociale cannot swallow the reason column, and broken anywhere
+   because an email has no spaces to break at. */
+.pc-party {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+  max-width: 18rem;
+}
+.pc-party__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pc-party__mail {
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* Clickable without being loud. The global ``a`` rule paints links accent,
+   which would make the address shout over the NAME above it -- and the name is
+   what identifies the row. So it keeps the muted ink and signals itself with
+   the same dotted underline the provider id uses two rules down, going accent
+   only on hover and focus. */
+.pc-party__mail--link {
+  color: var(--muted);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.pc-party__mail--link:hover,
+.pc-party__mail--link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline solid;
+}
+/* Below the tablet breakpoint: one card per row. The header row is removed
+   from view (kept for assistive tech) and each cell prints its own label, so a
+   row reads top to bottom instead of sideways.
+   At 820px rather than 640px, i.e. the same width at which the shared rule
+   above hands ``.tbl`` its own horizontal scroll. These two tables are six
+   columns of which two carry sentences: at 700-800px they either scroll
+   sideways or squeeze every column until it wraps, and a card avoids both. It
+   also means these tables never need the scroll fallback at all -- one
+   mechanism instead of two. */
+@media (max-width: 820px) {
+  .tbl--stack,
+  .tbl--stack tbody,
+  .tbl--stack tr,
+  .tbl--stack td {
+    display: block;
+  }
+  .tbl--stack {
+    min-width: 0;
+    overflow: visible;
+  }
+  /* Not display:none: the headings still name the columns for a screen reader
+     reading the labels below. */
+  .tbl--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .tbl--stack tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.55rem;
+  }
+  .tbl--stack td {
+    border: 0;
+    padding: 0.2rem 0;
+    display: grid;
+    /* A share, capped: a bare percentage would spend a third of an 800px card
+       on the word "Attempts", and a bare rem cap would leave a 360px phone
+       almost no room for the value. */
+    grid-template-columns: minmax(4.5rem, min(32%, 11rem)) 1fr;
+    gap: 0.6rem;
+    align-items: start;
+    text-align: left;
+  }
+  .tbl--stack td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  /* Every element in the cell belongs to the VALUE, not to the label column.
+     Without this a cell with two children (the event id under its type, the
+     missing-fields list under the reason) puts the second one under the label
+     and the record stops lining up. */
+  .tbl--stack td > * {
+    grid-column: 2;
+  }
+  /* A cell with no label is not a field of the record but the row's controls:
+     it takes the whole card width instead of leaving an empty label column. */
+  .tbl--stack td:not([data-label]) {
+    display: block;
+  }
+  .tbl--stack td.tbl__acts {
+    margin-top: 0.3rem;
+    /* A card has no right edge to align against: the controls start where
+       every value in the card starts. */
+    text-align: left;
+  }
+  .tbl--stack td.tbl__num {
+    text-align: left;
+  }
+  /* The column-share hints are a desktop concern; a card has one column. */
+  .tbl--stack th.tbl__num,
+  .tbl--stack th.tbl__when,
+  .tbl--stack th.tbl__prose {
+    width: auto;
+  }
+  .tbl--stack .pc-party {
+    max-width: none;
+  }
+  /* Keeping an event type unbroken is a preference, not a law: on a narrow
+     phone the alternative is a card wider than the screen. ``anywhere`` only
+     breaks when there is no other way to fit, so it stays on one line whenever
+     it can. */
+  .tbl--stack .pc-evt,
+  .tbl--stack .pc-id {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* ---- dependency DAG / gantt ---- */

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
+import { mailtoHref } from '../lib/mailto'
 
 // Inbound payment connectors (ADR-0051), org-facing surface. A connector turns
 // a payment provider's webhooks into FatturaPA documents for ONE issuer
@@ -89,6 +90,11 @@ type EventRow = {
   error_detail: string | null
   invoice_id: string | null
   provider_customer_id: string | null
+  /** The counterpart as the provider's own payload named them, derived by the
+   * backend from the frozen event. Null when the event names nobody: a refund
+   * and a reconciliation reference a document, not a person. */
+  counterpart_name: string | null
+  counterpart_email: string | null
   dry_run: boolean
   has_dry_run_xml: boolean
 }
@@ -694,6 +700,48 @@ function ProviderId({
   )
 }
 
+/** Who the payment is from, as the provider's own payload named them.
+ *
+ * The provider customer id used to be the entire column: eighteen characters
+ * of entropy that identify a row in Stripe's database and nobody at all in the
+ * operator's head. Deciding what to do with a parked payment starts with
+ * "whose is it?", so the company name leads and the email follows it -- the
+ * email is often the only thing a provider has on a counterpart who never
+ * filled in their billing data, which is exactly why these rows are parked.
+ *
+ * The id stays, quietly, at the bottom: it is what the assign-client action
+ * keys on and what a support conversation has to quote. */
+function Counterpart({ row }: { row: EventRow }) {
+  const { counterpart_name: name, counterpart_email: email } = row
+  if (!name && !email && !row.provider_customer_id) return <span className="muted">—</span>
+  const href = email ? mailtoHref(email) : null
+  return (
+    <div className="pc-party">
+      {/* No ``title`` on either line, unlike the provider id below: these two
+          are shown in full (they wrap rather than truncate), so a tooltip would
+          repeat what is already on screen and make a screen reader read every
+          name twice. */}
+      {name && <span className="pc-party__name">{name}</span>}
+      {/* The address is the exit from this row, not decoration: an event parked
+          on ``client_billing_data_missing`` is waiting for the counterpart to
+          supply data, and writing to them is the action that unblocks it. */}
+      {email &&
+        (href ? (
+          <a className="pc-party__mail pc-party__mail--link" href={href}>
+            {email}
+          </a>
+        ) : (
+          <span className="pc-party__mail">{email}</span>
+        ))}
+      {row.provider_customer_id && (
+        <div>
+          <ProviderId value={row.provider_customer_id} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Why an event did not become a document, in words.
  *
  * The slugs are the ledger's vocabulary and belong in the ledger; an operator
@@ -1002,126 +1050,152 @@ export function ConnectorEvents({
       {status === 'no_billing_data' && rows.length > 0 && (
         <p className="hint">{t('paymentConnectors.noBillingDataHint')}</p>
       )}
+      {/* The scroll box is the WRAPPER, not the table. Above the card
+          breakpoint this is a real six-column table, and a table whose
+          min-content is wider than its card would push the whole PAGE
+          sideways -- dragging the sticky topbar and the sidebar with it.
+          A data table may scroll in its own box; the page may not. */}
       {!loading && rows.length > 0 && (
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>{t('paymentConnectors.eventType')}</th>
-              <th>{t('paymentConnectors.customer')}</th>
-              <th>{t('paymentConnectors.errorSlug')}</th>
-              <th>{t('paymentConnectors.attempts')}</th>
-              <th>{t('paymentConnectors.createdAt')}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <code>{r.event_type}</code>
-                  <div className="muted">
-                    {/* The id opens the event. It is the row's identity, so it
-                        is also the obvious thing to click to ask "what was
-                        it?" -- a separate button would just be a second name
-                        for the same row. */}
-                    <ProviderId
-                      value={r.provider_event_id}
-                      expanded={payload?.id === r.id}
-                      onClick={() => void onShowPayload(r.id, r.provider_event_id)}
-                    />
-                  </div>
-                </td>
-                <td>
-                  {r.provider_customer_id ? (
-                    <ProviderId value={r.provider_customer_id} />
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td>
-                  {/* The detail names WHICH fiscal datum is missing, which is
-                      the difference between "fix something" and "fix this". */}
-                  <EventReason slug={r.last_error} detail={r.error_detail} />
-                </td>
-                <td>
-                  {r.attempt_count}/{r.max_attempts}
-                </td>
-                <td>{stamp(r.created_at)}</td>
-                <td>
-                  {/* In shadow mode the XML is the deliverable: this is the
-                      artefact you diff against the incumbent provider. */}
-                  {r.has_dry_run_xml && (
-                    <button
-                      type="button"
-                      className="btn--sm"
-                      onClick={() => void onDownloadXml(r.id)}
-                    >
-                      {t('paymentConnectors.downloadXml')}
-                    </button>
-                  )}
-                  {/* The other exit from a parallel run. Discard throws every
-                      shadow away; this promotes ONE, for the payment the
-                      incumbent provider did not invoice after all. It moves the
-                      claim with the document, so a later redelivery cannot
-                      compose a second invoice for the same money, and it
-                      refuses if a real document already covers it. */}
-                  {r.has_dry_run_xml && (
-                    <button
-                      type="button"
-                      className="btn--sm"
-                      onClick={() => void onPromote(r.id)}
-                    >
-                      {t('paymentConnectors.promote')}
-                    </button>
-                  )}
-                  {r.status === 'no_billing_data' && r.provider_customer_id && (
-                    <button
-                      type="button"
-                      className="btn--sm"
-                      aria-expanded={assigning === r.id}
-                      onClick={() => void openAssign(r.id)}
-                    >
-                      {t('paymentConnectors.assignClient')}
-                    </button>
-                  )}
-                  {assigning === r.id && (
-                    <div className="pc-assign">
-                      <p className="hint">
-                        {t('paymentConnectors.assignPrompt', {
-                          customer: r.provider_customer_id,
-                        })}
-                      </p>
-                      <select
-                        defaultValue=""
-                        onChange={(e) => {
-                          if (e.target.value) void onAssignClient(r, e.target.value)
-                        }}
-                      >
-                        <option value="" disabled>
-                          {t('paymentConnectors.assignPick')}
-                        </option>
-                        {clients.map((cl) => (
-                          <option key={cl.id} value={cl.id}>
-                            {cl.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  {r.status !== 'done' && (
-                    <button
-                      type="button"
-                      className="btn--sm btn--ghost"
-                      onClick={() => void onRetry(r.id)}
-                    >
-                      {t('paymentConnectors.retry')}
-                    </button>
-                  )}
-                </td>
+        <div className="tblwrap">
+          <table className="tbl tbl--stack">
+            <thead>
+              <tr>
+                <th scope="col">{t('paymentConnectors.eventType')}</th>
+                <th scope="col" className="tbl__prose">
+                  {t('paymentConnectors.customer')}
+                </th>
+                <th scope="col" className="tbl__prose">
+                  {t('paymentConnectors.errorSlug')}
+                </th>
+                <th scope="col" className="tbl__num">
+                  {t('paymentConnectors.attempts')}
+                </th>
+                <th scope="col" className="tbl__when">
+                  {t('paymentConnectors.createdAt')}
+                </th>
+                <th scope="col">
+                  {/* Not a data column, and naming it would suggest it is one.
+                      The stacked narrow layout needs the header row to exist
+                      all the same, so the label is given to assistive tech
+                      only. */}
+                  <span className="sr-only">{t('paymentConnectors.actions')}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  {/* ``data-label`` is what the narrow layout prints in front
+                      of each cell once the header row is gone: below the 820px
+                      tablet breakpoint the rows become cards, because six
+                      columns of horizontal scrolling is not a table anybody
+                      reads on a phone. */}
+                  <td data-label={t('paymentConnectors.eventType')}>
+                    <code className="pc-evt">{r.event_type}</code>
+                    <div className="muted">
+                      {/* The id opens the event. It is the row's identity, so it
+                          is also the obvious thing to click to ask "what was
+                          it?" -- a separate button would just be a second name
+                          for the same row. */}
+                      <ProviderId
+                        value={r.provider_event_id}
+                        expanded={payload?.id === r.id}
+                        onClick={() => void onShowPayload(r.id, r.provider_event_id)}
+                      />
+                    </div>
+                  </td>
+                  <td data-label={t('paymentConnectors.customer')}>
+                    <Counterpart row={r} />
+                  </td>
+                  <td data-label={t('paymentConnectors.errorSlug')}>
+                    {/* The detail names WHICH fiscal datum is missing, which is
+                        the difference between "fix something" and "fix this". */}
+                    <EventReason slug={r.last_error} detail={r.error_detail} />
+                  </td>
+                  <td className="tbl__num" data-label={t('paymentConnectors.attempts')}>
+                    {r.attempt_count}/{r.max_attempts}
+                  </td>
+                  <td className="tbl__when" data-label={t('paymentConnectors.createdAt')}>
+                    {stamp(r.created_at)}
+                  </td>
+                  {/* No data-label: the buttons name themselves, and a label
+                      column would pull the inline assign panel out of line. */}
+                  <td className="tbl__acts">
+                    {/* In shadow mode the XML is the deliverable: this is the
+                        artefact you diff against the incumbent provider. */}
+                    {r.has_dry_run_xml && (
+                      <button
+                        type="button"
+                        className="btn--sm"
+                        onClick={() => void onDownloadXml(r.id)}
+                      >
+                        {t('paymentConnectors.downloadXml')}
+                      </button>
+                    )}
+                    {/* The other exit from a parallel run. Discard throws every
+                        shadow away; this promotes ONE, for the payment the
+                        incumbent provider did not invoice after all. It moves the
+                        claim with the document, so a later redelivery cannot
+                        compose a second invoice for the same money, and it
+                        refuses if a real document already covers it. */}
+                    {r.has_dry_run_xml && (
+                      <button
+                        type="button"
+                        className="btn--sm"
+                        onClick={() => void onPromote(r.id)}
+                      >
+                        {t('paymentConnectors.promote')}
+                      </button>
+                    )}
+                    {r.status === 'no_billing_data' && r.provider_customer_id && (
+                      <button
+                        type="button"
+                        className="btn--sm"
+                        aria-expanded={assigning === r.id}
+                        onClick={() => void openAssign(r.id)}
+                      >
+                        {t('paymentConnectors.assignClient')}
+                      </button>
+                    )}
+                    {assigning === r.id && (
+                      <div className="pc-assign">
+                        <p className="hint">
+                          {t('paymentConnectors.assignPrompt', {
+                            customer: r.provider_customer_id,
+                          })}
+                        </p>
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            if (e.target.value) void onAssignClient(r, e.target.value)
+                          }}
+                        >
+                          <option value="" disabled>
+                            {t('paymentConnectors.assignPick')}
+                          </option>
+                          {clients.map((cl) => (
+                            <option key={cl.id} value={cl.id}>
+                              {cl.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {r.status !== 'done' && (
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        onClick={() => void onRetry(r.id)}
+                      >
+                        {t('paymentConnectors.retry')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {/* A window, not an expanded row: the payload is a nested provider object
           and inlining it would push every other event off the screen, turning a
@@ -1224,38 +1298,53 @@ export function ConnectorDeliveries({
       {!loading && rows.length === 0 && (
         <p className="ok">{t('paymentConnectors.deliveriesEmpty')}</p>
       )}
+      {/* The scroll box is the WRAPPER, not the table. Above the card
+          breakpoint this is a real six-column table, and a table whose
+          min-content is wider than its card would push the whole PAGE
+          sideways -- dragging the sticky topbar and the sidebar with it.
+          A data table may scroll in its own box; the page may not. */}
       {rows.length > 0 && (
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>{t('paymentConnectors.outcome')}</th>
-              <th>{t('paymentConnectors.httpStatus')}</th>
-              <th>{t('paymentConnectors.providerEventId')}</th>
-              <th>{t('paymentConnectors.receivedAt')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  {/* Same rule as the event list: the slug is the ledger's
-                      vocabulary, the operator needs the sentence. On hover for
-                      a bug report. */}
-                  <span title={d.outcome}>{outcomeLabel(d.outcome)}</span>
-                </td>
-                <td>{d.http_status}</td>
-                <td>
-                  {d.provider_event_id ? (
-                    <ProviderId value={d.provider_event_id} />
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td>{stamp(d.received_at)}</td>
+        <div className="tblwrap">
+          <table className="tbl tbl--stack">
+            <thead>
+              <tr>
+                <th scope="col">{t('paymentConnectors.outcome')}</th>
+                <th scope="col" className="tbl__num">
+                  {t('paymentConnectors.httpStatus')}
+                </th>
+                <th scope="col">{t('paymentConnectors.providerEventId')}</th>
+                <th scope="col" className="tbl__when">
+                  {t('paymentConnectors.receivedAt')}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={d.id}>
+                  <td data-label={t('paymentConnectors.outcome')}>
+                    {/* Same rule as the event list: the slug is the ledger's
+                        vocabulary, the operator needs the sentence. On hover for
+                        a bug report. */}
+                    <span title={d.outcome}>{outcomeLabel(d.outcome)}</span>
+                  </td>
+                  <td className="tbl__num" data-label={t('paymentConnectors.httpStatus')}>
+                    {d.http_status}
+                  </td>
+                  <td data-label={t('paymentConnectors.providerEventId')}>
+                    {d.provider_event_id ? (
+                      <ProviderId value={d.provider_event_id} />
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className="tbl__when" data-label={t('paymentConnectors.receivedAt')}>
+                    {stamp(d.received_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

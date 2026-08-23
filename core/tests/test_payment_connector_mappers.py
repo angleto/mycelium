@@ -55,6 +55,7 @@ from mycelium_core.services.payment_events import (
     Intent,
     LineIn,
     MapperConfig,
+    PartyDigest,
     PayloadError,
     PaymentSyncIntent,
     SubscriptionContext,
@@ -1799,3 +1800,172 @@ def test_native_contract_asks_for_no_customer_event() -> None:
         )
     }
     assert events == {"invoice.issue", "invoice.credit", "invoice.payment"}
+
+
+# --- the counterpart digest (the triage list's "whose payment is this?") ----
+
+
+def test_stripe_digest_reads_the_invoice_customer_pair() -> None:
+    digest = payment_stripe.MAPPER.describe_counterpart(_event("invoice.paid", _invoice_obj()))
+    assert digest.name == "Acme SpA"
+    assert digest.email == "amministrazione@acme.test"
+    assert bool(digest) is True
+
+
+def test_stripe_digest_resolves_name_and_email_independently() -> None:
+    """Regression guard: an invoice routinely carries an email and a null name.
+
+    Stripe collects the address at checkout and the ``customer_name`` is typed
+    later, if ever, so the two halves arrive from different nodes. A projection
+    that stopped at the first node carrying ANYTHING would take the email off
+    the invoice and then never look at the expanded customer that does have the
+    name -- blanking the column on the commonest shape there is.
+    """
+    obj = _invoice_obj(
+        customer_name=None,
+        customer={"id": "cus_1", "object": "customer", "name": "Acme SpA", "email": None},
+    )
+    digest = payment_stripe.MAPPER.describe_counterpart(_event("invoice.paid", obj))
+    assert digest.name == "Acme SpA"
+    assert digest.email == "amministrazione@acme.test"
+
+
+def test_stripe_digest_reads_every_shape_the_mapper_emits_from() -> None:
+    """The four objects an emission or a reversal can arrive as."""
+    customer = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "customer.created",
+            {"id": "cus_1", "object": "customer", "name": "Beta Srl", "email": "b@beta.test"},
+        )
+    )
+    assert (customer.name, customer.email) == ("Beta Srl", "b@beta.test")
+
+    session = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "checkout.session.completed",
+            {
+                "id": "cs_1",
+                "customer_details": {"name": "Gamma SpA", "email": "g@gamma.test"},
+            },
+        )
+    )
+    assert (session.name, session.email) == ("Gamma SpA", "g@gamma.test")
+
+    charge = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "charge.refunded",
+            {
+                "id": "ch_1",
+                "billing_details": {"name": "Delta Srl", "email": None},
+                "receipt_email": "delta@delta.test",
+            },
+        )
+    )
+    # The receipt address is a last resort for the EMAIL only: the local part of
+    # an address is a guess at a name, and a guess printed in this column reads
+    # as a fact.
+    assert (charge.name, charge.email) == ("Delta Srl", "delta@delta.test")
+
+    intent = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "payment_intent.succeeded",
+            {
+                "id": "pi_1",
+                "latest_charge": {
+                    "id": "ch_2",
+                    "billing_details": {"name": "Epsilon SNC", "email": "e@eps.test"},
+                },
+            },
+        )
+    )
+    assert (intent.name, intent.email) == ("Epsilon SNC", "e@eps.test")
+
+    legacy = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "payment_intent.succeeded",
+            {
+                "id": "pi_2",
+                "charges": {
+                    "data": [{"id": "ch_3", "billing_details": {"name": "Zeta", "email": None}}]
+                },
+            },
+        )
+    )
+    assert legacy.name == "Zeta"
+
+
+def test_stripe_digest_never_mistakes_an_article_for_a_counterpart() -> None:
+    """Regression guard: ``name`` on a Stripe object is not always a person.
+
+    ``describe_counterpart`` runs over EVERY stored payload, including the ones
+    parked as ``event_type_not_mapped``. On a Product or a Plan the top-level
+    ``name`` is the article's, and printing "Abbonamento Pro" in the column
+    that answers "whose payment is this?" would be a confident lie.
+    """
+    digest = payment_stripe.MAPPER.describe_counterpart(
+        _event("product.created", {"id": "prod_1", "object": "product", "name": "Abbonamento Pro"})
+    )
+    assert (digest.name, digest.email) == (None, None)
+    assert bool(digest) is False
+
+
+def test_stripe_digest_is_total_on_payloads_to_intent_refuses() -> None:
+    """It must not raise where ``to_intent`` does: the rows it is asked about
+    are frequently parked BECAUSE the payload could not be mapped, and a
+    projection that threw would blank the column exactly when it is needed."""
+    broken: list[Mapping[str, Any]] = [
+        {},
+        {"id": "evt_1", "type": "invoice.paid"},
+        {"id": "evt_1", "type": "invoice.paid", "data": {}},
+        {"id": "evt_1", "type": "invoice.paid", "data": {"object": {}}},
+        {"id": "evt_1", "type": "customer.created", "data": {"object": {"object": "customer"}}},
+        _event("invoice.paid", {"id": "in_1", "customer_name": "", "customer_email": "  "}),
+    ]
+    for payload in broken:
+        with pytest.raises(PayloadError):
+            # The premise of the guard: these are exactly the shapes the mapper
+            # refuses to turn into a document.
+            payment_stripe.MAPPER.to_intent(payload, config=MapperConfig())
+        assert payment_stripe.MAPPER.describe_counterpart(payload) == PartyDigest()
+
+
+def test_stripe_digest_clamps_what_the_provider_sends() -> None:
+    """An unbounded provider string must not travel into a response verbatim."""
+    digest = payment_stripe.MAPPER.describe_counterpart(
+        _event(
+            "invoice.paid",
+            {"id": "in_1", "customer_name": "A" * 500, "customer_email": "b" * 400 + "@x.test"},
+        )
+    )
+    assert digest.name is not None and len(digest.name) == 200
+    assert digest.email is not None and len(digest.email) == 320
+
+
+def test_native_digest_reads_the_issue_customer_block() -> None:
+    digest = payment_native.MAPPER.describe_counterpart(
+        _native("invoice.issue", {"customer": _native_customer()})
+    )
+    assert (digest.name, digest.email) == ("Acme SpA", "amministrazione@acme.test")
+
+
+def test_native_digest_assembles_a_personal_name_and_invents_none() -> None:
+    """``_party`` falls back to "Cliente" because a fiscal field cannot be
+    empty. A read column can: printing a placeholder here would claim we know
+    who paid when the sender never said."""
+    person = payment_native.MAPPER.describe_counterpart(
+        _native("invoice.issue", {"customer": {"first_name": "Ada", "last_name": "Lovelace"}})
+    )
+    assert person.name == "Ada Lovelace"
+
+    for data in ({}, {"customer": {}}, {"customer": {"email": None}}):
+        assert (
+            payment_native.MAPPER.describe_counterpart(_native("invoice.issue", data)).name is None
+        )
+
+    # A credit or a payment references the parent document, not its counterpart.
+    assert (
+        payment_native.MAPPER.describe_counterpart(
+            _native("invoice.payment", {"reference": "ORD-1"})
+        )
+        == PartyDigest()
+    )

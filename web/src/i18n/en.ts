@@ -2577,6 +2577,7 @@ export const en = {
     missingLabel: 'Missing:',
     fieldOr: ' or ',
     customer: 'Customer (provider)',
+    actions: 'Actions',
     assignPick: 'Choose the client…',
     outcomeLabel: {
       accepted: 'Accepted',

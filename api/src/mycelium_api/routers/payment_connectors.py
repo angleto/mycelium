@@ -250,6 +250,13 @@ class PaymentConnectorEventOut(BaseModel):
     #: operator associates with a client to unblock it, so it has to be visible
     #: on the row rather than buried in the frozen payload.
     provider_customer_id: str | None
+    #: The counterpart as the PAYLOAD named them, derived on read rather than
+    #: stored: a provider customer id identifies a row in someone else's
+    #: system, and an operator deciding what to do with a parked payment needs
+    #: the company it belongs to. Null when the event named nobody -- a refund
+    #: and a reconciliation legitimately do not.
+    counterpart_name: str | None
+    counterpart_email: str | None
     dry_run: bool
     #: Whether a shadow document was produced and can be downloaded. The XML
     #: itself is not projected here: it is large and carries the counterpart's
@@ -328,26 +335,39 @@ def _create_out(
     )
 
 
-def _event_out(row: PaymentConnectorEvent) -> PaymentConnectorEventOut:
+#: Fields of the event DTO computed here rather than copied off the row.
+_DERIVED_EVENT_FIELDS = frozenset({"has_dry_run_xml", "counterpart_name", "counterpart_email"})
+
+
+def _event_out(row: PaymentConnectorEvent, *, provider: str) -> PaymentConnectorEventOut:
+    counterpart = svc.counterpart_of(row, provider=provider)
     return PaymentConnectorEventOut(
         **{
             f: getattr(row, f)
             for f in PaymentConnectorEventOut.model_fields
-            if f != "has_dry_run_xml"
+            if f not in _DERIVED_EVENT_FIELDS
         },
         has_dry_run_xml=row.dry_run_xml is not None,
+        counterpart_name=counterpart.name,
+        counterpart_email=counterpart.email,
     )
 
 
 async def _assert_in_issuer(
     ctx: TenantCtx, issuer_profile_id: uuid.UUID, connector_id: uuid.UUID
-) -> None:
+) -> str:
     """The nested connector must belong to the path's issuer profile. 404 on a
     mismatch, never 403: the surface must not confirm a connector under another
-    issuer."""
+    issuer.
+
+    Returns the connector's ``provider``: every route already runs this check,
+    and the event projection needs to know whose dialect the stored payloads
+    are in. Reading it here costs nothing (the same row, one more column) and
+    saves a second query on the two routes that project events.
+    """
     found = (
         await ctx.session.execute(
-            select(PaymentConnector.id).where(
+            select(PaymentConnector.provider).where(
                 PaymentConnector.id == connector_id,
                 PaymentConnector.issuer_profile_id == issuer_profile_id,
             )
@@ -355,6 +375,7 @@ async def _assert_in_issuer(
     ).scalar_one_or_none()
     if found is None:
         raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_NOT_FOUND)
+    return found
 
 
 # --- endpoints -------------------------------------------------------------
@@ -539,10 +560,14 @@ async def list_events(
 ) -> list[PaymentConnectorEventOut]:
     """The triage list. Filter by ``status=needs_attention`` for the quarantine.
 
-    The raw provider payload is deliberately NOT projected: it carries the
-    counterpart's personal data and is only needed by the runner.
+    The raw provider payload is still NOT projected: it is a nested vendor
+    object carrying the counterpart's full record, and it has its own route for
+    when an operator asks to see exactly what arrived. What IS lifted out of it
+    is the counterpart's name and email -- deliberately, because the column
+    used to show a provider customer id and nothing else, which identifies the
+    payment in Stripe's database and not in the operator's head.
     """
-    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    provider = await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
     rows: list[PaymentConnectorEvent] = await svc.list_events(
         ctx.session,
         org_id=ctx.org_id,
@@ -550,7 +575,7 @@ async def list_events(
         status=event_status,
         limit=limit,
     )
-    return [_event_out(r) for r in rows]
+    return [_event_out(r, provider=provider) for r in rows]
 
 
 @router.get(
@@ -815,7 +840,7 @@ async def retry_event(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> PaymentConnectorEventOut:
     """Re-arm a parked or dead event once the operator fixed what blocked it."""
-    await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    provider = await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
     row = await svc.retry_event(
         ctx.session,
         org_id=ctx.org_id,
@@ -823,4 +848,4 @@ async def retry_event(
         connector_id=connector_id,
         event_id=event_id,
     )
-    return _event_out(row)
+    return _event_out(row, provider=provider)
