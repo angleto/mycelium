@@ -1,6 +1,6 @@
-"""Typed task dependency (docs/adr/0004): FS/SS/FF/SF + working-time
-lag/lead. The set forms a DAG; cycle detection is in the service
-layer. CPM scheduling consumes these in F3."""
+"""Typed task dependency (FR-3): FS/SS/FF/SF + working-time lag/lead,
+whose inequalities are docs/adr/0004. The set forms a DAG; cycle
+detection is in the service layer. CPM scheduling consumes these in F3."""
 
 from __future__ import annotations
 

@@ -1,5 +1,6 @@
 """Task service: CRUD, tags/assignees, comments, workflow state
-transitions. RBAC, optimistic concurrency, i18n, audit (docs/adr/0004).
+transitions (FR-6). RBAC, optimistic concurrency, i18n, audit
+(docs/adr/0002, docs/adr/0017).
 """
 
 from __future__ import annotations

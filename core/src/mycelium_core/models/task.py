@@ -1,5 +1,5 @@
-"""Task: primary unit. State is a workflow state (docs/adr/0004,
-FR-6); scheduler fields arrive in F3. Executor = human user or LLM
+"""Task: primary unit. State is a workflow state (FR-6); scheduler
+fields arrive in F3 (FR-4, docs/adr/0004). Executor = human user or LLM
 agent."""
 
 from __future__ import annotations

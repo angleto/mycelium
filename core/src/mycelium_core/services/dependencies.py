@@ -1,6 +1,6 @@
-"""Dependency service (docs/adr/0004, FR-3): typed edges, cycle
-detection before insert, DAG graph query, derived blocked overlay.
-CPM scheduling consumes these in F3.
+"""Dependency service (FR-3, docs/adr/0004 for the working-time
+inequalities): typed edges, cycle detection before insert, DAG graph
+query, derived blocked overlay. CPM scheduling consumes these in F3.
 """
 
 from __future__ import annotations
