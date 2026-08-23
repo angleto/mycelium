@@ -69,3 +69,44 @@ def test_head_migration_downgrade_upgrade_roundtrip() -> None:
         assert trg == 1  # the delete guard trigger
     finally:
         engine.dispose()
+
+
+def test_reference_data_seeds_survive_the_chain() -> None:
+    """The seeds a squash silently drops.
+
+    A squash keeps the schema and drops the data. Two revisions of the
+    old chain carried SEEDS rather than transformations -- 0074's
+    ``system_settings`` singleton and 0043's seven fleet rate cards --
+    and the 2026-08-22 squash classified both as schema-only, so a
+    database built from the new baseline started life without them.
+
+    The singleton turned CI red (concurrent readers raced to create it);
+    the rate cards were worse and silent, because the suite seeds its own
+    and nothing asserted the fleet defaults exist -- ``billing`` would
+    have raised ``rate_card.not_found`` for every non-BYOK call on a new
+    deployment. Migration 0003 restores both.
+
+    This asserts the OUTCOME rather than the migration, so it keeps
+    holding if the chain is squashed again: the next squash must carry
+    these rows forward or turn this red.
+    """
+    sync_url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
+    if not sync_url:
+        pytest.skip("MYCELIUM_DATABASE_URL_SYNC not set")
+    engine = sa.create_engine(sync_url, future=True)
+    try:
+        with engine.connect() as conn:
+            settings = conn.execute(sa.text("SELECT count(*) FROM system_settings")).scalar_one()
+            cards = conn.execute(
+                sa.text("SELECT count(*) FROM default_rate_card WHERE is_active")
+            ).scalar_one()
+            fallbacks = set(
+                conn.execute(sa.text("SELECT model_id FROM default_rate_card")).scalars()
+            )
+        assert settings == 1, "the SdI environment singleton must exist, exactly once"
+        assert cards >= 7, "the fleet fallback rate cards must be seeded"
+        # The two the resolver falls back to by name when an org has no
+        # card of its own; named explicitly so a partial seed is caught.
+        assert {"gpt-4o-mini", "claude-3-5-haiku-latest"} <= fallbacks
+    finally:
+        engine.dispose()

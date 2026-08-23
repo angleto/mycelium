@@ -90,6 +90,43 @@ revisions that carried them are preserved whole under
 whether it ever ran in production. Four of them had silently no-opped
 there (see below); archiving is what keeps that recoverable.
 
+### Two SEEDS the archive triage missed (repaired by 0003)
+
+The triage above sorted revisions into "schema" and "data
+transformation". It missed a third category: a **seed**, an INSERT of
+reference data that is a fresh database's starting state rather than a
+repair of existing rows. Two revisions were classified as schema-only
+and were neither archived nor carried into the baseline:
+
+| revision | seeded | consequence on a fresh DB |
+|---|---|---|
+| `0074_system_settings_sdi_env` | the `system_settings` singleton | `_get_or_create` raced on first read; five concurrent invoice transmissions hit `UniqueViolationError` on the `id IS TRUE` PK. Turned CI red on tag `v2.2.19`. |
+| `0043_default_rate_card` | 7 fleet fallback rate cards | `billing.resolve_rate` returns None for any model with no per-org card, and `_compute_credits` raises `rate_card.not_found` — every non-BYOK LLM call on a new deployment. Silent: the suite seeds its own cards. |
+
+Production was never affected: it was stamped to `0001`, not replayed,
+so both seeds survived (verified 2026-08-23). Only databases *built*
+from the squashed baseline lacked them — CI, and any new environment.
+
+`0003_restore_squashed_seeds.py` restores both idempotently
+(`ON CONFLICT DO NOTHING`), so it is a no-op wherever they already
+exist. Its `downgrade()` is deliberately a no-op: nothing distinguishes
+a row it inserted from one that predates it, so deleting would strip
+the fleet rate cards from a database that never needed repairing.
+
+**For the next squash:** grep the revisions being dropped for INSERTs
+inside `upgrade()`, not just for the word "backfill".
+
+```bash
+git show <pre-squash-ref>:core/migrations/versions/<rev>.py \
+  | awk '/^def upgrade/,/^def downgrade/' | grep -nE "INSERT INTO|op\.bulk_insert"
+```
+
+An INSERT that seeds reference data must be carried into the new
+baseline or replaced by a follow-up migration; an INSERT that repairs
+existing rows can be archived. `core/tests/test_migrations.py::
+test_reference_data_seeds_survive_the_chain` asserts the outcome, so a
+future squash that drops these again turns red instead of shipping.
+
 ## The 2026-05-25 squash (first cutover, historical)
 
 Up to v1.0 the chain grew incrementally to 104 revisions, with embedded

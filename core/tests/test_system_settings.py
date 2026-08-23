@@ -71,3 +71,54 @@ async def test_sdi_environment_readable_from_a_tenant_session() -> None:
         )
     async with tenant_session(str(r.org_id), str(r.user_id)) as ts:
         assert await ss.get_sdi_environment(ts) in ("test", "production")
+
+
+async def test_the_singleton_self_heals_under_concurrency() -> None:
+    """The fallback has to work when it is actually needed: concurrently.
+
+    ``_get_or_create`` used to be a plain check-then-INSERT. Migration
+    0074 seeded the row, so single-threaded callers never noticed --
+    until the 2026-08-22 squash dropped that seed and the first
+    concurrent readers of a fresh database all found nothing, all tried
+    to insert, and the ``id IS TRUE`` primary key let exactly one
+    through. Four of five invoice transmissions died on
+    UniqueViolationError; that is what turned CI red on v2.2.19.
+
+    Migration 0003 puts the row back, so this deletes it first: the
+    point is that the FALLBACK is safe, independently of the seed. A
+    fallback that only works single-threaded turns a missing row into a
+    hard failure instead of self-healing.
+    """
+    import asyncio
+
+    from sqlalchemy import delete, select
+
+    from mycelium_core.models.system_settings import SystemSettings
+
+    async with admin_session() as s:
+        await s.execute(delete(SystemSettings))
+
+    # A barrier, because without one the five coroutines serialise: each
+    # is short enough to commit before the next acquires a connection, so
+    # only the first ever sees an empty table and the old check-then-INSERT
+    # passes. Holding all five inside an open transaction until every one
+    # has entered reproduces what five concurrent invoice transmissions
+    # did on a fresh CI database.
+    started = asyncio.Barrier(5)
+
+    async def _read() -> str:
+        async with admin_session() as s:
+            # Force connection acquisition + transaction start BEFORE the
+            # barrier, so releasing it puts all five at the SELECT.
+            await s.execute(select(SystemSettings))
+            await started.wait()
+            return await ss.get_sdi_environment(s)
+
+    results = await asyncio.gather(*[_read() for _ in range(5)])
+    assert results == ["test"] * 5
+
+    async with admin_session() as s:
+        rows = (await s.execute(select(SystemSettings))).scalars().all()
+        assert len(rows) == 1, "still a singleton, whoever won the race"
+        # Leave the shared row as the rest of the suite expects it.
+        await ss.set_sdi_environment(s, "test")
