@@ -2677,6 +2677,10 @@ export const it: Catalog = {
     attempts: 'Tentativi',
     createdAt: 'Ricevuto',
     retry: 'Riprova',
+    recompose: 'Ricomponi',
+    recomposeConfirm:
+      'Cancellare il documento composto da questo evento e rifar passare il payload del provider dal mapper? Serve dopo una correzione che cambia il modo in cui il documento viene COSTRUITO dall\u2019evento. Per una correzione al serializer non serve niente: una bozza non contiene XML e viene ricostruita a ogni apertura. L\u2019operazione non e\u0300 reversibile.',
+    recomposed: 'Documento eliminato; l\u2019evento verra\u0300 ricomposto.',
     transmitDraft: 'Trasmetti bozza',
     transmitDraftConfirm:
       'Questo evento ha gia\u0300 composto un documento. Verra\u0300 depositato cosi\u0300 com\u2019e\u0300, NON ricomposto: se e\u0300 stato composto prima di una correzione, usa Recompose. Procedere?',

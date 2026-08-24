@@ -256,6 +256,12 @@ class EventActionsOut(BaseModel):
     #: clears ``dry_run`` on the invoice, and re-shooting a comparison artefact
     #: for a document nobody is comparing any more is meaningless.
     reshoot: bool
+    #: Throw the composed document away and re-run the payload. Offered only
+    #: for an untouched draft: a number or a file name already allocated means
+    #: a send was attempted, and deleting that draft would burn a fiscal
+    #: number and destroy the NomeFile dedupe that makes a resend safe. The
+    #: server re-checks all of it -- this only decides whether to show it.
+    recompose: bool
     #: Retry on an event that ALREADY composed a document does not recompose
     #: it: ``_process_emission`` short-circuits on the object claim into
     #: ``_settle``, which on a transmit-mode connector files the existing
@@ -389,11 +395,15 @@ class _LinkedDrafts(NamedTuple):
 
     drafts: frozenset[uuid.UUID]
     shadow_drafts: frozenset[uuid.UUID]
+    #: Drafts on which nothing has been spent yet: no fiscal number, no file
+    #: name, no frozen XML. Those three being NULL is what makes a document
+    #: safe to delete and re-derive.
+    recomposable_drafts: frozenset[uuid.UUID]
 
 
 #: A module-level empty value so the projection can be called without a page
 #: lookup (a single-row route, a test) without a mutable-looking default.
-_NO_LINKED_DRAFTS = _LinkedDrafts(frozenset(), frozenset())
+_NO_LINKED_DRAFTS = _LinkedDrafts(frozenset(), frozenset(), frozenset())
 
 
 async def _draft_invoice_ids(
@@ -407,14 +417,15 @@ async def _draft_invoice_ids(
         return _NO_LINKED_DRAFTS
     found = (
         await ctx.session.execute(
-            select(Invoice.id, Invoice.dry_run).where(
-                Invoice.id.in_(ids), Invoice.state == InvoiceState.draft
-            )
+            select(
+                Invoice.id, Invoice.dry_run, Invoice.number, Invoice.nome_file, Invoice.xml
+            ).where(Invoice.id.in_(ids), Invoice.state == InvoiceState.draft)
         )
     ).all()
     return _LinkedDrafts(
-        frozenset(i for i, _ in found),
-        frozenset(i for i, shadow in found if shadow),
+        frozenset(r[0] for r in found),
+        frozenset(r[0] for r in found if r[1]),
+        frozenset(r[0] for r in found if r[2] is None and r[3] is None and r[4] is None),
     )
 
 
@@ -442,6 +453,11 @@ def _event_out(
                 row.dry_run_xml is not None
                 and role is Role.owner
                 and row.invoice_id in linked.shadow_drafts
+            ),
+            recompose=(
+                role is Role.owner
+                and row.status not in {"pending", "processing"}
+                and row.invoice_id in linked.recomposable_drafts
             ),
             settles_existing_draft=row.invoice_id in linked.drafts,
         ),
@@ -793,6 +809,37 @@ async def discard_dry_run(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, connector_id=connector_id
     )
     return DiscardDryRunOut(discarded=discarded)
+
+
+@router.post(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+    "/events/{event_id}/recompose",
+    response_model=PaymentConnectorEventOut,
+)
+async def recompose_event(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> PaymentConnectorEventOut:
+    """Discard the document this event composed and re-run its frozen payload.
+
+    Owner-only: it deletes a document and re-arms an emission, which is the
+    same weight as promoting or discarding a shadow run, not the weight of
+    reading the ledger. Refuses anything but an untouched draft.
+    """
+    ensure_role(ctx.role, Role.owner)
+    provider = await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    row = await svc.recompose_event(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        connector_id=connector_id,
+        event_id=event_id,
+    )
+    return _event_out(
+        row, provider=provider, role=ctx.role, linked=await _draft_invoice_ids(ctx, [row])
+    )
 
 
 @router.post(

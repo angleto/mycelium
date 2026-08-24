@@ -2053,3 +2053,81 @@ async def test_reshooting_is_refused_once_the_document_has_been_promoted() -> No
                 connector_id=connector_id,
                 event_id=event_id,
             )
+
+
+# --- recompose --------------------------------------------------------------
+
+
+async def _one_event(org_id, user_id, connector_id, event_id):
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        return (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+
+
+async def test_recompose_discards_the_document_and_rearms_the_event() -> None:
+    """The verb Retry is not: retry finds the object claim and settles what
+    exists. This is for a fix to the MAPPER, where the stale part is the
+    persisted row rather than the serialization."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_rc"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        before = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        assert before.number is None
+        row = await svc.recompose_event(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id, event_id=event_id
+        )
+        assert row.status == "pending"
+        assert row.attempt_count == 0
+        assert row.invoice_id is None
+        # The document is gone, and so is its claim: the event is free to
+        # compose again and re-claim the same object keys.
+        assert await inv_svc.list_invoices(s, org_id=org_id) == []
+        claims = (
+            (
+                await s.execute(
+                    select(PaymentObjectLink).where(PaymentObjectLink.invoice_id == before.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert claims == []
+
+    # And re-running it composes a fresh document rather than resolving to the
+    # deleted one.
+    assert await _run(org_id, connector_id, event_id) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        again = await inv_svc.list_invoices(s, org_id=org_id)
+        assert len(again) == 1, "exactly one document, not zero and not two"
+        assert again[0].id != before.id
+
+
+async def test_recompose_refuses_a_draft_that_already_spent_a_fiscal_number() -> None:
+    """A definite-not-filed failure returns an invoice to draft while KEEPING
+    its number and NomeFile, so the retry sails under the same file name and
+    collides with SdI's own dedupe instead of double-filing. Deleting such a
+    draft destroys that property and leaves a hole in the counter."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_burnt"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        doc = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        doc.number = 7
+        doc.nome_file = "IT01234567890_00007.xml"
+        await s.flush()
+        with pytest.raises(ConflictError):
+            await svc.recompose_event(
+                s, org_id=org_id, actor_id=user_id, connector_id=connector_id, event_id=event_id
+            )
+        # Nothing was touched by the refusal.
+        assert len(await inv_svc.list_invoices(s, org_id=org_id)) == 1

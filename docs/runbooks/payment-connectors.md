@@ -132,6 +132,36 @@ tracciato, and a document without one is perfectly conformant. On a forfettario
 issuer the statutory L.190/2014 dicitura is emitted regardless, as an additional
 `Causale`, and can no longer be displaced by anything anyone types.
 
+### Retry, Recompose, Rebuild XML: three verbs, and only one of them rebuilds
+
+They are not variations on each other and the difference is fiscal, so the
+buttons are only offered where the server will honour them.
+
+**Retry** re-arms a parked or dead event. If the event never composed anything
+it runs from scratch through today's mapper, which is what you want. If it
+ALREADY composed a document, retry does not rebuild it: the object claim
+short-circuits into settle, which on a `transmit` connector files the existing
+draft as it stands. The button therefore reads **Transmit draft** on those rows
+and says so before doing it.
+
+**Recompose** (owner) deletes the composed document, drops its claim and re-runs
+the frozen payload through the mapper. Use it after a fix that changed how the
+document is BUILT from the event. It refuses anything but an untouched draft:
+a number, a file name or a frozen XML means a send was attempted, and deleting
+that draft would burn a fiscal number and destroy the NomeFile dedupe that makes
+a resend safe. It also refuses when a second event points at the same document,
+because deleting it would detach that one silently.
+
+**Rebuild XML** (owner) re-shoots the frozen *shadow* document. It exists
+because `dry_run_xml` is the only XML the subsystem stores.
+
+The case that needs none of them: a fix to the SERIALIZER. A draft holds no
+XML at all -- `invoices.xml` is NULL until transmit freezes it, and the preview
+is rebuilt from the current rows on every read -- so opening a pre-fix draft
+already shows post-fix bytes. What a serializer fix does NOT repair is
+persisted column data: a causale or a payment method written onto the row when
+it was composed. Those are edited on the draft itself.
+
 ### A connector states a payment method only if you set one
 
 Leave `default_payment_method_code` empty and the composed document carries no

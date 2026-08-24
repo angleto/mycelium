@@ -165,6 +165,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_CLIENT_INCOMPLETE = "payment_connector.client_incomplete"
     PAYMENT_CONNECTOR_EVENT_NOT_FOUND = "payment_connector.event_not_found"
     PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE = "payment_connector.event_not_retryable"
+    PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE = "payment_connector.event_not_recomposable"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
     IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
     IDEMPOTENCY_IN_PROGRESS = "idempotency.in_progress"
@@ -554,6 +555,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND: "Payment connector event not found",
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE: (
             "Only a parked or dead event can be retried"
+        ),
+        MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE: (
+            "This event cannot be recomposed: its document must still be an untouched "
+            "draft (no number and no file name allocated), the event must not be in "
+            "flight, and no other event may claim the same payment"
         ),
         MessageCode.IDEMPOTENCY_KEY_REQUIRED: "The Idempotency-Key header is required",
         MessageCode.IDEMPOTENCY_BODY_MISMATCH: (

@@ -2691,6 +2691,10 @@ export const en = {
     attempts: 'Attempts',
     createdAt: 'Received',
     retry: 'Retry',
+    recompose: 'Recompose',
+    recomposeConfirm:
+      'Delete the document this event composed and run the stored provider payload through the mapper again? Use this after a fix that changed how the document is BUILT from the event. A serializer fix needs nothing: a draft holds no XML and is rebuilt every time it is opened. This cannot be undone.',
+    recomposed: 'Document discarded; the event will be composed again.',
     transmitDraft: 'Transmit draft',
     transmitDraftConfirm:
       'This event already composed a document. It will be filed as it stands, NOT rebuilt: if it was composed before a fix, use Recompose instead. Continue?',

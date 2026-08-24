@@ -46,7 +46,7 @@ from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import Select, delete, select, text, update
+from sqlalchemy import Select, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2293,6 +2293,137 @@ async def retry_event(
     return event
 
 
+async def recompose_event(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+) -> PaymentConnectorEvent:
+    """Throw away the document this event composed and re-run the frozen payload.
+
+    The verb Retry is NOT. Retry re-arms the event, and ``_process_emission``
+    then finds the object claim and short-circuits into ``_settle``, which
+    resumes or files what already exists and never re-composes. That is correct
+    for its purpose and useless after a MAPPER fix, where the stale part is the
+    persisted row -- the causale, the inherited IBAN, the lines -- rather than
+    the serialization. (A serializer fix needs none of this: a draft holds no
+    XML and is rebuilt on read.)
+
+    Everything below is refusal, and each one has a specific accident behind it:
+
+    * Only ``draft``. A transmitted document is immutable (ADR-0009); a
+      ``rejected`` one has its own audited path, ``reopen_rejected``, which
+      already clears the XML and rebuilds on the next send.
+    * ``number`` and ``nome_file`` must both be NULL. A definite-not-filed
+      failure returns an invoice to draft while deliberately KEEPING them, so
+      the next attempt sails under the same file name and collides with SdI's
+      own dedupe instead of double-filing. Deleting such a draft destroys that
+      property and leaves a hole in the per-(issuer, series, year) counter --
+      and it is exactly the state a payment that failed to transmit ends in,
+      which is the population an operator is looking at.
+    * Not ``pending`` or ``processing``: a worker may hold the lease, and
+      re-arming underneath it would race.
+    * This event must be the SOLE live claimant of its object keys. Dropping a
+      claim is what opens the window in which a provider redelivery of the same
+      charge finds nothing and composes a second invoice for money already
+      invoiced -- the window ADR-0051's commit-the-claim-first ordering exists
+      to close. Refusing a shared claim keeps the deletion and the re-arm a
+      single, self-contained transaction.
+
+    The client profile and ``PaymentCustomerLink`` are deliberately left alone:
+    ``_resolve_client`` is idempotent through them, and dropping them would risk
+    a duplicate client tag, since ``client_profile`` has no uniqueness on fiscal
+    identity.
+    """
+    await require_role(session, org_id, actor_id, Role.owner)
+    event = (
+        await session.execute(
+            select(PaymentConnectorEvent).where(
+                PaymentConnectorEvent.id == event_id,
+                PaymentConnectorEvent.org_id == org_id,
+                PaymentConnectorEvent.connector_id == connector_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if event is None:
+        raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
+    if event.status in {"pending", "processing"} or event.invoice_id is None:
+        raise ConflictError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE)
+    inv = (
+        await session.execute(select(Invoice).where(Invoice.id == event.invoice_id))
+    ).scalar_one_or_none()
+    if (
+        inv is None
+        or inv.state is not InvoiceState.draft
+        or inv.number is not None
+        or inv.nome_file is not None
+        or inv.xml is not None
+    ):
+        raise ConflictError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE)
+
+    # A claim ties a connector to a provider OBJECT, not to an event, so "who
+    # else depends on this document" is asked of the events. Two events legitimately
+    # resolve to one document (an ``invoice.paid`` and the ``charge.succeeded``
+    # that reconciles it), and deleting it under the second one would detach it
+    # silently -- the FK nulls its ``invoice_id`` without a word. Refuse instead.
+    other_claimants = (
+        await session.execute(
+            select(func.count())
+            .select_from(PaymentConnectorEvent)
+            .where(
+                PaymentConnectorEvent.invoice_id == inv.id,
+                PaymentConnectorEvent.id != event.id,
+            )
+        )
+    ).scalar_one()
+    if other_claimants:
+        raise ConflictError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE)
+
+    link_ids = (
+        (
+            await session.execute(
+                select(PaymentObjectLink.id).where(PaymentObjectLink.invoice_id == inv.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    prior_status, prior_attempts = event.status, event.attempt_count
+    await session.execute(delete(PaymentObjectLink).where(PaymentObjectLink.id.in_(link_ids)))
+    await session.flush()
+    # ``delete_draft`` re-checks the state itself, which is the backstop that
+    # makes this structurally unable to reach a filed document even if the
+    # guards above were ever loosened.
+    await invoice_svc.delete_draft(session, org_id=org_id, actor_id=actor_id, invoice_id=inv.id)
+
+    event.invoice_id = None
+    event.dry_run_xml = None
+    event.status = "pending"
+    event.attempt_count = 0
+    event.next_attempt_at = _now()
+    event.processed_at = None
+    event.last_error = None
+    event.error_detail = None
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="payment_connector_event",
+        entity_id=event.id,
+        action="recompose",
+        diff={
+            "invoice_id": str(inv.id),
+            "claims_dropped": len(link_ids),
+            "status_before": prior_status,
+            "attempt_count_before": prior_attempts,
+        },
+    )
+    return event
+
+
 async def reshoot_dry_run_xml(
     session: AsyncSession,
     *,
@@ -2396,6 +2527,7 @@ __all__ = [
     "purge_expired",
     "rearm_waiting_events",
     "reclaim_expired",
+    "recompose_event",
     "record_delivery",
     "reshoot_dry_run_xml",
     "resolve_for_ingress",

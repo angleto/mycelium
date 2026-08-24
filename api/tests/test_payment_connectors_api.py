@@ -1463,7 +1463,9 @@ async def test_the_row_advertises_only_actions_the_server_will_honour() -> None:
         _row("dead", invoice_id=inv),
         provider="stripe",
         role=Role.owner,
-        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset()),
+        linked=_LinkedDrafts(
+            drafts=frozenset({inv}), shadow_drafts=frozenset(), recomposable_drafts=frozenset()
+        ),
     )
     assert settling.actions.settles_existing_draft is True
 
@@ -1474,13 +1476,67 @@ async def test_the_row_advertises_only_actions_the_server_will_honour() -> None:
         shadow_row,
         provider="stripe",
         role=Role.owner,
-        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset({inv})),
+        linked=_LinkedDrafts(
+            drafts=frozenset({inv}),
+            shadow_drafts=frozenset({inv}),
+            recomposable_drafts=frozenset({inv}),
+        ),
     )
     assert still_shadow.actions.reshoot is True
     promoted = _event_out(
         shadow_row,
         provider="stripe",
         role=Role.owner,
-        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset()),
+        linked=_LinkedDrafts(
+            drafts=frozenset({inv}), shadow_drafts=frozenset(), recomposable_drafts=frozenset()
+        ),
     )
     assert promoted.actions.reshoot is False
+
+
+async def test_recompose_is_offered_only_for_a_draft_with_nothing_spent_on_it() -> None:
+    """A number or a file name already allocated means a send was attempted:
+    deleting that draft would burn a fiscal number and destroy the NomeFile
+    dedupe that makes a resend safe. The row must not offer it, and the server
+    refuses it anyway."""
+    from mycelium_api.routers.payment_connectors import _event_out, _LinkedDrafts
+    from mycelium_core.models.membership import Role
+    from mycelium_core.models.payment_connector import PaymentConnectorEvent
+
+    inv = uuid.uuid4()
+
+    def _row(status: str) -> PaymentConnectorEvent:
+        return PaymentConnectorEvent(
+            id=uuid.uuid4(),
+            provider_event_id="evt_r",
+            event_type="invoice.paid",
+            status=status,
+            attempt_count=0,
+            max_attempts=5,
+            payload={},
+            next_attempt_at=dt.datetime.now(tz=dt.UTC),
+            created_at=dt.datetime.now(tz=dt.UTC),
+            dry_run=False,
+            invoice_id=inv,
+        )
+
+    untouched = _LinkedDrafts(
+        drafts=frozenset({inv}), shadow_drafts=frozenset(), recomposable_drafts=frozenset({inv})
+    )
+    spent = _LinkedDrafts(
+        drafts=frozenset({inv}), shadow_drafts=frozenset(), recomposable_drafts=frozenset()
+    )
+    assert _event_out(
+        _row("dead"), provider="stripe", role=Role.owner, linked=untouched
+    ).actions.recompose
+    assert not _event_out(
+        _row("dead"), provider="stripe", role=Role.owner, linked=spent
+    ).actions.recompose
+    # Owner-only, and never while a worker may hold the lease.
+    assert not _event_out(
+        _row("dead"), provider="stripe", role=Role.member, linked=untouched
+    ).actions.recompose
+    for status in ("pending", "processing"):
+        assert not _event_out(
+            _row(status), provider="stripe", role=Role.owner, linked=untouched
+        ).actions.recompose

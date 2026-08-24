@@ -105,6 +105,7 @@ type EventRow = {
     retry: boolean
     promote: boolean
     reshoot: boolean
+    recompose: boolean
     settles_existing_draft: boolean
   }
 }
@@ -1076,6 +1077,26 @@ export function ConnectorEvents({
     }
   }
 
+  async function onRecompose(eventId: string) {
+    // Destructive and not undoable: the composed document is deleted and the
+    // event re-runs from the frozen payload. Only ever offered on a draft with
+    // nothing spent on it, and the server re-checks that.
+    if (!window.confirm(t('paymentConnectors.recomposeConfirm'))) return
+    setErr(null)
+    setMsg(null)
+    try {
+      await send<EventRow>(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+          `/events/${eventId}/recompose`,
+        { method: 'POST' },
+      )
+      setMsg(t('paymentConnectors.recomposed'))
+      setTick((n) => n + 1)
+    } catch (e) {
+      setErr(message(e))
+    }
+  }
+
   async function onRetry(eventId: string, settlesExistingDraft: boolean) {
     // Confirm only when the verb is not what the operator expects. A plain
     // re-arm needs no ceremony; filing a document composed before a fix does.
@@ -1313,6 +1334,15 @@ export function ConnectorEvents({
                         into settle, which files the draft as it stands. The
                         button says that, rather than saying "retry" and doing
                         something else. */}
+                    {r.actions.recompose && (
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        onClick={() => void onRecompose(r.id)}
+                      >
+                        {t('paymentConnectors.recompose')}
+                      </button>
+                    )}
                     {r.actions.retry && (
                       <button
                         type="button"
