@@ -23,14 +23,6 @@ import { PomodoroTimer } from './PomodoroTimer'
 import { MemoPopover } from './MemoPopover'
 import { hms, activeElapsedSec, isPaused } from '../lib/time'
 import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
-import { parseMentionHref, routeForMention } from '../lib/mentions'
-import {
-  isAttachmentHref,
-  openAttachment,
-  openAttachmentByRef,
-} from '../lib/attachmentRef'
-import { classifyAttachmentRef } from '../lib/attachmentManifest'
-import type { ImageUploadParent } from '../lib/imageUpload'
 import {
   getCachedLookup,
   lookupPrefix,
@@ -395,82 +387,46 @@ export function AppShell() {
   // platform admin is a separate axis (handled by the same chip).
   const canSwitchRole = (ws?.my_role ?? 'member') === 'owner'
 
-  // One capture-phase interceptor routes two app-side click targets
-  // that the browser would otherwise mishandle:
+  // One capture-phase interceptor, for the one click target the browser
+  // would otherwise mishandle: a UUID-prefix chip (the entityChips
+  // decoration over the markdown source) carries a ``data-entity-prefix``
+  // attribute. Resolve it (the cache is warmed by the editor's resolver
+  // loop, so this is usually synchronous) and route to the entity, falling
+  // back to the /t/:prefix resolver route (a friendly 404 / disambiguator)
+  // when nothing is cached yet.
   //
-  //   1. UUID-prefix chips (entityPrefix decoration) rendered inside
-  //      the WYSIWYG editor carry a ``data-entity-prefix`` attribute.
-  //      Resolve it (cache is warmed by the editor's resolver loop, so
-  //      this is usually synchronous) and route to the entity, falling
-  //      back to the /t/:prefix resolver route (which shows a friendly
-  //      404 / disambiguator) when nothing is cached yet.
-  //   2. Mention links (@kind:id) are stored as plain markdown. The
-  //      tiptap editor renders a raw <a href="@note:id"> the browser
-  //      would resolve to a broken /tasks/@note:... URL; route it
-  //      app-side instead. No per-view duplication.
+  // It used to carry three more branches: one for mention links, two for
+  // the shapes of attachment link. They were there because the
+  // document-model editor put plain <a> marks in the DOM with no React
+  // handler on them. That editor is gone and its replacement renders no
+  // anchors at all, so every link a reader can click now comes from
+  // MarkdownView, which turns its own mentions into router links and marks
+  // its own attachment links `md-att` with a preventDefault on them. The
+  // branches had nothing left to serve.
+  //
+  // What keeps that true is the invariant asserted in Markdown.test.tsx: an
+  // attachment href reaching the DOM without `md-att` navigates in the clear
+  // and answers 401, because the route is bearer-authenticated. If that test
+  // fails, the fix is the renderer, or a fallback back here -- never a
+  // relaxed assertion.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       const chip = target?.closest('[data-entity-prefix]') as HTMLElement | null
-      if (chip) {
-        const prefix = chip.getAttribute('data-entity-prefix') ?? ''
-        if (prefix) {
-          e.preventDefault()
-          const go = (res: LookupOut | null) => {
-            const m =
-              res?.matches.find((x) => x.kind === 'task') ?? res?.matches?.[0]
-            navigate(m ? m.route_url : `/t/${prefix}`)
-          }
-          const cached = getCachedLookup(prefix, RESOLVE_ID)
-          if (cached) go(cached)
-          else
-            void lookupPrefix(prefix, RESOLVE_ID)
-              .then(go)
-              .catch(() => navigate(`/t/${prefix}`))
-          return
-        }
+      const prefix = chip?.getAttribute('data-entity-prefix') ?? ''
+      if (!prefix) return
+      e.preventDefault()
+      const go = (res: LookupOut | null) => {
+        const m =
+          res?.matches.find((x) => x.kind === 'task') ?? res?.matches?.[0]
+        navigate(m ? m.route_url : `/t/${prefix}`)
       }
-      const a = target?.closest('a')
-      const href = a?.getAttribute('href')
-      if (!href) return
-      const m = parseMentionHref(href)
-      if (m) {
-        e.preventDefault()
-        navigate(routeForMention(m.kind, m.id))
-        return
-      }
-      // Attachment links typed/inserted in the editor are plain <a>
-      // marks (no React handler), so route them here: authFetch the
-      // bytes and open/download via an object URL — never a bare
-      // navigation, which would 401 on the bearer-auth route. Read-side
-      // links carry the ``md-att`` class and handle their own click in
-      // React (MarkdownView), so skip those to avoid a double open.
-      if (isAttachmentHref(href) && !a?.classList.contains('md-att')) {
-        e.preventDefault()
-        void openAttachment(href, a?.textContent?.trim() || undefined)
-        return
-      }
-      // A bare-filename attachment link typed in an editor (plain <a>
-      // mark, no md-att React handler): resolve it against the note/task
-      // that owns the editor, read from the nearest data-attachment-parent
-      // ancestor, then open it.
-      if (
-        a &&
-        !a.classList.contains('md-att') &&
-        classifyAttachmentRef(href) === 'name'
-      ) {
-        const host = a.closest('[data-attachment-parent]')
-        const tag = host?.getAttribute('data-attachment-parent') ?? ''
-        const [kind, id] = tag.split(':')
-        if ((kind === 'note' || kind === 'task') && id) {
-          e.preventDefault()
-          void openAttachmentByRef(
-            href,
-            { kind, id } as ImageUploadParent,
-            a.textContent?.trim() || undefined,
-          )
-        }
-      }
+      const cached = getCachedLookup(prefix, RESOLVE_ID)
+      if (cached) go(cached)
+      else
+        void lookupPrefix(prefix, RESOLVE_ID)
+          .then(go)
+          .catch(() => navigate(`/t/${prefix}`))
     }
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)

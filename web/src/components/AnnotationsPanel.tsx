@@ -41,8 +41,9 @@ interface Props {
   /** Scroll the sibling editor to an annotation's anchored passage. Wired
    * by the host (PartAnnotated / TaskDetailRoute) to the RichEditor's
    * viewRef handle. When omitted, the per-card "go to text" button is
-   * hidden. Returns false when there was nothing to jump to (raw mode, or
-   * the passage was edited away) so the panel can show a brief hint. */
+   * hidden. Returns false when there was nothing to jump to (the passage
+   * was edited away, or the anchor does not resolve in the source) so the
+   * panel can show a brief hint. */
   onJumpToAnchor?: (a: Annotation) => boolean
 }
 
@@ -121,7 +122,8 @@ export function AnnotationsPanel({
   // line at the panel top — and gets the manual-apply affordance.
   const [staleIds, setStaleIds] = useState<Set<string>>(new Set())
   // Id of the card whose last "go to text" found no target (passage edited
-  // away, or the editor is in raw mode): shows a brief hint, auto-clears.
+  // away, or an anchor that does not resolve in the source): shows a brief
+  // hint, auto-clears.
   const [jumpMiss, setJumpMiss] = useState<string | null>(null)
   const missTimer = useRef<number | null>(null)
   useEffect(

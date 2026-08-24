@@ -36,7 +36,7 @@ describe('fences', () => {
 
   it('a longer fence contains a shorter one', () => {
     // The inner ``` is content, not a close. Getting this wrong splits the
-    // document -- the exact corruption the tiptap serializer produces.
+    // document -- the exact corruption the retired serializer produced.
     const src = '````\n```\ninner\n```\n````\n'
     const blocks = scan(src)
     expect(blocks).toHaveLength(1)

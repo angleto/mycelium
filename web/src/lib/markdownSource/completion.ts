@@ -19,8 +19,9 @@ import { searchCandidates, searchEntities } from '../mentionSearch'
 // already happened, i.e. never. What the user types is `@` followed by a
 // free-text title, and `[[` followed by a title or an 8-hex id prefix.
 //
-// Both insert exactly what the tiptap surface inserts, because a body has to
-// read the same whichever surface wrote it:
+// Both insert exactly what the retired surface inserted, because the bodies
+// it wrote are still stored and a body has to read the same whoever wrote
+// it:
 //   `@`  -> `[label](@kind:uuid) `
 //   `[[` -> `` `<8 hex>` `` plus a space (the ADR-0038 chip convention)
 //
@@ -29,9 +30,9 @@ import { searchCandidates, searchEntities } from '../mentionSearch'
 
 /**
  * What opens the `@` typeahead: an at-sign at a word boundary, followed by a
- * free-text query up to the caret. A space ends it, exactly as in the tiptap
- * surface -- an unterminated `@` mid-sentence must not keep matching the rest
- * of the paragraph.
+ * free-text query up to the caret. A space ends it, as in the surface this
+ * replaced -- an unterminated `@` mid-sentence must not keep matching the
+ * rest of the paragraph.
  */
 export const MENTION_TRIGGER = /(?:^|\s)@([^\s@]*)$/
 /** What opens the `[[` typeahead: the double bracket plus a query. */
@@ -48,7 +49,7 @@ export function mentionCompletion(kind: string, id: string, label: string): Comp
     label,
     detail: kind,
     // A trailing space so typing continues outside the link, matching what
-    // the tiptap command inserts.
+    // the retired surface's command inserted.
     apply: mdLink(label, formatMentionHref(kind as never, id)) + ' ',
   }
 }

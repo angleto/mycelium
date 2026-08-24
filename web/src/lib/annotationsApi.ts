@@ -45,10 +45,10 @@ export function createComment(args: {
    *
    *  `'source'` is the markdown itself, and is the default everywhere: the
    *  markdown editor's document IS the source, so a selection is a source
-   *  span. The legacy WYSIWYG surface captures the RENDERED text (markup
+   *  span. The retired WYSIWYG surface captured the RENDERED text (markup
    *  stripped, links reduced to their label, blocks joined by a space) and
-   *  must say `'rendered'`, because a quote read in the wrong domain either
-   *  fails to locate or matches the wrong passage. */
+   *  its rows say `'rendered'`, because a quote read in the wrong domain
+   *  either fails to locate or matches the wrong passage. */
   anchorDomain?: AnchorDomain
   parentId?: string | null
 }): Promise<ApiResult> {
@@ -76,10 +76,10 @@ export function createSuggestion(args: {
    *
    *  `'source'` is the markdown itself, and is the default everywhere: the
    *  markdown editor's document IS the source, so a selection is a source
-   *  span. The legacy WYSIWYG surface captures the RENDERED text (markup
+   *  span. The retired WYSIWYG surface captured the RENDERED text (markup
    *  stripped, links reduced to their label, blocks joined by a space) and
-   *  must say `'rendered'`, because a quote read in the wrong domain either
-   *  fails to locate or matches the wrong passage. */
+   *  its rows say `'rendered'`, because a quote read in the wrong domain
+   *  either fails to locate or matches the wrong passage. */
   anchorDomain?: AnchorDomain
 }): Promise<ApiResult> {
   return call('/annotations/suggestion', 'POST', {

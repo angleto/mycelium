@@ -33,7 +33,7 @@ async function openFreshNoteEditor(page: Page) {
 }
 
 /** The editor is the markdown surface; this only waits for it. */
-async function enterMarkdownMode(page: Page) {
+async function awaitSourceEditor(page: Page) {
   await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
 }
 
@@ -55,7 +55,7 @@ test('a markdown table previews as a table, and the source is untouched', async 
 }) => {
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   // A trailing paragraph so the caret has somewhere to be that is NOT the
   // table: a block whose lines the selection touches shows its source, which
   // is the whole reveal rule.
@@ -93,7 +93,7 @@ const VERBATIM = [
 test('opening a note never rewrites a verbatim markdown part', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   await setSource(page, VERBATIM)
   // Let the 1.2s debounced autosave land the bytes we typed.
   await page.waitForResponse(
@@ -123,14 +123,14 @@ test('opening a note never rewrites a verbatim markdown part', async ({ page }) 
   await expect(page.locator('.rte__notice')).toHaveCount(0)
 
   // The source is still the bytes we uploaded, byte for byte.
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   expect(await readSource(page)).toBe(VERBATIM)
 })
 
 test('links keep their destination', async ({ page }) => {
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   // Both arms used to LOSE the destination on the round trip: the first
   // because the `code` mark excluded `link`, the second because tiptap's
   // default isAllowedUri rejects a relative path containing a directory
@@ -152,7 +152,7 @@ test('sub/sup survive as the bytes the author wrote', async ({ page }) => {
   // here is that the source is untouched, code span included.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   const md = 'x<sub>0</sub> e 2<sup>t</sup>, ma `x<sup>2</sup>` resta letterale'
   await setSource(page, md)
   expect(await readSource(page)).toBe(md)
@@ -163,7 +163,7 @@ test('in markdown mode the Attach-file block does not overlap the editor', async
 }) => {
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   await setSource(page, Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n'))
   const box = await page.evaluate(() => {
     const ta = document.querySelector('.rte__raw.rte__src')!.getBoundingClientRect()
@@ -181,11 +181,11 @@ test('the toolbar formats markdown SOURCE, and reports what is under the caret',
   page,
 }) => {
   // The toolbar used to be disabled in markdown mode: every button was a
-  // ProseMirror command and there was no ProseMirror. They are source
-  // transformations now, so the same buttons drive both surfaces.
+  // document-model command and there was no model behind the source. They
+  // are source transformations now, so the same buttons work everywhere.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
 
   // By TITLE, not by accessible name: these buttons carry a glyph as their
   // content (`•`, `H1`), so the accessible name is the glyph and the label
@@ -218,7 +218,7 @@ test('a markdown-source edit is what gets saved, byte for byte', async ({ page }
   // exactly the edit the toolbar made, and nothing else normalised.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   await setSource(page, VERBATIM)
   await page.waitForResponse(
     (r) => /\/notes\/[^/]+\/parts\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
@@ -252,7 +252,7 @@ test('the @ typeahead inserts a mention link in markdown mode', async ({ page })
   // would never fire.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
 
   await sourceContent(page).click()
   // The note this editor belongs to is itself a candidate, so its own title

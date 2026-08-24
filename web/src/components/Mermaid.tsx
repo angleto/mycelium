@@ -3,7 +3,7 @@ import { useEffectiveTheme } from '../lib/useIsDark'
 
 // Mermaid diagram rendering, shared by the read-side markdown renderer
 // (the ```mermaid fenced block in Markdown.tsx) and the write-side editor
-// (the code-block node view's live preview in MermaidCodeBlock.tsx).
+// (the MermaidWidget block preview in lib/markdownSource/widgets.ts).
 //
 // Mermaid is a heavy dependency (hundreds of KB with its d3 / cytoscape
 // stack), and a diagram is only present in a minority of notes, so the

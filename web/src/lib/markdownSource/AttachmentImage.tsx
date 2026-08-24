@@ -12,8 +12,8 @@ import type { ImageUploadParent } from '../imageUpload'
 // in `useAttachmentImage`, and having one implementation of it is worth a
 // React root per image.
 //
-// The class names are the ones the read-side renderer and the tiptap preview
-// already use, so an embed looks the same in all three surfaces.
+// The class names are the ones the read-side renderer already uses, so an
+// embed looks the same in the editor and in the reader.
 export function AttachmentImage({
   src,
   alt,

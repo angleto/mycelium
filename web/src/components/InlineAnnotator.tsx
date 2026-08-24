@@ -161,8 +161,9 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       setSel(s)
       onSelectableChange?.(s != null)
     }
-    // Called once up front: neither surface reports the selection it already
-    // has, so without this the toolbar starts disabled over a live selection.
+    // Called once up front: the surface does not report a selection it
+    // already has, so without this the toolbar starts disabled over a live
+    // selection.
     update()
     const off = surface.onSelectionChange(update)
     return () => {
@@ -207,8 +208,8 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const openCompose = useCallback(
     (kind: 'comment' | 'suggest') => {
       // Re-read the live selection rather than trust the tracked ``sel``:
-      // when the trigger is a toolbar button, no fresh selectionUpdate
-      // fired, but ProseMirror keeps state.selection across the blur.
+      // when the trigger is a toolbar button, no fresh selection update
+      // fired, but the editor keeps its own state.selection across the blur.
       const s = readSelection() ?? sel
       if (!s) return
       setCBody('')
@@ -245,11 +246,12 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const submitCompose = async () => {
     if (!compose) return
     const s = compose.sel
-    // The DOMAIN comes from the surface that captured the quote. The two
-    // adapters read the document in two different languages -- the tiptap one
-    // a rendered projection, the markdown one the stored bytes -- and a quote
-    // read back in the wrong one does not merely fail to locate: it can match
-    // the WRONG passage.
+    // The DOMAIN comes from the surface that captured the quote. There is
+    // one surface now and it quotes the stored bytes, but rows written by
+    // the retired rendered surface are still in the table, in a different
+    // language -- and a quote read back in the wrong one does not merely
+    // fail to locate: it can match the WRONG passage. So the domain is
+    // recorded on the row, never assumed at read time.
     const r =
       compose.kind === 'comment'
         ? await annoApi.createComment({

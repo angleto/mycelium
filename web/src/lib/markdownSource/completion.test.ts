@@ -18,8 +18,9 @@ import {
 } from './completion'
 
 // The searches are network calls; what is under test here is the trigger
-// grammar and what gets INSERTED, which is where a mismatch with the tiptap
-// surface would leave two spellings of the same reference in one workspace.
+// grammar and what gets INSERTED: bodies written by the retired surface are
+// still stored, so a mismatch with what it inserted would leave two
+// spellings of the same reference in one workspace.
 vi.mock('../mentionSearch', () => ({
   searchCandidates: async (q: string) =>
     q === 'none'

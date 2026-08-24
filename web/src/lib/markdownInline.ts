@@ -12,10 +12,10 @@
 // sanitiser only strips path separators and leading dots, so `]`, `[` and
 // `\` all reach here intact.
 //
-// This module is the single escaping rule for the emitting side. The
-// matcher that recovers such a reference from a paste
-// (`parseAttachmentMarkdownRef`) understands the escaped form, so the two
-// stay symmetric.
+// This module is the single escaping rule for the emitting side. There is
+// no un-escaper to keep symmetric with it any more: the editor's document
+// IS the markdown, so a reference pasted into a body is already the bytes
+// that get stored, and nothing has to recover a label back out of them.
 //
 // Mirrored, deliberately duplicated, in two other emitters that cannot
 // share this code: `mycelium_core.markdown_inline` (used by the MCP
@@ -62,13 +62,4 @@ export function mdLink(
   opts?: { image?: boolean },
 ): string {
   return `${opts?.image ? '!' : ''}[${mdLinkLabel(label)}](${mdLinkDestination(href)})`
-}
-
-/**
- * Undo `mdLinkLabel`'s backslash escapes, for the matchers that recover a
- * label out of markdown text. Any `\x` becomes `x`, which is exactly
- * CommonMark's rule for a backslash escape inside a label.
- */
-export function mdUnescapeLabel(label: string): string {
-  return label.replace(/\\([\s\S])/g, '$1')
 }

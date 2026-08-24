@@ -276,8 +276,10 @@ function nodeText(children: ReactNode): string | undefined {
 // navigation — the click resolves the ref (filename → id via the
 // parent's manifest when needed) then authFetches the bytes and
 // opens/downloads them via an ephemeral object URL. The `md-att` class
-// both styles the link (leading icon) and tells the global editor
-// click-interceptor to leave this one to React (no double handling).
+// both styles the link (leading icon) and marks it as handled here rather
+// than by the browser: Markdown.test.tsx asserts that every attachment href
+// this renderer emits carries it, which is what allows nothing else in the
+// app to watch for unhandled ones.
 function AttachmentLink({
   href,
   parent,

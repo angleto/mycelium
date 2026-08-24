@@ -134,7 +134,7 @@ test('cancel discards a half-written suggestion', async ({ page }) => {
 
   await editor.click()
   const suggestBtn = page.locator('.rte__annotate--suggest').first()
-  // On slower CI the keyboard selection can fire before ProseMirror is
+  // On slower CI the keyboard selection can fire before the editor is
   // ready to report it, leaving the Suggest button disabled. Re-select
   // until the toolbar reflects the non-empty selection (deterministic,
   // no fixed settle) instead of asserting once on a possibly-lost one.
@@ -251,9 +251,9 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
 test('inline suggest: the anchor is the markdown source, and accept splices it', async ({
   page,
 }) => {
-  // The capability this whole move exists for. Until now the annotation UI
-  // was rendered only over the WYSIWYG surface, so switching to markdown
-  // meant losing comments and suggestions entirely.
+  // The capability this whole move exists for. The annotation UI used to be
+  // rendered only over the WYSIWYG surface, so the markdown mode of the
+  // time had no comments and no suggestions at all.
   //
   // The anchor captured here is the markdown SOURCE -- `**importante**`, not
   // `importante` -- which is the same domain the server resolves it in, so

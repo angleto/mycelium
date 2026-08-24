@@ -21,9 +21,10 @@ import {
 // StateEffect instead of a meta transaction.
 //
 // Navigation is deliberately NOT here. The decoration stamps
-// `data-entity-prefix` and the global capture-phase click interceptor in
-// AppShell resolves and routes it, exactly as it does for `@kind:id`
-// mention anchors. One interceptor, no per-editor router wiring.
+// `data-entity-prefix` and the global capture-phase interceptor in AppShell
+// resolves and routes it. A chip is not an anchor, so there is nothing for
+// the router to bind: one interceptor, no per-editor wiring. It is the only
+// target that interceptor has left.
 
 type Resolution = {
   state: 'loading' | 'resolved' | 'closed' | 'unresolved'

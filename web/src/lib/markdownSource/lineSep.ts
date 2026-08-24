@@ -17,8 +17,8 @@
 // nothing reads the document until the user types.
 //
 // This is a stated limit rather than a discovered one, and it is strictly
-// better than the tiptap surface it replaces, which destroys every CRLF
-// unconditionally (``a\r\nb`` round-trips to ``a b``).
+// better than the surface it replaced, which destroyed every CRLF
+// unconditionally (``a\r\nb`` round-tripped to ``a b``).
 
 /**
  * The ``EditorState.lineSeparator`` value for ``src``: ``'\r\n'`` when every

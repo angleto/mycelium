@@ -151,15 +151,24 @@ async function exportPdfViaServer(
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-// True WYSIWYG (no preview toggle), markdown round-trip via
-// tiptap-markdown, and an inline @ typeahead mirroring bitvision's
-// EvidenceMentionExtension: type @ -> search Mycelium tasks/tags ->
-// inserts a [label](@kind:id) link that serializes as the DSL.
+// The editor's document IS the markdown: CodeMirror over the stored
+// string, read back with ``sliceDoc()``. There is no second surface and no
+// serializer between what is typed and what is saved, so a body written
+// outside the app is not rewritten by being opened or edited. The one
+// stated limit is a body MIXING CRLF and LF, which normalises to LF on the
+// first edit; uniform bodies of either kind are exact. What used to be a
+// rendered mode is a preview layer over the source instead, in
+// ``lib/markdownSource/``.
+//
+// The inline @ typeahead inserts a [label](@kind:id) link: the mention DSL
+// stored as plain markdown, resolved into a chip at render time.
 
 export interface AnnotationViewHandle {
   /** Scroll the editor so the annotation's anchored text is in view and
    * briefly flash it. Returns false when there is nothing to jump to
-   * (raw mode, editor not ready, or the passage no longer exists). */
+   * (editor not ready, the passage no longer exists, or the anchor was
+   * captured in the retired rendered domain and is refused rather than
+   * guessed at). */
   scrollToAnnotation: (a: Annotation) => boolean
 }
 
@@ -268,10 +277,11 @@ export function RichEditor({
   useEffect(() => {
     srcHandleRef.current = srcHandle
   }, [srcHandle])
-  // Which constructs the caret is inside in SOURCE mode, reported by the
-  // editor on every selection change. The tiptap path asks the editor
-  // synchronously (``editor.isActive``); CodeMirror has no equivalent that
-  // re-renders React, so the state is pushed instead of pulled.
+  // Which constructs the caret is inside, reported by the editor on every
+  // selection change. CodeMirror has no synchronous "is the caret inside a
+  // bold mark" query that would re-render React (the document-model editor
+  // this replaced had one, ``editor.isActive``), so the answer is pushed
+  // into state here rather than pulled by the toolbar as it renders.
   const [srcMarks, setSrcMarks] = useState<Set<ActiveMark>>(() => new Set())
   // Latest ``value`` for the editor's own onUpdate closure (built once):
   // the emit path re-attaches the trailing newline the incoming body
@@ -307,10 +317,9 @@ export function RichEditor({
     parentRef.current = imageUploadParent
   }, [imageUploadParent])
 
-  // Insert a markdown snippet at the raw-mode caret (or append at the
-  // end if not focused). The WYSIWYG branch goes through the editor's
-  // insertContent below.
-  const insertRawSnippet = (md: string) => {
+  // Insert a markdown snippet at the caret, or append it at the end when
+  // the editor has not handed back a live view yet.
+  const insertSnippet = (md: string) => {
     const src = srcHandle
     if (!src) {
       onChange(value + (value.endsWith('\n') || !value ? '' : '\n') + md + '\n')
@@ -338,7 +347,7 @@ export function RichEditor({
       // A new file exists now; drop the cached name->id map so a later
       // `![alt](filename)` reference to it resolves.
       invalidateAttachmentManifest(parent)
-      insertRawSnippet(mdLink(up.filename, up.url, { image: true }))
+      insertSnippet(mdLink(up.filename, up.url, { image: true }))
     } catch (e) {
       setUploadErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -466,9 +475,9 @@ export function RichEditor({
   // position, a robust proxy for "N% through the note" that works whether
   // the editor scrolls the page or a modal body). Selection/caret left
   // untouched. Powers the toolbar's start / end / "go to %" controls,
-  // handy on long note parts. In raw mode the textarea scrolls its own
-  // content proportionally (it has an inner scrollbar), so the controls
-  // keep working there too.
+  // handy on long note parts. Both the editor's own scroll container and
+  // the host element are moved, so the controls work whether the inner
+  // editor scrolls, the page does, or the modal body does.
   const goToFraction = useCallback((f: number) => {
     srcHandleRef.current?.scrollToFraction(Math.max(0, Math.min(1, f)))
   }, [])
@@ -551,13 +560,6 @@ export function RichEditor({
     <div
       className={'rte' + (large ? ' rte--lg' : '')}
       data-placeholder={placeholder}
-      // Lets the global click-interceptor resolve a bare-filename
-      // attachment link typed in this editor against the right note/task.
-      data-attachment-parent={
-        imageUploadParent
-          ? `${imageUploadParent.kind}:${imageUploadParent.id}`
-          : undefined
-      }
     >
       <div className="rte__bar">
         <div className="rte__bar-left">
@@ -579,7 +581,7 @@ export function RichEditor({
               Deliberately OUTSIDE the collapsible tools span and not gated
               on the annotation layer: every editor (comment cards and
               composers included) keeps these reachable whenever the bar is
-              visible, in WYSIWYG and raw mode alike. */}
+              visible. */}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt rte__goto"
@@ -832,7 +834,7 @@ export function RichEditor({
             // hands out. The WYSIWYG branch used to convert it into a
             // ProseMirror node instead, which is the asymmetry that made a
             // PASTED reference need its own special case.
-            insertRawSnippet(attachmentMarkdownRef(meta))
+            insertSnippet(attachmentMarkdownRef(meta))
             setPickerOpen(false)
           }}
           onClose={() => setPickerOpen(false)}

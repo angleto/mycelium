@@ -28,9 +28,9 @@ import { attachmentMarkdownRef } from '../lib/attachmentRef'
 // AttachmentPicker, but only into the body it is editing; the clipboard
 // copy is what lets the reference travel — into a different note or task,
 // into a message to an agent, into anything outside this page — and it is
-// reachable from the panel itself, with no editor open. Pasted back into
-// the WYSIWYG editor it is recognised and inserted as the image/link node
-// it denotes (RichEditor's handlePaste), not as escaped literal text.
+// reachable from the panel itself, with no editor open. Pasted back into a
+// body it needs no special handling at all: the reference IS the markdown
+// that gets stored, so it lands as the image or the link it denotes.
 //
 // Object URLs never escape this component: the eager thumbs are revoked
 // when the list refetches, and a modal-owned blob (pdf/audio/video) is

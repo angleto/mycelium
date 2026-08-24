@@ -2621,13 +2621,6 @@ button.btn--danger:hover {
   color: var(--muted);
   font-size: 0.85em;
 }
-/* Code-block node view in the WYSIWYG editor. The editable <pre><code>
-   mirrors the read-side .md pre; the mermaid variant stacks a live diagram
-   preview beneath the source, separated by a hairline. */
-.rte-cb__toggle:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
 .md a.chip {
   text-decoration: none;
 }
@@ -2699,9 +2692,9 @@ button.btn--danger:hover {
   gap: 0.4rem;
   margin-top: 0.8rem;
 }
-/* In-editor UUID-prefix chips (entityPrefix decoration). The note body
-   is read/written in the WYSIWYG RichEditor, so backticked prefixes get
-   the same clickable affordance the read-only MarkdownView chips have.
+/* In-editor UUID-prefix chips (the entityChips decoration over the
+   markdown source), so a backticked prefix gets the same clickable
+   affordance the read-only MarkdownView chips have.
    It only decorates the existing inline <code>; navigation is the
    global click interceptor in AppShell (data-entity-prefix). */
 .entity-ref {
@@ -3377,11 +3370,11 @@ button.btn--danger:hover {
   margin-right: 0.4rem;
 }
 
-/* ---- WYSIWYG (TipTap) ---- */
+/* ---- Markdown editor chrome ---- */
 /* The toolbar stays in reach while writing a long note/document: it
    pins to the top of whatever scrolls (the modal body for notes, the
    window for the task description) so you never have to scroll back up
-   to toggle WYSIWYG/markdown, format, or insert an image. An opaque
+   to format, jump through the document, or insert an image. An opaque
    background + bottom border keep the prose from showing through as it
    scrolls underneath. */
 .rte__bar {
@@ -3551,7 +3544,7 @@ button.btn--danger:hover {
 }
 /* Non-image attachment linked in the body: filename with a leading
    paperclip. The icon is CSS-only so the link's text content stays the
-   bare filename (the click-interceptor reads it to name the download). */
+   bare filename, which the click handler reads to name the download. */
 .md-att {
   cursor: pointer;
 }
@@ -6692,8 +6685,9 @@ button.btn--danger:hover {
   font-size: 0.95rem;
   line-height: 1;
 }
-/* Transient hint when "go to text" finds no target (passage edited away
-   or the editor is in source/raw mode). Muted, reads in both themes. */
+/* Transient hint when "go to text" finds no target (passage edited away,
+   or an anchor that does not resolve in the source). Muted, reads in both
+   themes. */
 .anno__locate-miss {
   align-self: center;
   font-size: 0.72rem;

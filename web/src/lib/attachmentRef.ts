@@ -6,7 +6,7 @@ import {
   ensureAttachmentManifest,
   resolveAttachmentName,
 } from './attachmentManifest'
-import { mdLink, mdUnescapeLabel } from './markdownInline'
+import { mdLink } from './markdownInline'
 
 // Markdown references to attachments.
 //
@@ -51,11 +51,9 @@ export function isAttachmentHref(href: string | null | undefined): href is strin
 }
 
 // A reference to an attachment, decomposed: whether it embeds (`!`), the
-// label between the brackets, and the canonical href. Both directions go
-// through this shape — attachmentRefFor() builds one from attachment
-// metadata, parseAttachmentMarkdownRef() recovers one from a pasted
-// string — so the markdown emitters and the editor's node insertion share
-// a single model instead of each re-deriving it.
+// label between the brackets, and the canonical href. attachmentRefFor()
+// builds one out of attachment metadata and every markdown emitter starts
+// from it, so they share a single model instead of each re-deriving one.
 export type AttachmentRef = {
   /** Render as `![...]` (inline embed) rather than `[...]` (link). */
   image: boolean
@@ -66,11 +64,11 @@ export type AttachmentRef = {
 }
 
 // Label for a nameless attachment: an empty one would give an invisible
-// `[](…)` link, and the editor's node insertion would throw outright (an
-// empty ProseMirror text node is illegal). Defensive in practice — the
-// backend's filename sanitiser already falls back to this same word, so a
-// stored attachment is never nameless — and the same fallback the CLI
-// helper (`attachment_markdown_ref`, cli/cmds/_common.py) applies.
+// `[](…)` link, with nothing for a reader to click and nothing for an
+// author to see in the body. Defensive in practice — the backend's
+// filename sanitiser already falls back to this same word, so a stored
+// attachment is never nameless — and the same fallback the CLI helper
+// (`attachment_markdown_ref`, cli/cmds/_common.py) applies.
 const REF_FALLBACK_NAME = 'file'
 
 /**
@@ -126,39 +124,6 @@ export function attachmentMarkdownRef(att: {
   // The label is a filename, i.e. user data: `Report ]final.pdf` used to
   // emit a string that is not a link at all. mdLink escapes both halves.
   return mdLink(label, href, { image })
-}
-
-// One whole markdown link/image on a single line, with a
-// parenthesis-free, space-free destination. The destination is then
-// checked against isAttachmentHref, so only the canonical
-// /attachments/<id>/download route is ever accepted.
-//
-// The label admits BACKSLASH ESCAPES (`\]`, `\[`, `\\`), because that is
-// what attachmentMarkdownRef now emits for a filename containing a
-// bracket. A label class of `[^\]\n]*` would stop matching those exact
-// references -- the ones this matcher exists to recognise.
-const MARKDOWN_REF_RE = /^(!?)\[((?:\\[\s\S]|[^\\\]\n])*)\]\(([^\s()]+)\)$/
-
-/**
- * Recover an AttachmentRef from a pasted markdown reference — the exact
- * string attachmentMarkdownRef, the MCP `attach_file` tool and the CLI
- * hand a user to paste. Returns null unless the WHOLE input (surrounding
- * whitespace aside) is one such reference pointing at the canonical
- * download route, so any other paste is left to its normal handling.
- *
- * The WYSIWYG editor needs this because ProseMirror pastes plain text as
- * plain text: the reference would land as a literal text node and
- * prosemirror-markdown escapes `[` and `]` on the way back out, so the
- * saved body would hold `!\[name\](/attachments/…)` and readers would see
- * those characters instead of the image or the link.
- */
-export function parseAttachmentMarkdownRef(text: string): AttachmentRef | null {
-  const m = MARKDOWN_REF_RE.exec(text.trim())
-  if (!m) return null
-  const href = m[3]
-  if (!isAttachmentHref(href)) return null
-  const label = mdUnescapeLabel(m[2])
-  return { image: m[1] === '!', label: label || REF_FALLBACK_NAME, href }
 }
 
 // Extensions a browser can SAFELY render when an attachment link is opened

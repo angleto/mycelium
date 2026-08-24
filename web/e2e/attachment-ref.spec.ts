@@ -2,12 +2,13 @@ import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 import { readSource, setSource, sourceContent } from './source-editor'
 
-// Linkable attachments in the note/task body. The load-bearing risk is
-// the tiptap Link `validate` predicate: a relative
-// /attachments/<id>/download href must survive the markdown round-trip
-// (insert -> serialize -> parse-back) instead of being silently demoted
-// to bare text, which would lose the link on save/reload. Plus the
-// toolbar affordance to link an attachment.
+// Linkable attachments in the note/task body. The risk these tests were
+// written for was a relative /attachments/<id>/download href being
+// silently demoted to bare text by the round trip the document-model
+// editor performed on every save. There is no round trip now, so what
+// they assert is the destination surviving in the stored bytes and the
+// preview reading it as a link. Plus the toolbar affordance to link an
+// attachment.
 
 async function login(page: Page) {
   await page.goto('/login')
@@ -35,9 +36,8 @@ async function openFreshNoteEditor(page: Page) {
   await page.waitForTimeout(800)
 }
 
-// Markdown <-> WYSIWYG toggle. It lives in `.rte__actions` and carries no
 /** One surface now; this only waits for it. */
-async function enterMarkdownMode(page: Page) {
+async function awaitSourceEditor(page: Page) {
   await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
 }
 
@@ -48,7 +48,7 @@ test('an attachment link keeps its destination (keystone)', async ({ page }) => 
   // always mattered -- the bytes -- plus the preview reading it as a link.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   const id = '11111111-1111-1111-1111-111111111111'
   const href = `/attachments/${id}/download`
   const md = `[doc.pdf](${href})`
@@ -65,7 +65,7 @@ test('a bare-filename attachment link keeps its destination', async ({ page }) =
   // link used to be demoted to bare text.
   await login(page)
   await openFreshNoteEditor(page)
-  await enterMarkdownMode(page)
+  await awaitSourceEditor(page)
   const md = '[the figure](Fig02_donne.png)'
   await setSource(page, md)
   await page.locator('.cm-content').first().click()

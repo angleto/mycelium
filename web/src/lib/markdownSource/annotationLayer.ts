@@ -5,14 +5,15 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemir
 // highlights its quoted passage, an open suggestion strikes what it replaces
 // and shows the proposed text right after it.
 //
-// The tiptap version of this file (lib/annotationDecorations.ts) is 269 lines,
-// and roughly 150 of them build a RENDERED projection of the document with a
-// per-character map back to editor positions -- because the anchor was
-// captured in that projection while the body was markdown source. Its Python
-// counterpart (services/md_anchor.py) builds the same projection from the
-// source with markdown-it, and says so in its docstring. Two implementations
-// of one function, in two languages, that had to agree character for
-// character.
+// The file this replaced (lib/annotationDecorations.ts, deleted with the
+// document-model surface) was 269 lines, and roughly 150 of them built a
+// RENDERED projection of the document with a per-character map back to
+// editor positions -- because the anchor was captured in that projection
+// while the body was markdown source. Its Python counterpart
+// (services/md_anchor.py) still builds that projection from the source with
+// markdown-it, and says so in its docstring: it is what resolves the anchors
+// written back then. Two implementations of one function, in two languages,
+// that had to agree character for character.
 //
 // Here the document IS the markdown, so the anchor is a source span and
 // locating it is `indexOf`. That is the entire mechanism, and the reason
@@ -112,8 +113,7 @@ class ProposedWidget extends WidgetType {
 
   // Keyed on the TEXT as well as the id: an edited proposal has to produce a
   // different widget, or CodeMirror reuses the DOM and the ghost text stays
-  // stale. The tiptap version folds the text into its widget key for the
-  // same reason.
+  // stale.
   eq(other: WidgetType): boolean {
     return other instanceof ProposedWidget && other.id === this.id && other.text === this.text
   }
@@ -182,8 +182,7 @@ type LayerState = {
 
 const annotationField = StateField.define<LayerState>({
   // Empty until the host pushes the annotations in: they live in React
-  // state and arrive through a StateEffect, exactly as they arrive through
-  // a meta transaction on the tiptap side.
+  // state and arrive through a StateEffect.
   create: () => ({ anchors: [], flash: null, deco: Decoration.none }),
   update(value, tr) {
     let anchors = value.anchors

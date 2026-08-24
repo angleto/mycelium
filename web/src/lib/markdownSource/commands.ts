@@ -7,9 +7,10 @@ import { mdLink } from '../markdownInline'
 
 // The toolbar, as transformations of markdown SOURCE.
 //
-// In the tiptap surface a toolbar button is a document-model operation and
-// the serializer decides what characters come out. Here there is no
-// serializer, so a button IS the characters: `bold` inserts `**`. That makes
+// In the document-model surface this replaced, a toolbar button was an
+// operation on the model and the serializer decided what characters came
+// out. Here there is no serializer, so a button IS the characters: `bold`
+// inserts `**`. That makes
 // every command a total function `(string, selection) -> string`, which is
 // why the tests below assert exact bytes rather than a rendered result.
 //
@@ -21,8 +22,7 @@ import { mdLink } from '../markdownInline'
 // lands somewhere the characters would not mean what they say. The class is
 // smaller than the one it replaces, and unlike it, enumerable.
 
-/** Names the toolbar uses for its pressed state. Kept identical to the
- *  tiptap ones so the button wiring reads the same in both modes. */
+/** Names the toolbar uses for its pressed state. */
 export type ActiveMark =
   | 'bold'
   | 'italic'

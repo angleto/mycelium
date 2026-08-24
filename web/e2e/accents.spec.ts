@@ -6,7 +6,7 @@ import { readSource, sourceContent } from './source-editor'
 // Accented letters typed the way macOS types them: a DEAD KEY. Option+`
 // then `e` is not two characters, it is one IME composition — the browser
 // fires compositionstart / compositionupdate("`") / compositionend("è")
-// and ProseMirror must be left alone for its DOMObserver to read the
+// and the editor must be left alone for its DOM observer to read the
 // result. Anything that dispatches a transaction, or rebuilds the
 // document, inside that window kills the composition and the letter is
 // lost. Italian is unwriteable when that happens.

@@ -188,8 +188,8 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // Tab moves between table cells and does nothing elsewhere, so the key
     // keeps its accessibility meaning outside a table.
     tableKeymap(),
-    // `@` and `[[` typeaheads, inserting the same markdown the tiptap
-    // surface does so a body reads the same whichever one wrote it.
+    // `@` and `[[` typeaheads, inserting the same markdown the retired
+    // surface did, so a body reads the same whoever wrote it.
     markdownCompletion(),
     // Comment / suggestion marks. A bare state field: the annotations
     // themselves live in React state and arrive through a StateEffect.
