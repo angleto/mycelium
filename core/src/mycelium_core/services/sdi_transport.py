@@ -76,7 +76,23 @@ def _mtls_ssl_context(
 
 def fatturapa_filename(country_code: str, vat_number: str, progressivo: str) -> str:
     """SdI transmission file name: ``IT{idfiscale}_{progressivo}.xml`` for an
-    unsigned B2B/B2C file (a signed one would be ``.xml.p7m``)."""
+    unsigned B2B/B2C file (a signed one would be ``.xml.p7m``).
+
+    The identifier here is deliberately NOT kept equal to the document's
+    ``IdTrasmittente``, and that is not an oversight to be tidied up later.
+    AdE (Allegato A, Specifiche tecniche 1.9.1, §1.2.2) says of it: "l'
+    identificativo usato per il nome del file non e' soggetto a controlli di
+    validita', esistenza o coerenza con i dati presenti in fattura". The only
+    two controls on the name are 00001 (syntax) and 00002 (a name already
+    transmitted), so what the name owes is uniqueness per transmitting subject,
+    which the per-channel ``transmission_progressivo`` sequence provides.
+
+    The two fields answer to different rules and each takes the code its own
+    rule wants: SdI validates ``IdTrasmittente`` against the Anagrafe Tributaria
+    as a CODICE FISCALE (a P.IVA there is scartata 00300 for a physical person),
+    while the file name accepts any 11-16 character fiscal identifier -- the
+    spec's own examples show both a 16-char CF and an 11-digit one. Forcing them
+    to agree would either gain nothing or re-introduce 00300."""
     return f"{country_code}{vat_number}_{progressivo}.xml"
 
 
