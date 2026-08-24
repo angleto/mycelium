@@ -166,6 +166,8 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_EVENT_NOT_FOUND = "payment_connector.event_not_found"
     PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE = "payment_connector.event_not_retryable"
     PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE = "payment_connector.event_not_recomposable"
+    SDI_INTERMEDIARY_CODE_INVALID = "sdi.intermediary_code_invalid"
+    SDI_INTERMEDIARY_CODE_MISSING = "sdi.intermediary_code_missing"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
     IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
     IDEMPOTENCY_IN_PROGRESS = "idempotency.in_progress"
@@ -555,6 +557,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND: "Payment connector event not found",
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE: (
             "Only a parked or dead event can be retried"
+        ),
+        MessageCode.SDI_INTERMEDIARY_CODE_INVALID: (
+            "Not an Italian fiscal code: FatturaPA wants the trasmittente's codice "
+            "fiscale, 11 digits for a company or 16 characters for a person ({detail})"
+        ),
+        MessageCode.SDI_INTERMEDIARY_CODE_MISSING: (
+            "The accredited channel has no fiscal code configured; set it in Settings "
+            "before transmitting through it"
         ),
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE: (
             "This event cannot be recomposed: its document must still be an untouched "

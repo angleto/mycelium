@@ -162,6 +162,15 @@ class SdiEnvironmentOut(BaseModel):
     # tell a value that matters from one nothing reads.
     intermediary_id_paese: str
     intermediary_id_codice: str
+    #: True when the code above comes from ``system_settings`` rather than from
+    #: the deployment's env var. While it is False the field is showing the
+    #: fallback, and saving once moves it into platform configuration for good.
+    intermediary_id_codice_from_settings: bool
+    #: The one thing a shape check cannot decide: an 11-digit value is right for
+    #: a company and wrong for a physical person, whose codice fiscale is the
+    #: 16-character form. Surfaced next to the field because the failure it
+    #: predicts is otherwise invisible until SdI scarta a real invoice (00300).
+    intermediary_id_codice_warning: str | None
     # Presence, never the value: these name files mounted from k8s secrets.
     client_cert_configured: bool
     client_key_configured: bool
@@ -170,6 +179,13 @@ class SdiEnvironmentOut(BaseModel):
 
 class SdiEnvironmentIn(BaseModel):
     environment: Literal["test", "production"]
+
+
+class SdiIntermediaryIn(BaseModel):
+    """The accredited channel's fiscal code. Empty clears the override and
+    returns the deployment to its env value."""
+
+    id_codice: str = Field(default="", max_length=28)
 
 
 class VerifyEmailIn(BaseModel):

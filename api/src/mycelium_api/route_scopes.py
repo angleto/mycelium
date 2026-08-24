@@ -114,6 +114,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     # --- admin_sdi ---
     ("GET", "/admin/sdi-environment"): HUMAN_ONLY,
     ("PUT", "/admin/sdi-environment"): HUMAN_ONLY,
+    ("PUT", "/admin/sdi-environment/intermediary"): HUMAN_ONLY,
     # --- admin_users ---
     ("GET", "/admin/users"): HUMAN_ONLY,
     ("PATCH", "/admin/users/{user_id}"): HUMAN_ONLY,

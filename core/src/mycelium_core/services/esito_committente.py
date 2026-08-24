@@ -52,6 +52,7 @@ from mycelium_core.models.sdi_received import ReceivedInvoice
 from mycelium_core.services import audit
 from mycelium_core.services.sdi_notification_xsd import NS_MESSAGGI, validate_sdi_notification
 from mycelium_core.services.sdi_transport import esito_filename, send_esito_via_sdicoop
+from mycelium_core.services.system_settings import get_sdi_intermediary_id_codice
 
 _log = logging.getLogger(__name__)
 
@@ -200,10 +201,26 @@ async def send_esito_committente(
     # persisted EC -- the buyer's intent is durable; the operator replays via
     # the API which picks a new message_id and a fresh audit row.
     s = get_settings()
-    if s.sdicoop_active and s.sdi_endpoint_url and s.sdi_client_cert and s.sdi_client_key:
+    # Resolved from system_settings, where an operator can correct it without a
+    # redeploy, falling back to the env value while that is unset.
+    id_codice = await get_sdi_intermediary_id_codice(session)
+    if (
+        s.sdicoop_active
+        and s.sdi_endpoint_url
+        and s.sdi_client_cert
+        and s.sdi_client_key
+        # No ``or "0"``. That fabricated IT0_XXXXX_ES_001.xml and POSTed it to
+        # SdI, with the failure swallowed into a log warning -- garbage sent
+        # under a name that identifies nobody. It was only ever safe because
+        # the boot guard made the value non-empty for the process lifetime, and
+        # that guard is gone now the value is runtime-editable. Not sending is
+        # the honest outcome: the EC stays persisted and the operator replays
+        # it from the API once the channel is configured.
+        and id_codice
+    ):
         filename = esito_filename(
             country_code=s.sdi_intermediary_id_paese,
-            vat_number=s.sdi_intermediary_id_codice or "0",
+            vat_number=id_codice,
             progressivo=message_id[:5].upper(),
             esito_seq="001",
         )

@@ -116,3 +116,44 @@ gate arrives with the first mandate that actually grants emission, not before.
 **Leave it and note the discrepancy.** The document has fiscal value and is kept
 for ten years. A declaration in it that a named third party issued someone
 else's invoice is not a comment.
+
+## Amendment (2026-08-24) — the trasmittente's own code moves to platform configuration
+
+This ADR left `MYCELIUM_SDI_INTERMEDIARY_ID_CODICE` where it found it, in an
+env var, and that turned out to be the wrong home for the one field it made
+load-bearing. With 1.5/1.6 gone, `IdTrasmittente` is the ONLY place the
+channel's identity appears, and FatturaPA is specific about what belongs there:
+
+> IdCodice: numero di identificazione fiscale del trasmittente (per i soggetti
+> stabiliti nel territorio dello Stato Italiano corrisponde al Codice Fiscale).
+> In caso di IdPaese uguale a IT, il sistema ne verifica la presenza in Anagrafe
+> Tributaria: se non esiste come codice fiscale, il file viene scartato con
+> codice errore 00300.
+> — Allegato A, Specifiche tecniche 1.9.1, §2.1.1
+
+A deployment can hold the wrong value there for months without knowing, because
+the self-transmission branch takes a different path (it emits the cedente's own
+`tax_code`) and only the intermediary branch — transmitting for a DIFFERENT
+tenant — exposes it. A shadow document produced by the dry-run feature is what
+surfaced it: cedente HahnBanach, trasmittente the channel holder, `IdCodice`
+carrying an 11-digit P.IVA belonging to a physical person, whose codice fiscale
+is the 16-character form.
+
+So the value now lives in `system_settings`, editable by an admin, with the env
+var kept as a fallback while the column is blank (migration `0004`; the migrate
+Job sees only the database URL, so it cannot seed from the environment and the
+move has to be expand-only). Two consequences follow:
+
+- the fail-closed boot check no longer demands it. It could not: refusing to
+  start a deployment that is configured correctly in the database would be the
+  guard working against the reason the value moved. Presence is enforced in
+  `invoice.transmit` instead, upstream of the number, the NomeFile and the
+  frozen XML, so a missing one costs nothing durable;
+- `esito_committente` stops falling back to `"0"`. That fabricated
+  `IT0_XXXXX_ES_001.xml` and POSTed it to SdI with the failure swallowed into a
+  log warning, and it was only ever safe because the boot check made the value
+  non-empty for the process lifetime.
+
+The shape is validated on save; the one thing a shape cannot decide — 11 digits
+being right for a company and wrong for a person — is shown as a warning beside
+the field rather than refused, because refusing it would block every company.

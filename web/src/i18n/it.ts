@@ -762,6 +762,12 @@ export const it: Catalog = {
     present: 'presente',
     missing: 'assente',
     notSet: 'non impostato',
+    save: 'Salva',
+    codeSaved: 'Codice fiscale del trasmittente aggiornato.',
+    codeFromEnv:
+      'Al momento arriva dall\u2019ambiente del deployment. Salvando qui passa nella configurazione della piattaforma, e la variabile d\u2019ambiente si puo\u0300 togliere.',
+    codeLooksLikeVat:
+      'Sono 11 cifre. E\u0300 corretto per una societa\u0300, il cui codice fiscale coincide con la partita IVA, ed e\u0300 SBAGLIATO per una ditta individuale o un professionista, il cui codice fiscale e\u0300 quello a 16 caratteri: SdI verifica questo valore in Anagrafe Tributaria come codice fiscale e scarta il file con 00300 se non lo e\u0300.',
   },
   mfa: {
     title: 'Autenticazione a due fattori',

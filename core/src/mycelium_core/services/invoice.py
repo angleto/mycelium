@@ -92,6 +92,7 @@ from mycelium_core.services.sdi_transport import fatturapa_filename, transmissio
 from mycelium_core.services.system_settings import (
     endpoint_for,
     get_sdi_environment,
+    get_sdi_intermediary_id_codice,
 )
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
 
@@ -1906,9 +1907,21 @@ async def transmit(
             MessageCode.INVOICE_TRANSMIT_ENV_CHANGED,
             detail=f"{inv.sdi_env_used} -> {sdi_env}",
         )
-    ch = channel or get_channel(endpoint_override=endpoint_for(sdi_env))
+    ch = channel or get_channel(
+        endpoint_override=endpoint_for(sdi_env),
+        id_codice_override=await get_sdi_intermediary_id_codice(session),
+    )
     intermediary = ch.intermediary
     if intermediary is not None:
+        # The boot guard used to enforce presence, but the value now lives in
+        # system_settings where it can be cleared at runtime, so presence is
+        # checked where it is used. Refused HERE, upstream of the number, the
+        # ProgressivoInvio, the NomeFile, the frozen XML and the pre-dispatch
+        # checkpoint, so nothing durable is spent on a document that cannot
+        # carry a valid trasmittente. An empty IdTrasmittente would otherwise
+        # reach SdI as scarto 00300.
+        if not intermediary.vat_number:
+            raise ConflictError(MessageCode.SDI_INTERMEDIARY_CODE_MISSING)
         # Transmitting via the accredited channel = Mycelium acts as intermediary
         # for this VAT subject; an active SdiMandate is required (ADR-0011).
         mandate = (
@@ -2874,7 +2887,12 @@ async def get_xml_preview(
         # the IdTrasmittente the real send will carry -- for a self-transmitting
         # issuer that is the cedente's own codice fiscale, not the channel's
         # P.IVA, and the two differ for a physical-person channel holder.
-        intermediary=_payload_intermediary(p.issuer, get_channel().intermediary),
+        intermediary=_payload_intermediary(
+            p.issuer,
+            get_channel(
+                id_codice_override=await get_sdi_intermediary_id_codice(session)
+            ).intermediary,
+        ),
         # Already loaded by _gather_preview: the ANTEPRIMA must carry the
         # same AltriDatiGestionali transmit() will freeze (2.2.1.16).
         altri_dati=p.altri_dati,

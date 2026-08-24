@@ -19,6 +19,8 @@ type SdiEnv = {
   active_endpoint: string
   intermediary_id_paese: string
   intermediary_id_codice: string
+  intermediary_id_codice_from_settings: boolean
+  intermediary_id_codice_warning: string | null
   client_cert_configured: boolean
   client_key_configured: boolean
   ca_bundle_configured: boolean
@@ -30,6 +32,7 @@ export function SdiSettings() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [code, setCode] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -42,7 +45,10 @@ export function SdiSettings() {
           return
         }
         const data = (await res.json()) as SdiEnv
-        if (active) setState(data)
+        if (active) {
+          setState(data)
+          setCode(data.intermediary_id_codice)
+        }
       } catch (e) {
         if (active) setErr(String(e))
       }
@@ -86,6 +92,32 @@ export function SdiSettings() {
     )
   }
 
+  async function saveCode() {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const res = await authFetch('/admin/sdi-environment/intermediary', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id_codice: (code ?? '').trim() }),
+      })
+      if (!res.ok) {
+        setErr(errMessage(await res.json().catch(() => null)))
+        return
+      }
+      const data = (await res.json()) as SdiEnv
+      setState(data)
+      setCode(data.intermediary_id_codice)
+      setMsg(t('sdi.codeSaved'))
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const isProd = state.environment === 'production'
   const presence = (ok: boolean) => (
     <span className={ok ? 'tag' : 'tag tag--muted'}>
@@ -127,9 +159,33 @@ export function SdiSettings() {
       <h3>{t('sdi.channelTitle')}</h3>
       <p className="hint">{t('sdi.channelHint')}</p>
       <dl className="kv">
-        <dt>{t('sdi.idCodice')}</dt>
+        <dt>
+          <label htmlFor="sdi-id-codice">{t('sdi.idCodice')}</label>
+        </dt>
         <dd>
-          <code>{state.intermediary_id_codice || t('sdi.notSet')}</code>
+          <input
+            id="sdi-id-codice"
+            value={code ?? ''}
+            maxLength={28}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={t('sdi.notSet')}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+          />
+          <button
+            type="button"
+            className="btn--sm"
+            disabled={busy || (code ?? '') === state.intermediary_id_codice}
+            onClick={() => void saveCode()}
+          >
+            {t('sdi.save')}
+          </button>
+          {!state.intermediary_id_codice_from_settings && (
+            <p className="hint">{t('sdi.codeFromEnv')}</p>
+          )}
+          {state.intermediary_id_codice_warning === 'physical_person_must_use_16_char_cf' && (
+            <p className="err">{t('sdi.codeLooksLikeVat')}</p>
+          )}
         </dd>
         <dt>{t('sdi.idPaese')}</dt>
         <dd>

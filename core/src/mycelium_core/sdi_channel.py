@@ -142,12 +142,18 @@ def set_channel_override(fn: _FactoryFn | None) -> None:
     _override = fn
 
 
-def get_channel(endpoint_override: str | None = None) -> SdiChannel:
-    """The configured transmission channel. ``endpoint_override`` lets the
-    caller inject the RiceviFile URL chosen at runtime (the test<->production
-    switch in ``system_settings``); when None the legacy ``sdi_endpoint_url``
-    env value is used. Only the live send path needs the endpoint, so the
-    preview (which reads only ``intermediary``) can call this with no override."""
+def get_channel(
+    endpoint_override: str | None = None, id_codice_override: str | None = None
+) -> SdiChannel:
+    """The configured transmission channel.
+
+    Both overrides carry a value the caller resolved from ``system_settings``,
+    which this function cannot read: it is sync and holds no session, while the
+    settings live in the database precisely so an operator can change them
+    without a redeploy. ``endpoint_override`` is the test<->production switch;
+    ``id_codice_override`` is the accredited channel's fiscal code. When either
+    is None the env value stands, which is what keeps a deployment that has not
+    been touched working exactly as before."""
     if _override is not None:
         return _override()
     s = get_settings()
@@ -155,7 +161,7 @@ def get_channel(endpoint_override: str | None = None) -> SdiChannel:
         return SdICoopChannel(
             intermediary=IntermediaryIdentity(
                 country_code=s.sdi_intermediary_id_paese,
-                vat_number=s.sdi_intermediary_id_codice,
+                vat_number=id_codice_override or s.sdi_intermediary_id_codice,
             ),
             endpoint_url=endpoint_override or s.sdi_endpoint_url,
             client_cert=s.sdi_client_cert,

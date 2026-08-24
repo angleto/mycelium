@@ -28,3 +28,12 @@ class SystemSettings(TimestampMixin, Base):
     # 'test' (default, safe) or 'production'. Selects config.sdi_endpoint_url_test
     # vs sdi_endpoint_url_prod for the live SdICoop RiceviFile send.
     sdi_environment: Mapped[str] = mapped_column(String(16), nullable=False, server_default="test")
+    #: FatturaPA 1.1.1.2 IdTrasmittente/IdCodice: the accredited channel's own
+    #: fiscal code. Here rather than in an env var because it is a value with a
+    #: reason to change and an operator has to be able to see and correct it
+    #: without a redeploy. Empty means "not configured here", and the resolver
+    #: then falls back to ``MYCELIUM_SDI_INTERMEDIARY_ID_CODICE`` -- which is
+    #: what makes the move expand-only. 28 is CodiceType's maximum.
+    sdi_intermediary_id_codice: Mapped[str] = mapped_column(
+        String(28), nullable=False, server_default=""
+    )

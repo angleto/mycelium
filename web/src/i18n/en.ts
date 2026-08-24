@@ -764,6 +764,12 @@ export const en = {
     present: 'present',
     missing: 'missing',
     notSet: 'not set',
+    save: 'Save',
+    codeSaved: 'Transmitter fiscal code updated.',
+    codeFromEnv:
+      'Currently coming from the deployment’s environment. Saving here moves it into platform configuration, and the environment variable can then be removed.',
+    codeLooksLikeVat:
+      'This is 11 digits. That is correct for a company, whose codice fiscale is its VAT number, and WRONG for a sole trader or professional, whose codice fiscale is the 16-character form — SdI checks this value in Anagrafe Tributaria as a codice fiscale and rejects the file with 00300 if it is not one.',
   },
   mfa: {
     title: 'Two-factor authentication',

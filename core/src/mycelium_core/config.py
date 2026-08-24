@@ -810,14 +810,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_sdi(self) -> Settings:
-        """Fail closed: selecting the SdICoop channel means configuring it
-        fully (intermediary identity + mutual-TLS transport). The CA bundle
-        is optional (the system trust store is acceptable for SdI's cert)."""
+        """Fail closed: selecting the SdICoop channel means configuring the
+        mutual-TLS transport. The CA bundle is optional (the system trust store
+        is acceptable for SdI's cert).
+
+        The trasmittente's fiscal code is NOT checked here any more: it lives in
+        ``system_settings`` so an operator can correct it without a redeploy,
+        which means a boot-time presence check would refuse to start a
+        deployment that is configured perfectly well in the database. Presence
+        is enforced where the value is used instead -- in ``invoice.transmit``,
+        upstream of the number, the NomeFile and the frozen XML, so a missing
+        one costs nothing durable."""
         if self.sdi_channel == "sdicoop":
             missing = [
                 name
                 for name, value in (
-                    ("MYCELIUM_SDI_INTERMEDIARY_ID_CODICE", self.sdi_intermediary_id_codice),
                     ("MYCELIUM_SDI_CLIENT_CERT", self.sdi_client_cert),
                     ("MYCELIUM_SDI_CLIENT_KEY", self.sdi_client_key),
                 )
