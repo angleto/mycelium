@@ -2258,10 +2258,6 @@ export const en = {
       timeline: 'SdI transmission timeline',
       viewXml: 'view XML',
       downloadXml: 'download XML',
-    reshoot: 'Rebuild XML',
-    reshootConfirm:
-      'Rebuild this shadow document from the invoice as it stands now? The stored XML is what a parallel run diffs against the incumbent, so the artefact you compared before will be replaced. If the document no longer validates, the error is shown and nothing is overwritten.',
-    reshot: 'Shadow document rebuilt.',
     },
     view: { active: 'Active', archived: 'Archived', trashed: 'Trash' },
     archive: 'Archive',
@@ -2691,6 +2687,10 @@ export const en = {
     attempts: 'Attempts',
     createdAt: 'Received',
     retry: 'Retry',
+    reshoot: 'Rebuild XML',
+    reshootConfirm:
+      'Rebuild this shadow document from the invoice as it stands now? The stored XML is what a parallel run diffs against the incumbent, so the artefact you compared before will be replaced. If the document no longer validates, the error is shown and nothing is overwritten.',
+    reshot: 'Shadow document rebuilt.',
     recompose: 'Recompose',
     recomposeConfirm:
       'Delete the document this event composed and run the stored provider payload through the mapper again? Use this after a fix that changed how the document is BUILT from the event. A serializer fix needs nothing: a draft holds no XML and is rebuilt every time it is opened. This cannot be undone.',

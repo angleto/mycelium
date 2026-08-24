@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 
@@ -87,6 +87,11 @@ export function SdiSettings() {
   }
 
   const isProd = state.environment === 'production'
+  const presence = (ok: boolean) => (
+    <span className={ok ? 'tag' : 'tag tag--muted'}>
+      {ok ? t('sdi.present') : t('sdi.missing')}
+    </span>
+  )
   return (
     <section className="card">
       <h2>{t('sdi.title')}</h2>
@@ -130,22 +135,15 @@ export function SdiSettings() {
         <dd>
           <code>{state.intermediary_id_paese || t('sdi.notSet')}</code>
         </dd>
-        {(
-          [
-            ['sdi.clientCert', state.client_cert_configured],
-            ['sdi.clientKey', state.client_key_configured],
-            ['sdi.caBundle', state.ca_bundle_configured],
-          ] as const
-        ).map(([key, ok]) => (
-          <Fragment key={key}>
-            <dt>{t(key)}</dt>
-            <dd>
-              <span className={ok ? 'tag' : 'tag tag--muted'}>
-                {ok ? t('sdi.present') : t('sdi.missing')}
-              </span>
-            </dd>
-          </Fragment>
-        ))}
+        {/* Written out rather than mapped over an array of key strings: the
+            pipeline's i18n check only verifies STATIC t('...') calls, and a
+            dynamic one would quietly exempt these three from it. */}
+        <dt>{t('sdi.clientCert')}</dt>
+        <dd>{presence(state.client_cert_configured)}</dd>
+        <dt>{t('sdi.clientKey')}</dt>
+        <dd>{presence(state.client_key_configured)}</dd>
+        <dt>{t('sdi.caBundle')}</dt>
+        <dd>{presence(state.ca_bundle_configured)}</dd>
       </dl>
     </section>
   )
