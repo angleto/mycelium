@@ -50,6 +50,16 @@ async def test_sdi_environment_admin_gated_and_flips() -> None:
         body = got.json()
         assert body["environment"] in ("test", "production")
         assert "active_endpoint" in body and "sdicoop_active" in body
+        # The accredited channel is REFLECTED read-only, so an admin can see
+        # what the running process holds. The incident this answers: a setting
+        # nobody had heard of was demanded by the fail-closed boot check while
+        # being read by nothing (ADR-0053).
+        assert "intermediary_id_codice" in body and "intermediary_id_paese" in body
+        # Certificates are reported as present or missing, NEVER as values:
+        # they name files mounted from k8s secrets.
+        for key in ("client_cert_configured", "client_key_configured", "ca_bundle_configured"):
+            assert isinstance(body[key], bool), key
+        assert not any("BEGIN" in str(v) for v in body.values()), "no key material may leak here"
 
         # Flip to production, read it back, then reset to test (shared singleton).
         put = await c.put("/admin/sdi-environment", headers=h, json={"environment": "production"})

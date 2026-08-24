@@ -753,6 +753,17 @@ export const en = {
     confirmProd:
       'Switch to PRODUCTION? The next transmissions will be real fiscal invoices to SdI.',
     switched: 'Environment updated.',
+    channelTitle: 'Accredited channel',
+    channelHint:
+      'What this deployment actually holds. Read-only: the identity is welded to the client certificate it was accredited with, so it changes with the certificate, not from here. Certificates are shown as present or missing, never as values.',
+    idCodice: 'Transmitter fiscal code',
+    idPaese: 'Country',
+    clientCert: 'Client certificate',
+    clientKey: 'Client key',
+    caBundle: 'CA bundle',
+    present: 'present',
+    missing: 'missing',
+    notSet: 'not set',
   },
   mfa: {
     title: 'Two-factor authentication',

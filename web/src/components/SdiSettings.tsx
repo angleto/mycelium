@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 
@@ -17,6 +17,11 @@ type SdiEnv = {
   test_url: string
   prod_url: string
   active_endpoint: string
+  intermediary_id_paese: string
+  intermediary_id_codice: string
+  client_cert_configured: boolean
+  client_key_configured: boolean
+  ca_bundle_configured: boolean
 }
 
 export function SdiSettings() {
@@ -114,6 +119,34 @@ export function SdiSettings() {
       <p className="hint">
         {t('sdi.activeEndpoint')}: <code>{state.active_endpoint || '—'}</code>
       </p>
+      <h3>{t('sdi.channelTitle')}</h3>
+      <p className="hint">{t('sdi.channelHint')}</p>
+      <dl className="kv">
+        <dt>{t('sdi.idCodice')}</dt>
+        <dd>
+          <code>{state.intermediary_id_codice || t('sdi.notSet')}</code>
+        </dd>
+        <dt>{t('sdi.idPaese')}</dt>
+        <dd>
+          <code>{state.intermediary_id_paese || t('sdi.notSet')}</code>
+        </dd>
+        {(
+          [
+            ['sdi.clientCert', state.client_cert_configured],
+            ['sdi.clientKey', state.client_key_configured],
+            ['sdi.caBundle', state.ca_bundle_configured],
+          ] as const
+        ).map(([key, ok]) => (
+          <Fragment key={key}>
+            <dt>{t(key)}</dt>
+            <dd>
+              <span className={ok ? 'tag' : 'tag tag--muted'}>
+                {ok ? t('sdi.present') : t('sdi.missing')}
+              </span>
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
     </section>
   )
 }

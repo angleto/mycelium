@@ -153,6 +153,19 @@ class SdiEnvironmentOut(BaseModel):
     test_url: str
     prod_url: str
     active_endpoint: str
+    # The accredited channel's own identity, reflected read-only from the
+    # deployment. It is NOT editable here: it is welded to the client
+    # certificate it was accredited with, and nothing in the system can detect
+    # a mismatch between the two (a wrong-but-well-formed code surfaces only as
+    # SdI scarto 00300, after the fiscal identifiers are already burnt). Shown
+    # because an operator who cannot see what the running process holds cannot
+    # tell a value that matters from one nothing reads.
+    intermediary_id_paese: str
+    intermediary_id_codice: str
+    # Presence, never the value: these name files mounted from k8s secrets.
+    client_cert_configured: bool
+    client_key_configured: bool
+    ca_bundle_configured: bool
 
 
 class SdiEnvironmentIn(BaseModel):

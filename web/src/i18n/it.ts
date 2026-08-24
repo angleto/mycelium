@@ -751,6 +751,17 @@ export const it: Catalog = {
     confirmProd:
       'Passare a PRODUZIONE? Le prossime trasmissioni saranno fatture fiscali reali verso SdI.',
     switched: 'Ambiente aggiornato.',
+    channelTitle: 'Canale accreditato',
+    channelHint:
+      'Quello che questo deployment tiene davvero. In sola lettura: l\u2019identita\u0300 e\u0300 saldata al certificato con cui e\u0300 stata accreditata, quindi cambia col certificato, non da qui. Dei certificati si mostra solo se ci sono, mai il valore.',
+    idCodice: 'Codice fiscale del trasmittente',
+    idPaese: 'Paese',
+    clientCert: 'Certificato client',
+    clientKey: 'Chiave client',
+    caBundle: 'Bundle CA',
+    present: 'presente',
+    missing: 'assente',
+    notSet: 'non impostato',
   },
   mfa: {
     title: 'Autenticazione a due fattori',

@@ -31,6 +31,11 @@ def _out(environment: str) -> SdiEnvironmentOut:
         test_url=s.sdi_endpoint_url_test or s.sdi_endpoint_url,
         prod_url=s.sdi_endpoint_url_prod or s.sdi_endpoint_url,
         active_endpoint=svc.endpoint_for(environment),
+        intermediary_id_paese=s.sdi_intermediary_id_paese,
+        intermediary_id_codice=s.sdi_intermediary_id_codice,
+        client_cert_configured=bool(s.sdi_client_cert),
+        client_key_configured=bool(s.sdi_client_key),
+        ca_bundle_configured=bool(s.sdi_ca_bundle),
     )
 
 
