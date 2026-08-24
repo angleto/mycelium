@@ -2258,6 +2258,10 @@ export const en = {
       timeline: 'SdI transmission timeline',
       viewXml: 'view XML',
       downloadXml: 'download XML',
+    reshoot: 'Rebuild XML',
+    reshootConfirm:
+      'Rebuild this shadow document from the invoice as it stands now? The stored XML is what a parallel run diffs against the incumbent, so the artefact you compared before will be replaced. If the document no longer validates, the error is shown and nothing is overwritten.',
+    reshot: 'Shadow document rebuilt.',
     },
     view: { active: 'Active', archived: 'Archived', trashed: 'Trash' },
     archive: 'Archive',

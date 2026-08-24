@@ -26,7 +26,7 @@ import pytest
 from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
-from mycelium_core.errors import DomainError, UnprocessableError
+from mycelium_core.errors import ConflictError, DomainError, UnprocessableError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import DocumentType, InvoiceState, PaymentStatus
@@ -1979,3 +1979,77 @@ async def test_a_connector_cannot_carry_a_payment_code_outside_the_sdi_tables() 
     org_id, user_id, issuer_id = await _org_and_issuer()
     with pytest.raises(DomainError):
         await _connector(org_id, user_id, issuer_id, default_payment_method_code="MP99")
+
+
+# --- re-shooting the shadow document ----------------------------------------
+
+
+async def test_reshooting_replaces_the_shadow_xml_with_todays_build() -> None:
+    """A shadow blob is the ONLY XML this subsystem stores, so it is the only
+    one a serializer fix does not reach on its own: a live draft holds none and
+    is rebuilt on read. These blobs still carry whatever the builder produced
+    the day they were captured."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_shadow"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        ev = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert ev.dry_run_xml is not None
+        # Stand in for "the builder changed since": a stale blob.
+        ev.dry_run_xml = "<stale/>"
+        await s.flush()
+
+        row = await svc.reshoot_dry_run_xml(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            event_id=event_id,
+        )
+        assert row.dry_run_xml is not None
+        assert row.dry_run_xml != "<stale/>"
+        assert "<FatturaElettronica" in row.dry_run_xml
+        # It is still a would-be document: re-shooting allocates nothing.
+        assert "<ProgressivoInvio>ANTEPRIMA</ProgressivoInvio>" in row.dry_run_xml
+
+
+async def test_reshooting_is_refused_once_the_document_has_been_promoted() -> None:
+    """Promotion clears ``dry_run`` on the invoice: the document has left the
+    shadow universe and is a real draft an operator may send. Re-shooting a
+    comparison artefact for a document nobody is comparing is meaningless, and
+    the row stops offering it."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_promo"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        ev = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert ev.invoice_id is not None
+        await svc.promote_dry_run(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            connector_id=connector_id,
+            invoice_id=ev.invoice_id,
+        )
+        with pytest.raises(ConflictError):
+            await svc.reshoot_dry_run_xml(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                connector_id=connector_id,
+                event_id=event_id,
+            )

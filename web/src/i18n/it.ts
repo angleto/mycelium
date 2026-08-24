@@ -2244,6 +2244,10 @@ export const it: Catalog = {
       timeline: 'Cronologia trasmissione SdI',
       viewXml: 'vedi XML',
       downloadXml: 'scarica XML',
+    reshoot: 'Rigenera XML',
+    reshootConfirm:
+      'Rigenerare questo documento ombra dalla fattura com\u2019e\u0300 adesso? L\u2019XML memorizzato e\u0300 quello che una run in parallelo confronta con il fornitore uscente, quindi l\u2019artefatto gia\u0300 confrontato verra\u0300 sostituito. Se il documento non e\u0300 piu\u0300 valido viene mostrato l\u2019errore e non si sovrascrive niente.',
+    reshot: 'Documento ombra rigenerato.',
     },
     view: { active: 'Attive', archived: 'Archiviate', trashed: 'Cestino' },
     archive: 'Archivia',

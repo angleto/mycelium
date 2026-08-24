@@ -29,7 +29,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -252,6 +252,10 @@ class EventActionsOut(BaseModel):
     retry: bool
     #: Owner-only at the router, and only meaningful for a shadow document.
     promote: bool
+    #: Owner-only too, and only while the document is STILL a shadow: promoting
+    #: clears ``dry_run`` on the invoice, and re-shooting a comparison artefact
+    #: for a document nobody is comparing any more is meaningless.
+    reshoot: bool
     #: Retry on an event that ALREADY composed a document does not recompose
     #: it: ``_process_emission`` short-circuits on the object claim into
     #: ``_settle``, which on a transmit-mode connector files the existing
@@ -373,23 +377,45 @@ _DERIVED_EVENT_FIELDS = frozenset(
 )
 
 
+class _LinkedDrafts(NamedTuple):
+    """Which of the documents a page of events composed are still drafts, and
+    which of those are still SHADOW drafts.
+
+    The two are not the same question and the row needs both: a retry settles
+    any draft, while re-shooting only makes sense while the document is still a
+    comparison artefact. ``promote_dry_run`` clears ``dry_run`` on the invoice,
+    so a promoted document is a plain draft and must stop offering it.
+    """
+
+    drafts: frozenset[uuid.UUID]
+    shadow_drafts: frozenset[uuid.UUID]
+
+
+#: A module-level empty value so the projection can be called without a page
+#: lookup (a single-row route, a test) without a mutable-looking default.
+_NO_LINKED_DRAFTS = _LinkedDrafts(frozenset(), frozenset())
+
+
 async def _draft_invoice_ids(
     ctx: TenantCtx, rows: Sequence[PaymentConnectorEvent]
-) -> frozenset[uuid.UUID]:
-    """Of the documents these events composed, which are still drafts.
-
-    Read in one statement for the whole page. RLS scopes it to the tenant, so
-    an id belonging to another org simply does not come back.
-    """
+) -> _LinkedDrafts:
+    """Read in one statement for the whole page, not one query per row. RLS
+    scopes it to the tenant, so an id belonging to another org simply does not
+    come back."""
     ids = {r.invoice_id for r in rows if r.invoice_id is not None}
     if not ids:
-        return frozenset()
+        return _NO_LINKED_DRAFTS
     found = (
         await ctx.session.execute(
-            select(Invoice.id).where(Invoice.id.in_(ids), Invoice.state == InvoiceState.draft)
+            select(Invoice.id, Invoice.dry_run).where(
+                Invoice.id.in_(ids), Invoice.state == InvoiceState.draft
+            )
         )
-    ).scalars()
-    return frozenset(found)
+    ).all()
+    return _LinkedDrafts(
+        frozenset(i for i, _ in found),
+        frozenset(i for i, shadow in found if shadow),
+    )
 
 
 def _event_out(
@@ -397,7 +423,7 @@ def _event_out(
     *,
     provider: str,
     role: Role,
-    settling_invoice_ids: frozenset[uuid.UUID] = frozenset(),
+    linked: _LinkedDrafts = _NO_LINKED_DRAFTS,
 ) -> PaymentConnectorEventOut:
     counterpart = svc.counterpart_of(row, provider=provider)
     return PaymentConnectorEventOut(
@@ -412,7 +438,12 @@ def _event_out(
         actions=EventActionsOut(
             retry=row.status in svc.RETRYABLE_EVENT_STATUSES,
             promote=row.dry_run_xml is not None and role is Role.owner,
-            settles_existing_draft=row.invoice_id in settling_invoice_ids,
+            reshoot=(
+                row.dry_run_xml is not None
+                and role is Role.owner
+                and row.invoice_id in linked.shadow_drafts
+            ),
+            settles_existing_draft=row.invoice_id in linked.drafts,
         ),
     )
 
@@ -644,10 +675,8 @@ async def list_events(
     # merely settle a document this event already produced -- a distinction the
     # operator cannot make from the row otherwise, and the one that turns
     # "retry" into "file the pre-fix draft as it stands".
-    settling = await _draft_invoice_ids(ctx, rows)
-    return [
-        _event_out(r, provider=provider, role=ctx.role, settling_invoice_ids=settling) for r in rows
-    ]
+    linked = await _draft_invoice_ids(ctx, rows)
+    return [_event_out(r, provider=provider, role=ctx.role, linked=linked) for r in rows]
 
 
 @router.get(
@@ -764,6 +793,43 @@ async def discard_dry_run(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, connector_id=connector_id
     )
     return DiscardDryRunOut(discarded=discarded)
+
+
+@router.post(
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}"
+    "/events/{event_id}/reshoot-dry-run-xml",
+    response_model=PaymentConnectorEventOut,
+)
+async def reshoot_dry_run_xml(
+    issuer_profile_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> PaymentConnectorEventOut:
+    """Rebuild this event's frozen shadow document from the invoice as it is now.
+
+    Owner-only, like the other two verbs that act on the shadow universe: it
+    REPLACES the artefact a parallel run was diffing against the incumbent, so
+    it is a decision about the comparison, not a way of reading it.
+
+    A document that no longer validates answers with the validator's own words
+    rather than a success and a stale blob.
+    """
+    ensure_role(ctx.role, Role.owner)
+    provider = await _assert_in_issuer(ctx, issuer_profile_id, connector_id)
+    row = await svc.reshoot_dry_run_xml(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        connector_id=connector_id,
+        event_id=event_id,
+    )
+    return _event_out(
+        row,
+        provider=provider,
+        role=ctx.role,
+        linked=await _draft_invoice_ids(ctx, [row]),
+    )
 
 
 class PromoteDryRunOut(BaseModel):
@@ -924,5 +990,5 @@ async def retry_event(
         row,
         provider=provider,
         role=ctx.role,
-        settling_invoice_ids=await _draft_invoice_ids(ctx, [row]),
+        linked=await _draft_invoice_ids(ctx, [row]),
     )

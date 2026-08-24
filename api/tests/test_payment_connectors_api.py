@@ -1421,7 +1421,7 @@ async def test_the_row_advertises_only_actions_the_server_will_honour() -> None:
     shown for every status except ``done`` while the service accepts three, and
     "Make sendable" was shown to every role while its route is owner-only.
     """
-    from mycelium_api.routers.payment_connectors import _event_out
+    from mycelium_api.routers.payment_connectors import _event_out, _LinkedDrafts
     from mycelium_core.models.membership import Role
     from mycelium_core.models.payment_connector import PaymentConnectorEvent
     from mycelium_core.services import payment_connectors as svc
@@ -1463,6 +1463,24 @@ async def test_the_row_advertises_only_actions_the_server_will_honour() -> None:
         _row("dead", invoice_id=inv),
         provider="stripe",
         role=Role.owner,
-        settling_invoice_ids=frozenset({inv}),
+        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset()),
     )
     assert settling.actions.settles_existing_draft is True
+
+    # Re-shoot needs the document to be a SHADOW draft: promotion clears
+    # dry_run on the invoice, so a promoted one must stop offering it.
+    shadow_row = _row("done", dry_run_xml="<x/>", dry_run=True, invoice_id=inv)
+    still_shadow = _event_out(
+        shadow_row,
+        provider="stripe",
+        role=Role.owner,
+        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset({inv})),
+    )
+    assert still_shadow.actions.reshoot is True
+    promoted = _event_out(
+        shadow_row,
+        provider="stripe",
+        role=Role.owner,
+        linked=_LinkedDrafts(drafts=frozenset({inv}), shadow_drafts=frozenset()),
+    )
+    assert promoted.actions.reshoot is False

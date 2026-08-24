@@ -2293,6 +2293,76 @@ async def retry_event(
     return event
 
 
+async def reshoot_dry_run_xml(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    event_id: uuid.UUID,
+) -> PaymentConnectorEvent:
+    """Rebuild the frozen shadow document from the invoice as it stands now.
+
+    ``dry_run_xml`` is the ONLY XML this subsystem stores. A live draft holds
+    none -- ``invoices.xml`` stays NULL until transmit freezes it, and the
+    preview is rebuilt from the current rows on every read -- so a fix to the
+    serializer reaches every un-transmitted document for free. A shadow blob
+    does not: it was captured once and keeps whatever the builder produced that
+    day, which is why some of them still carry a memo as the Causale, a raw
+    euro sign, and an emitter block that is no longer emitted. Some are
+    XSD-invalid, meaning the shadow run reported a clean comparison against the
+    incumbent on a document that could never have been filed.
+
+    Deliberately narrow, and it is a REPLACEMENT, not a refresh. The field's
+    own contract is that a shadow run compares a FIXED artefact against the
+    incumbent's output, so silently re-deriving it on read would let a
+    comparison drift under the operator. Re-shooting is therefore an explicit
+    act with an audit row, and it says so: the artefact you diffed yesterday is
+    not the artefact you have now.
+
+    A validation failure PROPAGATES rather than being parked. When the original
+    run failed, ``QuarantineError`` was right because the finding had to reach
+    the operator's queue. Here the operator is standing in front of it, having
+    asked; the validator's own words -- naming the element and the rule -- are
+    the answer to the question, and swallowing them would leave the stale blob
+    in place while reporting success.
+    """
+    await require_role(session, org_id, actor_id, Role.owner)
+    event = (
+        await session.execute(
+            select(PaymentConnectorEvent).where(
+                PaymentConnectorEvent.id == event_id,
+                PaymentConnectorEvent.org_id == org_id,
+                PaymentConnectorEvent.connector_id == connector_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if event is None or event.dry_run_xml is None or event.invoice_id is None:
+        # A row with no shadow document reads as absent, like the download
+        # route: the surface must not confirm an event it will not serve.
+        raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
+    inv = (
+        await session.execute(select(Invoice).where(Invoice.id == event.invoice_id))
+    ).scalar_one_or_none()
+    # Once promoted the document has left the shadow universe and is a real
+    # draft an operator may send; re-shooting would rewrite a comparison
+    # artefact for a document that is no longer being compared.
+    if inv is None or inv.state is not InvoiceState.draft or not inv.dry_run:
+        raise ConflictError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE)
+    event.dry_run_xml = await invoice_svc.get_xml_preview(session, org_id=org_id, invoice_id=inv.id)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="payment_connector_event",
+        entity_id=event.id,
+        action="reshoot_dry_run_xml",
+        diff={"invoice_id": str(inv.id)},
+    )
+    return event
+
+
 __all__ = [
     "PATCHABLE_FIELDS",
     "RAW_KEY_PREFIX",
@@ -2327,6 +2397,7 @@ __all__ = [
     "rearm_waiting_events",
     "reclaim_expired",
     "record_delivery",
+    "reshoot_dry_run_xml",
     "resolve_for_ingress",
     "retry_event",
     "revoke_connector",

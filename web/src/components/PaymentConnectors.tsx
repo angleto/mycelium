@@ -104,6 +104,7 @@ type EventRow = {
   actions: {
     retry: boolean
     promote: boolean
+    reshoot: boolean
     settles_existing_draft: boolean
   }
 }
@@ -1053,6 +1054,28 @@ export function ConnectorEvents({
     }
   }
 
+  async function onReshoot(eventId: string) {
+    // A shadow blob is the only XML this subsystem stores, so it is the only
+    // one a serializer fix does NOT reach on its own. Replacing it changes the
+    // artefact a parallel run is diffing, hence the confirm.
+    if (!window.confirm(t('paymentConnectors.reshootConfirm'))) return
+    setErr(null)
+    setMsg(null)
+    try {
+      await send<EventRow>(
+        `/issuer-profiles/${profileId}/payment-connectors/${connectorId}` +
+          `/events/${eventId}/reshoot-dry-run-xml`,
+        { method: 'POST' },
+      )
+      setMsg(t('paymentConnectors.reshot'))
+      setTick((n) => n + 1)
+    } catch (e) {
+      // A document that no longer validates answers with the validator's own
+      // words. That IS the finding: show it rather than a generic failure.
+      setErr(message(e))
+    }
+  }
+
   async function onRetry(eventId: string, settlesExistingDraft: boolean) {
     // Confirm only when the verb is not what the operator expects. A plain
     // re-arm needs no ceremony; filing a document composed before a fix does.
@@ -1233,6 +1256,15 @@ export function ConnectorEvents({
                         claim with the document, so a later redelivery cannot
                         compose a second invoice for the same money, and it
                         refuses if a real document already covers it. */}
+                    {r.actions.reshoot && (
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        onClick={() => void onReshoot(r.id)}
+                      >
+                        {t('paymentConnectors.reshoot')}
+                      </button>
+                    )}
                     {r.actions.promote && (
                       <button
                         type="button"
