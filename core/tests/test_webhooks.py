@@ -35,9 +35,7 @@ class _SuccessCoop:
 
     @property
     def intermediary(self) -> IntermediaryIdentity | None:
-        return IntermediaryIdentity(
-            country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
-        )
+        return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
 
     async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
         return TransmitResult(

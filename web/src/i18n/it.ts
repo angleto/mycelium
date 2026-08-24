@@ -2523,7 +2523,7 @@ export const it: Catalog = {
     series: 'Sezionale',
     seriesHint: 'Numerazione separata per i documenti che nascono dal provider. Se vuoto resta il sezionale che il cliente userebbe normalmente.',
     purpose: 'Causale predefinita',
-    purposeHint: 'Riportata sul documento quando l’evento del provider non porta una descrizione propria.',
+    purposeHint: 'La causale dei documenti che nascono da questo connettore. È l’unica fonte: il testo libero del provider descrive la prestazione sulla riga, non la causale del documento.',
     paymentMethod: 'Modalità di pagamento predefinita',
     inherit: 'eredita',
     webhookUrl: 'URL del webhook',

@@ -178,10 +178,11 @@ single GUI/REST/MCP choke point).
 ## FR-9 SDI electronic invoicing (v1 B2B/B2C)
 
 - Legal role: in multi-tenant, Mycelium transmits on the tenant's behalf
-  and is therefore a transmitter/intermediary. An explicit per-Org
-  `SdiMandate` model. A single shared channel; the tenant's identity in
-  the payload (`CedentePrestatore`,
-  `TerzoIntermediarioOSoggettoEmittente`), never in the TLS identity.
+  and is therefore a *soggetto trasmittente*, not a *soggetto emittente*
+  (ADR-0053). An explicit per-issuer-profile `SdiMandate` model, whose
+  scope is transmission. A single shared channel; the tenant's identity
+  is the whole payload (`CedentePrestatore`), Mycelium's appears only in
+  `IdTrasmittente` and in the file name, and never in the TLS identity.
 - The channel behind the `SdiChannel` abstraction:
   - `ManualExportChannel` (immediately): downloadable XML; invoices
     issued this way are already legally issued.
@@ -222,9 +223,9 @@ single GUI/REST/MCP choke point).
 - History search; mark paid (manual reconciliation in v1); TD04 credit
   note.
 - Implemented (F7b, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`): official
-  FatturaPA XSD validation at transmit (`Schema_VFPA12_V1.2.3`); the per-issuer
-  `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
-  `SoggettoEmittente=TZ`; the SdICoop `RiceviFile` SOAP transport (mutual TLS) +
+  FatturaPA XSD validation at transmit AND at preview (`Schema_VFPA12_V1.2.3`);
+  the per-issuer `SdiMandate` and `IdTrasmittente` = channel holder (no emitter
+  block: ADR-0053); the SdICoop `RiceviFile` SOAP transport (mutual TLS) +
   `/sdi/notification` inbound receiver (cross-org correlation by `IdentificativoSdI`
   via a SECURITY DEFINER resolver). Fiscal conformance vs the v2.6 specs: the
   VAT id is stored split (`IdPaese`/`IdCodice`) with country-prefix

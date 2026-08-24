@@ -733,10 +733,11 @@ class Settings(BaseSettings):
     # SdI electronic-invoice transmission (ADR-0011, FR-9). Default
     # "manual_export": Mycelium builds downloadable XML and the tenant submits
     # it (no SdI transit; AdE conservation not covered). "sdicoop":
-    # transmit through Mycelium's single accredited channel as intermediary --
-    # the tenant's identity stays in the FatturaPA payload, Mycelium's goes in
-    # TerzoIntermediarioOSoggettoEmittente (requires a per-issuer
-    # SdiMandate). The intermediary identity + the mutual-TLS SOAP
+    # transmit through Mycelium's single accredited channel -- the tenant's
+    # identity is the whole FatturaPA payload, Mycelium's appears only in
+    # IdTrasmittente and in the file name (requires a per-issuer SdiMandate,
+    # whose scope is transmission; see ADR-0053 for why nothing of Mycelium's
+    # goes in the document body). The intermediary identity + the mutual-TLS SOAP
     # transport below are required only when "sdicoop" is selected
     # (validated fail-closed, same spirit as smtp/s3). vat_number is the
     # accredited channel holder's P.IVA; cert/key/ca are PEM file paths
@@ -744,7 +745,6 @@ class Settings(BaseSettings):
     sdi_channel: Literal["manual_export", "sdicoop"] = "manual_export"
     sdi_intermediary_id_paese: str = "IT"
     sdi_intermediary_id_codice: str = ""
-    sdi_intermediary_denominazione: str = ""
     # The SdICoop RiceviFile endpoint. ``sdi_endpoint_url`` is the legacy single
     # value (still honoured as a fallback). The two env-specific URLs below let
     # the active one be picked AT RUNTIME from the DB (system_settings.
@@ -818,10 +818,6 @@ class Settings(BaseSettings):
                 name
                 for name, value in (
                     ("MYCELIUM_SDI_INTERMEDIARY_ID_CODICE", self.sdi_intermediary_id_codice),
-                    (
-                        "MYCELIUM_SDI_INTERMEDIARY_DENOMINAZIONE",
-                        self.sdi_intermediary_denominazione,
-                    ),
                     ("MYCELIUM_SDI_CLIENT_CERT", self.sdi_client_cert),
                     ("MYCELIUM_SDI_CLIENT_KEY", self.sdi_client_key),
                 )

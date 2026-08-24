@@ -19,7 +19,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0008 No-ubiquity: events entity](0008-no-ubiquity-events.md) — superseded by addendum: appointments unified onto `tasks` (mig 0094 / 0095 / 0096 / 0097); the legacy events table is gone
 - [0009 Invoice immutability, soft-delete carve-out](0009-invoice-immutability.md)
 - [0010 Conservation: free AdE service](0010-conservation-ade-free-service.md)
-- [0011 SDI: intermediary/mandate model, v1 B2B/B2C](0011-sdi-intermediary-mandate-v1-b2b.md)
+- [0011 SDI: intermediary/mandate model, v1 B2B/B2C](0011-sdi-intermediary-mandate-v1-b2b.md) — revised by [0053](0053-transmitter-not-emitter.md): the mandate is to TRANSMIT, so `TerzoIntermediarioOSoggettoEmittente` / `SoggettoEmittente=TZ` are no longer emitted; `IdTrasmittente` stands
 - [0012 LLM/Embedder abstraction, reuse the bitvision pattern](0012-llm-embedder-abstraction.md)
 - [0013 Planning advisory layer, deterministic core](0013-planning-advisory-layer.md)
 - [0014 Personal domain and budget envelope](0014-personal-domain-budgets.md)
@@ -59,5 +59,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0048 Fuel-table retention: pruning is hygiene, not metabolism](0048-fuel-table-retention.md)
 - [0049 Working memory is delegated to the calling agent](0049-working-memory-delegated-to-the-caller.md)
 - [0050 Structural tag cardinality on tasks and notes](0050-structural-tag-cardinality.md) — revises ADR-0003 (silent on cardinality)
-- [0051 Inbound payment connectors (provider webhooks -> FatturaPA)](0051-inbound-payment-connectors.md)
+- [0051 Inbound payment connectors (provider webhooks -> FatturaPA)](0051-inbound-payment-connectors.md) — revised by [0054](0054-what-may-become-a-causale.md): a provider's free text never becomes a `Causale`
 - [0052 Workflow interchange document (JSON, no database identity)](0052-workflow-interchange-document.md)
+- [0053 Mycelium is the soggetto trasmittente, never the soggetto emittente](0053-transmitter-not-emitter.md)
+- [0054 What may become a Causale, and where the tracciato's charset is enforced](0054-what-may-become-a-causale.md)

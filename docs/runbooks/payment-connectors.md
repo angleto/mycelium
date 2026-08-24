@@ -112,6 +112,43 @@ matching ignores case and separators, so `Codice Destinatario`,
 `codiceDestinatario` and `CODICE_DESTINATARIO` all resolve. The same holds for
 the VAT number, the codice fiscale and the PEC.
 
+### The causale comes from the connector, never from the provider
+
+`default_purpose` is the `Causale` of every document this connector composes,
+and it is the only source. The provider's own free text is not read for it.
+
+That is a correction, not a limitation (ADR-0054). Stripe's invoice
+`description` is the field the dashboard labels **Memo**: text the merchant
+writes *to the customer*, rendered on the hosted invoice and on the PDF. On a
+live account it held onboarding instructions, and those were filed verbatim as
+the fiscal causale of a document kept in ten-year conservazione. `Causale` is
+read by SdI, by the customer's commercialista and by an auditor years later.
+
+The provider's text is not discarded: it still describes the supply on the line
+`<Descrizione>`, which is where a description belongs.
+
+Leaving `default_purpose` empty is valid — `Causale` is `<0.N>` in the
+tracciato, and a document without one is perfectly conformant. On a forfettario
+issuer the statutory L.190/2014 dicitura is emitted regardless, as an additional
+`Causale`, and can no longer be displaced by anything anyone types.
+
+### A connector states a payment method only if you set one
+
+Leave `default_payment_method_code` empty and the composed document carries no
+`DatiPagamento` block at all. That is legal: block 2.4 is `<0.N>` in the AdE
+tracciato and no SdI control reads it.
+
+Set it (`MP08`, carta di pagamento, for a card processor) and the block is
+emitted complete, with the conditions code alongside it — `TP02` unless you set
+another. The conditions code cannot be set on its own: the configuration is
+refused, because it used to open the block while leaving the method to resolve
+to the system default `MP05` (bonifico), stating on a fiscal document that a
+card charge was a bank transfer.
+
+For the same reason a connector-composed draft does **not** inherit the issuer
+profile's `default_iban`. If your issuer profile is the one you also use for
+hand-written bonifico invoices, that IBAN stays on those and off these.
+
 Subscribing the two events afterwards is enough: parked payments re-arm
 themselves the moment a `customer.*` event arrives carrying what they were
 waiting for. Stripe does not replay old customer events, so touch the customer

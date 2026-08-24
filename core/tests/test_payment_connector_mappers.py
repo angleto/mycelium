@@ -396,7 +396,9 @@ def test_stripe_invoice_with_exclusive_tax_yields_a_net_line() -> None:
     assert line.vat_nature is None
     assert intent.currency == "eur"
     assert intent.paid is True
-    assert intent.purpose == "Abbonamento marzo"
+    # The causale is the connector's, never the Stripe description: see
+    # test_stripe_never_takes_its_causale_from_the_provider_description.
+    assert intent.purpose is None
     # End to end with the service's own arithmetic: 100.00 net stays 100.00.
     assert svc.net_unit_price(line, fallback_rate=None) == Decimal("100.00")
 
@@ -581,14 +583,39 @@ def test_stripe_uses_the_connector_defaults_for_what_the_provider_cannot_send() 
     # to send, so a document is only addressable when the counterpart supplied a
     # real code or a PEC (or is foreign, which the service resolves by rule).
     assert intent.party.sdi_code is None
-    # ``purpose`` prefers what the provider actually said.
-    assert intent.purpose == "Abbonamento marzo"
-    silent = _as_emission(
-        _to_intent(
-            _event("invoice.paid", _invoice_obj(description=None)), default_purpose="Vendita"
-        )
+    # The causale is the connector's, and only the connector's.
+    assert intent.purpose == "Vendita online"
+
+
+def test_stripe_never_takes_its_causale_from_the_provider_description() -> None:
+    """A Stripe invoice ``description`` is the dashboard "Memo": text the
+    merchant wrote TO THE CUSTOMER, rendered on the hosted invoice and on the
+    PDF. It is not a fiscal causale, and it used to become <Causale> verbatim.
+    The regression this pins was a live one -- the memo held onboarding
+    instructions ("vada su <site>, Login, Configura"), filed as the causale of a
+    document kept in ten-year conservazione.
+
+    The provider's free text is not discarded: it still describes the supply on
+    the line, which is where a description belongs.
+    """
+    memo = (
+        "Per assicurarsi che la fattura elettronica venga inviata, "
+        "per piacere controlli di aver inserito tutti i dati."
     )
-    assert silent.purpose == "Vendita"
+    for obj in (
+        _invoice_obj(description=memo),
+        _invoice_obj(description=memo, metadata={}, customer_address=None),
+    ):
+        intent = _as_emission(
+            _to_intent(_event("invoice.paid", obj), default_purpose="Prestazione di servizi")
+        )
+        assert intent.purpose == "Prestazione di servizi"
+        assert memo not in (intent.purpose or "")
+
+    # With no connector default there is simply no causale, which is a valid
+    # document: Causale is minOccurs="0".
+    bare = _as_emission(_to_intent(_event("invoice.paid", _invoice_obj(description=memo))))
+    assert bare.purpose is None
 
 
 # --- Stripe: emission from a payment intent / checkout session -------------

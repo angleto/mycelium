@@ -157,6 +157,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_EVENT_INVALID = "payment_connector.emission_event_invalid"
     PAYMENT_CONNECTOR_REFUND_EVENT_INVALID = "payment_connector.refund_event_invalid"
     PAYMENT_CONNECTOR_VAT_PRICING_INVALID = "payment_connector.vat_pricing_invalid"
+    PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID = "payment_connector.payment_pair_invalid"
     PAYMENT_CONNECTOR_SIGNATURE_INVALID = "payment_connector.signature_invalid"
     PAYMENT_CONNECTOR_SECRET_REQUIRED = "payment_connector.signing_secret_required"  # noqa: S105 (message code, not a secret)
     PAYMENT_CONNECTOR_DISABLED = "payment_connector.disabled"
@@ -535,6 +536,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PAYMENT_CONNECTOR_MODE_INVALID: "Unknown automation mode: {detail}",
         MessageCode.PAYMENT_CONNECTOR_EVENT_INVALID: "Unknown emission event: {detail}",
         MessageCode.PAYMENT_CONNECTOR_VAT_PRICING_INVALID: "Unknown VAT pricing: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID: (
+            "Payment terms and payment method must be set together on a connector, "
+            "or the document states a payment method nobody chose: {detail}"
+        ),
         MessageCode.PAYMENT_CONNECTOR_REFUND_EVENT_INVALID: "Unknown refund event: {detail}",
         MessageCode.PAYMENT_CONNECTOR_SIGNATURE_INVALID: "Invalid or expired webhook signature",
         MessageCode.PAYMENT_CONNECTOR_SECRET_REQUIRED: (

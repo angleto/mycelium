@@ -2537,7 +2537,7 @@ export const en = {
     series: 'Series (sezionale)',
     seriesHint: 'Separate numbering for provider-originated documents. Empty keeps the series the client would normally use.',
     purpose: 'Default purpose',
-    purposeHint: 'Printed on the document when the provider event carries no description of its own.',
+    purposeHint: 'The causale of every document this connector composes. It is the only source: the provider’s free text describes the supply on the line, not the document’s causale.',
     paymentMethod: 'Default payment method',
     inherit: 'inherit',
     webhookUrl: 'Webhook URL',

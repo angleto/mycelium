@@ -292,7 +292,9 @@ class NativeMapper:
                 lines=lines,
                 currency=(as_str(data.get("currency")) or "EUR").upper(),
                 customer_key=as_str(data.get("customer_reference")),
-                purpose=as_str(data.get("purpose")) or config.default_purpose,
+                purpose=clamp_field(
+                    "purpose", as_str(data.get("purpose")) or config.default_purpose
+                ),
                 paid=bool(data.get("paid", True)),
             )
 
@@ -306,7 +308,7 @@ class NativeMapper:
                 lines=lines or None,
                 amount=_decimal_field(data, "amount"),
                 currency=(as_str(data.get("currency")) or "EUR").upper(),
-                reason=as_str(data.get("reason")),
+                reason=clamp_field("purpose", as_str(data.get("reason"))),
             )
 
         if identity.event_type == EVENT_PAYMENT:

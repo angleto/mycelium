@@ -77,6 +77,8 @@ from mycelium_core.services.invoice_format import (
     _effective_iban,
     _is_forfettario,
     _resolve_line_tax,
+    is_basic_latin,
+    is_latin1,
 )
 from mycelium_core.services.invoice_xsd import validate_fatturapa
 from mycelium_core.services.payment_methods import (
@@ -239,6 +241,7 @@ async def create_issuer_profile(
     default_payment_conditions_code = validate_condizioni(default_payment_conditions_code)
     default_payment_method_code = validate_modalita(default_payment_method_code)
     default_payment_terms_days = validate_terms_days(default_payment_terms_days)
+    postal_code = validate_issuer_cap(postal_code) or ""
     p = IssuerProfile(
         org_id=org_id,
         label=label,
@@ -313,6 +316,10 @@ async def update_issuer_profile(
     if "default_payment_terms_days" in values:
         values["default_payment_terms_days"] = validate_terms_days(
             values["default_payment_terms_days"]  # type: ignore[arg-type]
+        )
+    if "postal_code" in values:
+        values["postal_code"] = validate_issuer_cap(
+            values["postal_code"]  # type: ignore[arg-type]
         )
     if "logo_kind" in values and values["logo_kind"] not in _LOGO_KINDS:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"logo_kind {values['logo_kind']!r}")
@@ -795,6 +802,7 @@ async def create_draft(
     document_type: DocumentType = DocumentType.TD01,
     kind: InvoiceKind = InvoiceKind.invoice,
     parent_invoice_id: uuid.UUID | None = None,
+    inherit_payment_defaults: bool = True,
 ) -> Invoice:
     await require_role(session, org_id, actor_id, Role.member)
     issuer: IssuerProfile | None
@@ -818,6 +826,7 @@ async def create_draft(
         )
     # Forfettario (RF19): default the mandatory L.190/2014 purpose when
     # the caller gave none (an explicit purpose is always honoured).
+    purpose = validate_purpose(purpose)
     if purpose is None and _is_forfettario(issuer):
         purpose = FORFETTARIO_CAUSALE
     inv = Invoice(
@@ -838,10 +847,18 @@ async def create_draft(
     # visible/editable on the draft (precedence: invoice > client >
     # issuer). The client may not have a profile yet at draft time;
     # that is fine, update_draft re-resolves while still empty.
-    iban, _src = _effective_iban(inv, cp, issuer)
-    if iban is not None:
-        inv.payment_iban = iban
-        await session.flush()
+    # ``inherit_payment_defaults=False`` is how an automated composer says
+    # "the payment story of this document is not the issuer's standing one".
+    # A card connector must not inherit a bonifico IBAN: the IBAN alone opens
+    # the DatiPagamento block in the serializer, and ModalitaPagamento then
+    # falls through to the module default MP05, stating on a fiscal document
+    # that a card charge was a bank transfer. Defaulting to True leaves every
+    # hand-written invoice byte-for-byte as it was.
+    if inherit_payment_defaults:
+        iban, _src = _effective_iban(inv, cp, issuer)
+        if iban is not None:
+            inv.payment_iban = iban
+            await session.flush()
     await audit.log(
         session,
         org_id=org_id,
@@ -883,6 +900,7 @@ async def update_draft(
     actor_id: uuid.UUID,
     invoice_id: uuid.UUID,
     values: dict[str, object],
+    inherit_payment_defaults: bool = True,
 ) -> Invoice:
     """Edit invoice-level fields while the document is still a draft.
 
@@ -916,6 +934,8 @@ async def update_draft(
         values["payment_terms_days"] = validate_terms_days(
             values["payment_terms_days"]  # type: ignore[arg-type]
         )
+    if "purpose" in values:
+        values["purpose"] = validate_purpose(values["purpose"])  # type: ignore[arg-type]
     for field, value in values.items():
         setattr(inv, field, value)
     await session.flush()
@@ -928,7 +948,7 @@ async def update_draft(
     # Re-resolve the effective IBAN only while still empty (an explicit
     # invoice IBAN, once set, is never overwritten by client/issuer
     # defaults). The issuer/client may have changed in this same patch.
-    if not inv.payment_iban:
+    if inherit_payment_defaults and not inv.payment_iban:
         iban, _src = _effective_iban(inv, cp, issuer)
         if iban is not None:
             inv.payment_iban = iban
@@ -936,7 +956,7 @@ async def update_draft(
     # the due date now so the draft preview shows it. The resolver picks
     # up the days from the client / issuer too; auto-fill only when the
     # field is empty (an explicit user-set date is never overwritten).
-    if inv.payment_due_date is None:
+    if inherit_payment_defaults and inv.payment_due_date is None:
         from mycelium_core.services.payment_methods import resolve_payment as _rp
 
         resolved = _rp(inv, cp, issuer)
@@ -1134,20 +1154,63 @@ class AltriDatiBlock:
     riferimento_data: dt.date | None = None
 
 
-def _is_basic_latin(value: str) -> bool:
-    """XSD ``\\p{IsBasicLatin}`` is U+0000..U+007F. The C0 controls and
-    DEL sit inside that block but are not emittable as XML text (and
-    xs:normalizedString would rewrite tab/CR/LF anyway), so the printable
-    range is what we accept."""
-    return all("\x20" <= ch <= "\x7e" for ch in value)
+#: ``invoices.purpose`` is varchar(200), and it is also FatturaPA
+#: String200LatinType. One bound, two reasons to hold it.
+_PURPOSE_MAX = 200
 
 
-def _is_latin1(value: str) -> bool:
-    """XSD ``[\\p{IsBasicLatin}\\p{IsLatin-1Supplement}]`` is U+0000..U+00FF.
-    Same reasoning as above, plus the C1 controls (U+0080..U+009F) are
-    excluded: what remains is printable ASCII + the accented Latin-1
-    range an Italian text actually needs."""
-    return all("\x20" <= ch <= "\x7e" or "\xa0" <= ch <= "\xff" for ch in value)
+def validate_purpose(value: str | None) -> str | None:
+    """Bound the causale where the domain accepts it, not at each caller.
+
+    Refused rather than truncated: a causale cut mid-sentence sits on a document
+    kept for ten years, and the caller who supplied it is a person or a tool
+    that can be told. The connector mappers clamp BEFORE they get here, on
+    purpose and for the opposite reason -- there the alternative is an event
+    that retries a payload which can never succeed (see
+    ``payment_events._FIELD_LIMITS``).
+
+    The API bounds it too, at 200, so an HTTP caller still gets a 422 rather
+    than this. What this closes is every other door: the MCP credit-note tool
+    took an unbounded ``purpose``, and a long one raised a driver-level
+    truncation error, which is not a DomainError and therefore reached the
+    caller as an internal fault.
+    """
+    if value is None:
+        return None
+    if len(value) > _PURPOSE_MAX:
+        raise DomainError(
+            MessageCode.INVOICE_INVALID,
+            detail=f"purpose: at most {_PURPOSE_MAX} characters ({len(value)} given)",
+        )
+    return value
+
+
+def validate_issuer_cap(value: str | None) -> str | None:
+    """The issuer's CAP against the FatturaPA facet, at the write boundary.
+
+    ``CAPType`` is ``[0-9]{5}`` and 1.2.2.3 <CAP> is <1.1> in the AdE tracciato:
+    mandatory, exactly five digits, no exceptions. Refused HERE rather than at
+    the XSD gate so the person editing the profile gets an error on the field
+    they are editing, instead of every future invoice sticking in draft with a
+    schema message. That is not hypothetical: a six-digit CAP (a real 20129 with
+    an extra digit) sat on a live profile and blocked emission with nothing
+    pointing at the field.
+
+    The issuer of an Italian electronic invoice is an Italian fiscal subject by
+    construction, so there is no foreign case to admit here. Deliberately NOT
+    applied to the counterpart: a foreign client's postal code genuinely is not
+    a five-digit CAP, and this session found no AdE rule prescribing what to put
+    in its place, so inventing one would be inventing fiscal data. That case
+    stays with the schema gate, which now runs on the preview too.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if text and not re.fullmatch(r"[0-9]{5}", text):
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail=f"postal_code '{text}': CAP is 5 digits"
+        )
+    return text
 
 
 def _validate_altri_dati(blocks: Sequence[AltriDatiBlock]) -> list[AltriDatiBlock]:
@@ -1173,7 +1236,7 @@ def _validate_altri_dati(blocks: Sequence[AltriDatiBlock]) -> list[AltriDatiBloc
                 MessageCode.INVOICE_ALTRI_DATI_INVALID,
                 detail=f"tipo_dato: required, 1..{_TIPO_DATO_MAX} characters",
             )
-        if not _is_basic_latin(tipo):
+        if not is_basic_latin(tipo):
             raise DomainError(
                 MessageCode.INVOICE_ALTRI_DATI_INVALID,
                 detail="tipo_dato: Basic-Latin characters only",
@@ -1185,7 +1248,7 @@ def _validate_altri_dati(blocks: Sequence[AltriDatiBlock]) -> list[AltriDatiBloc
                     MessageCode.INVOICE_ALTRI_DATI_INVALID,
                     detail=f"riferimento_testo: at most {_RIF_TESTO_MAX} characters",
                 )
-            if not _is_latin1(testo):
+            if not is_latin1(testo):
                 raise DomainError(
                     MessageCode.INVOICE_ALTRI_DATI_INVALID,
                     detail="riferimento_testo: Latin-1 characters only",
@@ -1680,15 +1743,18 @@ async def _resolve_collegata(
 def _payload_intermediary(
     fiscal: IssuerProfile, intermediary: IntermediaryIdentity | None
 ) -> IntermediaryIdentity | None:
-    """The intermediary identity to stamp into the FatturaPA payload, or None.
+    """Which identity goes in 1.1.1 ``IdTrasmittente``: the channel's, or None
+    meaning the cedente's own.
 
     Self-transmission (the accredited-channel holder sending its OWN invoice,
-    cedente VAT == channel id) must NOT carry a TerzoIntermediarioOSoggettoEmittente
-    block / SoggettoEmittente=TZ: SdI scarta an invoice whose third-party emitter
-    coincides with the cedente, and the cedente becomes its own IdTrasmittente.
-    When Mycelium transmits for a *different* tenant the intermediary block is
-    stamped (ADR-0011). Shared by ``transmit`` and ``get_xml_preview`` so the
-    downloadable ANTEPRIMA is byte-faithful to the document that is emitted."""
+    cedente VAT == channel id) returns None, and the cedente becomes its own
+    trasmittente. That is not cosmetic: the None branch in ``_build_xml`` emits
+    the cedente's CODICE FISCALE, which is what SdI validates IdTrasmittente
+    against (a P.IVA there is scartata 00300, and for a physical-person channel
+    holder the two differ). So this helper is a trasmittente selector and must
+    not be mistaken for scaffolding of the 1.5/1.6 emitter block, which no
+    longer exists (ADR-0053). Shared by ``transmit`` and ``get_xml_preview`` so
+    the downloadable ANTEPRIMA is byte-faithful to the document emitted."""
     if intermediary is None:
         return None
     cedente_vat = (
@@ -1883,12 +1949,12 @@ async def transmit(
         )
         _validate(fiscal, client, lines)
         assert fiscal is not None  # _validate raised otherwise  # noqa: S101
-        # The payload identity (cedente-as-trasmittente for self-transmission,
-        # else the intermediary block) is resolved by the shared helper so the
+        # Who goes in IdTrasmittente (the cedente itself for self-transmission,
+        # else the channel holder) is resolved by the shared helper so the
         # downloadable ANTEPRIMA preview is byte-faithful to what we actually
         # emit here. The channel-level ``intermediary`` above still drives the
-        # mandate requirement and the trasmittente sequence (ADR-0011), even
-        # when self-transmission strips the block from the document body.
+        # mandate requirement and the trasmittente sequence (ADR-0011); the
+        # document body carries no emitter block either way (ADR-0053).
         payload_intermediary = _payload_intermediary(fiscal, intermediary)
         totals = _compute_totals(lines, fiscal)
         inv.taxable, inv.vat, inv.stamp_duty, inv.total = (
@@ -2099,6 +2165,7 @@ async def create_credit_note(
 ) -> Invoice:
     """TD04 credit note linked to a transmitted invoice (ADR-0009: the
     only post-emission correction). Copies the parent's lines."""
+    purpose = validate_purpose(purpose)
     parent = await get_invoice(session, org_id=org_id, invoice_id=parent_invoice_id)
     # A TD04 corrects an EMITTED invoice. A draft is not yet issued; a scartato
     # (rejected) one was never validly issued -> it is corrected by resend
@@ -2795,7 +2862,7 @@ async def get_xml_preview(
         p.totals.total,
     )
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
-    return _build_xml(
+    xml = _build_xml(
         inv,
         p.issuer,
         p.client,
@@ -2803,14 +2870,27 @@ async def get_xml_preview(
         "ANTEPRIMA",
         numero_override=p.number,
         collegata=collegata,
-        # Same payload-identity resolution as transmit(): a self-transmission
-        # issuer must not see a phantom TerzoIntermediario/SoggettoEmittente=TZ
-        # in the preview that the real send strips.
+        # Same trasmittente resolution as transmit(), so the ANTEPRIMA carries
+        # the IdTrasmittente the real send will carry -- for a self-transmitting
+        # issuer that is the cedente's own codice fiscale, not the channel's
+        # P.IVA, and the two differ for a physical-person channel holder.
         intermediary=_payload_intermediary(p.issuer, get_channel().intermediary),
         # Already loaded by _gather_preview: the ANTEPRIMA must carry the
         # same AltriDatiGestionali transmit() will freeze (2.2.1.16).
         altri_dati=p.altri_dati,
     )
+    # The same official-schema gate transmit() applies, for the same reason and
+    # with the same error. Without it the preview was byte-faithful but not
+    # VALIDITY-faithful: it handed back a downloadable document that transmit
+    # would refuse, and a connector dry-run reported a clean shadow run on a
+    # document that could never be filed. Two live defects (a euro sign in a
+    # line description, a six-digit CAP on an issuer profile) reached a
+    # downloaded artifact that way, with the authoritative schema sitting in
+    # the tree and validation costing one call.
+    xsd_errors = validate_fatturapa(xml)
+    if xsd_errors:
+        raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
+    return xml
 
 
 async def render_pdf(

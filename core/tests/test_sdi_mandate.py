@@ -94,9 +94,7 @@ def _intermediary_channel() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(
-                country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
-            )
+            return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
@@ -129,11 +127,14 @@ async def test_transmit_via_intermediary_requires_mandate(_intermediary_channel:
         with pytest.raises(ConflictError):
             await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert d.number is None
-        # After granting, transmit succeeds and stamps the intermediary block.
+        # After granting, transmit succeeds. The mandate authorises TRANSMISSION,
+        # so Mycelium appears as the trasmittente and NOWHERE in the document
+        # body: 1.5/1.6 declare an emitter, a role no mandate here confers
+        # (ADR-0053). This is the regression guard for that.
         await mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer_id)
         tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert tx.identificativo_sdi == "SDIFAKE000001"
-        assert "<TerzoIntermediarioOSoggettoEmittente>" in (tx.xml or "")
-        assert "<SoggettoEmittente>TZ</SoggettoEmittente>" in (tx.xml or "")
+        assert "<TerzoIntermediarioOSoggettoEmittente>" not in (tx.xml or "")
+        assert "<SoggettoEmittente>" not in (tx.xml or "")
         # The intermediary is the trasmittente (IdTrasmittente), not the cedente.
         assert "<IdCodice>11122233344</IdCodice>" in (tx.xml or "")

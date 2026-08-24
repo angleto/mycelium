@@ -21,6 +21,7 @@ from mycelium_core.models.invoice import (
     InvoiceLineAltriDati,
     IssuerProfile,
 )
+from mycelium_core.sdi_channel import IntermediaryIdentity
 from mycelium_core.services.invoice_format import (
     FORFETTARIO_RIFERIMENTO_NORMATIVO,
     _amount8,
@@ -32,7 +33,7 @@ from mycelium_core.services.invoice_format import (
 from mycelium_core.services.invoice_xsd import validate_fatturapa
 
 
-def _valid_xml() -> str:
+def _valid_xml(intermediary: IntermediaryIdentity | None = None) -> str:
     issuer = IssuerProfile(
         country_code="IT",
         vat_number="01234567890",
@@ -81,7 +82,7 @@ def _valid_xml() -> str:
         vat_rate=Decimal(22),
         vat_nature=None,
     )
-    return _build_xml(invoice, issuer, client, [line], "202600001")
+    return _build_xml(invoice, issuer, client, [line], "202600001", intermediary=intermediary)
 
 
 def test_valid_fatturapa_passes_xsd() -> None:
@@ -972,3 +973,17 @@ def test_multiple_lines_carry_their_own_blocks() -> None:
         for dl in root.iter("DettaglioLinee")
     }
     assert per_line == {"1": ["INTENTO"], "2": [], "3": ["NB3"]}
+
+
+def test_a_transmitted_for_document_names_the_channel_only_as_trasmittente() -> None:
+    """When Mycelium transmits for a tenant, its identity reaches 1.1.1
+    IdTrasmittente and nothing else. The emitter block (1.5/1.6) would declare
+    it the issuer of someone else's invoice, a role the transmission mandate
+    does not confer (ADR-0053). Asserted through the schema as well as by
+    string absence, so a revert of the emission code fails here too."""
+    xml = _valid_xml(IntermediaryIdentity(country_code="IT", vat_number="11122233344"))
+    assert "<TerzoIntermediarioOSoggettoEmittente>" not in xml
+    assert "<SoggettoEmittente>" not in xml
+    idt = xml.split("<IdTrasmittente>")[1].split("</IdTrasmittente>")[0]
+    assert "<IdCodice>11122233344</IdCodice>" in idt
+    assert validate_fatturapa(xml) == []

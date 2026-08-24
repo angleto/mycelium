@@ -1895,3 +1895,87 @@ async def test_a_non_client_tag_cannot_be_assigned_as_a_counterpart() -> None:
                 provider_customer_id="cus_y",
                 client_tag_id=generic.id,
             )
+
+
+# --- what a connector says about payment ------------------------------------
+
+
+async def _issuer_with_iban(org_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
+    """The shape a person's own issuer profile really has: a default IBAN,
+    because their hand-written invoices are paid by bonifico."""
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        profile = await inv_svc.create_issuer_profile(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            label=f"con-iban-{uuid.uuid4().hex[:6]}",
+            legal_name="HahnBanach SRL",
+            vat_number="01234567890",
+            address="Via Roma",
+            civic_number="1",
+            postal_code="00100",
+            city="Roma",
+            province="RM",
+            default_iban="IT60X0542811101000000123456",
+        )
+        return profile.id
+
+
+async def test_a_connector_document_does_not_inherit_the_issuer_bonifico_iban() -> None:
+    """The route that made this a live defect rather than a theoretical one:
+    nothing in the connector's own configuration mentions payment, yet
+    ``create_draft`` used to copy the issuer's default IBAN onto every draft.
+    An IBAN alone opens <DatiPagamento>, and ModalitaPagamento then resolves to
+    the module default MP05, so a card charge went out described as a bank
+    transfer, with a bonifico IBAN attached, to the customer's accountant."""
+    org_id, user_id, _ = await _org_and_issuer()
+    issuer_id = await _issuer_with_iban(org_id, user_id)
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_iban"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        assert inv.payment_iban is None
+        xml = await inv_svc.get_xml_preview(s, org_id=org_id, invoice_id=inv.id)
+    assert "<DatiPagamento>" not in xml
+    assert "MP05" not in xml
+    assert "IT60X0542811101000000123456" not in xml
+
+
+async def test_a_connector_that_states_a_method_states_the_terms_with_it() -> None:
+    """The opt-in half. An operator who says "this connector takes cards" gets
+    a complete payment block, not a method with the terms left to fall through
+    (nor terms with the method left to fall through, which is refused outright
+    at configuration time)."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="draft", default_payment_method_code="MP08"
+    )
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_mp08"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        xml = await inv_svc.get_xml_preview(s, org_id=org_id, invoice_id=inv.id)
+    assert "<ModalitaPagamento>MP08</ModalitaPagamento>" in xml
+    assert "<CondizioniPagamento>TP02</CondizioniPagamento>" in xml
+
+
+async def test_a_connector_cannot_state_payment_terms_without_a_method() -> None:
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    with pytest.raises(UnprocessableError) as err:
+        await _connector(org_id, user_id, issuer_id, default_payment_conditions_code="TP02")
+    assert err.value.code is MessageCode.PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID
+
+
+async def test_a_connector_cannot_carry_a_payment_code_outside_the_sdi_tables() -> None:
+    """These were not validated on the connector row at all: the router bounds
+    them to four characters and the service did a blind setattr, so an unknown
+    code was accepted and only failed later, while composing a document from a
+    webhook, where a domain error is a parked event rather than a 422."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    with pytest.raises(DomainError):
+        await _connector(org_id, user_id, issuer_id, default_payment_method_code="MP99")

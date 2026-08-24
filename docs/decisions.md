@@ -7,7 +7,7 @@ and the rejected alternatives are in the [ADRs](adr/README.md).
 
 | # | Topic | Decision |
 |---|---|---|
-| 1/A | SDI invoicing | v1 B2B/B2C only (PA deferred). Single shared channel; Mycelium as transmitter/intermediary under a per-Org mandate; tenant identity in the FatturaPA payload; conservation = free AdE service (per-tenant adhesion); introduced in phases |
+| 1/A | SDI invoicing | v1 B2B/B2C only (PA deferred). Single shared channel; Mycelium as transmitter under a per-issuer-profile transmission mandate, never as soggetto emittente (ADR-0053); tenant identity in the FatturaPA payload; conservation = free AdE service (per-tenant adhesion); introduced in phases |
 | 2/B | Email auth | Gmail OAuth2; Proton via Bridge sidecar; generic IMAP/SMTP |
 | 3 | Scheduling | Deterministic logical CPM + per-person serialization of non-delegated human tasks around appointments; not generic RCPSP |
 | 4 | Workflow states | Configurable per Org, project override |

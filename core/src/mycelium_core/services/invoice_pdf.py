@@ -56,6 +56,7 @@ from mycelium_core.services.invoice_format import (
     _line_total,
     _q2,
     _q4,
+    is_forfettario_causale,
 )
 from mycelium_core.services.payment_methods import (
     MODALITA_PAGAMENTO,
@@ -906,9 +907,20 @@ def build_pdf(
     # specific Italian statute); the parenthetical gloss is a courtesy
     # explanation for a non-Italian reader and is never relied upon
     # legally. When locale == "it" no gloss is printed.
-    if invoice.purpose:
-        flow.append(Paragraph(invoice.purpose, small))
-        if loc != "it" and invoice.purpose.strip() == FORFETTARIO_CAUSALE:
+    # Mirrors the XML serializer (``invoice_format._build_xml``): the statutory
+    # dicitura is APPENDED when the invoice carries a causale of its own,
+    # rather than occupying the single slot. Without this the courtesy document
+    # and the legal one diverge in exactly the case the serializer change
+    # exists for -- operator writes a causale, XML compliant, PDF silently
+    # missing the mandatory wording. Rendered from the stored text, NOT from
+    # ``fatturapa_text``: a PDF is not bound by the Latin-1 tracciato and
+    # should show a foreign counterpart's name as it is really spelled.
+    causali = [invoice.purpose] if invoice.purpose else []
+    if is_forf and not any(is_forfettario_causale(c) for c in causali):
+        causali.append(FORFETTARIO_CAUSALE)
+    for causale in causali:
+        flow.append(Paragraph(causale, small))
+        if loc != "it" and is_forfettario_causale(causale):
             gloss = _FORFETTARIO_GLOSS.get(loc)
             if gloss:
                 flow.append(Paragraph(f"<i>({gloss})</i>", small))

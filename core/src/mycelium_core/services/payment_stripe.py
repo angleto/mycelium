@@ -575,9 +575,19 @@ class StripeMapper:
             lines=lines,
             currency=currency,
             customer_key=as_str(inv.get("customer")) or as_str(customer.get("id")),
-            purpose=clamp_field(
-                "purpose", as_str(inv.get("description")) or config.default_purpose
-            ),
+            # NOT the Stripe ``description``. That field is the dashboard "Memo",
+            # written by the merchant TO THE CUSTOMER (Stripe renders it on the
+            # hosted invoice and on the PDF, twice, alongside the identical
+            # ``footer``), and it becomes <Causale> on a document that is read
+            # by SdI, by the customer's commercialista and by an auditor years
+            # later. A live account had it holding onboarding copy -- "vada su
+            # <site>, Login, Configura" -- which was then filed as the fiscal
+            # causale. ADR-0051 already refused to write a shadow-run marker
+            # into ``purpose`` for the same reason; this closes the other door.
+            # The causale is what the operator configured knowing it would be
+            # one. The provider's own free text still describes the supply,
+            # where it belongs: the line <Descrizione>.
+            purpose=config.default_purpose,
             paid=True,
         )
 
@@ -612,7 +622,9 @@ class StripeMapper:
             ),
             currency=currency,
             customer_key=as_str(pi.get("customer")),
-            purpose=clamp_field("purpose", as_str(pi.get("description")) or config.default_purpose),
+            # Same rule as ``_from_invoice``: a provider's free text is not a
+            # fiscal causale. Here it still describes the supply, on the line.
+            purpose=config.default_purpose,
             paid=True,
         )
 
@@ -724,7 +736,12 @@ class StripeMapper:
             lines=tuple(lines) or None,
             amount=amount,
             currency=currency,
-            reason=as_str(note.get("reason")) or as_str(note.get("memo")),
+            # ``memo`` is free text of unbounded length and lands in a
+            # varchar(200) as the credit note's purpose. Unclamped it raises a
+            # driver error, which is not a DomainError, so it escapes the event
+            # runner and retries a payload that can never succeed
+            # (payment_events._FIELD_LIMITS documents the same trap).
+            reason=clamp_field("purpose", as_str(note.get("reason")) or as_str(note.get("memo"))),
         )
 
     def _refund(self, event_type: str, obj: Mapping[str, Any]) -> Intent:

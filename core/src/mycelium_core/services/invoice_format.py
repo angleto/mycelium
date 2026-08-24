@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
@@ -116,6 +117,21 @@ FORFETTARIO_RIFERIMENTO_NORMATIVO = (
 )
 
 
+def is_forfettario_causale(value: str | None) -> bool:
+    """Whether a stored causale IS the statutory L.190/2014 dicitura.
+
+    One definition for the two readers that must agree: the XML serializer,
+    which appends the dicitura when it is not already there, and the courtesy
+    PDF, which hangs the foreign-locale gloss off it. Compared after the same
+    normalisation the XML applies, plus a strip, because a dicitura pasted into
+    the Causale field with a trailing space is the same dicitura and the two
+    call sites disagreeing about that is exactly how a document ends up
+    carrying it twice."""
+    if not value:
+        return False
+    return fatturapa_text(value).strip() == FORFETTARIO_CAUSALE
+
+
 def _is_forfettario(issuer: IssuerProfile | None) -> bool:
     """Forfettario is regime RF19. Drives the line/purpose/stamp_duty
     defaults; every effect is overridable by an explicit caller value."""
@@ -204,10 +220,124 @@ def _effective_iban(
     return None, None
 
 
+# --- FatturaPA text charset (String*LatinType) ---
+
+
+def is_basic_latin(value: str) -> bool:
+    """XSD ``\\p{IsBasicLatin}`` is U+0000..U+007F. The C0 controls and DEL sit
+    inside that block but are not emittable as XML text (and xs:normalizedString
+    would rewrite tab/CR/LF anyway), so the printable range is what we accept."""
+    return all("\x20" <= ch <= "\x7e" for ch in value)
+
+
+def is_latin1(value: str) -> bool:
+    """XSD ``[\\p{IsBasicLatin}\\p{IsLatin-1Supplement}]`` is U+0000..U+00FF.
+    Same reasoning as above, plus the C1 controls (U+0080..U+009F) are excluded:
+    what remains is printable ASCII + the accented Latin-1 range an Italian text
+    actually needs."""
+    return all("\x20" <= ch <= "\x7e" or "\xa0" <= ch <= "\xff" for ch in value)
+
+
+#: Characters outside the Latin-1 facet that a provider or a person routinely
+#: produces, each with the substitution carrying the same meaning. Explicit
+#: rather than derived, because no decomposition rule turns U+20AC into "EUR"
+#: and guessing is what this table exists to avoid. The euro sign is the one
+#: that matters in practice: Stripe writes it into the line description of
+#: every EUR subscription ("1 x Starter (at EUR50.00 / month)"), which is
+#: exactly how a document that is otherwise perfect fails the schema on one
+#: glyph. The incumbent (A-Cube) emits "EUR" for the same input.
+#: Every key here is above U+00FF by construction; a character the facet
+#: already admits never reaches this table (see ``fatturapa_text``).
+_LATIN1_SUBSTITUTIONS = {
+    # xs:normalizedString carries whiteSpace="replace", so SdI's own parser
+    # turns each of these into a space BEFORE the pattern facet is applied: a
+    # two-line note reaches the recipient as "riga uno riga due" today, and
+    # validates. Mapping them here reproduces what the schema already does.
+    # Dropping them instead (which is what the fallback below would do, since
+    # they are outside the printable range) would weld the words together.
+    "\n": " ",
+    "\r": " ",
+    "\t": " ",
+    # Written as codepoints, not as glyphs: the entries ARE ambiguous
+    # characters (that is why they are here), and a reader comparing this
+    # table against a hex dump of a rejected document needs the number.
+    "\u20ac": "EUR",  # EURO SIGN
+    "\u2018": "'",  # LEFT SINGLE QUOTATION MARK
+    "\u2019": "'",  # RIGHT SINGLE QUOTATION MARK (the typographic apostrophe)
+    "\u201a": "'",  # SINGLE LOW-9 QUOTATION MARK
+    "\u201c": '"',  # LEFT DOUBLE QUOTATION MARK
+    "\u201d": '"',  # RIGHT DOUBLE QUOTATION MARK
+    "\u201e": '"',  # DOUBLE LOW-9 QUOTATION MARK
+    "\u2013": "-",  # EN DASH
+    "\u2014": "-",  # EM DASH
+    "\u2212": "-",  # MINUS SIGN
+    "\u2022": "-",  # BULLET
+    "\u2026": "...",  # HORIZONTAL ELLIPSIS
+    "\u2007": " ",  # FIGURE SPACE
+    "\u2009": " ",  # THIN SPACE
+    "\u202f": " ",  # NARROW NO-BREAK SPACE
+    "\u200b": "",  # ZERO WIDTH SPACE
+    "\u200e": "",  # LEFT-TO-RIGHT MARK
+    "\u200f": "",  # RIGHT-TO-LEFT MARK
+    "\ufeff": "",  # ZERO WIDTH NO-BREAK SPACE / BOM
+}
+
+
+def fatturapa_text(value: str) -> str:
+    """Reduce a text to what a FatturaPA ``String*LatinType`` facet admits.
+
+    IDENTITY on text that already conforms: a character in U+0020..U+007E or
+    U+00A0..U+00FF is returned untouched, so this sits on the emission path of
+    documents that already validate without moving a byte of them. Only a
+    character the facet rejects is rewritten -- by the table above, else by a
+    compatibility decomposition keeping the Latin-1 parts (``ā`` -> ``a``,
+    ``ﬁ`` -> ``fi``, ``½`` is already Latin-1 and is untouched). What survives
+    neither is dropped: emitting it verbatim fails XSD validation and refuses a
+    whole fiscal document over one glyph, which is the worse outcome of the two.
+
+    Chosen over refusing the text upstream because the input is free text
+    authored in another system (a Stripe product name, a counterpart's legal
+    name) that the operator often cannot edit in time to invoice, and because
+    the incumbent provider normalises the same input rather than bouncing it.
+    Rejected alternative: transliterating with ``unicodedata.normalize`` over
+    the WHOLE string, which rewrites ``é`` to ``e`` and would silently alter
+    text the facet accepts as-is.
+
+    What it does NOT do: enforce the facet's LENGTH. A substitution can grow a
+    string (``€`` -> ``EUR``), so a caller slicing to a facet maximum must slice
+    AFTER normalising -- see the ``Causale`` chunking in ``_build_xml``. A text
+    that still overflows is caught by ``validate_fatturapa`` at the gate, which
+    names the offending element. It also does not touch codes or identifiers:
+    those are pure ASCII already, so normalisation is a no-op on them, and a
+    malformed one (a six-digit CAP) is a data error no substitution can repair.
+    """
+    if is_latin1(value):
+        return value
+    out: list[str] = []
+    for ch in value:
+        if "\x20" <= ch <= "\x7e" or "\xa0" <= ch <= "\xff":
+            out.append(ch)
+        elif ch in _LATIN1_SUBSTITUTIONS:
+            out.append(_LATIN1_SUBSTITUTIONS[ch])
+        else:
+            # Compatibility decomposition of THIS character only, keeping the
+            # parts the facet admits. Combining marks and anything still
+            # outside the range drop.
+            out.append(
+                "".join(c for c in unicodedata.normalize("NFKD", ch) if "\x20" <= c <= "\x7e")
+            )
+    return "".join(out)
+
+
 def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
+    """Every text node of the document passes through here, which is why the
+    charset normalisation lives at this single point rather than at each of the
+    forty-odd call sites: a field added later is covered by construction, and
+    the normaliser is the identity on conformant text so no existing element
+    changes."""
     el = ET.SubElement(parent, tag)
     if text is not None:
-        el.text = text
+        el.text = fatturapa_text(text)
     return el
 
 
@@ -440,19 +570,14 @@ def _build_xml(
     if client.province:
         _sub(csede, "Provincia", client.province)
     _sub(csede, "Nazione", client.country or "IT")
-    if intermediary is not None:
-        # Mycelium as terzo intermediario / soggetto emittente. Header order:
-        # after CessionarioCommittente, then SoggettoEmittente.
-        terzo = _sub(header, "TerzoIntermediarioOSoggettoEmittente")
-        tanag = _sub(terzo, "DatiAnagrafici")
-        tiva = _sub(tanag, "IdFiscaleIVA")
-        _sub(tiva, "IdPaese", intermediary.country_code)
-        _sub(tiva, "IdCodice", _bare_id_codice(intermediary.vat_number, intermediary.country_code))
-        tan = _sub(tanag, "Anagrafica")
-        _sub(tan, "Denominazione", intermediary.legal_name)
-        # TZ = document transmitted by a third party on the cedente's behalf.
-        _sub(header, "SoggettoEmittente", "TZ")
-
+    # No 1.5 TerzoIntermediarioOSoggettoEmittente / 1.6 SoggettoEmittente here,
+    # deliberately. The AdE binds both to EMISSION by a subject other than the
+    # cedente ("Nei casi di documenti emessi da un soggetto diverso dal
+    # cedente/prestatore va valorizzato l'elemento seguente", Allegato A
+    # 2.1.6), and it gives the transmitter a field of its own, 1.1.1
+    # IdTrasmittente, filled above. Mycelium holds a mandate to TRANSMIT, not
+    # an incarico all'emissione ex art. 21 c.1 DPR 633/72, so declaring TZ
+    # would assert a role it has not been given. See ADR-0053.
     body = _sub(root, "FatturaElettronicaBody")
     dg = _sub(body, "DatiGenerali")
     dgd = _sub(dg, "DatiGeneraliDocumento")
@@ -470,13 +595,30 @@ def _build_xml(
         _sub(db, "ImportoBollo", _money(inv.stamp_duty))
     # taxable + vat + stamp_duty (the stamp_duty is part of the document total).
     _sub(dgd, "ImportoTotaleDocumento", _money(inv.total))
+    # Causale is String200LatinType, repeatable. Normalise BEFORE slicing:
+    # a substitution can lengthen the text (see ``fatturapa_text``), so
+    # slicing first would hand the facet a 202-character chunk.
+    causali: list[str] = []
     if inv.purpose:
-        _sub(dgd, "Causale", inv.purpose)
-    # Free notes ride along as additional Causale lines (FatturaPA
-    # Causale is repeatable, max 200 chars each).
+        causali.append(fatturapa_text(inv.purpose)[:200])
+    # Free notes ride along as additional Causale lines.
     if inv.notes:
-        for i in range(0, len(inv.notes), 200):
-            _sub(dgd, "Causale", inv.notes[i : i + 200])
+        notes = fatturapa_text(inv.notes)
+        causali.extend(notes[i : i + 200] for i in range(0, len(notes), 200))
+    # L.190/2014 art. 1 commi 54-89 requires the dicitura on a forfettario
+    # invoice. It is ADDITIVE here rather than a value occupying ``purpose``:
+    # Causale is maxOccurs="unbounded", so a document can carry both the
+    # operator's own causale and the statutory one, and the statutory one can
+    # no longer be displaced by anything a person types in the Causale field
+    # or an integration supplies. Emitted only when not already present (the
+    # create-time default at ``invoice.create_draft`` still fills ``purpose``
+    # for a blank forfettario draft, and every already-drafted invoice carries
+    # it there), so this adds an element to documents that were missing it and
+    # changes nothing about the ones that were not.
+    if _is_forfettario(fiscal) and not any(is_forfettario_causale(c) for c in causali):
+        causali.append(FORFETTARIO_CAUSALE)
+    for causale in causali:
+        _sub(dgd, "Causale", causale)
     dbs = _sub(body, "DatiBeniServizi")
     for ln in lines:
         dl = _sub(dbs, "DettaglioLinee")
@@ -574,4 +716,8 @@ __all__ = [
     "_resolve_line_tax",
     "_riepilogo_groups",
     "_sub",
+    "fatturapa_text",
+    "is_basic_latin",
+    "is_forfettario_causale",
+    "is_latin1",
 ]

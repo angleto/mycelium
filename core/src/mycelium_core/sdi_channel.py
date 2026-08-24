@@ -7,13 +7,14 @@ intermediary under a per-issuer ``SdiMandate``). The channel is selected by
 
 - ``ManualExportChannel`` (default): the XML is downloadable and legally
   already issued, but it did NOT pass through SdI, so AdE free conservation
-  does NOT cover it (ADR-0010): conservation = out_of_coverage. No
-  intermediary block in the payload (the cedente is its own trasmittente).
+  does NOT cover it (ADR-0010): conservation = out_of_coverage. The cedente is
+  its own trasmittente.
 - ``SdICoopChannel`` (``sdicoop``): SdI assigns an ``IdentificativoSdI``;
   conservation becomes AdE-pending then covered once receipts arrive. Mycelium
-  transmits as intermediary, so its ``IntermediaryIdentity`` is stamped into
-  ``IdTrasmittente`` + ``TerzoIntermediarioOSoggettoEmittente`` and a
-  per-issuer ``SdiMandate`` is required (enforced in ``invoice.transmit``).
+  transmits for the tenant, so its ``IntermediaryIdentity`` is stamped into
+  ``IdTrasmittente`` and a per-issuer ``SdiMandate`` is required (enforced in
+  ``invoice.transmit``). Nothing of Mycelium's appears in the document body:
+  the mandate covers transmission, not issuance (ADR-0053).
   The live mutual-TLS SOAP send is in ``services.sdi_transport`` (F7b) and is
   never exercised in CI (the test-suite injects a fake).
 
@@ -33,12 +34,16 @@ from mycelium_core.models.invoice import ConservationStatus
 
 @dataclass(frozen=True)
 class IntermediaryIdentity:
-    """Mycelium's accredited-channel identity, stamped into the FatturaPA
-    payload when Mycelium transmits on a tenant's behalf (ADR-0011)."""
+    """Mycelium's accredited-channel identity: the soggetto trasmittente.
+
+    It reaches the wire in exactly two places, both about transmission and
+    neither about the document's content -- FatturaPA 1.1.1 ``IdTrasmittente``
+    and the NomeFile / ProgressivoInvio sequence (ADR-0011, ADR-0053). There is
+    deliberately no ``legal_name``: the only element that ever needed one was
+    the emitter block, which is not emitted."""
 
     country_code: str
     vat_number: str
-    legal_name: str
 
 
 @dataclass(frozen=True)
@@ -151,7 +156,6 @@ def get_channel(endpoint_override: str | None = None) -> SdiChannel:
             intermediary=IntermediaryIdentity(
                 country_code=s.sdi_intermediary_id_paese,
                 vat_number=s.sdi_intermediary_id_codice,
-                legal_name=s.sdi_intermediary_denominazione,
             ),
             endpoint_url=endpoint_override or s.sdi_endpoint_url,
             client_cert=s.sdi_client_cert,

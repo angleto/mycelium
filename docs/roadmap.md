@@ -67,9 +67,9 @@ end-to-end per phase.
   switching the channel to production (a heavy item, resourced as
   such). Implementation status (2026-05-22): F7a complete. F7b is now
   implemented as code, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`:
-  official FatturaPA XSD validation at transmit; the per-issuer
-  `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
-  `SoggettoEmittente=TZ` intermediary payload; a real SdICoop `RiceviFile`
+  official FatturaPA XSD validation at transmit and at preview; the per-issuer
+  `SdiMandate` + `IdTrasmittente` = accredited channel holder, with no emitter
+  block in the document body (ADR-0053); a real SdICoop `RiceviFile`
   SOAP client over mutual TLS with a per-intermediary file name /
   ProgressivoInvio sequence; and the inbound `/sdi/notification` receiver that
   correlates RC/MC/NS/AT to the tenant by `IdentificativoSdI` (a SECURITY

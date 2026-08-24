@@ -100,7 +100,6 @@ def _sdicoop_active(tmp_path: object, _ec_signing: None) -> Iterator[str]:
         "MYCELIUM_SDI_CHANNEL": "sdicoop",
         "MYCELIUM_SDI_INTERMEDIARY_ID_PAESE": "IT",
         "MYCELIUM_SDI_INTERMEDIARY_ID_CODICE": "11122233344",
-        "MYCELIUM_SDI_INTERMEDIARY_DENOMINAZIONE": "Mycelium Intermediary Srl",
         "MYCELIUM_SDI_ENDPOINT_URL": endpoint,
         "MYCELIUM_SDI_CLIENT_CERT": str(cert_path),
         "MYCELIUM_SDI_CLIENT_KEY": str(key_path),

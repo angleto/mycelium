@@ -16,9 +16,11 @@ from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import ConservationStatus, InvoiceState, SdiStatus
 from mycelium_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
 from mycelium_core.services import invoice as inv
@@ -335,9 +337,7 @@ def _sdicoop() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(
-                country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
-            )
+            return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
@@ -377,8 +377,9 @@ async def test_sdicoop_assigns_identificativo_and_receipt_correlation(
         tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert tx.identificativo_sdi is not None
         assert tx.conservation_status is ConservationStatus.ade_pending
-        # Mycelium stamped itself as terzo intermediario / soggetto emittente (TZ).
-        assert "<SoggettoEmittente>TZ</SoggettoEmittente>" in (tx.xml or "")
+        # Mycelium transmitted it; it did not issue it, so the document body
+        # carries no SoggettoEmittente at all (ADR-0053).
+        assert "<SoggettoEmittente>" not in (tx.xml or "")
         # RC receipt: delivered + AdE-covered (it transited SdI).
         rc = await inv.ingest_receipt(
             s,
@@ -507,13 +508,14 @@ async def test_notification_signed_xml_is_retrievable(_sdicoop: None) -> None:
             )
 
 
-async def test_sdicoop_preview_stamps_intermediary_for_a_different_tenant(
+async def test_sdicoop_preview_names_the_channel_as_trasmittente_only(
     _sdicoop: None,
 ) -> None:
-    # The downloadable ANTEPRIMA must be byte-faithful to the emitted document:
-    # when Mycelium is a genuine intermediary (channel id != cedente VAT), the
-    # preview carries the TerzoIntermediario / SoggettoEmittente=TZ block, like
-    # the real send does.
+    # The downloadable ANTEPRIMA must be byte-faithful to the emitted document.
+    # When Mycelium transmits for a different tenant (channel id != cedente VAT)
+    # its identity appears in IdTrasmittente and nowhere else: 1.5/1.6 would
+    # declare it the EMITTER of the document, which the transmission mandate
+    # does not authorise (ADR-0053).
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         client_id = await _setup(s, org, user)  # cedente VAT 01234567890
@@ -528,8 +530,8 @@ async def test_sdicoop_preview_stamps_intermediary_for_a_different_tenant(
         )
         xml = await inv.get_xml_preview(s, org_id=org, invoice_id=d.id)
         assert "<ProgressivoInvio>ANTEPRIMA</ProgressivoInvio>" in xml
-        assert "<TerzoIntermediarioOSoggettoEmittente>" in xml
-        assert "<SoggettoEmittente>TZ</SoggettoEmittente>" in xml
+        assert "<TerzoIntermediarioOSoggettoEmittente>" not in xml
+        assert "<SoggettoEmittente>" not in xml
         # Trasmittente is the accredited channel holder, not the cedente.
         assert "<IdCodice>11122233344</IdCodice>" in xml
 
@@ -544,9 +546,7 @@ def _sdicoop_self() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(
-                country_code="IT", vat_number="01234567890", legal_name="Acme Srl"
-            )
+            return IntermediaryIdentity(country_code="IT", vat_number="01234567890")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
@@ -562,13 +562,17 @@ def _sdicoop_self() -> Iterator[None]:
         set_channel_override(None)
 
 
-async def test_self_transmission_omits_terzo_intermediario_block(
+async def test_self_transmission_uses_the_cedente_as_trasmittente(
     _sdicoop_self: None,
 ) -> None:
-    # Cedente VAT == channel id: SdI scarta a third-party emitter coinciding
-    # with the cedente, so neither the real send nor its preview may carry the
-    # TerzoIntermediario / SoggettoEmittente=TZ block, and the cedente is its
-    # own IdTrasmittente.
+    # Cedente VAT == channel id: the cedente is its own trasmittente, and the
+    # IdTrasmittente carries the cedente's CODICE FISCALE rather than the
+    # channel's configured P.IVA. That branch is what ``_payload_intermediary``
+    # exists for and is the only thing pinning it -- a P.IVA in IdTrasmittente
+    # is scartata 00300 when the channel holder is a physical person.
+    # The two "no emitter block" assertions below are now true of every
+    # document (ADR-0053) and are kept only as belt-and-braces; the guard that
+    # discriminates lives in test_sdi_mandate.
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         client_id = await _setup(s, org, user)  # cedente VAT 01234567890 == channel id
@@ -692,3 +696,80 @@ async def test_issuer_piva_country_prefix_is_normalized() -> None:
                 postal_code="00100",
                 city="Roma",
             )
+
+
+# --- the write boundary refuses what the tracciato cannot carry --------------
+
+
+async def test_issuer_cap_must_be_five_digits_at_the_write_boundary() -> None:
+    """A six-digit CAP (a real 20129 with an extra digit) sat on a live issuer
+    profile and blocked every emission with a schema message that pointed at
+    nothing an operator could act on. CAPType is [0-9]{5} and 1.2.2.3 <CAP> is
+    <1.1>, so this is refusable where it is typed."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(DomainError):
+            await inv.create_issuer_profile(
+                s,
+                org_id=org,
+                actor_id=user,
+                label="Bad CAP",
+                legal_name="Acme Srl",
+                vat_number="01234567890",
+                address="Via Roma",
+                postal_code="202129",
+                city="Milano",
+                province="MI",
+            )
+
+        profile = await inv.create_issuer_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            label="Good CAP",
+            legal_name="Acme Srl",
+            vat_number="01234567890",
+            address="Via Roma",
+            postal_code="20129",
+            city="Milano",
+            province="MI",
+        )
+        assert profile.postal_code == "20129"
+        with pytest.raises(DomainError):
+            await inv.update_issuer_profile(
+                s,
+                org_id=org,
+                actor_id=user,
+                profile_id=profile.id,
+                values={"postal_code": "202129"},
+            )
+
+
+async def test_the_xml_preview_refuses_a_document_transmit_would_refuse() -> None:
+    """The preview used to be byte-faithful but not validity-faithful: it
+    handed back a downloadable document the gate would reject, and a connector
+    dry-run called that a clean shadow run. Here the offending value can only
+    reach the row through the counterpart, whose postal code is deliberately
+    not constrained (a foreign one genuinely is not a CAP)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        client_id = await _setup(s, org, user)
+        cp = (
+            await s.execute(select(ClientProfile).where(ClientProfile.tag_id == client_id))
+        ).scalar_one()
+        cp.postal_code = "202129"
+        await s.flush()
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client_id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        with pytest.raises(DomainError) as err:
+            await inv.get_xml_preview(s, org_id=org, invoice_id=d.id)
+        # The message names the offending element, which is the whole point of
+        # running the schema here instead of handing back an unusable file.
+        assert "CAP" in str(err.value.params.get("detail", ""))

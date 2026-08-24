@@ -325,9 +325,16 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
     #: invoice rather than a rounding preference.
     vat_pricing: Mapped[str] = mapped_column(String(8), nullable=False, server_default="auto")
     default_payment_conditions_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    #: MP08 (carta di pagamento) is the honest default for a card processor, but
-    #: DatiPagamento is only emitted when the invoice carries it, so it stays
-    #: opt-in per connector.
+    #: MP08 (carta di pagamento) is the honest value for a card processor, but it
+    #: stays opt-in: a connector states a payment method only when its operator
+    #: chose one. Set it and the composed document carries <DatiPagamento> with
+    #: this method and the conditions below (TP02 when unset); leave it and the
+    #: block is absent entirely, which is legal (2.4 is <0.N> in the AdE
+    #: tracciato and no SdI control reads it).
+    #: The conditions code may NOT be set on its own -- that used to open the
+    #: block while leaving the method to resolve to the module default MP05,
+    #: describing a card charge as a bank transfer. Connector-composed drafts
+    #: also do not inherit the issuer's default_iban, for the same reason.
     default_payment_method_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     #: Fallbacks for a counterpart the provider describes incompletely.
     default_country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)

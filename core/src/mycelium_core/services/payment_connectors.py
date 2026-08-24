@@ -96,6 +96,11 @@ from mycelium_core.services.payment_events import (
     VerificationSecrets,
     get_mapper,
 )
+from mycelium_core.services.payment_methods import (
+    DEFAULT_CONDIZIONI,
+    validate_condizioni,
+    validate_modalita,
+)
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.taxonomy import ClientInput
 
@@ -281,6 +286,16 @@ def mapper_config(connector: PaymentConnector) -> MapperConfig:
 # --- configuration CRUD ----------------------------------------------------
 
 
+def _opt_str(value: Any) -> str | None:
+    """A connector field as the vocabulary check wants it: a non-empty string or
+    nothing. The SPA sends "" for a cleared select and the column is nullable,
+    so "" and None must mean the same thing to a validator."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _validate_vocabulary(
     *,
     provider: str,
@@ -289,6 +304,8 @@ def _validate_vocabulary(
     emission_event: str,
     refund_event: str,
     vat_pricing: str,
+    payment_conditions_code: str | None = None,
+    payment_method_code: str | None = None,
 ) -> None:
     if provider not in PROVIDERS:
         raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID, detail=provider)
@@ -304,6 +321,23 @@ def _validate_vocabulary(
     if vat_pricing not in VAT_PRICING:
         raise UnprocessableError(
             MessageCode.PAYMENT_CONNECTOR_VAT_PRICING_INVALID, detail=vat_pricing
+        )
+    # The FatturaPA code tables. Nothing validated these on the connector row
+    # before: the router bounds them to 4 characters and the service did a blind
+    # setattr, so "MP99" was accepted here and only failed much later, inside
+    # update_draft, on the path that composes a document from a webhook -- where
+    # a DomainError is a parked event, not a 422 someone reads.
+    validate_condizioni(payment_conditions_code)
+    validate_modalita(payment_method_code)
+    # Conditions without a method is not a partial configuration, it is a wrong
+    # one: it opens <DatiPagamento> and leaves ModalitaPagamento to resolve to
+    # the module default MP05 (bonifico), so a card connector would state that a
+    # card charge was a bank transfer. Refuse the pair rather than guess which
+    # half was meant.
+    if payment_conditions_code and not payment_method_code:
+        raise UnprocessableError(
+            MessageCode.PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID,
+            detail="default_payment_conditions_code requires default_payment_method_code",
         )
 
 
@@ -372,6 +406,8 @@ async def create_connector(
         emission_event=emission_event,
         refund_event=refund_event,
         vat_pricing=vat_pricing,
+        payment_conditions_code=_opt_str(fields.get("default_payment_conditions_code")),
+        payment_method_code=_opt_str(fields.get("default_payment_method_code")),
     )
 
     # Minting is only meaningful where WE are the authority. For a vendor adapter
@@ -475,6 +511,8 @@ async def update_connector(
         emission_event=str(merged["emission_event"]),
         refund_event=str(merged["refund_event"]),
         vat_pricing=str(merged["vat_pricing"]),
+        payment_conditions_code=_opt_str(merged.get("default_payment_conditions_code")),
+        payment_method_code=_opt_str(merged.get("default_payment_method_code")),
     )
     if values.get("enabled") and row.signing_secret_ciphertext is None:
         # THE gate that replaced "you must supply a secret to create it".
@@ -1478,6 +1516,14 @@ async def _process_emission(
         series=connector.series,
         purpose=intent.purpose or connector.default_purpose,
         document_type=DocumentType.TD01,
+        # A connector-composed document does not inherit the issuer's standing
+        # payment story. The issuer profile that a person uses for hand-written
+        # bonifico invoices carries a default_iban, and inheriting it here puts
+        # an IBAN on the draft, which alone opens <DatiPagamento> and lets
+        # ModalitaPagamento fall through to MP05 -- describing a card charge as
+        # a bank transfer on a fiscal document. What a connector says about
+        # payment is only what its own settings say, below.
+        inherit_payment_defaults=False,
     )
     draft_values: dict[str, object] = {}
     # The provider's currency is authoritative and Invoice defaults to EUR, so a
@@ -1485,10 +1531,17 @@ async def _process_emission(
     currency = (intent.currency or "EUR").upper()[:3]
     if currency and currency != inv.currency:
         draft_values["currency"] = currency
+    # The two codes travel together or not at all. Writing the conditions alone
+    # opens the DatiPagamento block while leaving the method to resolve to the
+    # module default (MP05, bonifico), which is how a card connector ends up
+    # asserting a bank transfer. Configuration validation refuses the incoherent
+    # pair up front (_validate_vocabulary); this is the second lock, on the path
+    # that actually composes the document.
     if connector.default_payment_method_code:
         draft_values["payment_method_code"] = connector.default_payment_method_code
-    if connector.default_payment_conditions_code:
-        draft_values["payment_conditions_code"] = connector.default_payment_conditions_code
+        draft_values["payment_conditions_code"] = (
+            connector.default_payment_conditions_code or DEFAULT_CONDIZIONI
+        )
     if draft_values:
         await invoice_svc.update_draft(
             session,
@@ -1496,6 +1549,7 @@ async def _process_emission(
             actor_id=connector.id,
             invoice_id=inv.id,
             values=draft_values,
+            inherit_payment_defaults=False,
         )
     for line in intent.lines:
         await invoice_svc.add_line(
