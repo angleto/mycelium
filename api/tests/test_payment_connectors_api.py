@@ -30,6 +30,7 @@ the member path -- which is exactly what the SPA's per-tab "act as" switch does.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import uuid
 from decimal import Decimal
@@ -1411,3 +1412,57 @@ async def test_assigning_a_complete_client_reports_what_it_rearmed() -> None:
         # Nothing was waiting on this customer, so the association is a clean
         # no-op rather than an error: it stays safe to do ahead of time.
         assert r.json() == {"rearmed": 0}
+
+
+async def test_the_row_advertises_only_actions_the_server_will_honour() -> None:
+    """A capability offered and then refused is worse than an absent one: the
+    operator cannot tell a permission problem from a broken feature. The SPA
+    used to decide these itself and was wrong in both directions -- Retry was
+    shown for every status except ``done`` while the service accepts three, and
+    "Make sendable" was shown to every role while its route is owner-only.
+    """
+    from mycelium_api.routers.payment_connectors import _event_out
+    from mycelium_core.models.membership import Role
+    from mycelium_core.models.payment_connector import PaymentConnectorEvent
+    from mycelium_core.services import payment_connectors as svc
+
+    def _row(status: str, **kw: object) -> PaymentConnectorEvent:
+        return PaymentConnectorEvent(
+            id=uuid.uuid4(),
+            provider_event_id="evt_x",
+            event_type="invoice.paid",
+            status=status,
+            attempt_count=0,
+            max_attempts=5,
+            payload={},
+            next_attempt_at=dt.datetime.now(tz=dt.UTC),
+            created_at=dt.datetime.now(tz=dt.UTC),
+            **{"dry_run": False, **kw},
+        )
+
+    # Retry follows the service's own set, not "anything but done".
+    for status in ("pending", "processing", "done", "ignored"):
+        out = _event_out(_row(status), provider="stripe", role=Role.owner)
+        assert out.actions.retry is False, status
+    for status in sorted(svc.RETRYABLE_EVENT_STATUSES):
+        out = _event_out(_row(status), provider="stripe", role=Role.owner)
+        assert out.actions.retry is True, status
+
+    # Promote is owner-only, matching the route, and needs a shadow document.
+    shadow = _row("done", dry_run_xml="<x/>", dry_run=True)
+    assert _event_out(shadow, provider="stripe", role=Role.owner).actions.promote is True
+    assert _event_out(shadow, provider="stripe", role=Role.member).actions.promote is False
+    assert _event_out(_row("done"), provider="stripe", role=Role.owner).actions.promote is False
+
+    # And the row says when a retry would FILE an existing draft rather than
+    # compose anything, which is the case the label has to change for.
+    inv = uuid.uuid4()
+    plain = _event_out(_row("dead", invoice_id=inv), provider="stripe", role=Role.owner)
+    assert plain.actions.settles_existing_draft is False
+    settling = _event_out(
+        _row("dead", invoice_id=inv),
+        provider="stripe",
+        role=Role.owner,
+        settling_invoice_ids=frozenset({inv}),
+    )
+    assert settling.actions.settles_existing_draft is True

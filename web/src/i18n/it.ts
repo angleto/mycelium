@@ -2673,6 +2673,9 @@ export const it: Catalog = {
     attempts: 'Tentativi',
     createdAt: 'Ricevuto',
     retry: 'Riprova',
+    transmitDraft: 'Trasmetti bozza',
+    transmitDraftConfirm:
+      'Questo evento ha gia\u0300 composto un documento. Verra\u0300 depositato cosi\u0300 com\u2019e\u0300, NON ricomposto: se e\u0300 stato composto prima di una correzione, usa Recompose. Procedere?',
     deliveries: 'Consegne rifiutate',
     deliveriesHint: 'Ogni richiesta in ingresso che questo connettore ha respinto: firma non valida, connettore disattivato, corpo malformato. È questo che risponde a "il provider dice di averla inviata".',
     deliveriesEmpty: 'Nessuna consegna rifiutata.',

@@ -2238,6 +2238,16 @@ async def assign_customer_client(
     return rearmed
 
 
+#: The statuses an operator may re-arm. ``pending`` and ``processing`` are
+#: excluded because a worker may hold the lease on them and re-arming would
+#: race it; ``done`` is excluded because the event produced its document, and
+#: ``ignored`` because replaying it is not idempotent (the two Stripe refund
+#: announcements claim DIFFERENT keys, so the ledger would not catch a second
+#: TD04). Named rather than inline: the API projects it to decide whether to
+#: offer the button, and a second copy there would drift.
+RETRYABLE_EVENT_STATUSES = frozenset({"needs_attention", "no_billing_data", "dead"})
+
+
 async def retry_event(
     session: AsyncSession,
     *,
@@ -2264,7 +2274,7 @@ async def retry_event(
     ).scalar_one_or_none()
     if event is None:
         raise NotFoundError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND)
-    if event.status not in {"needs_attention", "no_billing_data", "dead"}:
+    if event.status not in RETRYABLE_EVENT_STATUSES:
         raise ConflictError(MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE)
     event.status = "pending"
     event.attempt_count = 0

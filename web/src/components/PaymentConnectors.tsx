@@ -98,6 +98,14 @@ type EventRow = {
   counterpart_email: string | null
   dry_run: boolean
   has_dry_run_xml: boolean
+  // Computed server-side. The row renders exactly these: re-deriving the
+  // rules here is what produced a Retry button that answered 409 and a
+  // "Make sendable" that answered 403.
+  actions: {
+    retry: boolean
+    promote: boolean
+    settles_existing_draft: boolean
+  }
 }
 
 type DeliveryRow = {
@@ -1045,7 +1053,11 @@ export function ConnectorEvents({
     }
   }
 
-  async function onRetry(eventId: string) {
+  async function onRetry(eventId: string, settlesExistingDraft: boolean) {
+    // Confirm only when the verb is not what the operator expects. A plain
+    // re-arm needs no ceremony; filing a document composed before a fix does.
+    if (settlesExistingDraft && !window.confirm(t('paymentConnectors.transmitDraftConfirm')))
+      return
     setErr(null)
     try {
       await send<EventRow>(
@@ -1221,7 +1233,7 @@ export function ConnectorEvents({
                         claim with the document, so a later redelivery cannot
                         compose a second invoice for the same money, and it
                         refuses if a real document already covers it. */}
-                    {r.has_dry_run_xml && (
+                    {r.actions.promote && (
                       <button
                         type="button"
                         className="btn--sm"
@@ -1264,13 +1276,20 @@ export function ConnectorEvents({
                         </select>
                       </div>
                     )}
-                    {r.status !== 'done' && (
+                    {/* An event that already composed a document does not get
+                        recomposed by a retry: the object claim short-circuits
+                        into settle, which files the draft as it stands. The
+                        button says that, rather than saying "retry" and doing
+                        something else. */}
+                    {r.actions.retry && (
                       <button
                         type="button"
                         className="btn--sm btn--ghost"
-                        onClick={() => void onRetry(r.id)}
+                        onClick={() => void onRetry(r.id, r.actions.settles_existing_draft)}
                       >
-                        {t('paymentConnectors.retry')}
+                        {r.actions.settles_existing_draft
+                          ? t('paymentConnectors.transmitDraft')
+                          : t('paymentConnectors.retry')}
                       </button>
                     )}
                   </td>

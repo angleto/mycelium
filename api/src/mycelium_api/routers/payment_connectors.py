@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime
 import json
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -38,6 +39,7 @@ from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_core.config import get_settings
 from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.invoice import Invoice, InvoiceState
 from mycelium_core.models.membership import Role
 from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
@@ -230,6 +232,34 @@ class RotateSigningSecretIn(BaseModel):
     signing_secret: str | None = Field(default=None, min_length=_MIN_SIGNING_SECRET, max_length=200)
 
 
+class EventActionsOut(BaseModel):
+    """What this row may actually do, decided HERE and rendered as given.
+
+    The SPA used to re-derive these rules and got them wrong in both
+    directions: Retry was offered whenever the status was not ``done`` while
+    the service accepts exactly three statuses, so ``ignored`` and ``pending``
+    rows showed a button that answered 409; and "Make sendable" was offered to
+    every role while its route is owner-only, so a member got a 403 on click.
+    A capability advertised and then refused is worse than an absent one --
+    the operator cannot tell a permission problem from a broken feature.
+
+    Deciding it once on the server is also what keeps the actions from
+    contradicting each other as more are added: they are computed from one
+    view of the row, not from four independent guesses in TSX.
+    """
+
+    #: ``retry_event`` accepts these three statuses and no others.
+    retry: bool
+    #: Owner-only at the router, and only meaningful for a shadow document.
+    promote: bool
+    #: Retry on an event that ALREADY composed a document does not recompose
+    #: it: ``_process_emission`` short-circuits on the object claim into
+    #: ``_settle``, which on a transmit-mode connector files the existing
+    #: draft as it stands. That is the opposite of what "retry" suggests, so
+    #: the button says what it will do instead of what it is called.
+    settles_existing_draft: bool
+
+
 class PaymentConnectorEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -258,6 +288,8 @@ class PaymentConnectorEventOut(BaseModel):
     counterpart_name: str | None
     counterpart_email: str | None
     dry_run: bool
+    #: What this row may do, computed server-side. See ``EventActionsOut``.
+    actions: EventActionsOut
     #: Whether a shadow document was produced and can be downloaded. The XML
     #: itself is not projected here: it is large and carries the counterpart's
     #: data, so it has its own route.
@@ -336,10 +368,37 @@ def _create_out(
 
 
 #: Fields of the event DTO computed here rather than copied off the row.
-_DERIVED_EVENT_FIELDS = frozenset({"has_dry_run_xml", "counterpart_name", "counterpart_email"})
+_DERIVED_EVENT_FIELDS = frozenset(
+    {"has_dry_run_xml", "counterpart_name", "counterpart_email", "actions"}
+)
 
 
-def _event_out(row: PaymentConnectorEvent, *, provider: str) -> PaymentConnectorEventOut:
+async def _draft_invoice_ids(
+    ctx: TenantCtx, rows: Sequence[PaymentConnectorEvent]
+) -> frozenset[uuid.UUID]:
+    """Of the documents these events composed, which are still drafts.
+
+    Read in one statement for the whole page. RLS scopes it to the tenant, so
+    an id belonging to another org simply does not come back.
+    """
+    ids = {r.invoice_id for r in rows if r.invoice_id is not None}
+    if not ids:
+        return frozenset()
+    found = (
+        await ctx.session.execute(
+            select(Invoice.id).where(Invoice.id.in_(ids), Invoice.state == InvoiceState.draft)
+        )
+    ).scalars()
+    return frozenset(found)
+
+
+def _event_out(
+    row: PaymentConnectorEvent,
+    *,
+    provider: str,
+    role: Role,
+    settling_invoice_ids: frozenset[uuid.UUID] = frozenset(),
+) -> PaymentConnectorEventOut:
     counterpart = svc.counterpart_of(row, provider=provider)
     return PaymentConnectorEventOut(
         **{
@@ -350,6 +409,11 @@ def _event_out(row: PaymentConnectorEvent, *, provider: str) -> PaymentConnector
         has_dry_run_xml=row.dry_run_xml is not None,
         counterpart_name=counterpart.name,
         counterpart_email=counterpart.email,
+        actions=EventActionsOut(
+            retry=row.status in svc.RETRYABLE_EVENT_STATUSES,
+            promote=row.dry_run_xml is not None and role is Role.owner,
+            settles_existing_draft=row.invoice_id in settling_invoice_ids,
+        ),
     )
 
 
@@ -575,7 +639,15 @@ async def list_events(
         status=event_status,
         limit=limit,
     )
-    return [_event_out(r, provider=provider) for r in rows]
+    # One extra query, not one per row: which of the linked documents are still
+    # DRAFTS. That is what decides whether Retry would compose something or
+    # merely settle a document this event already produced -- a distinction the
+    # operator cannot make from the row otherwise, and the one that turns
+    # "retry" into "file the pre-fix draft as it stands".
+    settling = await _draft_invoice_ids(ctx, rows)
+    return [
+        _event_out(r, provider=provider, role=ctx.role, settling_invoice_ids=settling) for r in rows
+    ]
 
 
 @router.get(
@@ -848,4 +920,9 @@ async def retry_event(
         connector_id=connector_id,
         event_id=event_id,
     )
-    return _event_out(row, provider=provider)
+    return _event_out(
+        row,
+        provider=provider,
+        role=ctx.role,
+        settling_invoice_ids=await _draft_invoice_ids(ctx, [row]),
+    )

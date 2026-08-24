@@ -2687,6 +2687,9 @@ export const en = {
     attempts: 'Attempts',
     createdAt: 'Received',
     retry: 'Retry',
+    transmitDraft: 'Transmit draft',
+    transmitDraftConfirm:
+      'This event already composed a document. It will be filed as it stands, NOT rebuilt: if it was composed before a fix, use Recompose instead. Continue?',
     deliveries: 'Refused deliveries',
     deliveriesHint: 'Every inbound request this connector turned away: bad signature, connector disabled, malformed body. This is what answers "the provider says it sent it".',
     deliveriesEmpty: 'No refused deliveries.',
