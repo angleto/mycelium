@@ -2505,6 +2505,16 @@ export const it: Catalog = {
     purgeConfirm: 'Rimuovere definitivamente questa chiave revocata? Sparisce dalla lista; resta la traccia di audit di ciò che ha fatto.',
   },
   paymentConnectors: {
+    numbering: 'Numerazione delle fatture',
+    numberingClient: 'Una sequenza per cliente',
+    numberingSeries: 'Una sequenza per questo connettore',
+    numberingProvider: 'Usa il numero assegnato dal provider',
+    numberingHintClient:
+      'Ogni cliente ha una sequenza progressiva indipendente, sotto un sezionale derivato dal suo nome.',
+    numberingHintSeries:
+      'Tutti i documenti di questo connettore condividono una sola sequenza progressiva, sotto il sezionale qui sotto.',
+    numberingHintProvider:
+      'Il numero che il provider ha gia\u0300 messo sulla ricevuta che il tuo cliente ha in mano diventa il numero fiscale, identico. Nessuna sequenza nostra viene spesa. Non puntare mai una seconda autorita\u0300 di numerazione sullo stesso sezionale: buchi e duplicati li\u0300 non sono reversibili una volta depositati.',
     button: 'Connettori di pagamento',
     title: 'Connettori di pagamento',
     hint: 'Trasforma i webhook di un incassatore (Stripe e simili) in fatture elettroniche emesse da questo profilo. Il provider invia in POST un evento firmato, Mycelium compone la FatturaPA e, in modalità trasmissione, la inoltra allo SdI. Finché non attivi il connettore non viene emesso nulla.',

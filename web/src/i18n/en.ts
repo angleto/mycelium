@@ -2519,6 +2519,16 @@ export const en = {
     purgeConfirm: 'Permanently delete this revoked key? It disappears from the list; the audit trail of what it did is kept.',
   },
   paymentConnectors: {
+    numbering: 'Invoice numbering',
+    numberingClient: 'One sequence per customer',
+    numberingSeries: 'One sequence for this connector',
+    numberingProvider: 'Use the number the provider assigned',
+    numberingHintClient:
+      'Each customer gets an independent progressive sequence, under a sezionale derived from their name.',
+    numberingHintSeries:
+      'Every document this connector composes shares one progressive sequence, under the sezionale below.',
+    numberingHintProvider:
+      'The number the provider already put on the receipt your customer is holding becomes the fiscal number, verbatim. No sequence of ours is spent. Never point a second numbering authority at the same sezionale: gaps and duplicates there cannot be undone once filed.',
     button: 'Payment connectors',
     title: 'Payment connectors',
     hint: 'Turn a payment provider webhook into an electronic invoice issued by this profile. The provider POSTs a signed event, Mycelium composes the FatturaPA and, in transmit mode, files it with SdI. A connector emits nothing until you enable it.',

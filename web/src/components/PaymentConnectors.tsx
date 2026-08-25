@@ -28,6 +28,7 @@ type Connector = {
   emission_event: string
   refund_event: string
   payment_sync_enabled: boolean
+  numbering: string
   series: string | null
   default_purpose: string | null
   // Pydantic serialises Numeric(5,2) as a JSON string, but a hand-declared type
@@ -209,6 +210,7 @@ type Defaults = {
   refund_event: string
   default_vat_rate: string
   vat_pricing: string
+  numbering: 'client' | 'series' | 'provider'
   series: string
   default_purpose: string
   default_payment_method_code: string
@@ -221,6 +223,7 @@ const EMPTY_DEFAULTS: Defaults = {
   refund_event: 'refund.created',
   default_vat_rate: '',
   vat_pricing: 'auto',
+  numbering: 'client',
   series: '',
   default_purpose: '',
   default_payment_method_code: '',
@@ -234,6 +237,7 @@ function defaultsOf(c: Connector): Defaults {
     refund_event: c.refund_event,
     default_vat_rate: c.default_vat_rate == null ? '' : String(c.default_vat_rate),
     vat_pricing: c.vat_pricing,
+    numbering: (c.numbering as Defaults['numbering']) ?? 'client',
     series: c.series ?? '',
     default_purpose: c.default_purpose ?? '',
     default_payment_method_code: c.default_payment_method_code ?? '',
@@ -253,7 +257,8 @@ function defaultsBody(d: Defaults): Record<string, unknown> {
     refund_event: d.refund_event,
     default_vat_rate: d.default_vat_rate.trim() || null,
     vat_pricing: d.vat_pricing,
-    series: d.series.trim() || null,
+    numbering: d.numbering,
+    series: d.numbering === 'series' ? d.series.trim() || null : null,
     default_purpose: d.default_purpose.trim() || null,
     default_payment_method_code: d.default_payment_method_code || null,
   }
@@ -611,13 +616,43 @@ function DefaultsFields({
           />
         </label>
         <label>
-          {t('paymentConnectors.series')}
-          <input
-            maxLength={20}
-            value={value.series}
-            onChange={(e) => onChange({ ...value, series: e.target.value })}
-          />
+          {t('paymentConnectors.numbering')}
+          <select
+            value={value.numbering}
+            onChange={(e) =>
+              onChange({ ...value, numbering: e.target.value as Defaults['numbering'] })
+            }
+          >
+            <option value="client">{t('paymentConnectors.numberingClient')}</option>
+            <option value="series">{t('paymentConnectors.numberingSeries')}</option>
+            <option value="provider">{t('paymentConnectors.numberingProvider')}</option>
+          </select>
         </label>
+        {/* Three static calls rather than one interpolated key: the pipeline's
+            i18n check only verifies STATIC t('...') calls, and a dynamic one
+            would quietly exempt these three from it. */}
+        {value.numbering === 'client' && (
+          <p className="hint">{t('paymentConnectors.numberingHintClient')}</p>
+        )}
+        {value.numbering === 'series' && (
+          <p className="hint">{t('paymentConnectors.numberingHintSeries')}</p>
+        )}
+        {value.numbering === 'provider' && (
+          <p className="hint">{t('paymentConnectors.numberingHintProvider')}</p>
+        )}
+        {/* The sezionale is only read in 'series' mode, so it is only offered
+            there: a field that is present but ignored reads as a setting that
+            did not take effect. */}
+        {value.numbering === 'series' && (
+          <label>
+            {t('paymentConnectors.series')}
+            <input
+              maxLength={20}
+              value={value.series}
+              onChange={(e) => onChange({ ...value, series: e.target.value })}
+            />
+          </label>
+        )}
         <label>
           {t('paymentConnectors.paymentMethod')}
           <select

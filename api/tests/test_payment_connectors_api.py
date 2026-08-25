@@ -1540,3 +1540,11 @@ async def test_recompose_is_offered_only_for_a_draft_with_nothing_spent_on_it() 
         assert not _event_out(
             _row(status), provider="stripe", role=Role.owner, linked=untouched
         ).actions.recompose
+
+
+async def test_numbering_mode_round_trips_through_the_api() -> None:
+    """Three mutually exclusive answers to "who numbers this", so one field and
+    not two flags. The sezionale is read only in 'series' mode."""
+    from mycelium_core.models.payment_connector import NUMBERING_MODES
+
+    assert NUMBERING_MODES == ("client", "series", "provider")

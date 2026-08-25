@@ -29,7 +29,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,6 +92,7 @@ class PaymentConnectorIn(BaseModel):
     emission_event: str = "invoice.paid"
     refund_event: str = "refund.created"
     payment_sync_enabled: bool = True
+    numbering: Literal["client", "series", "provider"] = "client"
     series: str | None = Field(default=None, max_length=20)
     default_purpose: str | None = Field(default=None, max_length=200)
     default_vat_rate: Decimal | None = None
@@ -130,6 +131,7 @@ class PaymentConnectorPatchIn(BaseModel):
     emission_event: str | None = None
     refund_event: str | None = None
     payment_sync_enabled: bool | None = None
+    numbering: Literal["client", "series", "provider"] | None = None
     series: str | None = Field(default=None, max_length=20)
     default_purpose: str | None = Field(default=None, max_length=200)
     default_vat_rate: Decimal | None = None
@@ -170,6 +172,7 @@ class PaymentConnectorOut(BaseModel):
     credit_note_mode: str
     emission_event: str
     payment_sync_enabled: bool
+    numbering: str
     series: str | None
     default_purpose: str | None
     default_vat_rate: Decimal | None
