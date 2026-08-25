@@ -46,6 +46,7 @@ from mycelium_core.services.payment_events import (
     PartyDigest,
     PartyIn,
     PayloadError,
+    PaymentMethodIntent,
     PaymentSyncIntent,
     ProviderEvent,
     SubscriptionContext,
@@ -87,6 +88,10 @@ _CUSTOMER_EVENTS = frozenset({"customer.created", "customer.updated"})
 #: an hour later would find the claim and settle that document instead of
 #: composing the right one.
 _EARLY_CHECK_EVENTS = frozenset({"invoice.created"})
+#: The instrument, stated BEFORE any money moves. A charge answers the same
+#: question but only after the fact, so without this a customer's very first
+#: invoice is always composed from the connector default.
+_METHOD_EVENTS = frozenset({"payment_method.attached"})
 
 
 def _parse_signature_header(raw: str) -> tuple[str | None, list[str]]:
@@ -483,6 +488,10 @@ class StripeMapper:
         # discovery made after the fiscal obligation exists into a warning that
         # arrives before it. It composes nothing: see CounterpartCheckIntent.
         events.append(ProviderEvent("invoice.created", "counterpart_check"))
+        # Delivered when the customer sets up their subscription, i.e. before
+        # their first invoice, which is the one case a charge cannot answer in
+        # time: a charge states the instrument only after money has moved.
+        events.append(ProviderEvent("payment_method.attached", "payment_method"))
         if ctx.credit_notes:
             events.append(ProviderEvent("credit_note.created", "credit_note"))
             events.append(ProviderEvent(ctx.refund_event, "credit_note"))
@@ -550,6 +559,15 @@ class StripeMapper:
             if event_type != config.refund_event:
                 return IgnoreIntent(reason="refund_event_not_selected")
             return self._refund(event_type, obj)
+        if event_type in _METHOD_EVENTS:
+            customer_key = as_str(obj.get("customer"))
+            method_type = as_str(obj.get("type"))
+            if not (customer_key and method_type):
+                # A payment method detached from any customer says nothing we
+                # can file against. Named rather than silently dropped, so the
+                # ledger shows why nothing happened.
+                return IgnoreIntent(reason="payment_method_without_customer")
+            return PaymentMethodIntent(customer_key=customer_key, method_type=method_type)
         if event_type in _EARLY_CHECK_EVENTS:
             customer = (
                 as_mapping(obj.get("customer")) if isinstance(obj.get("customer"), Mapping) else {}

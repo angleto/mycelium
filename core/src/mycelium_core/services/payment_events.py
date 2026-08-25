@@ -341,6 +341,24 @@ class CustomerProfileIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class PaymentMethodIntent:
+    """The provider says how a customer will pay. Remember it; emit nothing.
+
+    Closes the one gap the charge cannot: a charge states the instrument only
+    AFTER money has moved, so a customer's very first invoice is composed
+    before any charge for them exists. A payment method is attached when the
+    subscription is set up, which is before the first invoice, so the fact is
+    in hand when the first document is built rather than one cycle late.
+
+    Carries no ``object_keys``, like every other intent that must never mint a
+    document.
+    """
+
+    customer_key: str
+    method_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class CounterpartCheckIntent:
     """The provider is about to bill someone. Check we could invoice them.
 
@@ -373,6 +391,7 @@ Intent = (
     | PaymentSyncIntent
     | CustomerProfileIntent
     | CounterpartCheckIntent
+    | PaymentMethodIntent
     | IgnoreIntent
 )
 
@@ -467,7 +486,14 @@ def checked_identity(
 #: What a subscribed event is FOR. The SPA renders one explanation per purpose,
 #: so the vocabulary lives here (a backend that shipped English prose would have
 #: to be translated in two places).
-EVENT_PURPOSES = ("emission", "customer", "credit_note", "payment_sync", "counterpart_check")
+EVENT_PURPOSES = (
+    "emission",
+    "customer",
+    "credit_note",
+    "payment_sync",
+    "counterpart_check",
+    "payment_method",
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -92,6 +92,7 @@ from mycelium_core.services.payment_events import (
     PartyDigest,
     PartyIn,
     PayloadError,
+    PaymentMethodIntent,
     PaymentSyncIntent,
     ProviderEvent,
     SubscriptionContext,
@@ -1954,6 +1955,19 @@ async def process_event(session: AsyncSession, *, org_id: uuid.UUID, event_id: u
         intent: Intent = mapper.to_intent(event.payload, config=mapper_config(connector))
         if isinstance(intent, IgnoreIntent):
             return await _finish(session, event, status="ignored", slug=intent.reason)
+        if isinstance(intent, PaymentMethodIntent):
+            # Recorded against the same link row a charge writes, so composition
+            # has ONE place to read. Whichever fact arrives first wins for the
+            # first invoice; a later charge simply restates or corrects it.
+            await session.execute(
+                update(PaymentCustomerLink)
+                .where(
+                    PaymentCustomerLink.connector_id == connector.id,
+                    PaymentCustomerLink.provider_customer_id == intent.customer_key,
+                )
+                .values(observed_method_type=intent.method_type[:40])
+            )
+            return await _finish(session, event, status="done", slug=None)
         if isinstance(intent, CounterpartCheckIntent):
             return await _process_counterpart_check(
                 session, connector=connector, event=event, intent=intent

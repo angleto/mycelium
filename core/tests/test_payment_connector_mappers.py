@@ -1659,6 +1659,16 @@ def _minimal_stripe_object(event_type: str) -> dict[str, Any]:
         }
     if event_type.startswith("customer."):
         return {"id": "cus_1", "object": "customer", "email": "a@b.test"}
+    if event_type.startswith("payment_method."):
+        # A payment method names its customer and its instrument, and nothing
+        # about money: it is what the connector learns BEFORE the first charge.
+        return {
+            "id": "pm_1",
+            "object": "payment_method",
+            "customer": "cus_1",
+            "type": "card",
+            "card": {"brand": "visa", "last4": "4242"},
+        }
     raise AssertionError(f"no fixture for {event_type}: add one rather than skipping it")
 
 
@@ -1763,6 +1773,7 @@ def _handled_event_types(provider: str) -> set[str]:
         return (
             set(payment_stripe._PAYMENT_EVENTS)
             | set(payment_stripe._EARLY_CHECK_EVENTS)
+            | set(payment_stripe._METHOD_EVENTS)
             | set(payment_stripe._REFUND_EVENTS)
             | set(payment_stripe._CREDIT_NOTE_EVENTS)
             | set(payment_stripe._CUSTOMER_EVENTS)

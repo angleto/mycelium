@@ -2372,3 +2372,71 @@ async def test_the_early_check_parks_a_counterpart_we_could_not_invoice() -> Non
     )
     assert again is not None
     assert await _run(org_id, connector_id, again) == "ignored"
+
+
+async def test_the_instrument_is_known_before_the_first_invoice() -> None:
+    """The one case a charge cannot answer in time. A charge states the
+    instrument only after money has moved, so a customer's FIRST invoice is
+    always composed before any charge for them exists. A payment method is
+    attached when the subscription is set up, which is before that."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="draft", default_payment_method_code="MP08"
+    )
+    # The customer has to be known to the connector before anything can be
+    # recorded against them, which a customer event does.
+    _c0, cust = await _ingest(
+        org_id,
+        connector_id,
+        {
+            "id": "evt_cust",
+            "type": "customer.created",
+            "created": 1_755_000_000,
+            "data": {
+                "object": {
+                    "id": "cus_1",
+                    "object": "customer",
+                    "name": "Acme SpA",
+                    "email": "amministrazione@acme.test",
+                    "address": {
+                        "line1": "Via Milano 9",
+                        "postal_code": "20100",
+                        "city": "Milano",
+                        "state": "MI",
+                        "country": "IT",
+                    },
+                    "metadata": {"vat_number": "IT09876543210", "sdi_code": "ABCDEFG"},
+                }
+            },
+        },
+    )
+    assert cust is not None
+    assert await _run(org_id, connector_id, cust) == "done"
+
+    _c, method = await _ingest(
+        org_id,
+        connector_id,
+        {
+            "id": "evt_pm",
+            "type": "payment_method.attached",
+            "created": 1_755_000_050,
+            "data": {
+                "object": {
+                    "id": "pm_1",
+                    "object": "payment_method",
+                    "customer": "cus_1",
+                    "type": "sepa_debit",
+                }
+            },
+        },
+    )
+    assert method is not None
+    assert await _run(org_id, connector_id, method) == "done"
+
+    # The FIRST invoice already carries the fact, not the configured default.
+    _c2, paid = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_first"))
+    assert paid is not None
+    assert await _run(org_id, connector_id, paid) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        assert inv.payment_method_code == "MP19", "known before the first charge existed"
