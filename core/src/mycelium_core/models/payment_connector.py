@@ -628,6 +628,23 @@ class PaymentCustomerLink(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     UNIQUE here two workers would both miss and both insert.
     """
 
+    #: HOW this customer's money last arrived, as the provider named it
+    #: ("card", "sepa_debit", ...). Not a second copy of fiscal data -- it is an
+    #: observation about the MONEY, scoped to this connector, and that scoping
+    #: is the point: putting it on ``client_profile.default_payment_method_code``
+    #: would leak the connector's opinion onto the same client's hand-written
+    #: invoices, the same leak the code already refuses for the issuer's IBAN.
+    #:
+    #: Read when composing, because the fact usually arrives too late to be read
+    #: then: the charge object is created seconds AFTER the invoice is marked
+    #: paid, Stripe does not guarantee webhook order, and with
+    #: ``invoice_mode='transmit'`` the document is composed and filed inside the
+    #: single invoice.paid event. But the instrument is a property of the
+    #: customer far more often than of the individual payment, so the previous
+    #: cycle's charge answers for this one. Only a customer's very first payment
+    #: is uncovered, and there the connector's configured default stands.
+    observed_method_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
     __tablename__ = "payment_customer_links"
     __table_args__ = (
         UniqueConstraint(

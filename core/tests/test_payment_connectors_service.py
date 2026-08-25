@@ -2222,3 +2222,79 @@ async def test_a_provider_number_sdi_would_refuse_is_refused_here() -> None:
             number_label="4D41B1BD-0046",
         )
         assert ok.number_label == "4D41B1BD-0046"
+
+
+# --- how the money actually arrived -----------------------------------------
+
+
+def _charge_succeeded(*, event_id: str, customer: str, method: str) -> dict[str, Any]:
+    """A charge event IS the charge object, so it states the instrument. An
+    invoice event carries the charge as a bare id and states nothing."""
+    return {
+        "id": event_id,
+        "type": "charge.succeeded",
+        "created": 1_755_000_100,
+        "data": {
+            "object": {
+                "id": "ch_1",
+                "object": "charge",
+                "customer": customer,
+                "payment_intent": "pi_1",
+                "payment_method_details": {"type": method, method: {}},
+            }
+        },
+    }
+
+
+async def test_the_observed_instrument_beats_the_configured_assumption() -> None:
+    """The connector's code is the switch and the fallback, not the last word.
+    An operator who declared card and whose customer pays by SEPA direct debit
+    wants the document to say direct debit: SdI never checks this field, so a
+    wrong value is not bounced back, it just tells the recipient's accounts
+    payable the wrong thing about money already collected."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="draft", default_payment_method_code="MP08"
+    )
+    # Cycle one: the customer is new, nothing observed, the declared code stands.
+    _c, first = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_p1"))
+    assert first is not None
+    assert await _run(org_id, connector_id, first) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        assert inv.payment_method_code == "MP08"
+
+    # The charge arrives and says how the money actually moved.
+    _c2, charge = await _ingest(
+        org_id,
+        connector_id,
+        _charge_succeeded(event_id="evt_ch", customer="cus_1", method="sepa_debit"),
+    )
+    assert charge is not None
+    await _run(org_id, connector_id, charge)
+
+    # Cycle two: the fact answers for it.
+    _c3, second = await _ingest(
+        org_id,
+        connector_id,
+        _invoice_paid(
+            event_id="evt_p2", invoice_id="in_2", charge_id="ch_2", payment_intent_id="pi_2"
+        ),
+    )
+    assert second is not None
+    assert await _run(org_id, connector_id, second) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        docs = sorted(await inv_svc.list_invoices(s, org_id=org_id), key=lambda i: i.created_at)
+        assert docs[-1].payment_method_code == "MP19", "SEPA Direct Debit, read not guessed"
+
+
+async def test_an_instrument_with_no_fatturapa_code_falls_back_instead_of_guessing() -> None:
+    """The tracciato has no code for a wallet, and MP08 would assert a card
+    that may not exist. Absent from the table means "do not guess"."""
+    from mycelium_core.services.payment_methods import modalita_for_stripe_method
+
+    assert modalita_for_stripe_method("card") == "MP08"
+    assert modalita_for_stripe_method("sepa_debit") == "MP19"
+    assert modalita_for_stripe_method("us_bank_account") == "MP05"
+    for unknown in ("paypal", "klarna", "alipay", "boleto", None, ""):
+        assert modalita_for_stripe_method(unknown) is None

@@ -284,6 +284,10 @@ class EmissionIntent:
     provider_number: str | None = None
     #: The provider says the money is in hand, so the document is born paid.
     paid: bool = True
+    #: WHEN it was settled, as the provider recorded it. Becomes
+    #: DataScadenzaPagamento so the block says "collected on this date" rather
+    #: than leaving a document that is already paid looking payable.
+    settled_at: datetime.datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,9 +308,21 @@ class CreditNoteIntent:
 
 @dataclass(frozen=True, slots=True)
 class PaymentSyncIntent:
-    """Mark an already-emitted document as paid. Carries no fiscal content."""
+    """Mark an already-emitted document as paid, and report HOW it was paid.
+
+    The instrument is the one fiscal fact this event carries that no other
+    does: an invoice payload names the charge by id and a webhook body cannot
+    be expanded, so ``charge.succeeded`` is the only place the system ever
+    learns whether the money moved by card or by direct debit.
+    """
 
     parent_keys: tuple[ObjectKey, ...]
+    #: ``payment_method_details.type`` as the provider named it, unmapped. The
+    #: mapper reports what it saw; translating it into an MP code is a fiscal
+    #: decision and belongs to the service.
+    method_type: str | None = None
+    #: The provider's customer, so the observation can be recorded against it.
+    customer_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

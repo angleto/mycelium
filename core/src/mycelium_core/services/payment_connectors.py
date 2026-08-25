@@ -99,6 +99,7 @@ from mycelium_core.services.payment_events import (
 )
 from mycelium_core.services.payment_methods import (
     DEFAULT_CONDIZIONI,
+    modalita_for_stripe_method,
     validate_condizioni,
     validate_modalita,
 )
@@ -1549,10 +1550,22 @@ async def _process_emission(
     # pair up front (_validate_vocabulary); this is the second lock, on the path
     # that actually composes the document.
     if connector.default_payment_method_code:
-        draft_values["payment_method_code"] = connector.default_payment_method_code
+        # The configured code is the SWITCH ("this connector states a payment
+        # story") and the fallback. What it is NOT is the last word: when the
+        # provider told us how the money actually moved, the fact wins over the
+        # assumption. An operator who set MP08 and whose customer paid by SEPA
+        # direct debit wants the document to say direct debit -- SdI never
+        # checks this field, so a wrong value is not bounced back, it just
+        # misleads the recipient about whether money is still owed.
+        observed = await _observed_modalita(session, connector=connector, intent=intent)
+        draft_values["payment_method_code"] = observed or connector.default_payment_method_code
         draft_values["payment_conditions_code"] = (
             connector.default_payment_conditions_code or DEFAULT_CONDIZIONI
         )
+        # The event states the amount collected and when. Without these the
+        # block says "payable" where the money is already in.
+        if intent.paid and intent.settled_at is not None:
+            draft_values["payment_due_date"] = intent.settled_at.date()
     if draft_values:
         await invoice_svc.update_draft(
             session,
@@ -1785,6 +1798,54 @@ async def _process_credit_note(
     return "done"
 
 
+async def _observed_modalita(
+    session: AsyncSession,
+    *,
+    connector: PaymentConnector,
+    intent: EmissionIntent,
+) -> str | None:
+    """The MP code for how this customer actually pays, if we have seen it.
+
+    None when the customer is new to the connector, when no charge event has
+    arrived yet, or when the instrument has no unambiguous FatturaPA code --
+    all three mean "do not guess", and the caller falls back to what the
+    operator declared.
+    """
+    if not intent.customer_key:
+        return None
+    seen = (
+        await session.execute(
+            select(PaymentCustomerLink.observed_method_type).where(
+                PaymentCustomerLink.connector_id == connector.id,
+                PaymentCustomerLink.provider_customer_id == intent.customer_key,
+            )
+        )
+    ).scalar_one_or_none()
+    return modalita_for_stripe_method(seen)
+
+
+async def _record_observed_method(
+    session: AsyncSession,
+    *,
+    connector: PaymentConnector,
+    intent: PaymentSyncIntent,
+) -> None:
+    """Remember how this customer's money arrived, against the connector's own
+    link row. Silent when the event named no instrument or no customer: an
+    invoice-shaped payment event carries neither, and overwriting a known fact
+    with nothing would be worse than not looking."""
+    if not (intent.method_type and intent.customer_key):
+        return
+    await session.execute(
+        update(PaymentCustomerLink)
+        .where(
+            PaymentCustomerLink.connector_id == connector.id,
+            PaymentCustomerLink.provider_customer_id == intent.customer_key,
+        )
+        .values(observed_method_type=intent.method_type[:40])
+    )
+
+
 async def _process_payment_sync(
     session: AsyncSession,
     *,
@@ -1792,6 +1853,12 @@ async def _process_payment_sync(
     event: PaymentConnectorEvent,
     intent: PaymentSyncIntent,
 ) -> tuple[str, str | None]:
+    # Recorded FIRST and unconditionally: the instrument is worth keeping even
+    # when this particular payment matches no document of ours, because the
+    # observation is about the customer and answers for the NEXT invoice. It is
+    # also why payment_sync_enabled must not gate it -- that switch is about
+    # marking documents paid, not about learning how a customer pays.
+    await _record_observed_method(session, connector=connector, intent=intent)
     if not connector.payment_sync_enabled:
         return "ignored", "payment_sync_off"
     invoice_id = await _find_linked_invoice(

@@ -59,6 +59,49 @@ MODALITA_PAGAMENTO: dict[str, str] = {
     "MP23": "PagoPA",
 }
 
+#: Stripe's ``payment_method_details.type`` -> FatturaPA ModalitaPagamento.
+#: A FACT read off the charge, not an assumption about the account: the charge
+#: object says how the money actually moved, and it is the only place that
+#: does (an ``invoice.paid`` payload carries the charge as a bare id, and a
+#: webhook body cannot be expanded).
+#:
+#: Only entries where the mapping is unambiguous are here. Anything absent
+#: falls back to what the operator configured on the connector, because a
+#: guessed code on a fiscal document is worse than a declared one: SdI does not
+#: check this field, so a wrong value is never bounced back and simply misleads
+#: the recipient's accounts-payable software about whether money is owed.
+STRIPE_METHOD_TO_MODALITA: dict[str, str] = {
+    "card": "MP08",  # carta di pagamento
+    "card_present": "MP08",
+    "link": "MP08",  # Link settles on a card or a bank debit; the card is the common case
+    "sepa_debit": "MP19",  # SEPA Direct Debit
+    "us_bank_account": "MP05",  # bonifico
+    "bacs_debit": "MP19",
+    "acss_debit": "MP19",
+    "au_becs_debit": "MP19",
+    "customer_balance": "MP05",  # funded by a bank transfer into the Stripe balance
+    "sofort": "MP05",
+    "ideal": "MP05",
+    "bancontact": "MP05",
+    "giropay": "MP05",
+    "eps": "MP05",
+    "p24": "MP05",
+    # Deliberately ABSENT, each for a reason rather than an oversight:
+    #   paypal, klarna, afterpay_clearpay, affirm -- the tracciato has no code
+    #     for a wallet or a deferred-payment provider, and MP08 would assert a
+    #     card that may not exist;
+    #   cashapp, alipay, wechat_pay -- same, and outside the Italian tables;
+    #   boleto, oxxo, konbini -- local instruments with no MP equivalent.
+}
+
+
+def modalita_for_stripe_method(method_type: str | None) -> str | None:
+    """The MP code for a Stripe instrument, or None when we will not guess."""
+    if not method_type:
+        return None
+    return STRIPE_METHOD_TO_MODALITA.get(method_type)
+
+
 DEFAULT_CONDIZIONI = "TP02"
 DEFAULT_MODALITA = "MP05"
 
@@ -150,7 +193,9 @@ __all__ = [
     "DEFAULT_CONDIZIONI",
     "DEFAULT_MODALITA",
     "MODALITA_PAGAMENTO",
+    "STRIPE_METHOD_TO_MODALITA",
     "ResolvedPayment",
+    "modalita_for_stripe_method",
     "resolve_payment",
     "validate_condizioni",
     "validate_modalita",

@@ -403,6 +403,18 @@ def _keys(*pairs: tuple[str, Any]) -> tuple[ObjectKey, ...]:
     return tuple(out)
 
 
+def _epoch(value: object) -> datetime.datetime | None:
+    """A Stripe unix timestamp as an aware datetime, or nothing.
+
+    Total by design: a payload that omits the field, or carries a null or a
+    string where a number belongs, must not fail an event over a date that is
+    decoration on the document.
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return datetime.datetime.fromtimestamp(value, tz=datetime.UTC)
+
+
 class StripeMapper:
     name = "stripe"
 
@@ -525,7 +537,16 @@ class StripeMapper:
                 return IgnoreIntent(reason="refund_event_not_selected")
             return self._refund(event_type, obj)
         if event_type in _PAYMENT_EVENTS:
-            return PaymentSyncIntent(parent_keys=self._money_keys(event_type, obj))
+            # A charge event IS the charge object, so the instrument is right
+            # here. An invoice event carries the charge as a bare id and this
+            # reads nothing, which is correct: it states no fact it does not
+            # have rather than guessing one.
+            details = as_mapping(obj.get("payment_method_details"))
+            return PaymentSyncIntent(
+                parent_keys=self._money_keys(event_type, obj),
+                method_type=as_str(details.get("type")),
+                customer_key=as_str(obj.get("customer")),
+            )
         return IgnoreIntent(reason="event_type_not_mapped")
 
     # --- emission ---------------------------------------------------------
@@ -590,6 +611,7 @@ class StripeMapper:
             purpose=config.default_purpose,
             provider_number=as_str(inv.get("number")),
             paid=True,
+            settled_at=_epoch(as_mapping(inv.get("status_transitions")).get("paid_at")),
         )
 
     def _from_payment_intent(self, pi: Mapping[str, Any], *, config: MapperConfig) -> Intent:
