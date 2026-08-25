@@ -1762,6 +1762,7 @@ def _handled_event_types(provider: str) -> set[str]:
     if provider == "stripe":
         return (
             set(payment_stripe._PAYMENT_EVENTS)
+            | set(payment_stripe._EARLY_CHECK_EVENTS)
             | set(payment_stripe._REFUND_EVENTS)
             | set(payment_stripe._CREDIT_NOTE_EVENTS)
             | set(payment_stripe._CUSTOMER_EVENTS)

@@ -33,6 +33,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from mycelium_core.services.payment_events import (
+    CounterpartCheckIntent,
     CreditNoteIntent,
     CustomerProfileIntent,
     EmissionIntent,
@@ -78,6 +79,14 @@ _CREDIT_NOTE_EVENTS = frozenset({"credit_note.created"})
 #: the counterpart's fiscal identity actually travels, because a Stripe webhook
 #: payload cannot be expanded and an invoice event names its customer by id.
 _CUSTOMER_EVENTS = frozenset({"customer.created", "customer.updated"})
+#: Recognised, and deliberately NOT in _PAYMENT_EVENTS or the emission set. An
+#: invoice.created payload is a DRAFT: number is null, charge is null, paid is
+#: false. _from_invoice reads none of those and hardcodes paid=True, so routing
+#: this through the emission path would file a fiscal document built from
+#: pre-finalization data -- and claim the invoice id, so the real invoice.paid
+#: an hour later would find the claim and settle that document instead of
+#: composing the right one.
+_EARLY_CHECK_EVENTS = frozenset({"invoice.created"})
 
 
 def _parse_signature_header(raw: str) -> tuple[str | None, list[str]]:
@@ -469,6 +478,11 @@ class StripeMapper:
         # ``no_billing_data`` for reasons no log will explain.
         events.append(ProviderEvent("customer.created", "customer"))
         events.append(ProviderEvent("customer.updated", "customer"))
+        # A subscription invoice is created about an hour before it is paid.
+        # Delivering this one turns "we cannot invoice this customer" from a
+        # discovery made after the fiscal obligation exists into a warning that
+        # arrives before it. It composes nothing: see CounterpartCheckIntent.
+        events.append(ProviderEvent("invoice.created", "counterpart_check"))
         if ctx.credit_notes:
             events.append(ProviderEvent("credit_note.created", "credit_note"))
             events.append(ProviderEvent(ctx.refund_event, "credit_note"))
@@ -536,6 +550,29 @@ class StripeMapper:
             if event_type != config.refund_event:
                 return IgnoreIntent(reason="refund_event_not_selected")
             return self._refund(event_type, obj)
+        if event_type in _EARLY_CHECK_EVENTS:
+            customer = (
+                as_mapping(obj.get("customer")) if isinstance(obj.get("customer"), Mapping) else {}
+            )
+            party_node: dict[str, Any] = {
+                "name": obj.get("customer_name") or customer.get("name"),
+                "email": obj.get("customer_email") or customer.get("email"),
+                "address": obj.get("customer_address") or customer.get("address"),
+                "tax_ids": obj.get("customer_tax_ids") or customer.get("tax_ids"),
+            }
+            # The SAME party projection _from_invoice uses, so the check and the
+            # emission can never disagree about whether a counterpart is
+            # invoiceable. Deliberately NOT _invoice_lines: no lines, no totals,
+            # no VAT arithmetic -- nothing here becomes a document.
+            return CounterpartCheckIntent(
+                customer_key=as_str(obj.get("customer")) or as_str(customer.get("id")),
+                party=_party(
+                    party_node,
+                    metadata=_metadata(obj, customer),
+                    config=config,
+                    fallback_name="Cliente",
+                ),
+            )
         if event_type in _PAYMENT_EVENTS:
             # A charge event IS the charge object, so the instrument is right
             # here. An invoice event carries the charge as a bare id and this

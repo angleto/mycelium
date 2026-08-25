@@ -341,6 +341,26 @@ class CustomerProfileIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class CounterpartCheckIntent:
+    """The provider is about to bill someone. Check we could invoice them.
+
+    Carries NO ``object_keys``, and that absence is the whole safety argument
+    rather than a detail: claims are written only on the two composing paths,
+    and ``payment_object_links.invoice_id`` is NOT NULL, so an intent with no
+    keys is structurally incapable of minting or claiming a document. A flag on
+    ``EmissionIntent`` would have been one inverted condition away from filing a
+    fiscal document from a draft invoice.
+
+    What it buys is time. A Stripe subscription invoice is created about an hour
+    before it is paid, so a counterpart with incomplete fiscal data surfaces in
+    the waiting room BEFORE the obligation crystallises, instead of after.
+    """
+
+    customer_key: str | None
+    party: PartyIn
+
+
+@dataclass(frozen=True, slots=True)
 class IgnoreIntent:
     """Recognised, deliberately not actionable under this configuration."""
 
@@ -348,7 +368,12 @@ class IgnoreIntent:
 
 
 Intent = (
-    EmissionIntent | CreditNoteIntent | PaymentSyncIntent | CustomerProfileIntent | IgnoreIntent
+    EmissionIntent
+    | CreditNoteIntent
+    | PaymentSyncIntent
+    | CustomerProfileIntent
+    | CounterpartCheckIntent
+    | IgnoreIntent
 )
 
 
@@ -442,7 +467,7 @@ def checked_identity(
 #: What a subscribed event is FOR. The SPA renders one explanation per purpose,
 #: so the vocabulary lives here (a backend that shipped English prose would have
 #: to be translated in two places).
-EVENT_PURPOSES = ("emission", "customer", "credit_note", "payment_sync")
+EVENT_PURPOSES = ("emission", "customer", "credit_note", "payment_sync", "counterpart_check")
 
 
 @dataclass(frozen=True, slots=True)

@@ -2298,3 +2298,77 @@ async def test_an_instrument_with_no_fatturapa_code_falls_back_instead_of_guessi
     assert modalita_for_stripe_method("us_bank_account") == "MP05"
     for unknown in ("paypal", "klarna", "alipay", "boleto", None, ""):
         assert modalita_for_stripe_method(unknown) is None
+
+
+# --- the early counterpart check --------------------------------------------
+
+
+def _invoice_created(*, event_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A Stripe DRAFT invoice: no number, no charge, not paid."""
+    paid = _invoice_paid(event_id=event_id, metadata=metadata)
+    obj = paid["data"]["object"]
+    obj.update(
+        {"status": "draft", "paid": False, "number": None, "charge": None, "payment_intent": None}
+    )
+    paid["type"] = "invoice.created"
+    return paid
+
+
+async def test_the_early_check_composes_nothing_and_claims_nothing() -> None:
+    """The hazard it exists to avoid: _from_invoice reads neither status nor
+    paid nor number and hardcodes paid=True, so routing a draft through the
+    emission path would file a document built from pre-finalization data AND
+    claim the invoice id -- so the real invoice.paid an hour later would find
+    the claim and settle that document instead of composing the right one."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_created(event_id="evt_created"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert await inv_svc.list_invoices(s, org_id=org_id) == [], "no document may exist yet"
+        claims = (await s.execute(select(PaymentObjectLink))).scalars().all()
+        assert claims == [], "and nothing may be claimed, or invoice.paid would settle it"
+
+    # The real event still composes normally afterwards.
+    _c2, paid = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_real"))
+    assert paid is not None
+    assert await _run(org_id, connector_id, paid) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert len(await inv_svc.list_invoices(s, org_id=org_id)) == 1
+
+
+async def test_the_early_check_parks_a_counterpart_we_could_not_invoice() -> None:
+    """An hour before the money arrives, not after."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    _c, event_id = await _ingest(
+        org_id, connector_id, _invoice_created(event_id="evt_early", metadata={})
+    )
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "no_billing_data"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert row.provider_customer_id == "cus_1", "or nothing can re-arm it"
+        assert row.invoice_id is None
+
+    # The paid event parks too -- its row is the one that must be re-armed to
+    # produce the document, so it never stands down. But a SECOND early check
+    # does, or one customer who never fills in their data would accrue two
+    # permanent rows every billing cycle in a queue that is never swept.
+    _c2, paid = await _ingest(
+        org_id, connector_id, _invoice_paid(event_id="evt_paid_early", metadata={})
+    )
+    assert paid is not None
+    assert await _run(org_id, connector_id, paid) == "no_billing_data"
+    _c3, again = await _ingest(
+        org_id, connector_id, _invoice_created(event_id="evt_early2", metadata={})
+    )
+    assert again is not None
+    assert await _run(org_id, connector_id, again) == "ignored"

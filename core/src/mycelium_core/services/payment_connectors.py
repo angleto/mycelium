@@ -81,6 +81,7 @@ from mycelium_core.models.tag import TagKind
 from mycelium_core.services import audit, taxonomy
 from mycelium_core.services import invoice as invoice_svc
 from mycelium_core.services.payment_events import (
+    CounterpartCheckIntent,
     CreditNoteIntent,
     CustomerProfileIntent,
     EmissionIntent,
@@ -1375,7 +1376,11 @@ async def _resolve_client(
     session: AsyncSession,
     *,
     connector: PaymentConnector,
-    intent: EmissionIntent,
+    # Widened to the early check, which asks the SAME question an hour before
+    # the money arrives. It reads only ``customer_key`` and ``party``, so one
+    # implementation serves both and the check cannot drift from the emission
+    # into declaring a counterpart invoiceable that emission would then reject.
+    intent: EmissionIntent | CounterpartCheckIntent,
 ) -> uuid.UUID:
     """Provider customer -> client tag, race-safe for this connector.
 
@@ -1798,6 +1803,47 @@ async def _process_credit_note(
     return "done"
 
 
+async def _process_counterpart_check(
+    session: AsyncSession,
+    *,
+    connector: PaymentConnector,
+    event: PaymentConnectorEvent,
+    intent: CounterpartCheckIntent,
+) -> str:
+    """Ask, an hour early, whether this counterpart could be invoiced at all.
+
+    Composes nothing and claims nothing: it runs the SAME completeness gate the
+    emission path runs and lets ``MissingBillingDataError`` propagate, so the
+    existing handler stamps the customer on the row and parks it in the waiting
+    room, where a ``customer.*`` event re-arms it for free.
+
+    The suppression below is asymmetric ON PURPOSE. A billing cycle produces
+    both an invoice.created and an invoice.paid, and both would park for the
+    same customer -- two rows for one payment, each with its own "Assign client"
+    button, in a queue that is never swept. So the NON-COMPOSING check stands
+    down when the customer is already waiting; the composing event never does,
+    because its row is the one that has to be re-armed to produce the document.
+    """
+    if intent.customer_key:
+        already = (
+            await session.execute(
+                select(PaymentConnectorEvent.id)
+                .where(
+                    PaymentConnectorEvent.connector_id == connector.id,
+                    PaymentConnectorEvent.provider_customer_id == intent.customer_key,
+                    PaymentConnectorEvent.status == "no_billing_data",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if already is not None:
+            return await _finish(
+                session, event, status="ignored", slug="already_awaiting_billing_data"
+            )
+    await _resolve_client(session, connector=connector, intent=intent)
+    return await _finish(session, event, status="done", slug=None)
+
+
 async def _observed_modalita(
     session: AsyncSession,
     *,
@@ -1908,6 +1954,10 @@ async def process_event(session: AsyncSession, *, org_id: uuid.UUID, event_id: u
         intent: Intent = mapper.to_intent(event.payload, config=mapper_config(connector))
         if isinstance(intent, IgnoreIntent):
             return await _finish(session, event, status="ignored", slug=intent.reason)
+        if isinstance(intent, CounterpartCheckIntent):
+            return await _process_counterpart_check(
+                session, connector=connector, event=event, intent=intent
+            )
         if isinstance(intent, CustomerProfileIntent):
             await register_customer(
                 session,
