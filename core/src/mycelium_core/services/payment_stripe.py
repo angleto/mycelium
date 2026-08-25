@@ -588,6 +588,7 @@ class StripeMapper:
             # one. The provider's own free text still describes the supply,
             # where it belongs: the line <Descrizione>.
             purpose=config.default_purpose,
+            provider_number=as_str(inv.get("number")),
             paid=True,
         )
 

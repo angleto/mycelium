@@ -246,11 +246,29 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         UniqueConstraint(
             "issuer_profile_id", "series", "year", "number", name="uq_invoices_issuer"
         ),
+        # A number this system did NOT mint gets its own uniqueness, and
+        # deliberately NOT scoped by series or year: a provider's sequence is
+        # global to the provider account and carries no year of ours, so
+        # scoping it would let the same provider number in twice. NULL rows are
+        # unconstrained (Postgres treats NULLs as distinct), so counter-numbered
+        # documents are untouched by it.
+        UniqueConstraint("issuer_profile_id", "number_label", name="uq_invoices_issuer_label"),
         # Client-scoped newest-first lookup ("last invoice of client X") at
         # thousands scale (task 19b7e874).
         Index("ix_invoices_org_client", "org_id", "client_tag_id"),
     )
 
+    #: The emitted ``<Numero>`` verbatim, when the document's identity comes
+    #: from OUTSIDE our counters -- a provider that already numbered the
+    #: invoice, and whose number the customer is holding on a receipt. NULL for
+    #: everything we number ourselves, which stays ``series``-``number``.
+    #: Kept as an opaque string rather than parsed into the integer: Stripe's
+    #: "4D41B1BD-0046" would come back out as "4D41B1BD-46" and stop matching
+    #: the document the customer has, which is the whole reason to adopt it.
+    #: String20Type in the tracciato, Basic Latin only, and SdI additionally
+    #: refuses one with no digit in it (error 00425) -- both enforced on the
+    #: way in, because the XSD gate cannot see the second one.
+    number_label: Mapped[str | None] = mapped_column(String(20), nullable=True)
     client_tag_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     issuer_profile_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

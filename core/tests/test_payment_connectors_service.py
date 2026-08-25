@@ -2131,3 +2131,94 @@ async def test_recompose_refuses_a_draft_that_already_spent_a_fiscal_number() ->
             )
         # Nothing was touched by the refusal.
         assert len(await inv_svc.list_invoices(s, org_id=org_id)) == 1
+
+
+# --- who numbers the document -----------------------------------------------
+
+
+async def _composed_xml(org_id, user_id, connector_id, event_id):
+    assert await _run(org_id, connector_id, event_id) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
+        return inv, await inv_svc.get_xml_preview(s, org_id=org_id, invoice_id=inv.id)
+
+
+async def test_provider_numbering_emits_the_number_verbatim_and_spends_no_counter() -> None:
+    """The customer is holding a receipt numbered by the provider. Mapping that
+    onto our series + integer emits "4D41B1BD-46" and loses the zero padding,
+    which leaves two unreconcilable identities for one document -- the exact
+    thing adopting the provider's number is meant to fix."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="draft", numbering="provider"
+    )
+    payload = _invoice_paid(event_id="evt_num")
+    payload["data"]["object"]["number"] = "4D41B1BD-0046"
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+    inv, xml = await _composed_xml(org_id, user_id, connector_id, event_id)
+
+    assert inv.number_label == "4D41B1BD-0046"
+    assert "<Numero>4D41B1BD-0046</Numero>" in xml
+    # No counter position was spent: the sequence lives at the provider.
+    assert inv.number is None
+
+
+async def test_client_numbering_is_the_default_and_still_mints_our_own() -> None:
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    payload = _invoice_paid(event_id="evt_cli")
+    payload["data"]["object"]["number"] = "4D41B1BD-0046"
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+    inv, xml = await _composed_xml(org_id, user_id, connector_id, event_id)
+
+    assert inv.number_label is None
+    assert "4D41B1BD-0046" not in xml, "the provider number must not leak into our numbering"
+
+
+async def test_a_provider_number_sdi_would_refuse_is_refused_here() -> None:
+    """Two rules, and the second is why this cannot wait for the XSD gate:
+    String20Type catches length and charset, but "at least one numeric
+    character" (SdI 00425) is invisible to the schema, so the scarto would
+    arrive after the pre-dispatch commit has already spent a NomeFile."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        tag = await taxonomy.resolve_or_create_client(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            name="Numbering SpA",
+            profile=ClientInput(
+                legal_name="Numbering SpA",
+                country_code="IT",
+                vat_number="09876543210",
+                address="Via Milano 9",
+                postal_code="20100",
+                city="Milano",
+                province="MI",
+                country="IT",
+                sdi_code="ABCDEFG",
+            ),
+        )
+        client_id = tag.id
+        for bad in ("ABC-DEF", "X" * 21, "N\u00b0 12"):
+            with pytest.raises(DomainError):
+                await inv_svc.create_draft(
+                    s,
+                    org_id=org_id,
+                    actor_id=user_id,
+                    client_tag_id=client_id,
+                    issuer_profile_id=issuer_id,
+                    number_label=bad,
+                )
+        # 13 Basic Latin characters with digits in them: accepted.
+        ok = await inv_svc.create_draft(
+            s,
+            org_id=org_id,
+            actor_id=user_id,
+            client_tag_id=client_id,
+            issuer_profile_id=issuer_id,
+            number_label="4D41B1BD-0046",
+        )
+        assert ok.number_label == "4D41B1BD-0046"

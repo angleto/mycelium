@@ -276,6 +276,12 @@ class EmissionIntent:
     currency: str = "EUR"
     customer_key: str | None = None
     purpose: str | None = None
+    #: The number the PROVIDER assigned, reported as it stands. Whether it
+    #: becomes the document's fiscal number is the connector's decision
+    #: (``numbering``), not the mapper's: a mapper translates, it does not pick
+    #: a numbering authority. None when the provider numbered nothing yet -- a
+    #: Stripe invoice carries ``number: null`` until it is finalized.
+    provider_number: str | None = None
     #: The provider says the money is in hand, so the document is born paid.
     paid: bool = True
 

@@ -66,6 +66,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
     EMISSION_EVENTS,
+    NUMBERING_MODES,
     PROVIDERS,
     PROVIDERS_WITH_INGRESS_KEY,
     REFUND_EVENTS,
@@ -306,6 +307,7 @@ def _validate_vocabulary(
     vat_pricing: str,
     payment_conditions_code: str | None = None,
     payment_method_code: str | None = None,
+    numbering: str = "client",
 ) -> None:
     if provider not in PROVIDERS:
         raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_PROVIDER_INVALID, detail=provider)
@@ -327,6 +329,8 @@ def _validate_vocabulary(
     # setattr, so "MP99" was accepted here and only failed much later, inside
     # update_draft, on the path that composes a document from a webhook -- where
     # a DomainError is a parked event, not a 422 someone reads.
+    if numbering not in NUMBERING_MODES:
+        raise UnprocessableError(MessageCode.PAYMENT_CONNECTOR_NUMBERING_INVALID, detail=numbering)
     validate_condizioni(payment_conditions_code)
     validate_modalita(payment_method_code)
     # Conditions without a method is not a partial configuration, it is a wrong
@@ -352,6 +356,7 @@ PATCHABLE_FIELDS = frozenset(
         "emission_event",
         "refund_event",
         "payment_sync_enabled",
+        "numbering",
         "series",
         "default_purpose",
         "default_vat_rate",
@@ -408,6 +413,7 @@ async def create_connector(
         vat_pricing=vat_pricing,
         payment_conditions_code=_opt_str(fields.get("default_payment_conditions_code")),
         payment_method_code=_opt_str(fields.get("default_payment_method_code")),
+        numbering=str(fields.get("numbering", "client")),
     )
 
     # Minting is only meaningful where WE are the authority. For a vendor adapter
@@ -513,6 +519,7 @@ async def update_connector(
         vat_pricing=str(merged["vat_pricing"]),
         payment_conditions_code=_opt_str(merged.get("default_payment_conditions_code")),
         payment_method_code=_opt_str(merged.get("default_payment_method_code")),
+        numbering=str(merged.get("numbering", "client")),
     )
     if values.get("enabled") and row.signing_secret_ciphertext is None:
         # THE gate that replaced "you must supply a secret to create it".
@@ -1513,9 +1520,13 @@ async def _process_emission(
         actor_id=connector.id,
         client_tag_id=client_tag_id,
         issuer_profile_id=connector.issuer_profile_id,
-        series=connector.series,
         purpose=intent.purpose or connector.default_purpose,
         document_type=DocumentType.TD01,
+        # Who numbers the document. Only ``series`` mode passes a sezionale;
+        # ``client`` leaves it None so create_draft derives one per counterpart,
+        # and ``provider`` uses neither because the number comes from the event.
+        series=connector.series if connector.numbering == "series" else None,
+        number_label=(intent.provider_number if connector.numbering == "provider" else None),
         # A connector-composed document does not inherit the issuer's standing
         # payment story. The issuer profile that a person uses for hand-written
         # bonifico invoices carries a default_iban, and inheriting it here puts

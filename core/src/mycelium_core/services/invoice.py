@@ -77,6 +77,7 @@ from mycelium_core.services.invoice_format import (
     _effective_iban,
     _is_forfettario,
     _resolve_line_tax,
+    emitted_numero,
     is_basic_latin,
     is_latin1,
 )
@@ -798,6 +799,7 @@ async def create_draft(
     client_tag_id: uuid.UUID,
     year: int | None = None,
     series: str | None = None,
+    number_label: str | None = None,
     purpose: str | None = None,
     issuer_profile_id: uuid.UUID | None = None,
     document_type: DocumentType = DocumentType.TD01,
@@ -828,6 +830,11 @@ async def create_draft(
     # Forfettario (RF19): default the mandatory L.190/2014 purpose when
     # the caller gave none (an explicit purpose is always honoured).
     purpose = validate_purpose(purpose)
+    # Validated before anything is written, so a provider number SdI
+    # would refuse never reaches a row: the alternative is discovering it
+    # at the gate, after the counterpart has been resolved and the client
+    # created.
+    number_label = validate_number_label(number_label)
     if purpose is None and _is_forfettario(issuer):
         purpose = FORFETTARIO_CAUSALE
     inv = Invoice(
@@ -838,6 +845,7 @@ async def create_draft(
         document_type=document_type,
         parent_invoice_id=parent_invoice_id,
         series=series,
+        number_label=number_label,
         year=year or dt.datetime.now(tz=dt.UTC).year,
         state=InvoiceState.draft,
         purpose=purpose,
@@ -1158,6 +1166,43 @@ class AltriDatiBlock:
 #: ``invoices.purpose`` is varchar(200), and it is also FatturaPA
 #: String200LatinType. One bound, two reasons to hold it.
 _PURPOSE_MAX = 200
+
+
+def validate_number_label(value: str | None) -> str | None:
+    """A number assigned outside our counters, against what SdI will accept.
+
+    Two rules, and the second is the reason this cannot wait for the XSD gate:
+
+    * ``String20Type`` -- 1..20 characters, Basic Latin only. The gate does
+      catch this one.
+    * at least one DIGIT. "Numero: numero progressivo attribuito dal
+      cedente/prestatore al documento. Deve contenere almeno un carattere
+      numerico. In caso contrario il file viene scartato con codice errore
+      00425" (Allegato A, Specifiche tecniche 1.9.1, 2.1.1.4). That is an
+      SdI-side control, invisible to the schema: ``validate_fatturapa`` passes
+      a digit-less Numero happily and the scarto arrives AFTER the pre-dispatch
+      commit has already spent a NomeFile and a ProgressivoInvio.
+
+    Refused, never truncated. Clamping is right for a counterpart's name and
+    wrong for an identifier: a fiscal number cut to fit names a different
+    document, and the customer is holding the original on a receipt.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > 20 or not is_basic_latin(text):
+        raise DomainError(
+            MessageCode.INVOICE_NUMBER_LABEL_INVALID,
+            detail=f"{text[:24]}: at most 20 Basic Latin characters",
+        )
+    if not any(ch.isdigit() for ch in text):
+        raise DomainError(
+            MessageCode.INVOICE_NUMBER_LABEL_INVALID,
+            detail=f"{text[:24]}: SdI refuses a number with no digit in it (00425)",
+        )
+    return text
 
 
 def validate_purpose(value: str | None) -> str | None:
@@ -1732,11 +1777,15 @@ async def _resolve_collegata(
     if inv.parent_invoice_id is None:
         return None
     parent = await get_invoice(session, org_id=org_id, invoice_id=inv.parent_invoice_id)
-    # Match the prominent ``<sezionale>-<counter>`` formatting used in
-    # the parent's own <Numero> / PDF header; without the hyphen the
-    # IdDocumento on a TD04 doesn't match the human-readable identifier
-    # on the corrected invoice (confusing on the receiving side).
-    numero = f"{parent.series}-{parent.number}" if parent.number is not None else str(parent.series)
+    # The SAME accessor the parent's own <Numero> used. Rebuilding the string
+    # here is how a TD04 ends up naming a document nobody has: the parent may
+    # carry a provider-assigned number, which is emitted verbatim and does not
+    # survive a round trip through ``series`` + ``number``.
+    numero = (
+        emitted_numero(parent)
+        if (parent.number_label or parent.number is not None)
+        else str(parent.series)
+    )
     data = (parent.issued_at or dt.datetime.now(tz=dt.UTC)).date()
     return numero, data
 
@@ -1993,7 +2042,10 @@ async def transmit(
         # within 5 days under the SAME numero + data -- allocating a new
         # number would leave a gap. A fresh draft (number/issued_at still
         # None) allocates and stamps now.
-        if inv.number is None:
+        # An identity from EITHER source counts. Without the label test this
+        # would mint a counter number for a document the provider already
+        # numbered, spending a sequence position on an identity nobody emits.
+        if inv.number is None and not inv.number_label:
             inv.number = await _allocate_number(
                 session,
                 org_id=org_id,
@@ -2826,17 +2878,26 @@ async def _gather_preview(
     lines = await list_lines(session, org_id=org_id, invoice_id=inv.id)
     totals = _compute_totals(lines, issuer)
     iban, src = _effective_iban(inv, client, issuer)
-    n = inv.number
-    if n is None:
-        # Display-only "would-be" number, keyed per issuer like the real
-        # allocation. ``issuer`` may be None on an incomplete draft with no
-        # profile yet; then there is no sequence to peek, so show 1.
-        iid = issuer.id if issuer is not None else inv.issuer_profile_id
-        n = (
-            await _would_be_number(session, issuer_profile_id=iid, series=inv.series, year=inv.year)
-            if iid is not None
-            else 1
-        )
+    if inv.number_label:
+        # A number this system did not mint: there is no sequence to peek and
+        # nothing to assemble. Showing a would-be counter position here would
+        # put a number in the preview that the emitted document never carries.
+        display_number = inv.number_label
+    else:
+        n = inv.number
+        if n is None:
+            # Display-only "would-be" number, keyed per issuer like the real
+            # allocation. ``issuer`` may be None on an incomplete draft with no
+            # profile yet; then there is no sequence to peek, so show 1.
+            iid = issuer.id if issuer is not None else inv.issuer_profile_id
+            n = (
+                await _would_be_number(
+                    session, issuer_profile_id=iid, series=inv.series, year=inv.year
+                )
+                if iid is not None
+                else 1
+            )
+        display_number = f"{inv.series}-{n}"
     return InvoicePreview(
         issuer=issuer,
         client=client,
@@ -2852,7 +2913,7 @@ async def _gather_preview(
         # client series ends and the progressive starts; without it,
         # a customer code ending in a digit (e.g. ``ACME2026``) ran
         # straight into the counter and read as one opaque token.
-        number=f"{inv.series}-{n}",
+        number=display_number,
     )
 
 

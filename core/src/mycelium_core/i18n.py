@@ -158,6 +158,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_REFUND_EVENT_INVALID = "payment_connector.refund_event_invalid"
     PAYMENT_CONNECTOR_VAT_PRICING_INVALID = "payment_connector.vat_pricing_invalid"
     PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID = "payment_connector.payment_pair_invalid"
+    PAYMENT_CONNECTOR_NUMBERING_INVALID = "payment_connector.numbering_invalid"
     PAYMENT_CONNECTOR_SIGNATURE_INVALID = "payment_connector.signature_invalid"
     PAYMENT_CONNECTOR_SECRET_REQUIRED = "payment_connector.signing_secret_required"  # noqa: S105 (message code, not a secret)
     PAYMENT_CONNECTOR_DISABLED = "payment_connector.disabled"
@@ -166,6 +167,7 @@ class MessageCode(enum.StrEnum):
     PAYMENT_CONNECTOR_EVENT_NOT_FOUND = "payment_connector.event_not_found"
     PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE = "payment_connector.event_not_retryable"
     PAYMENT_CONNECTOR_EVENT_NOT_RECOMPOSABLE = "payment_connector.event_not_recomposable"
+    INVOICE_NUMBER_LABEL_INVALID = "invoice.number_label_invalid"
     SDI_INTERMEDIARY_CODE_INVALID = "sdi.intermediary_code_invalid"
     SDI_INTERMEDIARY_CODE_MISSING = "sdi.intermediary_code_missing"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
@@ -539,6 +541,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PAYMENT_CONNECTOR_MODE_INVALID: "Unknown automation mode: {detail}",
         MessageCode.PAYMENT_CONNECTOR_EVENT_INVALID: "Unknown emission event: {detail}",
         MessageCode.PAYMENT_CONNECTOR_VAT_PRICING_INVALID: "Unknown VAT pricing: {detail}",
+        MessageCode.PAYMENT_CONNECTOR_NUMBERING_INVALID: ("Unknown numbering mode: {detail}"),
         MessageCode.PAYMENT_CONNECTOR_PAYMENT_PAIR_INVALID: (
             "Payment terms and payment method must be set together on a connector, "
             "or the document states a payment method nobody chose: {detail}"
@@ -557,6 +560,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_FOUND: "Payment connector event not found",
         MessageCode.PAYMENT_CONNECTOR_EVENT_NOT_RETRYABLE: (
             "Only a parked or dead event can be retried"
+        ),
+        MessageCode.INVOICE_NUMBER_LABEL_INVALID: (
+            "The provider's invoice number cannot be used as it stands: {detail}"
         ),
         MessageCode.SDI_INTERMEDIARY_CODE_INVALID: (
             "Not an Italian fiscal code: FatturaPA wants the trasmittente's codice "

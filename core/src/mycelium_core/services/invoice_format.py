@@ -117,6 +117,21 @@ FORFETTARIO_RIFERIMENTO_NORMATIVO = (
 )
 
 
+def emitted_numero(inv: Invoice) -> str:
+    """The document's fiscal number as it goes on the wire.
+
+    One accessor because two things read it and must never disagree: the
+    ``<Numero>`` element and the ``IdDocumento`` a TD04 uses to name the
+    invoice it corrects. A number the provider assigned is emitted verbatim --
+    parsing "4D41B1BD-0046" into a series and an integer and reassembling it
+    yields "4D41B1BD-46", and a credit note referencing that would name a
+    document nobody has.
+    """
+    if inv.number_label:
+        return inv.number_label
+    return f"{inv.series}-{inv.number}"
+
+
 def is_forfettario_causale(value: str | None) -> bool:
     """Whether a stored causale IS the statutory L.190/2014 dicitura.
 
@@ -584,7 +599,7 @@ def _build_xml(
     _sub(dgd, "TipoDocumento", inv.document_type.value)
     _sub(dgd, "Divisa", inv.currency)
     _sub(dgd, "Data", (inv.issued_at or dt.datetime.now(tz=dt.UTC)).date().isoformat())
-    _sub(dgd, "Numero", numero_override or f"{inv.series}-{inv.number}")
+    _sub(dgd, "Numero", numero_override or emitted_numero(inv))
     # Virtual stamp duty: DatiBollo goes AFTER Numero and BEFORE
     # ImportoTotaleDocumento (FatturaPA 1.2 element order). Only when it
     # applies (forfettario with taxable >= threshold); ordinary regime
@@ -716,6 +731,7 @@ __all__ = [
     "_resolve_line_tax",
     "_riepilogo_groups",
     "_sub",
+    "emitted_numero",
     "fatturapa_text",
     "is_basic_latin",
     "is_forfettario_causale",

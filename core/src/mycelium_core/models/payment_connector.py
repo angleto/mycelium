@@ -121,6 +121,9 @@ PROVIDERS_WITH_INGRESS_KEY = ("mycelium",)
 #: with an incumbent e-invoicing provider long enough to diff the two XMLs.
 AUTOMATION_MODES = ("transmit", "draft", "dry_run", "off")
 
+#: Who assigns the fiscal number. See ``PaymentConnector.numbering``.
+NUMBERING_MODES = ("client", "series", "provider")
+
 #: The single event family that triggers an emission. Exactly one per connector:
 #: Stripe fires several events for the same money (an ``invoice.paid`` is also a
 #: ``charge.succeeded``), so a set here would double-invoice.
@@ -245,6 +248,10 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
             name="ck_payment_connectors_vat_pricing",
         ),
         CheckConstraint(
+            f"numbering IN {_sql_in(NUMBERING_MODES)}",
+            name="ck_payment_connectors_numbering",
+        ),
+        CheckConstraint(
             "length(label) >= 1 AND length(label) <= 120", name="ck_payment_connectors_label_len"
         ),
         UniqueConstraint("issuer_profile_id", "label", name="uq_payment_connectors_label"),
@@ -310,8 +317,25 @@ class PaymentConnector(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin
     payment_sync_enabled: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
 
     # --- invoice defaults, complementary to what the provider sends --------
+    #: Who numbers the documents this connector composes. The three answers are
+    #: mutually exclusive, which is why this is one column and not two flags:
+    #:
+    #: - ``client``: a sezionale per counterpart, each an independent sequence
+    #:   (``create_draft`` derives and persists it on the client);
+    #: - ``series``: one sequence for the whole connector, under ``series``;
+    #: - ``provider``: no sequence of ours at all. The provider already numbered
+    #:   the invoice and the customer is holding that number on a receipt, so
+    #:   emitting a different one leaves two unreconcilable identities for one
+    #:   document. Our counters are not touched, which also makes the number
+    #:   deterministic: recomposing an event re-derives it instead of spending
+    #:   a new one.
+    #:
+    #: Never mix ``provider`` with a sequence of ours on the same sezionale:
+    #: two numbering authorities over one series is where gaps and duplicates
+    #: come from, and it cannot be undone once filed.
+    numbering: Mapped[str] = mapped_column(String(12), nullable=False, server_default="client")
     #: Sezionale for provider-originated documents; NULL keeps the per-client
-    #: series ``create_draft`` derives.
+    #: series ``create_draft`` derives. Read only when ``numbering='series'``.
     series: Mapped[str | None] = mapped_column(String(20), nullable=True)
     default_purpose: Mapped[str | None] = mapped_column(String(200), nullable=True)
     #: Used when the provider reports no tax on a line. NULL falls through to
