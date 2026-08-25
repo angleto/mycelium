@@ -36,23 +36,14 @@ _IT_FISCAL_CODE = re.compile(r"^(?:[0-9]{11}|[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][
 
 
 async def get_sdi_intermediary_id_codice(session: AsyncSession) -> str:
-    """The accredited channel's fiscal code: the DB value, else the env one.
+    """The accredited channel's fiscal code. Platform configuration, full stop.
 
-    The fallback is what makes the move out of the ConfigMap expand-only. Once
-    an operator sets it from Settings the DB wins and the env var can go; until
-    then a deployment that never opens the page keeps transmitting exactly as
-    before.
-    """
-    row = await _get_or_create(session)
-    return row.sdi_intermediary_id_codice or get_settings().sdi_intermediary_id_codice
-
-
-async def get_sdi_intermediary_override(session: AsyncSession) -> str:
-    """The stored value ALONE, without the env fallback.
-
-    The admin surface needs to tell "configured here" from "still showing the
-    deployment's value", which the resolved value cannot express: they are the
-    same string when the two agree.
+    There is deliberately no env fallback any more. Two homes for one value is
+    how a deployment ends up with the ConfigMap and the database disagreeing and
+    nobody able to say which one the running process used -- and this is a value
+    whose wrongness surfaces only as an SdI rejection on a real invoice. Empty
+    means unconfigured, and ``invoice.transmit`` refuses rather than filing
+    under an empty trasmittente.
     """
     return (await _get_or_create(session)).sdi_intermediary_id_codice
 

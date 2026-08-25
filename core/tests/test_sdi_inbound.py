@@ -161,7 +161,7 @@ def _coop() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
+            return IntermediaryIdentity(country_code="IT", fiscal_code="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             # IdentificativoSdI is xsd:integer with up to 12 digits per the
@@ -257,7 +257,7 @@ async def test_inbound_lost_ack_reconciles_by_nome_file(_coop: None) -> None:
 
         @property
         def intermediary(self) -> _II | None:
-            return _II(country_code="IT", vat_number="11122233344")
+            return _II(country_code="IT", fiscal_code="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> _TR:
             raise httpx.ReadTimeout("lost ack")

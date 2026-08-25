@@ -94,7 +94,7 @@ def _intermediary_channel() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
+            return IntermediaryIdentity(country_code="IT", fiscal_code="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(

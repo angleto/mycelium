@@ -86,12 +86,12 @@ async def test_the_transmitter_fiscal_code_is_configurable_from_the_platform() -
     from mycelium_core.services import system_settings as svc
 
     async with admin_session() as s:
-        # Empty column: the deployment's env value still stands.
-        assert await svc.get_sdi_intermediary_override(s) == ""
+        # Platform configuration is the ONLY home: no env fallback, so an
+        # unconfigured deployment reads empty and transmit refuses rather than
+        # filing under an identity nobody chose.
+        assert await svc.get_sdi_intermediary_id_codice(s) == ""
 
         await svc.set_sdi_intermediary_id_codice(s, "  ltengl79m31i356x ")
-        assert await svc.get_sdi_intermediary_override(s) == "LTENGL79M31I356X"
-        # And it now wins over the env value.
         assert await svc.get_sdi_intermediary_id_codice(s) == "LTENGL79M31I356X"
 
         # Shape is enforced: FatturaPA wants a fiscal code, not free text.
@@ -108,6 +108,6 @@ async def test_the_transmitter_fiscal_code_is_configurable_from_the_platform() -
         )
         assert svc.sdi_intermediary_warning("LTENGL79M31I356X") is None
 
-        # Clearing returns the deployment to its env value.
+        # Clearing leaves the channel unconfigured, which transmit refuses.
         await svc.set_sdi_intermediary_id_codice(s, "")
-        assert await svc.get_sdi_intermediary_override(s) == ""
+        assert await svc.get_sdi_intermediary_id_codice(s) == ""

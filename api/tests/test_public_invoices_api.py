@@ -407,7 +407,7 @@ class _FlakyCoop:
     def intermediary(self):
         from mycelium_core.sdi_channel import IntermediaryIdentity
 
-        return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
+        return IntermediaryIdentity(country_code="IT", fiscal_code="11122233344")
 
     async def transmit(self, *, xml: str, invoice_id: str, filename: str):
         from mycelium_core.models.invoice import ConservationStatus

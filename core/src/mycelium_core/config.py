@@ -744,7 +744,6 @@ class Settings(BaseSettings):
     # (deploy secrets).
     sdi_channel: Literal["manual_export", "sdicoop"] = "manual_export"
     sdi_intermediary_id_paese: str = "IT"
-    sdi_intermediary_id_codice: str = ""
     # The SdICoop RiceviFile endpoint. ``sdi_endpoint_url`` is the legacy single
     # value (still honoured as a fallback). The two env-specific URLs below let
     # the active one be picked AT RUNTIME from the DB (system_settings.

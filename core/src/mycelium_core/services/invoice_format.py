@@ -477,7 +477,7 @@ def _build_xml(
         # Mycelium transmits as intermediary: the trasmittente is the accredited
         # channel holder, not the cedente (ADR-0011).
         _sub(idt, "IdPaese", intermediary.country_code)
-        _sub(idt, "IdCodice", _bare_id_codice(intermediary.vat_number, intermediary.country_code))
+        _sub(idt, "IdCodice", _bare_id_codice(intermediary.fiscal_code, intermediary.country_code))
     else:
         _sub(idt, "IdPaese", fiscal.country_code)
         # IdTrasmittente/IdCodice is validated by SdI as a CODICE FISCALE

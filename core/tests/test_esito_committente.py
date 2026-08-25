@@ -185,6 +185,18 @@ def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, first_name: str) -> byt
     ).encode()
 
 
+async def _configure_channel_identity() -> None:
+    """The accredited channel's fiscal code is platform configuration, not an
+    env var: an EC cannot be filed under a trasmittente nobody set, so the
+    tests that exercise the outbound path have to set it the way production
+    does."""
+    from mycelium_core.db import admin_session
+    from mycelium_core.services import system_settings as sys_svc
+
+    async with admin_session() as s:
+        await sys_svc.set_sdi_intermediary_id_codice(s, "11122233344")
+
+
 async def _make_org_with_received_invoice() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create org + issuer (with codice destinatario) + a ReceivedInvoice via
     the passive ingest. Returns (org_id, user_id, received_invoice_id)."""
@@ -324,6 +336,7 @@ async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -
 
     from mycelium_core.models.sdi_notification import ReceivedInvoiceNotification
 
+    await _configure_channel_identity()
     org, user, ri_id = await _make_org_with_received_invoice()
     endpoint = _sdicoop_active
 
@@ -378,6 +391,7 @@ async def test_send_ec_with_sdicoop_transport_error_persists_anyway(
     import respx
     from httpx import Response
 
+    await _configure_channel_identity()
     org, user, ri_id = await _make_org_with_received_invoice()
     endpoint = _sdicoop_active
 

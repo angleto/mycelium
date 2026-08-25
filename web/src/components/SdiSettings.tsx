@@ -19,7 +19,6 @@ type SdiEnv = {
   active_endpoint: string
   intermediary_id_paese: string
   intermediary_id_codice: string
-  intermediary_id_codice_from_settings: boolean
   intermediary_id_codice_warning: string | null
   client_cert_configured: boolean
   client_key_configured: boolean
@@ -163,8 +162,10 @@ export function SdiSettings() {
           <label htmlFor="sdi-id-codice">{t('sdi.idCodice')}</label>
         </dt>
         <dd>
+          {!state.intermediary_id_codice && <p className="err">{t('sdi.codeMissing')}</p>}
           <input
             id="sdi-id-codice"
+            required
             value={code ?? ''}
             maxLength={28}
             spellCheck={false}
@@ -180,9 +181,6 @@ export function SdiSettings() {
           >
             {t('sdi.save')}
           </button>
-          {!state.intermediary_id_codice_from_settings && (
-            <p className="hint">{t('sdi.codeFromEnv')}</p>
-          )}
           {state.intermediary_id_codice_warning === 'physical_person_must_use_16_char_cf' && (
             <p className="err">{t('sdi.codeLooksLikeVat')}</p>
           )}

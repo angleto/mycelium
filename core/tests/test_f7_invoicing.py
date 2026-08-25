@@ -21,7 +21,12 @@ from sqlalchemy import select
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.models.client_profile import ClientProfile
-from mycelium_core.models.invoice import ConservationStatus, InvoiceState, SdiStatus
+from mycelium_core.models.invoice import (
+    ConservationStatus,
+    InvoiceState,
+    IssuerProfile,
+    SdiStatus,
+)
 from mycelium_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
 from mycelium_core.services import invoice as inv
 from mycelium_core.services.auth import signup
@@ -337,7 +342,7 @@ def _sdicoop() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(country_code="IT", vat_number="11122233344")
+            return IntermediaryIdentity(country_code="IT", fiscal_code="11122233344")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
@@ -546,7 +551,7 @@ def _sdicoop_self() -> Iterator[None]:
 
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
-            return IntermediaryIdentity(country_code="IT", vat_number="01234567890")
+            return IntermediaryIdentity(country_code="IT", fiscal_code="01234567890")
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
@@ -773,3 +778,41 @@ async def test_the_xml_preview_refuses_a_document_transmit_would_refuse() -> Non
         # The message names the offending element, which is the whole point of
         # running the schema here instead of handing back an unusable file.
         assert "CAP" in str(err.value.params.get("detail", ""))
+
+
+async def test_self_transmission_survives_a_channel_identified_by_codice_fiscale() -> None:
+    """The regression this pins was found by the operator, not by a test.
+
+    A physical person transmitting their OWN invoices has two fiscal
+    identifiers: the codice fiscale (16 chars) and the P.IVA (11 digits). The
+    channel must be identified by the CODICE FISCALE -- FatturaPA 1.1.1.2 asks
+    for one and SdI verifies it in Anagrafe Tributaria as such. Detecting
+    self-transmission by comparing the channel against the cedente's P.IVA
+    alone therefore breaks the moment the channel is configured with the value
+    the tracciato actually wants: the subject is reclassified as an
+    intermediary transmitting somebody else's document.
+    """
+    from mycelium_core.sdi_channel import IntermediaryIdentity
+
+    issuer = IssuerProfile(
+        country_code="IT",
+        vat_number="13438810015",
+        tax_code="LTENGL79M31I356X",
+        legal_name=None,
+        first_name="Angelo",
+        last_name="Leto",
+        tax_regime="RF19",
+        address="Via Botticelli",
+        postal_code="10154",
+        city="Torino",
+        province="TO",
+        country="IT",
+    )
+    by_cf = IntermediaryIdentity(country_code="IT", fiscal_code="LTENGL79M31I356X")
+    by_vat = IntermediaryIdentity(country_code="IT", fiscal_code="13438810015")
+    # Either identifier names the same person, so either is self-transmission.
+    assert inv._payload_intermediary(issuer, by_cf) is None
+    assert inv._payload_intermediary(issuer, by_vat) is None
+    # A genuinely different subject still is one.
+    other = IntermediaryIdentity(country_code="IT", fiscal_code="11122233344")
+    assert inv._payload_intermediary(issuer, other) is other

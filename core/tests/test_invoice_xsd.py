@@ -981,7 +981,7 @@ def test_a_transmitted_for_document_names_the_channel_only_as_trasmittente() -> 
     it the issuer of someone else's invoice, a role the transmission mandate
     does not confer (ADR-0053). Asserted through the schema as well as by
     string absence, so a revert of the emission code fails here too."""
-    xml = _valid_xml(IntermediaryIdentity(country_code="IT", vat_number="11122233344"))
+    xml = _valid_xml(IntermediaryIdentity(country_code="IT", fiscal_code="11122233344"))
     assert "<TerzoIntermediarioOSoggettoEmittente>" not in xml
     assert "<SoggettoEmittente>" not in xml
     idt = xml.split("<IdTrasmittente>")[1].split("</IdTrasmittente>")[0]

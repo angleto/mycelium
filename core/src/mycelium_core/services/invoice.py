@@ -1758,10 +1758,21 @@ def _payload_intermediary(
     the downloadable ANTEPRIMA is byte-faithful to the document emitted."""
     if intermediary is None:
         return None
-    cedente_vat = (
-        _bare_id_codice(fiscal.vat_number, fiscal.country_code) if fiscal.vat_number else None
-    )
-    return None if cedente_vat == intermediary.vat_number else intermediary
+    # Compared against BOTH of the cedente's fiscal identifiers, not just the
+    # P.IVA. The channel is identified by a CODICE FISCALE (FatturaPA 1.1.1.2
+    # asks for one and SdI verifies it in Anagrafe Tributaria as such), and for
+    # a physical person the codice fiscale and the P.IVA are different strings.
+    # Comparing one against the other silently reclassified a subject
+    # transmitting its OWN invoices as an intermediary transmitting someone
+    # else's, the moment the channel was configured with the identifier the
+    # tracciato actually wants. Which of the two the operator configured is not
+    # something this function should depend on.
+    cedente_ids = {
+        _bare_id_codice(code, fiscal.country_code)
+        for code in (fiscal.tax_code, fiscal.vat_number)
+        if code
+    }
+    return None if intermediary.fiscal_code in cedente_ids else intermediary
 
 
 def _require_transmittable(inv: Invoice) -> bool:
@@ -1920,7 +1931,7 @@ async def transmit(
         # checkpoint, so nothing durable is spent on a document that cannot
         # carry a valid trasmittente. An empty IdTrasmittente would otherwise
         # reach SdI as scarto 00300.
-        if not intermediary.vat_number:
+        if not intermediary.fiscal_code:
             raise ConflictError(MessageCode.SDI_INTERMEDIARY_CODE_MISSING)
         # Transmitting via the accredited channel = Mycelium acts as intermediary
         # for this VAT subject; an active SdiMandate is required (ADR-0011).
@@ -2010,10 +2021,12 @@ async def transmit(
             progressivo_str = inv.progressivo_invio
             filename = inv.nome_file
         elif intermediary is not None:
-            seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.vat_number)
+            seq = await _allocate_transmission_seq(
+                session, intermediary_id=intermediary.fiscal_code
+            )
             progressivo_str = transmission_progressivo(seq)
             filename = fatturapa_filename(
-                intermediary.country_code, intermediary.vat_number, progressivo_str
+                intermediary.country_code, intermediary.fiscal_code, progressivo_str
             )
         else:
             cedente_id = fiscal.vat_number or fiscal.tax_code or ""

@@ -43,7 +43,12 @@ class IntermediaryIdentity:
     the emitter block, which is not emitted."""
 
     country_code: str
-    vat_number: str
+    #: A CODICE FISCALE, not a P.IVA, and the name says so because the old one
+    #: (``vat_number``) is what invited a P.IVA into the slot. FatturaPA 1.1.1.2
+    #: wants the trasmittente's codice fiscale and SdI verifies it in Anagrafe
+    #: Tributaria as one; for a company that is its P.IVA, for a physical person
+    #: it is the 16-character form and the two differ.
+    fiscal_code: str
 
 
 @dataclass(frozen=True)
@@ -151,9 +156,11 @@ def get_channel(
     which this function cannot read: it is sync and holds no session, while the
     settings live in the database precisely so an operator can change them
     without a redeploy. ``endpoint_override`` is the test<->production switch;
-    ``id_codice_override`` is the accredited channel's fiscal code. When either
-    is None the env value stands, which is what keeps a deployment that has not
-    been touched working exactly as before."""
+    ``id_codice_override`` is the accredited channel's fiscal code, which has
+    NO env fallback: it is platform configuration (``system_settings``) and
+    nothing else, so a caller that forgets to resolve it gets an empty identity
+    and is refused at transmit rather than quietly filing under the wrong
+    subject."""
     if _override is not None:
         return _override()
     s = get_settings()
@@ -161,7 +168,7 @@ def get_channel(
         return SdICoopChannel(
             intermediary=IntermediaryIdentity(
                 country_code=s.sdi_intermediary_id_paese,
-                vat_number=id_codice_override or s.sdi_intermediary_id_codice,
+                fiscal_code=id_codice_override or "",
             ),
             endpoint_url=endpoint_override or s.sdi_endpoint_url,
             client_cert=s.sdi_client_cert,

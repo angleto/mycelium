@@ -25,7 +25,7 @@ router = APIRouter(prefix="/admin/sdi-environment", tags=["admin"])
 
 def _out(environment: str, id_codice: str = "") -> SdiEnvironmentOut:
     s = get_settings()
-    effective = id_codice or s.sdi_intermediary_id_codice
+    effective = id_codice
     return SdiEnvironmentOut(
         environment=environment,
         sdicoop_active=s.sdicoop_active,
@@ -34,7 +34,6 @@ def _out(environment: str, id_codice: str = "") -> SdiEnvironmentOut:
         active_endpoint=svc.endpoint_for(environment),
         intermediary_id_paese=s.sdi_intermediary_id_paese,
         intermediary_id_codice=effective,
-        intermediary_id_codice_from_settings=bool(id_codice),
         intermediary_id_codice_warning=svc.sdi_intermediary_warning(effective),
         client_cert_configured=bool(s.sdi_client_cert),
         client_key_configured=bool(s.sdi_client_key),
@@ -48,7 +47,7 @@ async def get_sdi_environment(
 ) -> SdiEnvironmentOut:
     async with admin_session() as s:
         env = await svc.get_sdi_environment(s)
-        code = await svc.get_sdi_intermediary_override(s)
+        code = await svc.get_sdi_intermediary_id_codice(s)
     return _out(env, code)
 
 
