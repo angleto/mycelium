@@ -2505,6 +2505,11 @@ export const it: Catalog = {
     purgeConfirm: 'Rimuovere definitivamente questa chiave revocata? Sparisce dalla lista; resta la traccia di audit di ciò che ha fatto.',
   },
   paymentConnectors: {
+    paymentNone: 'non dichiarare nulla sul pagamento',
+    paymentHintOn:
+      'Il documento portera\u0300 il blocco pagamento: condizioni TP02 (pagamento completo), importo incassato e data, presi dall\u2019evento del provider. La MODALITA\u0300 viene letta dal charge quando il provider ha detto come il denaro si e\u0300 mosso davvero; il codice scelto qui vale finche\u0301 non lo sa, e per gli strumenti che nel tracciato non hanno un codice.',
+    paymentHintOff:
+      'Il documento non dice nulla sul pagamento. E\u0300 legale, il blocco 2.4 e\u0300 facoltativo e nessun controllo SdI lo legge, ma chi la riceve non distingue una fattura gia\u0300 saldata da un credito aperto, e puo\u0300 sollecitare o pagare due volte.',
     numbering: 'Numerazione delle fatture',
     numberingClient: 'Una sequenza per cliente',
     numberingSeries: 'Una sequenza per questo connettore',

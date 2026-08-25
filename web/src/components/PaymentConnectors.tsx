@@ -549,6 +549,11 @@ function DefaultsFields({
             ))}
           </select>
         </label>
+        <p className="hint">
+          {value.default_payment_method_code
+            ? t('paymentConnectors.paymentHintOn')
+            : t('paymentConnectors.paymentHintOff')}
+        </p>
         <label>
           {t('paymentConnectors.creditNoteMode')}
           <select
@@ -661,7 +666,11 @@ function DefaultsFields({
               onChange({ ...value, default_payment_method_code: e.target.value })
             }
           >
-            <option value="">{t('paymentConnectors.inherit')}</option>
+            {/* NOT "inherit". A connector-composed draft inherits nothing from
+                the issuer, deliberately, so an empty value means the document
+                states no payment story at all. Saying "inherit" described a
+                fallback that no longer happens. */}
+            <option value="">{t('paymentConnectors.paymentNone')}</option>
             {MODALITA.map(([code, lbl]) => (
               <option key={code} value={code}>
                 {code} - {lbl}

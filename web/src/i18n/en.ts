@@ -2519,6 +2519,11 @@ export const en = {
     purgeConfirm: 'Permanently delete this revoked key? It disappears from the list; the audit trail of what it did is kept.',
   },
   paymentConnectors: {
+    paymentNone: 'state nothing about payment',
+    paymentHintOn:
+      'The document will carry a payment block: terms TP02 (paid in full), the amount collected and the settlement date, both taken from the provider event. The METHOD is read from the charge when the provider told us how the money actually moved; the code chosen here is what stands in until then, and for instruments the tracciato has no code for.',
+    paymentHintOff:
+      'The document says nothing about payment. Legal — block 2.4 is optional and no SdI control reads it — but the recipient cannot tell a settled invoice from an open receivable, and may chase or pay twice.',
     numbering: 'Invoice numbering',
     numberingClient: 'One sequence per customer',
     numberingSeries: 'One sequence for this connector',
