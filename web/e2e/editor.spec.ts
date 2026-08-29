@@ -67,14 +67,18 @@ test('a markdown table previews as a table, and the source is untouched', async 
   await openFreshNoteEditor(page)
   await awaitSourceEditor(page)
   // A trailing paragraph so the caret has somewhere to be that is NOT the
-  // table: a block whose lines the selection touches shows its source, which
-  // is the whole reveal rule.
+  // table: a block the selection touches shows its source, which is the whole
+  // reveal rule.
   const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |', '', 'dopo'].join('\n')
   await setSource(page, md)
+  // Put the caret on that trailing paragraph EXPLICITLY. This used to click
+  // the middle of the editor and trust it to land somewhere harmless, which
+  // stopped being true when clicking a rendered block became the way to ask
+  // for its source back: the click landed on the table, revealed it, and the
+  // widget under test was gone.
+  await placeCaret(page, md, md.length)
   // The table is PREVIEWED as a table -- a widget over the source, not a
   // second document model -- so there is nothing to serialise back.
-  await page.locator('.cm-content').first().click()
-  await page.keyboard.press('ControlOrMeta+ArrowDown')
   await expect(page.locator('.cm-md-table table').first()).toBeVisible()
   expect(await page.locator('.cm-md-table th').count()).toBe(2)
   expect(await readSource(page)).toBe(md)
