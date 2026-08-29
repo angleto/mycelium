@@ -17,6 +17,8 @@ import {
   toggleWrap,
 } from './commands'
 import { addColumnAfter, addRowAfter, deleteTable, formatTable, nextCell } from './tableCommands'
+import { splitRow } from './widgets'
+import { hasMixedLineEndings } from './lineSep'
 
 // Every toolbar command is now a total function from (source, selection) to
 // source, so these assert EXACT BYTES. That is the point of the substrate:
@@ -83,11 +85,107 @@ describe('inline wrapping', () => {
     expect(run('un __«bold»__ qui', toggleWrap('bold')).doc).toBe('un bold qui')
   })
 
-  it('on an empty selection leaves the caret between the delimiters', () => {
-    const view = open('scrivi «» qui')
+  it('on an empty selection wraps the WORD under the caret', () => {
+    // Not `add + add` with the caret parked between them: an empty pair is
+    // not emphasis in CommonMark. `****` mid-line is four literal asterisks
+    // and, on a line of its own, a horizontal rule -- neither of which is
+    // what pressing B asked for, and neither explicable once the markup is
+    // drawn rather than shown.
+    const view = open('scrivi cia«»o qui')
+    expect(toggleWrap('bold')(view)).toBe(true)
+    expect(view.state.sliceDoc()).toBe('scrivi **ciao** qui')
+    // The caret stays where it was, now inside the wrap.
+    expect(view.state.selection.main.head).toBe(12)
+  })
+
+  it('un-wraps from a caret inside an already-wrapped word', () => {
+    const view = open('un **grasse«»tto** qui')
+    expect(toggleWrap('bold')(view)).toBe(true)
+    expect(view.state.sliceDoc()).toBe('un grassetto qui')
+  })
+
+  it('REFUSES an empty selection with no word under the caret', () => {
+    const src = 'scrivi «» qui'
+    const { doc, ok } = run(src, toggleWrap('bold'))
+    expect(ok).toBe(false)
+    expect(doc).toBe(parse(src).doc)
+    // On an empty line it used to write `****`, which is a HORIZONTAL RULE.
+    const empty = run('«»', toggleWrap('bold'))
+    expect(empty.ok).toBe(false)
+    expect(empty.doc).toBe('')
+  })
+
+  it('italic inside a bold run adds, it does not eat one asterisk', () => {
+    // `**grassetto**` is a RUN of two asterisks. Looking for "a `*` before
+    // and a `*` after" finds one, and taking one from each end would turn
+    // bold into italic. The parser knows which run belongs to which node.
+    expect(run('un **«grassetto»** qui', toggleWrap('italic')).doc).toBe(
+      'un **_grassetto_** qui',
+    )
+  })
+
+  it('the code button can REMOVE the span it reports itself pressed inside', () => {
+    const view = open('un `cod«»ice` qui')
+    expect(activeMarks(view.state).has('code')).toBe(true)
+    expect(toggleWrap('code')(view)).toBe(true)
+    expect(view.state.sliceDoc()).toBe('un codice qui')
+  })
+
+  it('the code-block button removes the fence it is inside', () => {
+    expect(run('```\nlet «x» = 1\n```\n', toggleCodeBlock).doc).toBe('let x = 1\n')
+    // An unterminated fence has only an opener to take off, and its last
+    // CONTENT line is not a closer to be deleted.
+    expect(run('```\nlet «x» = 1\n', toggleCodeBlock).doc).toBe('let x = 1\n')
+    // A `~~~` line inside a ``` fence is content, not the closer.
+    expect(run('```\n«~~~»\n', toggleCodeBlock).doc).toBe('~~~\n')
+    // From the FIRST COLUMN of the opening fence line. Asking the syntax tree
+    // with side -1 resolved into the block BEFORE the fence and answered
+    // "not in a fence", so the button nested a second one inside the first.
+    expect(run('prima\n\n«»```\nlet x = 1\n```\n', toggleCodeBlock).doc).toBe(
+      'prima\n\nlet x = 1\n',
+    )
+  })
+
+  it('trims the selection, so padding cannot become literal asterisks', () => {
+    // `** parola **` is not emphasis: a `**` followed by a space is not
+    // left-flanking. Wrapping a selection that includes its own padding wrote
+    // four literal asterisks -- and with no node for the un-toggle to find,
+    // pressing the button again added another pair, and again, without bound.
+    // Selecting a word plus its trailing space is an ordinary drag.
+    expect(run('un «parola »qui', toggleWrap('bold')).doc).toBe('un **parola** qui')
+    expect(run('un« parola» qui', toggleWrap('bold')).doc).toBe('un **parola** qui')
+    // And it is a TOGGLE again: twice is the identity.
+    const view = open('un «parola »qui')
     toggleWrap('bold')(view)
-    expect(view.state.sliceDoc()).toBe('scrivi **** qui')
-    expect(view.state.selection.main.head).toBe(9)
+    view.dispatch({ selection: { anchor: 5, head: 11 } })
+    toggleWrap('bold')(view)
+    expect(view.state.sliceDoc()).toBe('un parola qui')
+  })
+
+  it('REFUSES against an adjacent run of the same delimiter', () => {
+    // `**Nota**seguito` bolding `seguito` gives `**Nota****seguito**`, which
+    // parses as ONE StrongEmphasis whose content is the literal
+    // `Nota****seguito`: the middle asterisks are text and the first word has
+    // quietly stopped being bold. There is no spelling that works.
+    const src = '**Nota**segu«»ito'
+    const { doc, ok } = run(src, toggleWrap('bold'))
+    expect(ok).toBe(false)
+    expect(doc).toBe(parse(src).doc)
+  })
+
+  it('REFUSES inside a link destination, which is not prose', () => {
+    // With no selection the caret expands to the word under it, and a word
+    // inside a URL is part of the URL: wrapping it does not emphasise
+    // anything, it rewrites the address.
+    for (const src of [
+      '![alt](/attachments/abc«»123/download)',
+      '[x](@task:aaaa«»bbbb)',
+      '[etichetta](https://esem«»pio.it "titolo")',
+    ]) {
+      const { doc, ok } = run(src, toggleWrap('bold'))
+      expect(ok).toBe(false)
+      expect(doc).toBe(parse(src).doc)
+    }
   })
 
   it('REFUSES a selection that crosses a blank line', () => {
@@ -128,6 +226,12 @@ describe('line prefixes', () => {
 
   it('numbers an ordered list from one', () => {
     expect(run('«uno\ndue\ntre»', toggleOrderedList).doc).toBe('1. uno\n2. due\n3. tre')
+  })
+
+  it('numbers from one even when the selection starts on a blank line', () => {
+    // A blank line is skipped, but it used to occupy an index, so the first
+    // real item came out as `2.`.
+    expect(run('«\nuno\ndue»', toggleOrderedList).doc).toBe('\n1. uno\n2. due')
   })
 
   it('switches list kind instead of stacking markers', () => {
@@ -186,6 +290,62 @@ describe('links', () => {
     const src = 'vedi «la guida» ok'
     expect(run(src, (v) => setLink(v, () => null)).doc).toBe(parse(src).doc)
   })
+
+  it('a bare bracket pair is NOT a link to write a destination into', () => {
+    // lezer emits a `Link` node for any bracket run. Taking those for links
+    // spliced the URL in before the `]` and produced no link at all.
+    expect(run('see «[proven]» status', (v) => setLink(v, () => 'https://x')).doc).toBe(
+      String.raw`see [\[proven\]](https://x) status`,
+    )
+    expect(run('vedi «array[0]» qui', (v) => setLink(v, () => 'https://x')).doc).toBe(
+      String.raw`vedi [array\[0\]](https://x) qui`,
+    )
+    expect(run('«[a][ref]»', (v) => setLink(v, () => 'https://x')).doc).toBe(
+      String.raw`[\[a\]\[ref\]](https://x)`,
+    )
+  })
+
+  it('an inline link with an EMPTY destination still takes one', () => {
+    expect(run('vedi [la guida](«») ok', (v) => setLink(v, () => 'https://x')).doc).toBe(
+      'vedi [la guida](https://x) ok',
+    )
+  })
+
+  it('is a fixed point: pressing it twice writes what pressing it once did', () => {
+    // The label comes out of the DOCUMENT, so it is already escaped. Running
+    // the raw-text escaper over it doubled every backslash, and every press
+    // doubled them again -- backslashes multiplying through a body is the
+    // exact failure the previous editor was retired for.
+    const once = run(String.raw`«a \] b»`, (v) => setLink(v, () => 'https://x')).doc
+    expect(once).toBe(String.raw`[a \] b](https://x)`)
+    const view = open(String.raw`«a \] b»`)
+    setLink(view, () => 'https://x')
+    view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } })
+    setLink(view, () => 'https://x')
+    expect(view.state.sliceDoc()).toBe(once)
+  })
+
+  it('a label ending in a backslash still comes out a link', () => {
+    // A dangling backslash would escape the `]` the emitter appends, and the
+    // result parses as text with no Link node -- and no way to repair it with
+    // the same button, since there would be no link for it to find.
+    const view = open(String.raw`«C:\Users\»`)
+    setLink(view, () => 'https://e.example')
+    const doc = view.state.sliceDoc()
+    expect(doc).toBe(String.raw`[C:\Users\\](https://e.example)`)
+    forceParsing(view, doc.length, 5_000)
+    // It really is a link, not text that looks like one.
+    expect([...activeMarks(view.state)]).toContain('link')
+  })
+
+  it('REFUSES a selection that spans more than one line', () => {
+    // A label may legally wrap, but the emitter collapses the newline to a
+    // space, which changes bytes outside the construct that was selected.
+    const src = '«riga uno\nriga due»'
+    const { doc, ok } = run(src, (v) => setLink(v, () => 'https://x'))
+    expect(ok).toBe(false)
+    expect(doc).toBe(parse(src).doc)
+  })
 })
 
 describe('tables', () => {
@@ -229,10 +389,61 @@ describe('tables', () => {
     expect(doc.split('\n')[2]).toBe('| 1    | 2     |')
   })
 
+  it('formatTable keeps an ESCAPED pipe escaped', () => {
+    // `splitRow` unescapes `\|` so a cell reads as its text; joining that
+    // back with ` | ` separated on it, the row gained a cell against a
+    // two-column delimiter, and the last cell was destroyed. That is the
+    // corruption the retired serializer shipped, reached from a button.
+    const src = String.raw`| pipe | note |` + '\n| --- | --- |\n' + String.raw`| a \| b | escaped |` + '\n'
+    const { doc } = run(src.replace('| pipe', '| pi«»pe'), formatTable)
+    const rows = doc.split('\n')
+    expect(splitRow(rows[2])).toEqual(['a | b', 'escaped'])
+    expect(rows[2]).toContain(String.raw`a \| b`)
+    // Idempotent: reformatting the reformatted table changes nothing.
+    const twice = run(doc.replace('| pipe', '| pi«»pe'), formatTable).doc
+    expect(twice).toBe(doc)
+  })
+
   it('nothing table-shaped fires outside a table', () => {
     expect(run('solo testo«»', addRowAfter).ok).toBe(false)
     expect(run('solo testo«»', nextCell).ok).toBe(false)
     expect(run('solo testo«»', deleteTable).ok).toBe(false)
+  })
+})
+
+describe('a CRLF body stays uniformly CRLF', () => {
+  // CodeMirror splits an inserted string on the document's OWN separator, so
+  // a `\n` written into a CRLF body survives as a literal character inside a
+  // line. The document then MIXES its line endings, which is the one shape
+  // this editor cannot keep byte-exact.
+  const CRLF = '| a | b |\r\n| --- | --- |\r\n| 1 | 2 |\r\ndopo\r\n'
+
+  const cases: [string, (v: EditorView) => boolean][] = [
+    ['formatTable', formatTable],
+    ['addRowAfter', addRowAfter],
+    ['addColumnAfter', addColumnAfter],
+    ['insertTable', insertTable],
+    ['insertHorizontalRule', insertHorizontalRule],
+    ['toggleCodeBlock', toggleCodeBlock],
+  ]
+
+  it.each(cases)('%s', (_name, cmd) => {
+    const view = open(CRLF.replace('| a', '| a«»'))
+    cmd(view)
+    const doc = view.state.sliceDoc()
+    expect(hasMixedLineEndings(doc)).toBe(false)
+    expect(doc).not.toContain('\r\r')
+  })
+
+  it('a table command reads CRLF rows as rows, not as rows with a stray CR', () => {
+    // `sliceDoc` hands back CRLF; splitting that on `\n` left a `\r` on the
+    // end of every line, which then travelled into the cell text, the
+    // measured widths, and everything rewritten from them.
+    const view = open(CRLF.replace('| 1', '| 1«»'))
+    addColumnAfter(view)
+    const rows = view.state.sliceDoc().split('\r\n')
+    expect(splitRow(rows[0])).toEqual(['a', 'b', ''])
+    expect(splitRow(rows[2])).toEqual(['1', '2', ''])
   })
 })
 

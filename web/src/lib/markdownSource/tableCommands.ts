@@ -3,7 +3,7 @@ import { EditorSelection } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import { scanBlocks } from './blockScan'
-import { rowAlignments, splitRow } from './widgets'
+import { escapeCell, rowAlignments, splitRow } from './widgets'
 
 // Editing a GFM table as source.
 //
@@ -29,7 +29,15 @@ export function tableAt(state: EditorState, pos: number): TableAt | null {
   for (const b of scanBlocks(state.doc)) {
     if (b.kind !== 'table') continue
     if (pos < b.from || pos > b.to) continue
-    return { from: b.from, to: b.to, lines: state.sliceDoc(b.from, b.to).split('\n') }
+    // Split on the DOCUMENT's separator: `sliceDoc` hands back CRLF for a
+    // CRLF body, and splitting that on `\n` leaves a `\r` on the end of every
+    // line -- which then travels into the cell text, into the measured widths
+    // and into everything rewritten from them.
+    return {
+      from: b.from,
+      to: b.to,
+      lines: state.sliceDoc(b.from, b.to).split(state.lineBreak),
+    }
   }
   return null
 }
@@ -122,7 +130,7 @@ export function addRowAfter(view: EditorView): boolean {
   const at = Math.max(line.number, headerEnd)
   const insertAfter = state.doc.line(at).to
   view.dispatch({
-    changes: { from: insertAfter, insert: '\n|' + '  |'.repeat(cols) },
+    changes: { from: insertAfter, insert: state.lineBreak + '|' + '  |'.repeat(cols) },
     userEvent: 'input.format',
     scrollIntoView: true,
   })
@@ -186,7 +194,11 @@ export function formatTable(view: EditorView): boolean {
   const { state } = view
   const t = tableAt(state, state.selection.main.head)
   if (!t) return false
-  const rows = t.lines.map((l, i) => (i === 1 ? null : splitRow(l)))
+  // ESCAPED cells throughout: `splitRow` unescapes `\|` so a cell reads as
+  // its text, and joining that back with ` | ` would separate on a pipe the
+  // author had escaped -- the row gains a cell, the last one is destroyed,
+  // and the widths would have been measured on the wrong strings too.
+  const rows = t.lines.map((l, i) => (i === 1 ? null : splitRow(l).map(escapeCell)))
   const align = rowAlignments(t.lines[1] ?? '')
   const cols = Math.max(...rows.map((r) => r?.length ?? 0), align.length)
   // A column is as wide as its widest cell OR its delimiter, whichever is
@@ -220,7 +232,7 @@ export function formatTable(view: EditorView): boolean {
     )
   })
   view.dispatch({
-    changes: { from: t.from, to: t.to, insert: out.join('\n') },
+    changes: { from: t.from, to: t.to, insert: out.join(state.lineBreak) },
     userEvent: 'input.format',
   })
   view.focus()

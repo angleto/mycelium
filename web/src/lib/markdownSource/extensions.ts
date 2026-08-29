@@ -3,8 +3,6 @@ import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/vi
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown'
 import { GFM } from '@lezer/markdown'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { tags as t } from '@lezer/highlight'
 import { lineSepFor } from './lineSep'
 import { attachmentRetain } from './attachmentRetain'
 import { tableKeymap } from './tableCommands'
@@ -14,8 +12,8 @@ import { annotationLayer } from './annotationLayer'
 import { entityChips } from './entityChips'
 import { notifySelection } from '../annotationSurface'
 import type { ImageUploadParent } from '../imageUpload'
-import { blockPreview } from './blockPreview'
-import { livePreview } from './livePreview'
+import { DEFAULT_MODE, markdownModeCompartment, presentationFor, type MarkdownMode } from './mode'
+import { baseTheme } from './theme'
 
 // The CodeMirror configuration of the markdown source surface, kept apart
 // from the React shell in SourceEditor.tsx so the contract this file encodes
@@ -39,120 +37,11 @@ export type SourceOptions = {
   /** The constructs the caret is inside, for the toolbar's pressed state.
    *  Fired on every selection or document change. */
   onActive?: (marks: Set<ActiveMark>) => void
+  /** Which of the two views this state starts in. Switched afterwards with
+   *  ``setMarkdownMode``, which reconfigures the compartment below rather
+   *  than rebuilding the state. */
+  mode?: MarkdownMode
 }
-
-// Syntax highlighting for the source. Deliberately restrained: this is a
-// writing surface, not a code viewer, so it marks structure (headings,
-// emphasis, links, code) and leaves prose alone. Colours come from the app's
-// CSS variables so light/dark follow the theme with no second palette.
-const mdHighlight = HighlightStyle.define([
-  { tag: t.heading, color: 'var(--text)', fontWeight: '700' },
-  { tag: t.strong, fontWeight: '700' },
-  { tag: t.emphasis, fontStyle: 'italic' },
-  { tag: t.strikethrough, textDecoration: 'line-through' },
-  { tag: [t.link, t.url], color: 'var(--accent)' },
-  { tag: [t.monospace, t.literal], color: 'var(--accent)' },
-  { tag: t.quote, color: 'var(--muted)', fontStyle: 'italic' },
-  { tag: t.list, color: 'var(--accent)' },
-  // The delimiters themselves (``##``, ``**``, ``[``) stay visible but
-  // recede, so the source reads as prose without hiding what it is.
-  { tag: [t.processingInstruction, t.punctuation], color: 'var(--muted)' },
-  { tag: t.contentSeparator, color: 'var(--muted)' },
-])
-
-// Structural theming lives here rather than in index.css because CodeMirror
-// injects its base theme through StyleModule, and the load order against the
-// app's stylesheet is not guaranteed. A theme extension always wins.
-const baseTheme = EditorView.theme({
-  '&': {
-    color: 'var(--text)',
-    backgroundColor: 'transparent',
-    height: '100%',
-    fontSize: 'inherit',
-  },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    lineHeight: '1.55',
-    overflow: 'auto',
-  },
-  '.cm-content': {
-    padding: '0.55rem 0.7rem',
-    caretColor: 'var(--text)',
-  },
-  '.cm-line': { padding: '0' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent)',
-  },
-  '.cm-placeholder': { color: 'var(--muted)' },
-
-  // Live-preview structure. These are LINE decorations, so they style the
-  // line the construct occupies without the document knowing anything about
-  // it. Sizes are relative so the whole surface still scales with the host's
-  // font-size (the notes editor and the checklist editor are not the same
-  // size).
-  '.cm-md-h1': { fontSize: '1.5em', fontWeight: '700', lineHeight: '1.3' },
-  '.cm-md-h2': { fontSize: '1.3em', fontWeight: '700', lineHeight: '1.3' },
-  '.cm-md-h3': { fontSize: '1.15em', fontWeight: '700' },
-  '.cm-md-h4': { fontWeight: '700' },
-  '.cm-md-h5': { fontWeight: '700', color: 'var(--muted)' },
-  '.cm-md-h6': { fontWeight: '700', color: 'var(--muted)' },
-  '.cm-md-quote': {
-    borderLeft: '3px solid var(--border)',
-    paddingLeft: '0.6em',
-    color: 'var(--muted)',
-    fontStyle: 'italic',
-  },
-  '.cm-md-code': {
-    backgroundColor: 'color-mix(in srgb, var(--text) 6%, transparent)',
-  },
-  '.cm-md-hr': {
-    color: 'var(--muted)',
-    borderBottom: '1px solid var(--border)',
-  },
-  '.cm-md-linklabel': {
-    color: 'var(--accent)',
-    textDecoration: 'underline',
-    textUnderlineOffset: '2px',
-  },
-
-  // Block widgets (blockPreview.ts). They stand where several source lines
-  // would be, so they own their vertical rhythm; ``user-select: none`` keeps
-  // a drag across one from producing a selection that has no counterpart in
-  // the document.
-  '.cm-md-widget': {
-    margin: '0.4em 0',
-    userSelect: 'none',
-  },
-  // An image embed is replaced INLINE (it can sit mid-paragraph), so the
-  // widget is an inline box rather than a block one.
-  '.cm-md-widget-inline': { display: 'inline-block', verticalAlign: 'middle' },
-  '.cm-md-mermaid': { display: 'flex', justifyContent: 'center' },
-  '.cm-md-mermaid svg': { maxWidth: '100%', height: 'auto' },
-  '.cm-md-math': { overflowX: 'auto', textAlign: 'center' },
-  '.cm-md-math--error': {
-    fontFamily: 'inherit',
-    color: 'var(--muted)',
-    textAlign: 'left',
-  },
-  // The table scrolls inside its own box rather than widening the editor:
-  // a wide table must never make the whole writing surface scroll sideways.
-  '.cm-md-table': { overflowX: 'auto' },
-  '.cm-md-table table': {
-    borderCollapse: 'collapse',
-    fontSize: '0.95em',
-  },
-  '.cm-md-table th, .cm-md-table td': {
-    border: '1px solid var(--border)',
-    padding: '0.25em 0.6em',
-    textAlign: 'left',
-  },
-  '.cm-md-table th': {
-    fontWeight: '700',
-    backgroundColor: 'color-mix(in srgb, var(--text) 5%, transparent)',
-  },
-})
 
 export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
   const sep = lineSepFor(opts.src)
@@ -172,18 +61,24 @@ export function markdownSourceExtensions(opts: SourceOptions): Extension[] {
     // ``<sup>`` are interpreted anywhere in Mycelium, so completing arbitrary
     // HTML tags would be an invitation to write text that stays literal.
     markdown({ base: commonmarkLanguage, extensions: [GFM], completeHTMLTags: false }),
-    syntaxHighlighting(mdHighlight),
-    // Markup recedes on the lines the caret is not on. Presentational only:
-    // it never dispatches a document change, so the bytes are the same with
-    // it as without it.
-    livePreview({ getParent: opts.getParent }),
-    // Block-level previews (mermaid, `$$`, tables, setext folding). A state
-    // field, not a plugin: these replace ranges that span line breaks and
-    // determine their own height.
-    blockPreview(),
+    // The presentation: which preview layers exist, and which typography.
+    // Purely decorative in both configurations -- neither dispatches a
+    // document change, so the bytes are the same in either, which is what
+    // makes the toggle a view setting rather than a data decision.
+    //
+    // The slot MATTERS. Decoration rank is extension order, and the layers
+    // have to outrank annotationLayer and entityChips below: a hidden `**`
+    // has to nest INSIDE a comment highlight, or one annotation would be
+    // painted as three fragments with the amber background broken at every
+    // delimiter.
+    markdownModeCompartment.of(presentationFor(opts.mode ?? DEFAULT_MODE, {
+      getParent: opts.getParent,
+    })),
     // Hold the bytes of every embedded attachment for the editor's lifetime,
     // so a widget destroyed by the caret moving onto its line does not take
-    // the refcount to zero and throw the image away.
+    // the refcount to zero and throw the image away. OUTSIDE the compartment,
+    // deliberately: making it mode-aware would release every attachment on a
+    // switch to source mode and refetch them all on the way back.
     attachmentRetain(opts.getParent ?? (() => undefined)),
     // Tab moves between table cells and does nothing elsewhere, so the key
     // keeps its accessibility meaning outside a table.

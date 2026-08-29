@@ -18,16 +18,40 @@ export function sourceContent(page: Page, nth = 0) {
   return page.locator('.rte__src .cm-content').nth(nth)
 }
 
-/** Assert the editor is in markdown-source mode. */
-export async function expectSourceMode(page: Page, nth = 0) {
-  await expect(sourceContent(page, nth)).toBeVisible()
+/** The view switch, by its accessible name. */
+export function modeToggle(page: Page, nth = 0) {
+  return page.getByRole('button', { name: 'Plain markdown' }).nth(nth)
 }
 
-/** Is the source surface currently mounted? (The mode toggle's state.) */
-export async function inSourceMode(page: Page, nth = 0): Promise<boolean> {
-  return sourceContent(page, nth)
-    .isVisible()
-    .catch(() => false)
+/**
+ * Which of the two views the editor is showing.
+ *
+ * From the EDITOR's own attribute, not from the button's `aria-pressed` and
+ * not from whether `.cm-content` is visible. There is one surface, mounted in
+ * both views, so visibility cannot tell them apart; and the button reflects
+ * React state, which changes one commit before the editor is reconfigured, so
+ * reading it would be racing the thing the caller is waiting for.
+ */
+export async function editorMode(page: Page, nth = 0): Promise<'source' | 'visual'> {
+  const attr = await page.locator('.rte__src').nth(nth).getAttribute('data-md-mode')
+  return attr === 'source' ? 'source' : 'visual'
+}
+
+/**
+ * Put the editor in `mode`, whatever it was in.
+ *
+ * The preference is app-wide and persisted, so a spec that assumes a view has
+ * to assert it rather than inherit whatever the previous spec left in
+ * localStorage (one worker, one browser context, one origin).
+ */
+export async function setEditorMode(
+  page: Page,
+  mode: 'source' | 'visual',
+  nth = 0,
+): Promise<void> {
+  if ((await editorMode(page, nth)) === mode) return
+  await modeToggle(page, nth).click()
+  await expect(page.locator('.rte__src').nth(nth)).toHaveAttribute('data-md-mode', mode)
 }
 
 /**
@@ -62,12 +86,16 @@ export async function setSource(page: Page, md: string, nth = 0): Promise<void> 
  * character three blocks away from where it meant to.
  *
  * Select-all first -- the editor's own reveal rule, the same one `readSource`
- * leans on: with the whole document selected every line shows its source, so
- * the rendered lines ARE the source lines and a (line, column) resolved from
- * the source text addresses the DOM faithfully. Then set the browser
- * selection there, which is where CodeMirror reads its own from; collapsing
- * the selection re-hides the other lines' markup, which changes what is
- * DRAWN and never the document, so the offset stays put.
+ * leans on: a selection covering the whole document touches every construct
+ * in it, so every one of them shows its source and the rendered lines ARE the
+ * source lines. A (line, column) resolved from the source text then addresses
+ * the DOM faithfully. True in both modes: in markdown mode nothing was hidden
+ * to begin with.
+ *
+ * Then set the browser selection there, which is where CodeMirror reads its
+ * own from; collapsing the selection re-hides the other constructs' markup,
+ * which changes what is DRAWN and never the document, so the offset stays
+ * put.
  *
  * ``md`` is the source the editor currently holds: the caller has it (it
  * pasted it), and resolving the offset against it keeps this helper out of
@@ -121,12 +149,15 @@ export async function placeCaret(
 /**
  * The document as text, rebuilt from the rendered lines.
  *
- * SELECT-ALL FIRST, and that is not a trick: the live-preview layer hides
- * markup on every line the selection does not touch, so reading the rendered
- * lines with the caret parked somewhere gives the RENDERING (`Titolo`), not
- * the source (`## Titolo`). Selecting the whole document reveals the whole
- * document, by the editor's own documented rule, and the rendered lines then
- * are the source. It reads the contract instead of reaching around it.
+ * SELECT-ALL FIRST, and that is not a trick: in the rendered view the
+ * live-preview layer hides the markup of every construct the selection does
+ * not touch, so reading the rendered lines with the caret parked somewhere
+ * gives the RENDERING (`Titolo`), not the source (`## Titolo`). A selection
+ * covering the whole document touches every construct in it, so the whole
+ * document shows its source, by the editor's own documented rule, and the
+ * rendered lines then are the source. It reads the contract instead of
+ * reaching around it. In markdown mode there is nothing to reveal and the
+ * same code path is simply already true.
  *
  * One `.cm-line` per document line, in order, `textContent` faithful (the
  * content is `white-space: pre-wrap` and neither `highlightSpecialChars` nor

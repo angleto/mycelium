@@ -7,7 +7,9 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view'
+import type { SyntaxNodeRef } from '@lezer/common'
 import { overlaps, revealedRanges } from './reveal'
+import { isInlineLink } from './commands'
 import { ImageWidget, parseImageEmbed } from './widgets'
 import type { ImageUploadParent } from '../imageUpload'
 
@@ -20,13 +22,21 @@ import type { ImageUploadParent } from '../imageUpload'
 // property the tests assert first. A decoration that needed to rewrite the
 // document to display it would have reinvented the serializer this replaces.
 //
-// The rule for what is hidden is deliberately the simplest one that is
-// predictable: markup recedes everywhere except on the lines the selection
-// touches. Put the caret in a heading and the `##` comes back, so you are
-// always editing real source, never a rendering of it. Obsidian and Typora
-// both settled on this shape; anything cleverer (hide per construct, reveal
-// per construct) makes the caret's meaning depend on where inside a
-// construct it sits, and that is where those editors get bug reports.
+// The rule for what is hidden: markup recedes except on the CONSTRUCT the
+// selection touches. Put the caret in a bold word and its `**` come back,
+// while the rest of the paragraph stays rendered. You are therefore always
+// editing real source, never a rendering of it, without the whole line
+// flipping to markup around you.
+//
+// The scope is per construct rather than per line because per line is what
+// made this read as neither a rendered view nor a source view, and it is per
+// construct rather than nothing at all because hiding unconditionally was
+// measured and is worse: `x **bold*` genuinely parses as italic for one
+// keystroke while `**bold**` is being typed, so the text would shrink and
+// shift mid-word; and a Backspace next to an invisible delimiter deletes half
+// a pair, which makes characters APPEAR. Both are fixed by the delimiters
+// being visible at exactly the moment the caret is at them, which is what
+// this rule says.
 
 // Inline delimiters that carry no information once the thing they delimit is
 // styled. `CodeMark` and `URL` are NOT in this list unconditionally: a
@@ -81,6 +91,46 @@ function hiddenRange(
   }
   return { from, to }
 }
+/**
+ * The construct a delimiter belongs to, for the reveal test.
+ *
+ * A BLOCK prefix (`##`, `>`) belongs to its LINE: it is one short run at the
+ * start, revealing it does not reflow the prose, and hiding it while the
+ * caret is on the line makes Backspace at the first character produce
+ * `##Titolo` -- which is not a heading, so two characters appear.
+ *
+ * An INLINE delimiter belongs to the node it delimits, so one caret never
+ * reveals one half of a pair.
+ */
+function revealOwner(state: EditorState, node: SyntaxNodeRef): { from: number; to: number } {
+  if (node.name === 'HeaderMark' || node.name === 'QuoteMark') {
+    const line = state.doc.lineAt(node.from)
+    return { from: line.from, to: line.to }
+  }
+  let owner = node.node.parent
+  if (!owner) return { from: node.from, to: node.to }
+  // Climb while the enclosing construct's delimiter is CONTIGUOUS with this
+  // one. `***molto***` is an Emphasis wrapping a StrongEmphasis, and the two
+  // spell one run of three asterisks: revealing the outer alone put a single
+  // `*` on each side, which is markup for neither construct. Contiguity is
+  // the test rather than mere nesting, so `**x [a](b) y**` still reveals the
+  // link on its own -- there is text between the two delimiter runs, and the
+  // whole point of this rule is that a caret does not turn its surroundings
+  // back into source.
+  for (let up = owner.parent; up; up = up.parent) {
+    const marks: { from: number; to: number }[] = []
+    for (let c = up.firstChild; c; c = c.nextSibling) {
+      if (c.name.endsWith('Mark')) marks.push({ from: c.from, to: c.to })
+    }
+    if (!marks.length) break
+    const opensHere = marks[0].to === owner.from
+    const closesHere = marks[marks.length - 1].from === owner.to
+    if (!opensHere && !closesHere) break
+    owner = up
+  }
+  return { from: owner.from, to: owner.to }
+}
+
 const lineDeco = (cls: string) => Decoration.line({ class: cls })
 const markDeco = (cls: string) => Decoration.mark({ class: cls })
 
@@ -161,14 +211,23 @@ function buildDecorations(
           ALWAYS_HIDDEN.has(node.name) ||
           // The backticks of an inline code span, but not a fence.
           (node.name === 'CodeMark' && parent === 'InlineCode') ||
-          // `[`, `]`, `(`, `)` and the destination of an inline link, so the
-          // label reads as the link. An Image keeps its source visible until
-          // there is a widget to put in its place, and an Autolink is all
-          // URL -- hiding it would leave an empty line.
+          // `[`, `]`, `(`, `)` and the destination of an INLINE link, so the
+          // label reads as the link. Not a reference link, a footnote or a
+          // bare bracket run: lezer makes a `Link` node out of all of those,
+          // and hiding their brackets drew `array[0]` as `array0` and
+          // `nota[^1]` as `nota^1`, neither of which is what the reader
+          // prints. An Image keeps its source visible until there is a widget
+          // to put in its place, and an Autolink is all URL -- hiding it
+          // would leave an empty line.
           ((node.name === 'LinkMark' || node.name === 'URL' || node.name === 'LinkTitle') &&
-            parent === 'Link')
+            parent === 'Link' &&
+            !!node.node.parent &&
+            isInlineLink(state, node.node.parent))
         if (!hidden) return
-        if (overlaps(revealed, node.from, node.to)) return
+        // Against the OWNER, not the delimiter: a caret at one end of a bold
+        // run must bring back both `**`, never one.
+        const owner = revealOwner(state, node)
+        if (overlaps(revealed, owner.from, owner.to)) return
         const r = hiddenRange(state, {
           name: node.name,
           from: node.from,
@@ -182,17 +241,38 @@ function buildDecorations(
   return Decoration.set(out, true)
 }
 
-/** Style the label of an inline link, which is what is left once the
- *  brackets and the destination are hidden. Separate from the hiding pass
- *  because it applies whether or not the line is revealed. */
-function linkLabels(view: EditorView): DecorationSet {
+/**
+ * The faces that apply whether or not the construct is revealed: an inline
+ * link's label, which is what is left once the brackets and the destination
+ * are hidden, and an inline code span's content, which has to keep a
+ * monospace face under the rendered view's proportional body.
+ *
+ * Separate from the hiding pass for exactly that reason -- these do not
+ * depend on the reveal -- and marks rather than replacements, so they nest
+ * inside an annotation highlight instead of cutting it in two.
+ */
+function inlineFaces(view: EditorView): DecorationSet {
+  const { state } = view
   const out: Range<Decoration>[] = []
   for (const { from, to } of view.visibleRanges) {
-    syntaxTree(view.state).iterate({
+    syntaxTree(state).iterate({
       from,
       to,
       enter: (node) => {
+        if (node.name === 'InlineCode') {
+          // Between the delimiters: the marks are the first and last children.
+          let inFrom = node.from
+          let inTo = node.to
+          for (let c = node.node.firstChild; c; c = c.nextSibling) {
+            if (c.name !== 'CodeMark') continue
+            if (c.from === node.from) inFrom = c.to
+            if (c.to === node.to) inTo = c.from
+          }
+          if (inTo > inFrom) out.push(markDeco('cm-md-inlinecode').range(inFrom, inTo))
+          return
+        }
         if (node.name !== 'Link') return
+        if (!isInlineLink(state, node.node)) return
         const marks = []
         for (let c = node.node.firstChild; c; c = c.nextSibling) {
           if (c.name === 'LinkMark') marks.push(c)
@@ -240,12 +320,12 @@ function makeLivePreviewPlugin(getParent: () => ImageUploadParent | undefined) {
   )
 }
 
-const linkLabelPlugin = ViewPlugin.fromClass(
+const inlineFacePlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
 
     constructor(view: EditorView) {
-      this.decorations = linkLabels(view)
+      this.decorations = inlineFaces(view)
     }
 
     update(u: ViewUpdate) {
@@ -254,7 +334,7 @@ const linkLabelPlugin = ViewPlugin.fromClass(
         return
       }
       if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
-        this.decorations = linkLabels(u.view)
+        this.decorations = inlineFaces(u.view)
       }
     }
   },
@@ -271,5 +351,5 @@ export function livePreview(opts: {
   getParent?: () => ImageUploadParent | undefined
 }): Extension {
   const getParent = opts.getParent ?? (() => undefined)
-  return [makeLivePreviewPlugin(getParent), linkLabelPlugin]
+  return [makeLivePreviewPlugin(getParent), inlineFacePlugin]
 }

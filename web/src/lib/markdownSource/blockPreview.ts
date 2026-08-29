@@ -43,24 +43,37 @@ function build(state: EditorState): DecorationSet {
       if (b.info !== 'mermaid') continue
       const code = fenceContent(state, b.contentFrom, b.contentTo)
       if (!code.trim()) continue
-      const widget = new MermaidWidget(code)
       out.push(
         shown
           ? // Editing the source: keep the diagram below it, live. Losing the
             // preview the moment you click into the fence would make a
-            // diagram something you can only write blind.
-            Decoration.widget({ widget, block: true, side: 1 }).range(b.to)
-          : Decoration.replace({ widget, block: true }).range(b.from, b.to),
+            // diagram something you can only write blind. It does not replace
+            // anything here, so it carries no click-to-reveal.
+            Decoration.widget({
+              widget: new MermaidWidget(code, false),
+              block: true,
+              side: 1,
+            }).range(b.to)
+          : Decoration.replace({
+              widget: new MermaidWidget(code),
+              block: true,
+            }).range(b.from, b.to),
       )
       continue
     }
 
     if (b.kind === 'math') {
-      const widget = new MathWidget(b.tex)
       out.push(
         shown
-          ? Decoration.widget({ widget, block: true, side: 1 }).range(b.to)
-          : Decoration.replace({ widget, block: true }).range(b.from, b.to),
+          ? Decoration.widget({
+              widget: new MathWidget(b.tex, false),
+              block: true,
+              side: 1,
+            }).range(b.to)
+          : Decoration.replace({
+              widget: new MathWidget(b.tex),
+              block: true,
+            }).range(b.from, b.to),
       )
       continue
     }
@@ -79,7 +92,7 @@ function build(state: EditorState): DecorationSet {
     // setext: fold the underline INTO the heading by replacing the newline
     // before it as well, so the two source lines render as one heading line
     // instead of a heading followed by a blank.
-    if (!shown && b.underlineFrom > 0) {
+    if (b.kind === 'setext' && !shown && b.underlineFrom > 0) {
       out.push(Decoration.replace({}).range(b.underlineFrom - 1, b.to))
     }
   }

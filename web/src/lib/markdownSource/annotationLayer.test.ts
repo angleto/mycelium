@@ -53,6 +53,31 @@ afterEach(() => {
   while (views.length) views.pop()?.destroy()
 })
 
+describe('a CRLF body paints where the words are', () => {
+  it('converts the search string offset into a document position', () => {
+    // `locateSourceAnchor` searches `sliceDoc()`, a STRING. CodeMirror counts
+    // a line break as ONE position whatever it is spelled as, so in a CRLF
+    // body the two drift by one per preceding line: the highlight used to sit
+    // two characters to the right of the words it quoted.
+    const doc = 'riga uno\r\nriga due\r\nbersaglio qui\r\n'
+    const view = open(doc)
+    view.dispatch({ effects: setAnnotations.of([anchor({ anchorQuote: 'bersaglio' })]) })
+    const painted = view.contentDOM.querySelector('[data-annotation-id="a1"]')
+    expect(painted).not.toBeNull()
+    expect(painted!.textContent).toBe('bersaglio')
+    expect(view.state.sliceDoc()).toBe(doc)
+  })
+
+  it('an LF body is unaffected, which is the identity case', () => {
+    const doc = 'riga uno\nriga due\nbersaglio qui\n'
+    const view = open(doc)
+    view.dispatch({ effects: setAnnotations.of([anchor({ anchorQuote: 'bersaglio' })]) })
+    expect(
+      view.contentDOM.querySelector('[data-annotation-id="a1"]')!.textContent,
+    ).toBe('bersaglio')
+  })
+})
+
 describe('locating an anchor', () => {
   const doc = 'Il termine **importante** va spiegato.\n'
 

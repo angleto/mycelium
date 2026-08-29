@@ -1,9 +1,10 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
-import { EditorState, Transaction, type Extension } from '@codemirror/state'
+import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { lineSepFor } from './lineSep'
+import { syncExternal } from './syncExternal'
 import { markdownSourceExtensions } from './extensions'
 import { activeMarks, type ActiveMark } from './commands'
+import { setMarkdownMode, type MarkdownMode } from './mode'
 import type { ImageUploadParent } from '../imageUpload'
 
 // The markdown SOURCE editing surface.
@@ -39,54 +40,10 @@ export type SourceEditorHandle = {
   view: () => EditorView | null
 }
 
-/**
- * Push an externally-changed ``next`` onto a live view as the smallest
- * change that produces it.
- *
- * Two things are load-bearing here.
- *
- * ``Transaction.addToHistory.of(false)``: an external value is not something
- * the user did, so it must not enter the undo stack. Without it, accepting a
- * suggestion (which reloads the body from the server) becomes undoable, and
- * one Cmd+Z would write the pre-accept body back over the accepted one while
- * the annotation stayed ``accepted``.
- *
- * The ``setState`` branch: ``lineSeparator`` is read once, when the state is
- * created, and later inserts split on the CURRENT ``state.lineBreak``. It
- * cannot be swapped by reconfiguring. So when the incoming body wants a
- * different separator than the live one, the state is rebuilt rather than
- * patched.
- */
-function syncExternal(
-  view: EditorView,
-  next: string,
-  extensionsFor: (src: string) => Extension[],
-): void {
-  const cur = view.state.sliceDoc()
-  if (cur === next) return
-  const wanted = lineSepFor(next) ?? '\n'
-  const live = view.state.lineBreak
-  if (wanted !== live) {
-    view.setState(EditorState.create({ doc: next, extensions: extensionsFor(next) }))
-    return
-  }
-  // Common prefix / suffix, so a one-character edit dispatches a
-  // one-character change and the selection of anyone else looking at this
-  // document maps through it instead of being reset.
-  let a = 0
-  const max = Math.min(cur.length, next.length)
-  while (a < max && cur[a] === next[a]) a += 1
-  let b = 0
-  while (b < max - a && cur[cur.length - 1 - b] === next[next.length - 1 - b]) b += 1
-  view.dispatch({
-    changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) },
-    annotations: Transaction.addToHistory.of(false),
-  })
-}
-
 export function SourceEditor({
   value,
   onChange,
+  mode,
   placeholder,
   className,
   onPasteFiles,
@@ -96,6 +53,10 @@ export function SourceEditor({
 }: {
   value: string
   onChange: (v: string) => void
+  /** Which of the two views to show. A change reconfigures the live editor's
+   *  presentation compartment; it never rebuilds the state, so the document,
+   *  the undo history and the attachment refcounts all survive it. */
+  mode: MarkdownMode
   placeholder?: string
   className?: string
   /** Return true to consume the files (an image upload); false lets the
@@ -120,11 +81,17 @@ export function SourceEditor({
   const onPasteRef = useRef(onPasteFiles)
   const getParentRef = useRef(getParent)
   const onActiveRef = useRef(onActive)
+  // The mode has to be readable from the extension builders, which run again
+  // on the CRLF rebuild path below: a builder that closed over the mount-time
+  // mode would silently drop the editor back to the default halfway through a
+  // session, on a transition nobody asked for.
+  const modeRef = useRef(mode)
   useEffect(() => {
     onChangeRef.current = onChange
     onPasteRef.current = onPasteFiles
     getParentRef.current = getParent
     onActiveRef.current = onActive
+    modeRef.current = mode
   })
 
   useEffect(() => {
@@ -134,6 +101,7 @@ export function SourceEditor({
       markdownSourceExtensions({
         src,
         placeholder,
+        mode: modeRef.current,
         onChange: (v) => {
           lastEmitted.current = v
           onChangeRef.current(v)
@@ -150,6 +118,12 @@ export function SourceEditor({
       parent,
     })
     viewRef.current = view
+    // Stamped from HERE and from the mode effect below, never from JSX: the
+    // attribute has to mean "the editor's presentation compartment holds this
+    // mode", and React writes a JSX attribute during the commit that PRECEDES
+    // the effect doing the reconfigure. A browser test reading it would be
+    // racing the thing it was waiting for.
+    parent.setAttribute('data-md-mode', modeRef.current)
     // The update listener never fires for the initial state, so the toolbar
     // would start with nothing pressed until the first keystroke.
     onActiveRef.current?.(activeMarks(view.state))
@@ -172,21 +146,42 @@ export function SourceEditor({
     if (!view) return
     if (value === lastEmitted.current) return
     lastEmitted.current = value
-    syncExternal(view, value, (src) =>
-      markdownSourceExtensions({
-        src,
-        placeholder,
-        onChange: (v) => {
-          lastEmitted.current = v
-          onChangeRef.current(v)
-        },
-        onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
-        getParent: () => getParentRef.current?.(),
-        onActive: (marks) => onActiveRef.current?.(marks),
-      }),
+    syncExternal(
+      view,
+      value,
+      (src) =>
+        markdownSourceExtensions({
+          src,
+          placeholder,
+          mode: modeRef.current,
+          onChange: (v) => {
+            lastEmitted.current = v
+            onChangeRef.current(v)
+          },
+          onPasteFiles: (files) => onPasteRef.current?.(files) ?? false,
+          getParent: () => getParentRef.current?.(),
+          onActive: (marks) => onActiveRef.current?.(marks),
+        }),
+      (rebuilt) => {
+        lastEmitted.current = rebuilt
+        onChangeRef.current(rebuilt)
+      },
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
+
+  // Reflect a mode change onto the live editor. Guarded by what was last
+  // APPLIED rather than by a mount flag: the state is built in the current
+  // mode already, and reconfiguring it to the same value would dispatch a
+  // transaction for nothing.
+  const appliedMode = useRef(mode)
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || appliedMode.current === mode) return
+    appliedMode.current = mode
+    setMarkdownMode(view, mode, { getParent: () => getParentRef.current?.() })
+    host.current?.setAttribute('data-md-mode', mode)
+  }, [mode])
 
   useImperativeHandle(
     handleRef,

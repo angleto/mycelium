@@ -1321,6 +1321,14 @@ export const en = {
     exportPdfErr: 'Export PDF: ',
     toolbarHide: 'Hide toolbar',
     toolbarShow: 'Show toolbar',
+    modeSource: 'Plain markdown',
+    modeToSource: 'Edit as plain markdown',
+    modeToVisual: 'Edit as rendered text',
+    revealBlock: 'Click to edit the markdown source',
+    refused:
+      'Not applied here. Format a selection inside one paragraph, or put the cursor on a word: not inside code, and not in a table delimiter row.',
+    refusedLink:
+      'Not applied here. A link label has to be one line, inside one paragraph, and outside code.',
     annotateComment: 'Comment on the selected text',
     annotateSuggest: 'Suggest an edit to the selected text',
     annotatePrev: 'Go to the previous comment / suggestion',

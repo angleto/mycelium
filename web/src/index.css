@@ -3438,6 +3438,17 @@ button.btn--danger:hover {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+/* The two-view switch. Wide enough for `md` without the bar reflowing when
+   it flips to the one-glyph `¶`. */
+.rte__mode {
+  min-width: 2.2rem;
+  font-weight: 600;
+}
+.rte__mode[aria-pressed='true'] {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--text);
+}
 /* Compact "go to %" field in the toolbar; trims the number spinners so
    it stays the width of a couple of digits next to the goto arrows. */
 .rte__goto-pct {
@@ -3467,8 +3478,12 @@ button.btn--danger:hover {
      sticky .rte__bar instead of underneath them (cf. .anno). */
   scroll-margin-top: calc(var(--header-h) + 2.6rem);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  /* No font here. Typography belongs to the CodeMirror theme, which is what
+     the two views disagree about (mono in markdown mode, the reader's
+     proportional face in the rendered one) -- and a rule in this stylesheet
+     could not win reliably anyway: CodeMirror injects its own base theme
+     through StyleModule and the load order against this file is not
+     guaranteed. See lib/markdownSource/theme.ts. */
   outline: none;
 }
 /* The markdown SOURCE editor (CodeMirror) mounts into a host div that takes
@@ -3496,6 +3511,13 @@ button.btn--danger:hover {
 .rte__err {
   margin: 0.25rem 0 0;
   font-size: 0.82rem;
+}
+/* The command-refusal hint. Always in the document, because a live region
+   has to exist BEFORE its text changes or assistive technology has nothing
+   to watch; collapsed to nothing while it is empty, so an editor that has
+   never refused anything is not paying for the slot. */
+.rte__refusal:empty {
+  margin: 0;
 }
 /* Embedded markdown images: capped at the editor/view width so a
  * full-resolution screenshot does not blow up the layout. ``--loading``

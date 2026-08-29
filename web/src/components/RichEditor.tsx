@@ -11,6 +11,7 @@ import {
   type AnchorQuery,
   type AnnotationAnchor,
 } from '../lib/markdownSource/annotationLayer'
+import { posFromSliceOffset } from '../lib/markdownSource/lineSep'
 import { authFetch } from '../api/client'
 import { invalidateAttachmentManifest } from '../lib/attachmentManifest'
 import {
@@ -32,6 +33,7 @@ import {
   SourceEditor,
   type SourceEditorHandle,
 } from '../lib/markdownSource/SourceEditor'
+import { setEditorMode, useEditorMode } from '../lib/editorMode'
 import {
   insertHorizontalRule as srcHr,
   insertTable as srcInsertTable,
@@ -156,9 +158,15 @@ async function exportPdfViaServer(
 // serializer between what is typed and what is saved, so a body written
 // outside the app is not rewritten by being opened or edited. The one
 // stated limit is a body MIXING CRLF and LF, which normalises to LF on the
-// first edit; uniform bodies of either kind are exact. What used to be a
-// rendered mode is a preview layer over the source instead, in
-// ``lib/markdownSource/``.
+// first edit; uniform bodies of either kind are exact.
+//
+// The toolbar's ``¶``/``md`` button switches between two VIEWS of that one
+// document (``lib/markdownSource/mode.ts``): the rendered one, which is a
+// decoration layer over the source, and plain markdown, which installs no
+// layer at all. It reconfigures a compartment and dispatches no document
+// change, so it cannot be a data decision -- unlike the pair of surfaces it
+// replaces, where one of the two held a document model and had to serialise
+// its way back (ADR-0055).
 //
 // The inline @ typeahead inserts a [label](@kind:id) link: the mention DSL
 // stored as plain markdown, resolved into a chip at render time.
@@ -239,6 +247,11 @@ export function RichEditor({
   viewRef?: Ref<AnnotationViewHandle>
 }) {
   const { t } = useTranslation()
+  // Which of the two views this editor is showing. One app-wide preference:
+  // a note has one editor per part plus the annotation composers, and a
+  // setting that changes what the caret does cannot disagree between two of
+  // them on screen at once.
+  const mode = useEditorMode()
   // Collapse the formatting buttons to reclaim writing space (a single
   // tap on a phone, where the wrapped bar otherwise eats several rows).
   // Persisted so the choice sticks across editors and sessions.
@@ -307,6 +320,14 @@ export function RichEditor({
   // (their quoted text was edited away), so the click isn't a silent no-op.
   const [navMiss, setNavMiss] = useState(false)
   const navMissTimer = useRef<number | null>(null)
+  // Why a command REFUSED (see commands.ts: a range crossing a blank line, or
+  // landing where the characters would not be markup, or no word under the
+  // caret to wrap). It used to be silent -- the boolean was discarded at the
+  // call site -- and in the rendered view "the button refused" and "the
+  // button is broken" are indistinguishable, because the markup that would
+  // explain the refusal is exactly what is not being shown.
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const refusalTimer = useRef<number | null>(null)
 
   // Keep the latest parent in a ref so the editorProps handlers below
   // (created once when the editor is built) see the live value even if
@@ -374,7 +395,18 @@ export function RichEditor({
   // Migration 0099 converted every such row it could.
   const locateIn = useCallback((a: AnchorQuery): { from: number; to: number } | null => {
     const view = srcHandleRef.current?.view()
-    return view ? locateSourceAnchor(view.state.sliceDoc(), a) : null
+    if (!view) return null
+    const found = locateSourceAnchor(view.state.sliceDoc(), a)
+    if (!found) return null
+    // String offsets in, DOCUMENT positions out. CodeMirror counts a line
+    // break as ONE position whatever it is spelled as, so in a CRLF body the
+    // two drift apart by one per preceding line: the flash was painted two
+    // characters to the right of the words it quoted, and near the end of a
+    // long body the range ran past `doc.length` and scrollIntoView threw.
+    return {
+      from: posFromSliceOffset(view.state, found.from),
+      to: posFromSliceOffset(view.state, found.to),
+    }
   }, [])
 
   // Scroll a located range into view and pulse it, in the source surface.
@@ -384,6 +416,12 @@ export function RichEditor({
     const view = srcHandleRef.current?.view()
     if (!view) return
     view.dispatch({
+      // The SELECTION moves too, not just the scroll. The reveal is keyed on
+      // where the selection is, so without this "go to text" could point at a
+      // passage inside a rendered table or a hidden link destination and
+      // never un-hide it -- the popover would open over prose that never lit
+      // up, which reads as a broken button.
+      selection: { anchor: r.from, head: r.to },
       effects: [
         flashAnnotation.of(r),
         CmEditorView.scrollIntoView(r.from, { y: 'center' }),
@@ -494,6 +532,7 @@ export function RichEditor({
     () => () => {
       if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
       if (navMissTimer.current !== null) window.clearTimeout(navMissTimer.current)
+      if (refusalTimer.current !== null) window.clearTimeout(refusalTimer.current)
     },
     [],
   )
@@ -517,11 +556,39 @@ export function RichEditor({
 
   const fmt = srcHandle != null
 
+  // Run a source command and, when it refuses, say why. Every command returns
+  // whether it did anything (SourceEditor.tsx documents that contract); the
+  // toolbar used to throw the answer away.
+  //
+  // ``message`` is null for the commands whose ``false`` means "there was
+  // nothing to do" rather than "this is not allowed here": undo with an empty
+  // history is not a refusal, and telling someone their selection crosses a
+  // blank line when they pressed Undo is worse than saying nothing.
+  const showRefusal = (message: string | null): void => {
+    setRefusal(message)
+    if (refusalTimer.current !== null) window.clearTimeout(refusalTimer.current)
+    refusalTimer.current = null
+    if (!message) return
+    refusalTimer.current = window.setTimeout(() => {
+      setRefusal(null)
+      refusalTimer.current = null
+    }, 5000)
+  }
+
+  const runCmd = (cmd: (v: CmView) => boolean, message: string | null): void => {
+    if (!srcHandle) return
+    const done = srcHandle.run(cmd)
+    showRefusal(done ? null : message)
+  }
+
   const tb = (
     label: string,
     titleKey: string,
     run: (v: CmView) => boolean,
     srcMark?: ActiveMark,
+    // Commands whose refusal means "nothing to do here" (undo, a table
+    // button pressed outside a table) rather than "not allowed here".
+    quiet?: boolean,
   ) => (
     <button
       type="button"
@@ -531,7 +598,7 @@ export function RichEditor({
       }
       title={t(titleKey)}
       disabled={!fmt}
-      onClick={() => srcHandle?.run(run)}
+      onClick={() => runCmd(run, quiet ? null : t('editor.refused'))}
     >
       {label}
     </button>
@@ -542,9 +609,19 @@ export function RichEditor({
   // (if any) and writes it back through the shared escaper, so a label
   // containing `]` cannot emit something that is not a link.
   const setLink = () => {
-    srcHandle?.run((v) =>
-      srcSetLink(v, (current) => window.prompt(t('editor.linkPrompt'), current)),
+    if (!srcHandle) return
+    // Cancelling the prompt makes the command return false, exactly as a
+    // refusal does, and it is not one: reporting "a link label has to be one
+    // line" to someone who pressed Escape is worse than saying nothing.
+    let cancelled = false
+    const done = srcHandle.run((v) =>
+      srcSetLink(v, (current) => {
+        const url = window.prompt(t('editor.linkPrompt'), current)
+        cancelled = url === null
+        return url
+      }),
     )
+    showRefusal(done || cancelled ? null : t('editor.refusedLink'))
   }
 
   // Image button: opens the hidden file input. Disabled when no parent
@@ -575,6 +652,28 @@ export function RichEditor({
             onClick={() => setShowTools((v) => !v)}
           >
             {showTools ? '⌄' : 'Aa'}
+          </button>
+          {/* The two views. Deliberately OUTSIDE the collapsible tools span:
+              a reader who has hidden the formatting buttons must still be
+              able to get at the markdown. `aria-pressed` on a STABLE
+              accessible name, so a screen reader says "plain markdown,
+              pressed" rather than reading a label that has just flipped. */}
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__fmt rte__mode"
+            aria-pressed={mode === 'source'}
+            aria-label={t('editor.modeSource')}
+            title={mode === 'visual' ? t('editor.modeToSource') : t('editor.modeToVisual')}
+            // Keep the caret: unlike a format command, a mode switch has no
+            // view.focus() of its own to lean on, so the first keystroke
+            // after switching would go to the button.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setEditorMode(mode === 'visual' ? 'source' : 'visual')
+              srcHandle?.focus()
+            }}
+          >
+            {mode === 'visual' ? '¶' : 'md'}
           </button>
           {/* Position navigation: jump to the start / end of the document,
               or type a percentage (e.g. 30) to land ~30% through it.
@@ -708,13 +807,13 @@ export function RichEditor({
           {tb('B', 'editor.bold', srcWrap('bold'), 'bold')}
           {tb('I', 'editor.italic', srcWrap('italic'), 'italic')}
           {tb('S', 'editor.strike', srcWrap('strike'), 'strike')}
-          {tb('H1', 'editor.h1', srcHeading(1), 'heading1')}
-          {tb('H2', 'editor.h2', srcHeading(2), 'heading2')}
-          {tb('H3', 'editor.h3', srcHeading(3), 'heading3')}
-          {tb('•', 'editor.bullet', srcBullet, 'bulletList')}
-          {tb('1.', 'editor.ordered', srcOrdered, 'orderedList')}
-          {tb('☑', 'editor.checklist', srcTask, 'taskList')}
-          {tb('❝', 'editor.quote', srcQuote, 'blockquote')}
+          {tb('H1', 'editor.h1', srcHeading(1), 'heading1', true)}
+          {tb('H2', 'editor.h2', srcHeading(2), 'heading2', true)}
+          {tb('H3', 'editor.h3', srcHeading(3), 'heading3', true)}
+          {tb('•', 'editor.bullet', srcBullet, 'bulletList', true)}
+          {tb('1.', 'editor.ordered', srcOrdered, 'orderedList', true)}
+          {tb('☑', 'editor.checklist', srcTask, 'taskList', true)}
+          {tb('❝', 'editor.quote', srcQuote, 'blockquote', true)}
           {tb('</>', 'editor.code', srcWrap('code'), 'code')}
           {tb('{ }', 'editor.codeBlock', srcCodeBlock, 'codeBlock')}
           <button
@@ -748,28 +847,28 @@ export function RichEditor({
           >
             📎
           </button>
-          {tb('―', 'editor.hr', srcHr)}
+          {tb('―', 'editor.hr', srcHr, undefined, true)}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
             title={t('editor.table')}
             disabled={!fmt}
-            onClick={() => srcHandle?.run(srcInsertTable)}
+            onClick={() => runCmd(srcInsertTable, null)}
           >
             ▦
           </button>
           {srcMarks.has('table') && (
             <>
-              {tb('+row', 'editor.tableRow', srcAddRow)}
-              {tb('+col', 'editor.tableCol', srcAddCol)}
-              {tb('✕tbl', 'editor.tableDel', srcDelTable)}
+              {tb('+row', 'editor.tableRow', srcAddRow, undefined, true)}
+              {tb('+col', 'editor.tableCol', srcAddCol, undefined, true)}
+              {tb('✕tbl', 'editor.tableDel', srcDelTable, undefined, true)}
               {/* Re-aligning rewrites bytes nobody typed, so it is a button
                   the author presses and never something Tab does. */}
-              {tb('⇔tbl', 'editor.tableFormat', srcFormatTable)}
+              {tb('⇔tbl', 'editor.tableFormat', srcFormatTable, undefined, true)}
             </>
           )}
-          {tb('↶', 'editor.undo', srcUndo)}
-          {tb('↷', 'editor.redo', srcRedo)}
+          {tb('↶', 'editor.undo', srcUndo, undefined, true)}
+          {tb('↷', 'editor.redo', srcRedo, undefined, true)}
           </span>
           )}
         </div>
@@ -840,6 +939,14 @@ export function RichEditor({
           onClose={() => setPickerOpen(false)}
         />
       )}
+      {/* A live region has to be in the document BEFORE its text changes, or
+          assistive technology has nothing to watch and the announcement is
+          missed. So the element is always here and only its content comes
+          and goes. It sits in the same slot as the upload and export
+          messages, and shifts the surface the same way they do. */}
+      <p className="hint rte__err rte__refusal" role="status">
+        {refusal}
+      </p>
       {uploadErr && <p className="err rte__err">{uploadErr}</p>}
       {pdfErr && (
         <p className="err rte__err">
@@ -850,6 +957,7 @@ export function RichEditor({
       <SourceEditor
         handleRef={setSrcHandle}
         className="rte__raw rte__src"
+        mode={mode}
         value={value}
         placeholder={placeholder}
         onChange={onChange}

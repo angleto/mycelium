@@ -1,10 +1,18 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
-import { placeCaret, readSource, setSource, sourceContent } from './source-editor'
+import {
+  placeCaret,
+  readSource,
+  setEditorMode,
+  setSource,
+  sourceContent,
+} from './source-editor'
 
-// Regression coverage for the note editor. There is ONE editing surface now
-// -- the markdown source, live-previewed -- so the mode toggle these tests
-// used to flip is gone with the surface it flipped to.
+// Regression coverage for the note editor. There is ONE editing surface and
+// ONE document -- the markdown source -- shown in either of two ways: the
+// rendered view, and plain markdown. The toggle between them changes
+// decorations and nothing else, so these tests assert the mode they need
+// rather than inheriting a persisted preference from whatever ran before.
 //
 // The bugs pinned here reached production: the layout overlap, the
 // <label>-forwarded double-click bold, the silent rewrite of a verbatim body
@@ -32,9 +40,11 @@ async function openFreshNoteEditor(page: Page) {
   await page.waitForTimeout(1000)
 }
 
-/** The editor is the markdown surface; this only waits for it. */
-async function awaitSourceEditor(page: Page) {
+/** Wait for the editing surface, and pin the view these specs assume. The
+ *  mode preference is app-wide and persisted, so it outlives a spec. */
+async function awaitSourceEditor(page: Page, mode: 'source' | 'visual' = 'visual') {
   await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
+  await setEditorMode(page, mode)
 }
 
 test('the editor is not wrapped in a <label> (double-click must not bold)', async ({

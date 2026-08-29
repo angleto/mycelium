@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
-import { readSource, setSource, sourceContent } from './source-editor'
+import { readSource, setEditorMode, setSource, sourceContent } from './source-editor'
 
 // Linkable attachments in the note/task body. The risk these tests were
 // written for was a relative /attachments/<id>/download href being
@@ -36,9 +36,12 @@ async function openFreshNoteEditor(page: Page) {
   await page.waitForTimeout(800)
 }
 
-/** One surface now; this only waits for it. */
+/** One surface, two views. These specs assert the RENDERED one (the link
+ *  label is a preview decoration), and the preference is app-wide and
+ *  persisted, so it has to be pinned rather than inherited. */
 async function awaitSourceEditor(page: Page) {
   await expect(sourceContent(page)).toBeVisible({ timeout: 10_000 })
+  await setEditorMode(page, 'visual')
 }
 
 test('an attachment link keeps its destination (keystone)', async ({ page }) => {

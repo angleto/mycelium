@@ -1,3 +1,5 @@
+import type { EditorState } from '@codemirror/state'
+
 // Line endings, which is the one place the source editor's byte-exactness
 // is not free.
 //
@@ -54,4 +56,32 @@ export function hasMixedLineEndings(src: string): boolean {
     if (i > 0 && src.charCodeAt(i - 1) === 13) crlf += 1
   }
   return crlf > 0 && crlf < lf
+}
+
+/**
+ * A slice offset as a document position.
+ *
+ * Anything that searches or diffs `state.sliceDoc()` works in STRING offsets.
+ * CodeMirror counts a line break as ONE position whatever it is spelled as,
+ * so in a CRLF body the two diverge by one per preceding line break, and
+ * handing a string offset to `dispatch` addresses the wrong characters: an
+ * annotation was painted two columns right of the words it quoted, and an
+ * external-value sync spliced its change two columns off and corrupted the
+ * body. Near the end of a long body the offset runs past `doc.length`
+ * outright.
+ *
+ * The common case is the identity and says so: an LF body needs no walk.
+ */
+export function posFromSliceOffset(state: EditorState, off: number): number {
+  if (state.lineBreak.length === 1) return off
+  let consumed = 0
+  for (let n = 1; n <= state.doc.lines; n += 1) {
+    const line = state.doc.line(n)
+    if (off <= consumed + line.length) return line.from + (off - consumed)
+    consumed += line.length + state.lineBreak.length
+    // The offset landed INSIDE the separator, which has no document position
+    // of its own: clamp to the end of the line it follows.
+    if (off < consumed) return line.to
+  }
+  return state.doc.length
 }

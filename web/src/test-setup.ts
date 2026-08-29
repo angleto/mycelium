@@ -45,3 +45,29 @@ function install(name: 'localStorage' | 'sessionStorage'): void {
 
 install('localStorage')
 install('sessionStorage')
+
+// ``window.matchMedia``, which jsdom does not implement at all.
+//
+// Environment repair for the same reason as the storage above, not a mock.
+// The app asks it exactly one question (``useIsDark``, and through it every
+// Mermaid diagram, which the editor's block preview renders), and a jsdom
+// document has no OS preference to report -- so the honest answer is the CSS
+// default: no preference matches. Without it, rendering anything that reads
+// the theme throws ``window.matchMedia is not a function`` from inside a
+// React commit, which surfaces as an unhandled error attributed to whichever
+// test happened to be running when the render flushed.
+function installMatchMedia(): void {
+  if (typeof window === 'undefined' || typeof window.matchMedia === 'function') return
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia
+}
+
+installMatchMedia()

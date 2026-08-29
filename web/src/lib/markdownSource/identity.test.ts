@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { forceParsing } from '@codemirror/language'
 import { hasMixedLineEndings, lineSepFor } from './lineSep'
 import { markdownSourceExtensions } from './extensions'
+import { setMarkdownMode, type MarkdownMode } from './mode'
 
 // The contract of the source editor, asserted as a law rather than a habit:
 // the document IS the markdown, so reading it back gives the bytes it was
@@ -38,6 +40,29 @@ function stateFor(src: string): EditorState {
   })
 }
 
+const views: EditorView[] = []
+
+/** A real, MOUNTED editor with the tree parsed to the end. The EditorState
+ *  assertions above never run the inline layer at all (it is a ViewPlugin)
+ *  and never call a widget's `toDOM`, so byte-exactness at that level says
+ *  nothing about whether the rendered view survives a fixture. */
+function mount(src: string, mode: MarkdownMode): { view: EditorView; emitted: string[] } {
+  const emitted: string[] = []
+  const view = new EditorView({
+    state: EditorState.create({
+      doc: src,
+      extensions: markdownSourceExtensions({ src, mode, onChange: (v) => emitted.push(v) }),
+    }),
+  })
+  forceParsing(view, src.length, 5_000)
+  views.push(view)
+  return { view, emitted }
+}
+
+afterEach(() => {
+  while (views.length) views.pop()?.destroy()
+})
+
 describe('the corpus is actually loaded', () => {
   // A glob that matches nothing makes every assertion below vacuous, which
   // is the classic way a byte-level test passes while testing nothing.
@@ -61,6 +86,54 @@ describe('the corpus is actually loaded', () => {
 describe('every fixture is a fixed point of the document model', () => {
   it.each(named.map((f) => [f.name, f.src] as const))('%s', (_name, src) => {
     expect(stateFor(src).sliceDoc()).toBe(src)
+  })
+})
+
+describe('every fixture survives the RENDERED view, mounted', () => {
+  it.each(named.map((f) => [f.name, f.src] as const))('%s', (_name, src) => {
+    const { view, emitted } = mount(src, 'visual')
+    expect(view.state.sliceDoc()).toBe(src)
+    expect(emitted).toEqual([])
+    // And after the caret has walked the whole document, which is what
+    // rebuilds the decorations and destroys and re-creates every widget.
+    for (let at = 0; at <= src.length; at += Math.max(1, Math.floor(src.length / 12))) {
+      view.dispatch({ selection: { anchor: at } })
+    }
+    expect(view.state.sliceDoc()).toBe(src)
+    expect(emitted).toEqual([])
+  })
+})
+
+describe('the toggle is a view setting, not a document one', () => {
+  it.each(named.map((f) => [f.name, f.src] as const))('%s', (_name, src) => {
+    const { view, emitted } = mount(src, 'visual')
+    setMarkdownMode(view, 'source')
+    expect(view.state.sliceDoc()).toBe(src)
+    setMarkdownMode(view, 'visual')
+    expect(view.state.sliceDoc()).toBe(src)
+    expect(emitted).toEqual([])
+  })
+})
+
+describe('rebuilding a state over its own text is a fixed point', () => {
+  // The one path that rebuilds rather than patches (SourceEditor's CRLF
+  // branch) must not quietly change the document. Where it does -- a body
+  // that MIXES line endings normalises to LF -- the rebuild is required to
+  // REPORT it, or the host goes on holding bytes the editor has discarded and
+  // the next keystroke autosaves the whole rewritten body.
+  it.each(named.map((f) => [f.name, f.src] as const))('%s', (_name, src) => {
+    const once = stateFor(src).sliceDoc()
+    expect(EditorState.create({
+      doc: once,
+      extensions: markdownSourceExtensions({ src: once, onChange: () => {} }),
+    }).sliceDoc()).toBe(src)
+  })
+
+  it('a MIXED body is the one that does not survive, and is detectable', () => {
+    const MIXED = 'riga uno\r\nriga due\nriga tre\r\n'
+    const rebuilt = stateFor(MIXED).sliceDoc()
+    expect(rebuilt).not.toBe(MIXED)
+    expect(rebuilt).toBe('riga uno\nriga due\nriga tre\n')
   })
 })
 

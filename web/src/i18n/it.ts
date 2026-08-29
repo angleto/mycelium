@@ -1314,6 +1314,14 @@ export const it: Catalog = {
     exportPdfErr: 'Export PDF: ',
     toolbarHide: 'Nascondi barra',
     toolbarShow: 'Mostra barra',
+    modeSource: 'Markdown grezzo',
+    modeToSource: 'Modifica come markdown grezzo',
+    modeToVisual: 'Modifica come testo formattato',
+    revealBlock: 'Clicca per modificare il sorgente markdown',
+    refused:
+      'Non applicato qui. Seleziona il testo dentro un solo paragrafo, o metti il cursore su una parola: non dentro del codice o nella riga di delimitazione di una tabella.',
+    refusedLink:
+      "Non applicato qui. L'etichetta di un link deve stare su una riga sola, dentro un solo paragrafo, e fuori dal codice.",
     annotateComment: 'Commenta il testo selezionato',
     annotateSuggest: 'Suggerisci una modifica al testo selezionato',
     annotatePrev: 'Vai al commento / suggerimento precedente',

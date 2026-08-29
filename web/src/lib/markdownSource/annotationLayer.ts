@@ -1,5 +1,6 @@
 import { StateEffect, StateField, type EditorState, type Extension, type Range } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
+import { posFromSliceOffset } from './lineSep'
 
 // The annotation layer over the markdown SOURCE surface: an open comment
 // highlights its quoted passage, an open suggestion strikes what it replaces
@@ -138,17 +139,24 @@ function build(
 ): DecorationSet {
   const doc = state.sliceDoc()
   const out: Range<Decoration>[] = []
+  // In SLICE offsets, which is the domain locateSourceAnchor searches and
+  // compares in. Only what becomes a decoration is converted.
   const used: SourceRange[] = []
+  const pos = (o: number) => posFromSliceOffset(state, o)
 
-  if (flash && flash.to > flash.from && flash.to <= doc.length) {
+  // `flash` arrives in DOCUMENT positions already: the host locates the range
+  // and converts before dispatching, because it also scrolls to it.
+  if (flash && flash.to > flash.from && flash.to <= state.doc.length) {
     out.push(Decoration.mark({ class: 'anno-mark--flash' }).range(flash.from, flash.to))
   }
 
   for (const a of anchors) {
     if (a.status !== 'open') continue
-    const r = locateSourceAnchor(doc, a, used)
-    if (!r || r.to <= r.from) continue
-    used.push(r)
+    const found = locateSourceAnchor(doc, a, used)
+    if (!found || found.to <= found.from) continue
+    used.push(found)
+    const r = { from: pos(found.from), to: pos(found.to) }
+    if (r.to <= r.from) continue
     if (a.kind === 'comment') {
       out.push(
         Decoration.mark({
