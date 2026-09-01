@@ -28,6 +28,7 @@ import {
   type DayBucket,
 } from '../components/timeChartColors'
 import { activeElapsedSec, hhmm, hhmmss, isPaused } from '../lib/time'
+import { refreshRunning, useRunningTimers } from '../lib/useRunningTimer'
 import type { components, paths } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -82,7 +83,12 @@ export function TimeRoute() {
   const session = useSession()
   const activeId = session?.workspaceId
   const [tasks, setTasks] = useState<Task[]>([])
-  const [running, setRunning] = useState<Entry[]>([])
+  // "What is running now" is read from the shared source, not kept here:
+  // this view and the top-bar chip are two renderings of one fact, and
+  // while each held its own copy (its own poll, reconciled only by its
+  // own mutations) a timer started here was missing from the chip until
+  // the chip's next backstop poll.
+  const { running, known: runningKnown, now } = useRunningTimers()
   const [entries, setEntries] = useState<Entry[]>([])
   const [entOffset, setEntOffset] = useState(0)
   const [entMore, setEntMore] = useState(false)
@@ -167,7 +173,6 @@ export function TimeRoute() {
   } = useLinkedClientProject(projectProfiles)
   const projectsForClient = filterProjectsByClient(projects)
   const [pick, setPick] = useState('')
-  const [now, setNow] = useState<number>(() => Date.now())
   // Force-refresh counter for the report / pie chart effects. Bumped
   // by saveEntry / deleteEntry / startTask / stopTimer so the
   // dependent useEffects re-fetch the reports independently of the
@@ -362,26 +367,6 @@ export function TimeRoute() {
     setReportTick((n) => n + 1)
   }, [resetEntries])
 
-  // Realtime-ish: poll the running timer (no WS endpoint in v1). State
-  // is only set inside the async tick, never sync in the effect body.
-  useEffect(() => {
-    let active = true
-    const tick = async () => {
-      const { data } = await api.GET('/time/running', {
-        params: { header: workspaceHeader() },
-      })
-      if (active) setRunning(data ?? [])
-    }
-    void tick()
-    const poll = setInterval(() => void tick(), 5000)
-    const clock = setInterval(() => setNow(Date.now()), 1000)
-    return () => {
-      active = false
-      clearInterval(poll)
-      clearInterval(clock)
-    }
-  }, [activeId])
-
   // Bootstrap data (tasks, clients/projects tags, projects, all tags)
   // only needs to be (re)loaded when the workspace changes, not every
   // time the focus selector flips — keep this effect keyed on
@@ -571,13 +556,6 @@ export function TimeRoute() {
     projectId,
     reportTick,
   ])
-
-  const refreshRunning = useCallback(async () => {
-    const { data } = await api.GET('/time/running', {
-      params: { header: workspaceHeader() },
-    })
-    setRunning(data ?? [])
-  }, [])
 
   async function beginEdit(en: Entry) {
     setErr(null)
@@ -817,7 +795,13 @@ export function TimeRoute() {
 
       <div className="card card--running">
         <h2>{t('time.runningNow')}</h2>
-        {running.length === 0 ? (
+        {/* "Not read yet" is not "nothing is running": until the first
+            successful read lands (or after a workspace switch, which
+            resets the store) the card says so instead of asserting an
+            idle state it has not checked. */}
+        {!runningKnown ? (
+          <p className="hint">{t('common.loading')}</p>
+        ) : running.length === 0 ? (
           <p className="hint">{t('time.idle')}</p>
         ) : (
           <ul className="list">

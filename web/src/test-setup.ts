@@ -71,3 +71,33 @@ function installMatchMedia(): void {
 }
 
 installMatchMedia()
+
+// Relative request URLs under vitest.
+//
+// The api client is built with a RELATIVE baseUrl (``/api``): in a browser
+// the document resolves it against its own origin, and in production nginx
+// proxies that path. Under vitest the jsdom environment keeps NODE's
+// ``Request``, which has no document to resolve against and throws "Failed to
+// parse URL from /api/..." inside the client, before the request ever reaches
+// ``fetch``. A test that stubs fetch then sees no call at all, and the failure
+// reads as "the code issued no request" instead of as a URL problem.
+//
+// Environment repair for the same reason as the two above, not a mock: it
+// resolves a root-relative URL against the origin the jsdom document already
+// has, which is exactly what a browser does with it.
+function installRelativeRequestBase(): void {
+  if (typeof window === 'undefined' || typeof globalThis.Request !== 'function') return
+  const Base = globalThis.Request
+  const origin = window.location.origin
+  class RelativeRequest extends Base {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(
+        typeof input === 'string' && input.startsWith('/') ? origin + input : input,
+        init,
+      )
+    }
+  }
+  globalThis.Request = RelativeRequest as unknown as typeof Request
+}
+
+installRelativeRequestBase()
