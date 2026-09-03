@@ -18,15 +18,31 @@ const API_TARGET = process.env.MYCELIUM_API_URL ?? 'http://localhost:8000'
 //
 // The git SHA is preferred because it is the same identity the backend
 // reports at /api/buildinfo and the images carry as a label, so a stale
-// tab can be traced to a commit. CI passes it (build-images.yml already
-// forwards --build-arg MYCELIUM_GIT_SHA to every image). A local
-// `pnpm build` has no SHA, so fall back to the build clock: distinct per
-// build, which is exactly the question the client is asking ("is what
-// the server serves still what I am running?").
+// tab can be traced to a commit. A local `pnpm build` has no SHA, so
+// fall back to the build clock: distinct per build, which is enough for
+// the question the client is asking ("is what the server serves still
+// what I am running?") and useless for the question an operator asks
+// ("which release is this?").
+//
+// That fallback is only acceptable locally. These variables reach the
+// bundle exclusively through the environment of the process running the
+// build, and a shipped image that misses them serves a placeholder that
+// nothing complains about — 2.3.9 did. docker/frontend.Dockerfile now
+// injects them into the build stage and asserts the result
+// (web/scripts/assert-build-identity.mjs), so a release that cannot name
+// itself fails there rather than in production.
 const BUILD_ID =
   process.env.MYCELIUM_GIT_SHA ||
   process.env.MYCELIUM_VERSION ||
   `dev-${Date.now()}`
+
+// The release name and build time, when the build was given them. They
+// are not what the app COMPARES (BUILD_ID is), they are what makes
+// /version.json answerable by a person: "2.3.9, built at ...". Omitted
+// rather than emitted empty when absent, so the document never asserts
+// an identity the build did not have.
+const RELEASE = process.env.MYCELIUM_VERSION || null
+const BUILT_AT = process.env.MYCELIUM_BUILD_AT || null
 
 // The app imports its own identity from here (see src/lib/buildId.ts).
 const VIRTUAL_ID = 'virtual:mycelium-build-id'
@@ -53,7 +69,12 @@ const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID
  * way in both modes.
  */
 function buildIdentity(): Plugin {
-  const body = JSON.stringify({ buildId: BUILD_ID }) + '\n'
+  const body =
+    JSON.stringify({
+      buildId: BUILD_ID,
+      ...(RELEASE ? { version: RELEASE } : {}),
+      ...(BUILT_AT ? { builtAt: BUILT_AT } : {}),
+    }) + '\n'
   return {
     name: 'mycelium-build-identity',
     resolveId(id) {
