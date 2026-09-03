@@ -4858,9 +4858,13 @@ button.btn--danger:hover {
   color: var(--text-h);
 }
 
-/* Time: inline entry edit + clickable by-task report rows. */
+/* Time: entry edit row + clickable by-task report rows.
+   The form takes a line of its own in the wrapping .taskrow flex row
+   (TimeRoute renders it as a sibling of .taskrow__title, never inside
+   it: that span is clipped on purpose and swallowed Save). */
 .entryedit {
-  display: inline-flex;
+  display: flex;
+  flex-basis: 100%;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
@@ -4870,6 +4874,23 @@ button.btn--danger:hover {
 .entryedit input {
   font-size: 0.8rem;
   padding: 0.2rem 0.35rem;
+  /* A flex item's automatic minimum size is its min-content width, and a
+     <select>'s min-content width is its longest OPTION — one 95-character
+     task title made this form 912px wide and pushed Save past the row's
+     right edge. Allowing the controls to shrink is what makes the width
+     of the DATA irrelevant to the reachability of the actions. The
+     selected option ellipsises instead. */
+  min-width: 0;
+}
+.entryedit select {
+  flex: 1 1 12rem;
+  max-width: 22rem;
+}
+.entryedit input[type='datetime-local'] {
+  flex: 0 1 11rem;
+}
+.entryedit__memo {
+  flex: 1 1 9rem;
 }
 .entryedit__select--invalid {
   border-color: var(--err);

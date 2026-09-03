@@ -918,131 +918,6 @@ export function TimeRoute() {
                     ✎ {en.memo}
                   </span>
                 )}
-                {editId === en.id && (() => {
-                  // Project dropdown = pure filter for the Task select
-                  // below. Picking a project narrows the Task choices;
-                  // the Task select is the real control that moves
-                  // the entry. When the project filter changes such
-                  // that the current task no longer matches, blank
-                  // eTask so the Save button surfaces the "pick a
-                  // task" guard rather than silently re-saving the
-                  // old task_id. The empty-task state is also flagged
-                  // visually (red Task select + inline warning) so
-                  // imported entries whose chosen project has zero
-                  // candidate tasks don't look "silently broken".
-                  const tasksInProj = tasks.filter(
-                    (tk) => !eProject || (tk.tags ?? []).some((g) => g.id === eProject),
-                  )
-                  const taskInvalid = !eTask
-                  const noTaskInProj = !!eProject && tasksInProj.length === 0
-                  return (
-                    <form
-                      className="entryedit"
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        void saveEntry(en)
-                      }}
-                    >
-                      <select
-                        value={eProject}
-                        onChange={(e) => {
-                          const newProj = e.target.value
-                          setEProject(newProj)
-                          if (newProj) {
-                            const cur = tasks.find((tk) => tk.id === eTask)
-                            const stillFits =
-                              cur &&
-                              (cur.tags ?? []).some((g) => g.id === newProj)
-                            if (!stillFits) setETask('')
-                          }
-                        }}
-                        title={t('time.editProject')}
-                      >
-                        <option value="">{t('time.editAnyProject')}</option>
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={eTask}
-                        onChange={(e) => setETask(e.target.value)}
-                        aria-invalid={taskInvalid}
-                        className={
-                          taskInvalid ? 'entryedit__select--invalid' : undefined
-                        }
-                        title={
-                          taskInvalid
-                            ? noTaskInProj
-                              ? t('time.editNoTaskInProjectHint')
-                              : t('time.editPickTaskHint')
-                            : undefined
-                        }
-                      >
-                        <option value="">
-                          {tasksInProj.length === 0
-                            ? t('time.editNoTaskInProject')
-                            : t('time.editPickTask')}
-                        </option>
-                        {tasksInProj.map((tk) => {
-                          const dupe = tasks.filter(
-                            (x) => x.title === tk.title && x.id !== tk.id,
-                          ).length
-                          const suffix = dupe > 0 ? ` · ${tk.id.slice(0, 4)}` : ''
-                          return (
-                            <option key={tk.id} value={tk.id}>
-                              {tk.title}
-                              {suffix}
-                            </option>
-                          )
-                        })}
-                      </select>
-                      <input
-                        type="datetime-local"
-                        value={eStart}
-                        onChange={(e) => setEStart(e.target.value)}
-                      />
-                      <input
-                        type="datetime-local"
-                        value={eEnd}
-                        onChange={(e) => setEEnd(e.target.value)}
-                      />
-                      <input
-                        type="text"
-                        className="entryedit__memo"
-                        value={eMemo}
-                        onChange={(e) => setEMemo(e.target.value)}
-                        placeholder={t('time.memoPlaceholder')}
-                        title={t('time.memoEdit')}
-                      />
-                      <button
-                        type="submit"
-                        className="btn--sm"
-                        disabled={taskInvalid}
-                        title={
-                          taskInvalid ? t('time.errPickTask') : undefined
-                        }
-                      >
-                        {t('time.save')}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn--ghost btn--sm"
-                        onClick={() => setEditId(null)}
-                      >
-                        {t('notes.close')}
-                      </button>
-                      {taskInvalid && (
-                        <span className="entryedit__warn" role="alert">
-                          {noTaskInProj
-                            ? t('time.editNoTaskInProjectHint')
-                            : t('time.editPickTaskHint')}
-                        </span>
-                      )}
-                    </form>
-                  )
-                })()}
               </span>
               <span className="taskrow__meta">
                 <button
@@ -1110,6 +985,147 @@ export function TimeRoute() {
                   </>
                 )}
               </span>
+              {/* The edit form is a FULL-WIDTH SIBLING of the title and
+                  the row actions, never a child of .taskrow__title. That
+                  span is deliberately single-line and clipped (nowrap +
+                  overflow: hidden, so a long task title cannot spill
+                  over the action buttons) and a form inside it inherits
+                  the clip. A <select> is sized by its longest OPTION, so
+                  one long task title measured 912px of form inside an
+                  800px span: the 112px cut off carried Save and Close,
+                  which the row rule `.list li button {margin-left:auto}`
+                  pins to the right edge, while the date and memo fields
+                  stayed visible. The row looked editable and could not
+                  be saved. Rejected: widening the span (moves the
+                  threshold, does not remove it) and unclipping it (that
+                  clip is what keeps long titles off the buttons). Not
+                  covered here: the controls must ALSO be allowed to
+                  shrink — see .entryedit in index.css. */}
+              {editId === en.id && (() => {
+                // Project dropdown = pure filter for the Task select
+                // below. Picking a project narrows the Task choices;
+                // the Task select is the real control that moves
+                // the entry. When the project filter changes such
+                // that the current task no longer matches, blank
+                // eTask so the Save button surfaces the "pick a
+                // task" guard rather than silently re-saving the
+                // old task_id. The empty-task state is also flagged
+                // visually (red Task select + inline warning) so
+                // imported entries whose chosen project has zero
+                // candidate tasks don't look "silently broken".
+                const tasksInProj = tasks.filter(
+                  (tk) => !eProject || (tk.tags ?? []).some((g) => g.id === eProject),
+                )
+                const taskInvalid = !eTask
+                const noTaskInProj = !!eProject && tasksInProj.length === 0
+                return (
+                  <form
+                    className="entryedit"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      void saveEntry(en)
+                    }}
+                  >
+                    <select
+                      value={eProject}
+                      onChange={(e) => {
+                        const newProj = e.target.value
+                        setEProject(newProj)
+                        if (newProj) {
+                          const cur = tasks.find((tk) => tk.id === eTask)
+                          const stillFits =
+                            cur &&
+                            (cur.tags ?? []).some((g) => g.id === newProj)
+                          if (!stillFits) setETask('')
+                        }
+                      }}
+                      title={t('time.editProject')}
+                    >
+                      <option value="">{t('time.editAnyProject')}</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={eTask}
+                      onChange={(e) => setETask(e.target.value)}
+                      aria-invalid={taskInvalid}
+                      className={
+                        taskInvalid ? 'entryedit__select--invalid' : undefined
+                      }
+                      title={
+                        taskInvalid
+                          ? noTaskInProj
+                            ? t('time.editNoTaskInProjectHint')
+                            : t('time.editPickTaskHint')
+                          : undefined
+                      }
+                    >
+                      <option value="">
+                        {tasksInProj.length === 0
+                          ? t('time.editNoTaskInProject')
+                          : t('time.editPickTask')}
+                      </option>
+                      {tasksInProj.map((tk) => {
+                        const dupe = tasks.filter(
+                          (x) => x.title === tk.title && x.id !== tk.id,
+                        ).length
+                        const suffix = dupe > 0 ? ` · ${tk.id.slice(0, 4)}` : ''
+                        return (
+                          <option key={tk.id} value={tk.id}>
+                            {tk.title}
+                            {suffix}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    <input
+                      type="datetime-local"
+                      value={eStart}
+                      onChange={(e) => setEStart(e.target.value)}
+                    />
+                    <input
+                      type="datetime-local"
+                      value={eEnd}
+                      onChange={(e) => setEEnd(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="entryedit__memo"
+                      value={eMemo}
+                      onChange={(e) => setEMemo(e.target.value)}
+                      placeholder={t('time.memoPlaceholder')}
+                      title={t('time.memoEdit')}
+                    />
+                    <button
+                      type="submit"
+                      className="btn--sm"
+                      disabled={taskInvalid}
+                      title={
+                        taskInvalid ? t('time.errPickTask') : undefined
+                      }
+                    >
+                      {t('time.save')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() => setEditId(null)}
+                    >
+                      {t('notes.close')}
+                    </button>
+                    {taskInvalid && (
+                      <span className="entryedit__warn" role="alert">
+                        {noTaskInProj
+                          ? t('time.editNoTaskInProjectHint')
+                          : t('time.editPickTaskHint')}
+                      </span>
+                    )}
+                  </form>
+                )
+              })()}
             </li>
           ))}
           </ul>
