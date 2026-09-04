@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 

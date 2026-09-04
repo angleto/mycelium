@@ -1,12 +1,13 @@
-# CLI and Neovim integration
+# CLI, Neovim and browser integration
 
-Two adapter surfaces ship alongside the SPA, both **thin clients over
+Three adapter surfaces ship alongside the SPA, all **thin clients over
 the REST API** (no business logic):
 
 | Surface | Source | Install |
 | --- | --- | --- |
 | `mycelium` CLI | [`cli/`](../cli/README.md) | `brew install angleto/mycelium/mycelium-cli` |
 | `mycelium-nvim` plugin | [`nvim/mycelium-nvim/`](../nvim/mycelium-nvim/README.md) | `lazy.nvim` block, see plugin README |
+| Browser extension | [`extension/`](extension.md) | Settings → Browser extension, in the app |
 
 ## Why a CLI
 

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from mycelium_api import idempotency as idem
 from mycelium_api.deps import (
     TenantCtx,
     current_claims,
@@ -251,7 +252,23 @@ def _turn(t: NoteTurn) -> NoteTurnOut:
 async def create_note(
     body: NoteCreateIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    # Optional, and the same reasoning as the task create: every client
+    # today creates without one, and what the header buys is for a caller
+    # that cannot tell a create which never arrived from one whose answer
+    # was lost. Claimed in the SAME transaction as the create, so a retry
+    # replays the first answer instead of writing a second note.
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> NoteOut:
+    claimed = await idem.claim_optional(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        endpoint="notes.create",
+        idempotency_key=idempotency_key,
+        body=body.model_dump(mode="json"),
+    )
+    if claimed is not None and claimed.replay is not None:
+        return NoteOut.model_validate(claimed.replay)
     n = await svc.create_note(
         ctx.session,
         org_id=ctx.org_id,
@@ -296,7 +313,7 @@ async def create_note(
     titles = await note_links_svc.task_titles_for_ids(
         ctx.session, org_id=ctx.org_id, task_ids=[pid] if pid else []
     )
-    return _out(
+    out = _out(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
@@ -304,6 +321,8 @@ async def create_note(
         derived_task_ids=derived.get(n.id, []),
         transcript=await svc.get_body(ctx.session, note_id=n.id),
     )
+    await idem.store_result(ctx.session, claimed, out.model_dump(mode="json"))
+    return out
 
 
 @router.get(

@@ -29,7 +29,7 @@ import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { pushRecent } from '../lib/recents'
 
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']

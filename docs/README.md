@@ -25,6 +25,7 @@ planning draft.
 - [References](references.md)
 - [Architecture Decision Records](adr/README.md)
 - [CLI and Neovim integration](cli.md)
+- [The browser extension](extension.md)
 
 ## How to read
 

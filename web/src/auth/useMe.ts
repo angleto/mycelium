@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { useSession } from './useSession'
 
 export type Me = components['schemas']['MeOut']

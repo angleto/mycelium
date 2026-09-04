@@ -64,3 +64,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0053 Mycelium is the soggetto trasmittente, never the soggetto emittente](0053-transmitter-not-emitter.md)
 - [0054 What may become a Causale, and where the tracciato's charset is enforced](0054-what-may-become-a-causale.md)
 - [0055 Two views of one document, not two documents](0055-two-views-of-one-document.md) — revises the single-surface editor decision in `0228012`
+- [0057 The browser is a fourth surface, and it holds a scoped credential](0057-the-browser-is-a-fourth-surface.md)

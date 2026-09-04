@@ -25,7 +25,7 @@ from mycelium_core.mcp_scopes import DEFAULT_SCOPES, SCOPE_CATALOG, VALID_SCOPE_
 from mycelium_mcp.gateway import describe_tools, execute_tool, search_tools
 from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits
 from mycelium_mcp.server import mcp as _registry
-from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES
+from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, required_keys
 
 
 @pytest.fixture(autouse=True)
@@ -66,8 +66,18 @@ def test_tool_scopes_reference_only_catalog_keys() -> None:
     """No typo'd / invented scope key: an assistant can only ever be granted a
     key from SCOPE_CATALOG, so a tool gated on anything else is unreachable.
     Covers the static map and every scope an argument-dependent tool could
-    require (its ``possible`` set enumerates the resolver's whole range)."""
-    bad = {n: s for n, s in TOOL_SCOPES.items() if s is not None and s not in VALID_SCOPE_KEYS}
+    require (its ``possible`` set enumerates the resolver's whole range).
+
+    Read through ``required_keys`` rather than off the raw value, so that
+    an any-of entry has EVERY member checked. Comparing the value itself
+    to the catalogue would have passed a set containing a typo, because a
+    frozenset is never a key: the check would have gone quiet exactly
+    where it was needed most."""
+    bad = {
+        n: sorted(required_keys(n) - VALID_SCOPE_KEYS)  # type: ignore[operator]
+        for n, s in TOOL_SCOPES.items()
+        if s is not None and required_keys(n) - VALID_SCOPE_KEYS  # type: ignore[operator]
+    }
     assert not bad, f"TOOL_SCOPES references keys absent from SCOPE_CATALOG: {bad}"
     bad_dyn = {
         n: sorted(possible - VALID_SCOPE_KEYS)
@@ -251,7 +261,12 @@ def test_read_only_scope_cannot_reach_any_write_tool() -> None:
         leaked = [
             name
             for name, scope in TOOL_SCOPES.items()
-            if scope is not None and scope not in reads and _scope_permits(name)
+            # ``required_keys`` normalises the any-of entries: a tool
+            # satisfied by ANY key outside the read set is a leak if the
+            # gate still lets it through.
+            if scope is not None
+            and not (required_keys(name) or frozenset()) <= set(reads)
+            and _scope_permits(name)
         ]
         assert not leaked, f"read-only scope reached non-read tools: {sorted(leaked)}"
         # Dynamic write tools: hidden in a listing and denied for every kind.

@@ -8,7 +8,7 @@ import { readableOn } from '../lib/color'
 import { useFocus } from '../lib/focus'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { formatDueDate } from '../lib/time'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 type Graph = components['schemas']['GraphOut']

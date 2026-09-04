@@ -850,8 +850,66 @@ export const en = {
     configHint:
       'Shared by everyone in this workspace, and different in every other one.',
   },
+  ext: {
+    title: 'Mycelium in your browser',
+    intro:
+      'A panel that opens on a keystroke over any page: find a task or a note, change its state or its due date, and file the page in front of you without leaving it.',
+    install: {
+      title: 'Install',
+      store: 'Install from the Chrome Web Store',
+      unpublished:
+        'Not published to the Chrome Web Store yet. Until it is, load it by hand from a build of this repository:',
+      step1: 'Build the extension: run "pnpm build" in the extension/ directory.',
+      step2: 'Open chrome://extensions and switch on Developer mode.',
+      step3: 'Choose "Load unpacked" and pick extension/dist/unpacked.',
+      step4: 'Open the panel with Ctrl+Shift+K (Cmd+Shift+K on a Mac), then press Connect.',
+      chromeOnly:
+        'Chrome and Chromium-based browsers (Edge, Brave, Arc). Firefox and Safari use a different extension format and are not supported yet.',
+    },
+    connect: {
+      title: 'Connect this browser',
+      startFromExtension:
+        'A connection always starts in the extension: open the panel and press Connect. It brings you back here to approve, because this page is the only place that can show you what is being granted.',
+      asking: 'Extension {{id}} is asking to connect to the workspace {{workspace}}.',
+      grantIntro: 'Approving mints a credential for this browser that can do exactly this and nothing else:',
+      notGranted:
+        'It cannot read your account, list your other workspaces, create or rename clients and projects, edit workflows, or delete anything.',
+      approve: 'Connect',
+      label: 'Browser extension — {{workspace}}',
+      done: 'Connected to {{workspace}}.',
+      noRuntime:
+        'The credential was created but this browser could not hand it to the extension. Chrome extension messaging is not available on this page. Revoke the credential below and try again from a Chromium-based browser with the extension installed.',
+      noReply:
+        'The credential was created but the extension did not answer. Revoke it below and start again from the extension.',
+      refused: {
+        'unknown-state':
+          'The extension did not recognise this request. Start again from the extension rather than from a bookmarked link.',
+        expired: 'The request timed out. Start again from the extension.',
+        'already-connected': 'That extension is already connected to this workspace.',
+        'wrong-origin': 'The extension refused a handover from this address.',
+      },
+    },
+    connections: {
+      title: 'Connected browsers',
+      help: 'Credentials minted for the extension in this workspace. Revoking one takes effect on the next request that browser makes.',
+      empty: 'No browser is connected to this workspace.',
+      paused: 'paused',
+      revoke: 'Revoke',
+      revoked: 'Revoked.',
+    },
+    limits: {
+      title: 'What this does not protect against',
+      profile:
+        'Anything running as your Chrome profile. The credential is stored in the browser profile directory and is not additionally encrypted, so full-disk encryption is what protects it.',
+      disconnect:
+        'Disconnecting inside the extension only forgets the secret on that machine. Revoking here is what ends it on the server, and it is the one that matters if a machine is lost.',
+      workspace:
+        'A credential is minted per workspace. Connecting a second workspace is a separate, deliberate act from inside that workspace.',
+    },
+  },
   setnav: {
     account: 'Account',
+    extension: 'Browser extension',
     workspace: 'Workspace',
     platform: 'Platform',
     platformHint:

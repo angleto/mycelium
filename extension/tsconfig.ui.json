@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.ui.tsbuildinfo",
+    /* No WebWorker. The panel documents have a DOM and no `self` in the
+       worker sense; keeping the two libs apart is what makes the split
+       above mean something. `src/shared` is compiled by BOTH projects on
+       purpose: it is the only code in the package that has to hold under
+       either lib, and checking it twice is the cheapest proof of that. */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["chrome"]
+  },
+  "include": ["src/ui", "src/shared"]
+}

@@ -1,0 +1,308 @@
+{
+  "extName": {
+    "message": "Mycelium"
+  },
+  "extDescription": {
+    "message": "Trova, modifica e cattura task e note di Mycelium da qualsiasi pagina."
+  },
+  "cmdOpenPanel": {
+    "message": "Apri il pannello Mycelium"
+  },
+  "cmdOpenSidePanel": {
+    "message": "Apri il pannello laterale Mycelium"
+  },
+  "cmdCapture": {
+    "message": "Cattura questa pagina in Mycelium"
+  },
+  "cmdSearchSelection": {
+    "message": "Cerca in Mycelium il testo selezionato"
+  },
+  "menuCaptureTask": {
+    "message": "Nuovo task Mycelium da questa pagina"
+  },
+  "menuCaptureNote": {
+    "message": "Nuova nota Mycelium da questa pagina"
+  },
+  "omniboxHint": {
+    "message": "Cerca in Mycelium, oppure incolla un codice di task o nota"
+  },
+  "switchLabel": {
+    "message": "Estensione attiva"
+  },
+  "switchOffTitle": {
+    "message": "Spenta"
+  },
+  "switchOffBody": {
+    "message": "Non viene inviato nulla. La credenziale e le bozze non inviate restano: è un silenziamento, non una disconnessione."
+  },
+  "notConnectedTitle": {
+    "message": "Non collegata"
+  },
+  "notConnectedBody": {
+    "message": "Collega questo browser a un workspace. Si apre Mycelium, dove approvi esattamente ciò che stai concedendo."
+  },
+  "connect": {
+    "message": "Collega un workspace"
+  },
+  "revokedTitle": {
+    "message": "Ricollega $WORKSPACE$",
+    "placeholders": {
+      "workspace": {
+        "content": "$1"
+      }
+    }
+  },
+  "revokedBody": {
+    "message": "La credenziale di questo browser non è più accettata. Può essere stata revocata in Mycelium, oppure è scaduta."
+  },
+  "disconnect": {
+    "message": "Dimentica la credenziale di questo browser"
+  },
+  "disconnectNote": {
+    "message": "Dimenticare rimuove il segreto solo da questo browser. La revoca sul server si fa nelle impostazioni di Mycelium."
+  },
+  "searchPlaceholder": {
+    "message": "Cerca, o incolla un codice"
+  },
+  "searchLabel": {
+    "message": "Cerca task e note"
+  },
+  "resultsLabel": {
+    "message": "Risultati"
+  },
+  "scopeLabel": {
+    "message": "Ambito"
+  },
+  "scopeEverything": {
+    "message": "Tutto"
+  },
+  "scopeNotesClientWarning": {
+    "message": "Le note non si restringono per cliente, solo per progetto."
+  },
+  "loading": {
+    "message": "Caricamento…"
+  },
+  "searching": {
+    "message": "Ricerca…"
+  },
+  "warmingUp": {
+    "message": "Ricerca… l'indice si sta svegliando"
+  },
+  "degraded": {
+    "message": "Solo corrispondenze testuali: l'indice semantico non ha risposto in tempo."
+  },
+  "emptyNoQuery": {
+    "message": "Scrivi per cercare, oppure incolla un codice di task o nota."
+  },
+  "emptyNoResults": {
+    "message": "Nessuna corrispondenza."
+  },
+  "emptyNoResultsInScope": {
+    "message": "Nessuna corrispondenza dentro questo ambito."
+  },
+  "searchEverything": {
+    "message": "Cerca ovunque"
+  },
+  "emptyRecents": {
+    "message": "Non hai ancora aperto nulla."
+  },
+  "offline": {
+    "message": "Sei offline. Le modifiche restano disattivate finché non torna."
+  },
+  "outcomeUnknown": {
+    "message": "Abbiamo smesso di aspettare. La modifica può essere stata salvata oppure no."
+  },
+  "check": {
+    "message": "Verifica"
+  },
+  "retry": {
+    "message": "Riprova"
+  },
+  "reference": {
+    "message": "Riferimento"
+  },
+  "copyReference": {
+    "message": "Copia il riferimento"
+  },
+  "conflict": {
+    "message": "È cambiato mentre lo guardavi. Ricaricato."
+  },
+  "open": {
+    "message": "Apri"
+  },
+  "cancel": {
+    "message": "Annulla"
+  },
+  "close": {
+    "message": "Chiudi"
+  },
+  "save": {
+    "message": "Salva"
+  },
+  "saved": {
+    "message": "Salvato"
+  },
+  "state": {
+    "message": "Stato"
+  },
+  "due": {
+    "message": "Scadenza"
+  },
+  "importance": {
+    "message": "Importanza"
+  },
+  "urgency": {
+    "message": "Urgenza"
+  },
+  "priority": {
+    "message": "Priorità"
+  },
+  "attachPage": {
+    "message": "Allega questa pagina"
+  },
+  "attached": {
+    "message": "Pagina allegata."
+  },
+  "copyCode": {
+    "message": "Copia il codice"
+  },
+  "today": {
+    "message": "Oggi"
+  },
+  "tomorrow": {
+    "message": "Domani"
+  },
+  "inAWeek": {
+    "message": "Fra una settimana"
+  },
+  "clearDue": {
+    "message": "Nessuna data"
+  },
+  "captureTitle": {
+    "message": "Cattura questa pagina"
+  },
+  "captureAsTask": {
+    "message": "Come task"
+  },
+  "captureAsNote": {
+    "message": "Come nota"
+  },
+  "captureTitleLabel": {
+    "message": "Titolo"
+  },
+  "captureBodyLabel": {
+    "message": "Corpo"
+  },
+  "captureProject": {
+    "message": "Progetto"
+  },
+  "captureNoProject": {
+    "message": "Nessun progetto"
+  },
+  "captureScreenshot": {
+    "message": "Allega uno screenshot"
+  },
+  "captureFile": {
+    "message": "Allega un file"
+  },
+  "captureFileSidePanelOnly": {
+    "message": "Scegliere un file chiude questo popup. Apri il pannello laterale per allegarne uno."
+  },
+  "captureCreate": {
+    "message": "Crea"
+  },
+  "captureCreateAndOpen": {
+    "message": "Crea e apri"
+  },
+  "captureDone": {
+    "message": "Creato $CODE$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureAttachmentsFailed": {
+    "message": "Creato, ma questi non si sono allegati: $NAMES$",
+    "placeholders": {
+      "names": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureSelectionBlocked": {
+    "message": "Chrome non permette alle estensioni di leggere questa pagina, quindi la selezione non è stata inclusa."
+  },
+  "screenshotWrongTab": {
+    "message": "Chrome permette di fotografare solo la scheda da cui hai invocato l'estensione."
+  },
+  "sinceYouLeftOk": {
+    "message": "Mentre il pannello era chiuso: $N$ salvati.",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "sinceYouLeftFailed": {
+    "message": "Mentre il pannello era chiuso, questi non si sono salvati: $NAMES$",
+    "placeholders": {
+      "names": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNetwork": {
+    "message": "Mycelium non è raggiungibile."
+  },
+  "errServer": {
+    "message": "Mycelium ha risposto con un errore."
+  },
+  "errDisabled": {
+    "message": "L'estensione è spenta."
+  },
+  "errDisconnected": {
+    "message": "Questo browser non è collegato a un workspace."
+  },
+  "errUnauthenticated": {
+    "message": "La credenziale di questo browser non è più accettata."
+  },
+  "shortcuts": {
+    "message": "Scorciatoie"
+  },
+  "hintKeys": {
+    "message": "Tab lista · Invio apri · Maiusc+Invio modifica"
+  },
+  "sectionDue": {
+    "message": "In scadenza o scadute"
+  },
+  "sectionPressing": {
+    "message": "Piu' pressanti"
+  },
+  "sectionTouched": {
+    "message": "Toccate di recente"
+  },
+  "pin": {
+    "message": "Tieni sopra l'elenco"
+  },
+  "unpin": {
+    "message": "Smetti di tenerla sopra"
+  },
+  "pinned": {
+    "message": "Tenuta sopra"
+  },
+  "pageStripAttach": {
+    "message": "Allega questa pagina"
+  },
+  "synced": {
+    "message": "sincronizzato $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "refresh": {
+    "message": "Aggiorna"
+  }
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useMe } from '../auth/useMe'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import type { Ecl, VCardData } from '../lib/myceliumQr'
 import {
   buildVCard,

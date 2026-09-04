@@ -17,7 +17,7 @@ import {
   parseFilter,
   TASKS_LASTSEARCH_KEY,
 } from '../lib/taskFilter'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type View = 'kanban' | 'list'
 const VIEW_KEY = 'mycelium.tasks.view'

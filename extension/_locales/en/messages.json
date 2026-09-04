@@ -1,0 +1,308 @@
+{
+  "extName": {
+    "message": "Mycelium"
+  },
+  "extDescription": {
+    "message": "Find, change and capture Mycelium tasks and notes from any page."
+  },
+  "cmdOpenPanel": {
+    "message": "Open the Mycelium panel"
+  },
+  "cmdOpenSidePanel": {
+    "message": "Open the Mycelium side panel"
+  },
+  "cmdCapture": {
+    "message": "Capture this page into Mycelium"
+  },
+  "cmdSearchSelection": {
+    "message": "Search Mycelium for the selected text"
+  },
+  "menuCaptureTask": {
+    "message": "New Mycelium task from this page"
+  },
+  "menuCaptureNote": {
+    "message": "New Mycelium note from this page"
+  },
+  "omniboxHint": {
+    "message": "Search Mycelium, or paste a task or note code"
+  },
+  "switchLabel": {
+    "message": "Extension on"
+  },
+  "switchOffTitle": {
+    "message": "Switched off"
+  },
+  "switchOffBody": {
+    "message": "Nothing is being sent. Your credential and any unsent draft are kept: this is a mute, not a sign-out."
+  },
+  "notConnectedTitle": {
+    "message": "Not connected"
+  },
+  "notConnectedBody": {
+    "message": "Connect this browser to a workspace. It opens Mycelium, where you approve exactly what is being granted."
+  },
+  "connect": {
+    "message": "Connect a workspace"
+  },
+  "revokedTitle": {
+    "message": "Reconnect $WORKSPACE$",
+    "placeholders": {
+      "workspace": {
+        "content": "$1"
+      }
+    }
+  },
+  "revokedBody": {
+    "message": "This browser's credential is no longer accepted. It may have been revoked in Mycelium, or it expired."
+  },
+  "disconnect": {
+    "message": "Forget this browser's credential"
+  },
+  "disconnectNote": {
+    "message": "Forgetting removes the secret from this browser only. Revoking it on the server is done in Mycelium settings."
+  },
+  "searchPlaceholder": {
+    "message": "Search, or paste a code"
+  },
+  "searchLabel": {
+    "message": "Search tasks and notes"
+  },
+  "resultsLabel": {
+    "message": "Results"
+  },
+  "scopeLabel": {
+    "message": "Scope"
+  },
+  "scopeEverything": {
+    "message": "Everything"
+  },
+  "scopeNotesClientWarning": {
+    "message": "Notes are not narrowed by a client, only by a project."
+  },
+  "loading": {
+    "message": "Loading…"
+  },
+  "searching": {
+    "message": "Searching…"
+  },
+  "warmingUp": {
+    "message": "Searching… the index is waking up"
+  },
+  "degraded": {
+    "message": "Text matches only: the semantic index did not answer in time."
+  },
+  "emptyNoQuery": {
+    "message": "Type to search, or paste a task or note code."
+  },
+  "emptyNoResults": {
+    "message": "Nothing matched."
+  },
+  "emptyNoResultsInScope": {
+    "message": "Nothing matched inside this scope."
+  },
+  "searchEverything": {
+    "message": "Search everything"
+  },
+  "emptyRecents": {
+    "message": "Nothing opened yet."
+  },
+  "offline": {
+    "message": "You are offline. Changes are disabled until it comes back."
+  },
+  "outcomeUnknown": {
+    "message": "We stopped waiting. The change may or may not have been saved."
+  },
+  "check": {
+    "message": "Check"
+  },
+  "retry": {
+    "message": "Retry"
+  },
+  "reference": {
+    "message": "Reference"
+  },
+  "copyReference": {
+    "message": "Copy reference"
+  },
+  "conflict": {
+    "message": "This changed while you were looking at it. Reloaded."
+  },
+  "open": {
+    "message": "Open"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "close": {
+    "message": "Close"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "saved": {
+    "message": "Saved"
+  },
+  "state": {
+    "message": "State"
+  },
+  "due": {
+    "message": "Due"
+  },
+  "importance": {
+    "message": "Importance"
+  },
+  "urgency": {
+    "message": "Urgency"
+  },
+  "priority": {
+    "message": "Priority"
+  },
+  "attachPage": {
+    "message": "Attach this page"
+  },
+  "attached": {
+    "message": "Page attached."
+  },
+  "copyCode": {
+    "message": "Copy code"
+  },
+  "today": {
+    "message": "Today"
+  },
+  "tomorrow": {
+    "message": "Tomorrow"
+  },
+  "inAWeek": {
+    "message": "In a week"
+  },
+  "clearDue": {
+    "message": "No date"
+  },
+  "captureTitle": {
+    "message": "Capture this page"
+  },
+  "captureAsTask": {
+    "message": "As a task"
+  },
+  "captureAsNote": {
+    "message": "As a note"
+  },
+  "captureTitleLabel": {
+    "message": "Title"
+  },
+  "captureBodyLabel": {
+    "message": "Body"
+  },
+  "captureProject": {
+    "message": "Project"
+  },
+  "captureNoProject": {
+    "message": "No project"
+  },
+  "captureScreenshot": {
+    "message": "Attach a screenshot"
+  },
+  "captureFile": {
+    "message": "Attach a file"
+  },
+  "captureFileSidePanelOnly": {
+    "message": "Choosing a file closes this popup. Open the side panel to attach one."
+  },
+  "captureCreate": {
+    "message": "Create"
+  },
+  "captureCreateAndOpen": {
+    "message": "Create and open"
+  },
+  "captureDone": {
+    "message": "Created $CODE$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureAttachmentsFailed": {
+    "message": "Created, but these did not attach: $NAMES$",
+    "placeholders": {
+      "names": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureSelectionBlocked": {
+    "message": "Chrome does not let extensions read this page, so the selection could not be included."
+  },
+  "screenshotWrongTab": {
+    "message": "Chrome only lets the extension photograph the tab you invoked it from."
+  },
+  "sinceYouLeftOk": {
+    "message": "While the panel was closed: $N$ saved.",
+    "placeholders": {
+      "n": {
+        "content": "$1"
+      }
+    }
+  },
+  "sinceYouLeftFailed": {
+    "message": "While the panel was closed, these did not save: $NAMES$",
+    "placeholders": {
+      "names": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNetwork": {
+    "message": "Mycelium is unreachable."
+  },
+  "errServer": {
+    "message": "Mycelium answered with an error."
+  },
+  "errDisabled": {
+    "message": "The extension is switched off."
+  },
+  "errDisconnected": {
+    "message": "This browser is not connected to a workspace."
+  },
+  "errUnauthenticated": {
+    "message": "This browser's credential is no longer accepted."
+  },
+  "shortcuts": {
+    "message": "Shortcuts"
+  },
+  "hintKeys": {
+    "message": "Tab list · Enter open · Shift+Enter edit"
+  },
+  "sectionDue": {
+    "message": "Due or overdue"
+  },
+  "sectionPressing": {
+    "message": "Most pressing"
+  },
+  "sectionTouched": {
+    "message": "Recently touched"
+  },
+  "pin": {
+    "message": "Keep above the list"
+  },
+  "unpin": {
+    "message": "Stop keeping it above"
+  },
+  "pinned": {
+    "message": "Kept above"
+  },
+  "pageStripAttach": {
+    "message": "Attach this page to it"
+  },
+  "synced": {
+    "message": "synced $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "refresh": {
+    "message": "Refresh"
+  }
+}

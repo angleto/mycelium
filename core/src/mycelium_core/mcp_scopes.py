@@ -66,9 +66,32 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
     ScopeDef(
         "tasks:write", "write", "Write tasks", "Create, update and re-state tasks (no deletion)."
     ),
+    ScopeDef(
+        "tasks:state",
+        "write",
+        "Advance tasks",
+        "Move a task to another state of the workflow it already runs on. "
+        "Advancing a task and REDEFINING the state machine every task runs "
+        "on are different powers, so they are different keys: this one "
+        "cannot create, edit or delete a workflow.",
+    ),
     ScopeDef("time:write", "write", "Write time", "Start, stop and edit time entries."),
     ScopeDef(
-        "tags:write", "write", "Write taxonomy", "Create or update tags, clients and projects."
+        "tags:write",
+        "write",
+        "Write taxonomy",
+        "Create or update tags, clients and projects, and change a tag's "
+        "scope. This is the vocabulary itself; FILING something into a "
+        "client, project or tag that already exists is tags:assign.",
+    ),
+    ScopeDef(
+        "tags:assign",
+        "write",
+        "File into the taxonomy",
+        "Attach and detach existing tags, and move a task into an existing "
+        "client or project. Inventing a vocabulary and using one are "
+        "different powers: a client that files work does not need to be "
+        "able to rename a client or rescope a tag every entity carries.",
     ),
     ScopeDef("notes:write", "write", "Write notes", "Create and edit notes."),
     ScopeDef("memory:write", "write", "Write memory", "Append to the memory store."),
@@ -99,7 +122,9 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "workflows:write",
         "danger",
         "Edit workflows",
-        "Change workflow state machines used by every task — invariants matter here.",
+        "Create, change and delete the workflow state machines every task "
+        "runs on, and choose which one a project uses — invariants matter "
+        "here. Moving one task between states is tasks:state.",
     ),
     ScopeDef(
         "delete:taxonomy",

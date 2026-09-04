@@ -15,7 +15,7 @@ import { periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { ConnectorTriage } from '../components/ConnectorTriage'
 import { CopyXmlButton, XmlView } from '../components/XmlView'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Invoice = components['schemas']['InvoiceOut']
 type Line = components['schemas']['InvoiceLineOut']

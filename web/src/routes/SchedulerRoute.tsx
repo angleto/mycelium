@@ -4,7 +4,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { fmtDateTime } from '../lib/tz'
 import { DispatchPanel } from '../components/DispatchPanel'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 type Row = components['schemas']['ScheduleOut']

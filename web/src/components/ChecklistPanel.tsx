@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { RichEditor } from './RichEditor'
 import { useUnsavedGuard } from '../lib/unsavedGuard'
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Endpoint = components['schemas']['WebhookEndpointOut']
 // The create / rotate response is the only place the signing secret appears.

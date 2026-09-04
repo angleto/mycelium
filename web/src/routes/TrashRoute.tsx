@@ -5,7 +5,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { TagChip } from '../components/TagChip'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 type NoteT = components['schemas']['NoteListOut']

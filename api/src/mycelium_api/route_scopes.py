@@ -18,7 +18,9 @@ Each ``(METHOD, path-template)`` maps to one of:
   no matter which scopes it holds. This is the privilege-escalation fence:
   account/session/MFA, workspace and member administration, and above all
   the credential and assistant routes, since an assistant that can PATCH its
-  own row could simply widen its own scope and undo the whole boundary.
+  own row could simply widen its own scope and undo the whole boundary;
+- ``META`` -- authenticated and tenant-scoped, but callable under any scope
+  including the empty one. Exactly one route, ``GET /agent/self``.
 
 FAIL-CLOSED: a route absent from the map is denied to a scoped assistant. A
 drift-guard test asserts the map covers the live route table exactly, so a
@@ -36,9 +38,16 @@ re-litigated per route):
   tool callable under any scope. They are NOT the same operation: ``whoami``
   is a purpose-built agent bootstrap returning a curated identity subset,
   while ``/auth/me`` reads and mutates the raw user-account row (email,
-  avatar, admin flag). A scoped assistant bootstraps over MCP ``whoami``; it
-  has no reason to touch the account row. No META sentinel is added to this
-  module -- the only always-callable identity path is the MCP one.
+  avatar, admin flag). A scoped assistant bootstraps over ``whoami``; it has
+  no reason to touch the account row, and that half of the decision stands.
+
+  The other half -- "no META sentinel is added to this module, the only
+  always-callable identity path is the MCP one" -- is SUPERSEDED. It was
+  true while every scoped client spoke MCP and could therefore bootstrap on
+  ``whoami``. A scoped client that speaks only HTTP cannot, and hardcoding
+  the scope list it was minted with drifts silently the moment somebody
+  edits the assistant. ``GET /agent/self`` is the REST twin, mapped META,
+  and it answers what the CREDENTIAL is rather than who the person is.
 
 - ``POST /capability/text-block`` is HUMAN_ONLY, not a stopgap. It mints a
   ``mycelium_cap_`` token, and a capability token authenticates on a branch
@@ -85,6 +94,23 @@ from __future__ import annotations
 # with a real scope key.
 PUBLIC: object = object()
 HUMAN_ONLY: object = object()
+
+# META: authenticated, tenant-scoped, and callable under ANY scope --
+# including the empty one. Exactly one route holds it, ``GET /agent/self``,
+# and the reason it must not be a scope key is circular: a client cannot
+# ask what it may do if asking is itself something it may not do. It then
+# either hardcodes the list it was minted with, which drifts silently the
+# moment someone edits the assistant, or it probes an unrelated endpoint
+# and reads the failure, which is guessing.
+#
+# This supersedes the decision recorded below that no META sentinel would
+# exist here. That was written when every scoped client spoke MCP and
+# could bootstrap on the ``whoami`` tool; a scoped client that speaks only
+# HTTP is a new fact, not a re-litigation. The fence itself is unchanged:
+# ``/auth/me`` reads the raw account row and stays HUMAN_ONLY, and META
+# answers the narrower question -- what is this CREDENTIAL -- rather than
+# who is the person holding it.
+META: object = object()
 UNMAPPED: object = object()
 
 # Any-of value: a route whose exact required key depends on the REQUEST BODY (a
@@ -106,6 +132,35 @@ LINK_WRITE_ANY: frozenset[str] = frozenset({"notes:write", "tasks:write"})
 # in the handler -- either key genuinely suffices, so no ``require_agent_scope``
 # call follows.
 ANNOTATION_WRITE_ANY: frozenset[str] = frozenset({"annotations:write", "comments:write"})
+
+# Any-of value, third family, and this one is TRANSITIONAL (2026-09-03).
+# REMOVE BY 2026-12-01.
+#
+# Two keys were each doing two jobs, so a caller that needed the small power
+# had to be granted the large one:
+#
+#   workflows:write  advance ONE task  +  create / edit / DELETE the state
+#                                         machine every task in the workspace
+#                                         runs on, and repoint a project at
+#                                         another one
+#   tags:write       file a task into  +  invent, rename and rescope the
+#                    an existing         vocabulary every entity carries
+#                    client / project
+#
+# A browser extension whose job is "mark this done" must not hold the power
+# to delete a workflow, and one that files a page into a project the user
+# already made must not be able to rename that user's clients. Those are
+# different resources, so they are different keys: ``tasks:state`` and
+# ``tags:assign``.
+#
+# These sets exist ONLY so an assistant granted the wide key before the split
+# keeps working: holding either passes. To remove them, re-grant the narrow
+# key where it is relied on, then collapse each set to its narrow member.
+# Left in place the split is decorative, because nothing ever moves off the
+# wide key. The same two sets exist in ``mcp.tool_scopes``; the pair must be
+# collapsed on both surfaces in the same change.
+TASK_STATE_ANY: frozenset[str] = frozenset({"tasks:state", "workflows:write"})
+TAG_ASSIGN_ANY: frozenset[str] = frozenset({"tags:assign", "tags:write"})
 
 # (METHOD, path template) -> scope key | PUBLIC | HUMAN_ONLY | any-of frozenset
 ROUTE_SCOPES: dict[tuple[str, str], object] = {
@@ -188,6 +243,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/auth/login"): PUBLIC,
     ("POST", "/auth/login-mfa"): PUBLIC,
     ("POST", "/auth/logout"): HUMAN_ONLY,
+    ("GET", "/agent/self"): META,
     ("GET", "/auth/me"): HUMAN_ONLY,
     ("PATCH", "/auth/me"): HUMAN_ONLY,
     ("GET", "/auth/me/avatar"): HUMAN_ONLY,
@@ -537,10 +593,10 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/tasks/{task_id}/revisions/{rev_id}"): "tasks:read",
     ("PATCH", "/tasks/{task_id}/revisions/{rev_id}"): "tasks:write",
     ("POST", "/tasks/{task_id}/revisions/{rev_id}/restore"): "tasks:write",
-    ("POST", "/tasks/{task_id}/state"): "workflows:write",
+    ("POST", "/tasks/{task_id}/state"): TASK_STATE_ANY,
     ("GET", "/tasks/{task_id}/states"): "workflows:read",
-    ("POST", "/tasks/{task_id}/tags"): "tags:write",
-    ("DELETE", "/tasks/{task_id}/tags/{tag_id}"): "tags:write",
+    ("POST", "/tasks/{task_id}/tags"): TAG_ASSIGN_ANY,
+    ("DELETE", "/tasks/{task_id}/tags/{tag_id}"): TAG_ASSIGN_ANY,
     ("POST", "/tasks/{task_id}/unarchive"): "tasks:write",
     # --- telegram ---
     ("DELETE", "/telegram/link"): HUMAN_ONLY,
@@ -701,6 +757,8 @@ def scope_permits(method: str, path: str, scope: list[str] | None) -> bool:
         return True
     req = required_scope(method, path)
     if req is PUBLIC:
+        return True
+    if req is META:
         return True
     if req is HUMAN_ONLY or req is UNMAPPED:
         return False

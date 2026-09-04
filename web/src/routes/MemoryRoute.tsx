@@ -11,7 +11,7 @@ import { useSession } from '../auth/useSession'
 import { useFocus } from '../lib/focus'
 import { TagChip } from '../components/TagChip'
 import { TagPickerGrid } from '../components/TagPickerGrid'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Hit = components['schemas']['MemoryHitOut']
 type Tag = components['schemas']['TagOut']

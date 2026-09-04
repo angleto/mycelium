@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Executor = components['schemas']['ExecutorOut']
 

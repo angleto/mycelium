@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { NotePickList } from './NotePickList'
 
 type NoteLinkOut = components['schemas']['NoteLinkOut']

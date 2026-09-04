@@ -7,6 +7,11 @@ import { useAdminMode } from '../auth/useSession'
 // happened to add it:
 //
 //   Account    — you, on this login. Follows you into every workspace.
+//   Browser    — this browser. Which one holds an extension credential is
+//                not a property of you (it does not follow you to another
+//                machine) nor of the workspace (which does not care where
+//                you read it from), so it is its own scope rather than a
+//                drawer inside one of the others.
 //   Workspace  — this tenant. Different in the next workspace you open.
 //   Platform   — the deployment. Admin-only, one value for everybody.
 //
@@ -34,6 +39,9 @@ export function SettingsLayout() {
       <nav className="setnav" aria-label={t('nav.settings')}>
         <NavLink end to="/settings" className={cls}>
           {t('setnav.account')}
+        </NavLink>
+        <NavLink to="/settings/extension" className={cls}>
+          {t('setnav.extension')}
         </NavLink>
         <NavLink to="/settings/workspace" className={cls}>
           {t('setnav.workspace')}

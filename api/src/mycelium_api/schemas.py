@@ -706,6 +706,27 @@ class TaskCreateIn(BaseModel):
     recurrence: dict[str, Any] | None = None
 
 
+# The sort keys ``GET /tasks`` accepts, as a type rather than a string.
+# The service holds the authoritative name -> column whitelist
+# (``services.tasks._TASK_ORDER``, so a sort key can never be
+# string-interpolated into SQL) and answers an unrecognised name by
+# falling back to its default order. That fallback is right inside the
+# service, where the caller is our own code; over HTTP it is wrong,
+# because a typo then looks exactly like a sort that was applied. Here an
+# unrecognised value is a 422. A drift guard asserts the two stay equal
+# in both directions -- a key added to the service and not offered here
+# is unreachable, one offered here and removed there silently stops
+# sorting.
+TaskOrderBy = Literal[
+    "priority",
+    "due_date",
+    "start_date",
+    "created_at",
+    "updated_at",
+    "necessity",
+]
+
+
 class TaskPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=300)
@@ -3875,6 +3896,21 @@ class SearchIn(BaseModel):
     include_deleted: bool = False
     rerank: bool = False
     operation_id: str = Field(min_length=1, max_length=128, default="search")
+    # The four below were accepted by the service long before they were
+    # reachable over HTTP. A caller that could not express them had to
+    # apply them AFTER the fact, to a list the server had already cut to
+    # ``limit`` -- which means "of the twenty best text matches, the ones
+    # due today" instead of "the best matches among the ones due today".
+    # Same words, different answer, and nothing in the response says
+    # which one you got.
+    #
+    # 'org' (the default) searches every task; 'project' ANDs the
+    # caller's ``X-Project-Id`` project tag into the task branch, so task
+    # hits are scoped the way note and blob hits already are.
+    task_scope: Literal["org", "project"] = "org"
+    due_before: datetime.datetime | None = None
+    assignee_handles: list[str] | None = None
+    task_state_id: uuid.UUID | None = None
 
 
 class SearchHit(BaseModel):
@@ -3884,7 +3920,14 @@ class SearchHit(BaseModel):
     ``note_part_index_pointer``), neither for an opaque ``kind='blob'``.
     The ``blob_id`` is always the underlying memory row. ``snippet`` is
     the server-side ``ts_headline`` extract; ``title`` is the task/note
-    title when applicable, otherwise None."""
+    title when applicable, otherwise None.
+
+    ``tags`` carries the entity's own tags for a task or note hit,
+    batched server-side, and is empty for an opaque blob hit, which has
+    no entity to carry them. The field was declared here and never
+    filled, so a caller wanting to badge a result with its project had
+    exactly one option: a fetch per row, turning a twenty-row page into
+    twenty-one requests."""
 
     kind: str  # 'task' | 'note' | 'blob'
     task_id: uuid.UUID | None = None

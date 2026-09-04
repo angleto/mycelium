@@ -22,7 +22,39 @@ test:
 # invocation reports success on a file it never opened. `tsc -b` is the
 # one that type-checks.
 web-check:
-	cd web && pnpm install --frozen-lockfile && pnpm exec eslint . && pnpm typecheck
+	cd web && pnpm install --frozen-lockfile \
+	  && pnpm exec eslint . \
+	  && pnpm check:shared \
+	  && pnpm check:i18n \
+	  && pnpm check:css \
+	  && pnpm typecheck \
+	  && pnpm test
+
+# The browser extension gate, matching CI's `extension` job. Its own
+# package with its own lockfile, so `pnpm install` here does not touch
+# the SPA's tree.
+extension-check:
+	cd extension && pnpm install --frozen-lockfile \
+	  && pnpm exec eslint . \
+	  && pnpm check:messages \
+	  && pnpm check:grammar \
+	  && pnpm check:tokens \
+	  && pnpm typecheck \
+	  && pnpm test
+
+# A loadable unpacked directory at extension/dist/unpacked. There is no
+# default origin: it decides which deployment the package talks to, which
+# origin it may fetch from and which origin may hand it a credential, so
+# a missing value stops the build rather than picking somewhere.
+#   MYCELIUM_EXTENSION_ORIGIN=https://mycelium.xeno.garden make extension-build
+extension-build:
+	cd extension && pnpm build
+
+# The upload artifact. Refuses a non-https origin: the store would accept
+# a localhost build and every installer would get an extension talking to
+# their own machine.
+extension-pack:
+	cd extension && pnpm pack
 
 # Offline retrieval eval gate (ADR-0035 / Mycelio WS-E1): deterministic
 # gold-set recall@k/MRR + dense-tier health over the real pipeline. Runs

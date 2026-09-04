@@ -1,0 +1,369 @@
+/* The panel.
+ *
+ * Colours come from tokens.generated.css, which is extracted from the
+ * app's stylesheet, so a rule copied between the two codebases means the
+ * same thing in both and a literal here would be the one value that
+ * cannot follow a brand change.
+ *
+ * Spacing does NOT come from there: the app has no spacing tokens, and a
+ * 420px panel wants a denser scale than a full page. These are the
+ * extension's own, prefixed so they can never be mistaken for shared
+ * ones. */
+
+:root {
+  --myc-s1: 4px;
+  --myc-s2: 8px;
+  --myc-s3: 12px;
+  --myc-s4: 16px;
+  --myc-s5: 24px;
+  --myc-panel: 420px;
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.hypha {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hypha--popup {
+  width: var(--myc-panel);
+  max-height: 600px;
+}
+
+.hypha--side {
+  width: 100%;
+  height: 100vh;
+}
+
+.hypha__header {
+  display: flex;
+  align-items: center;
+  gap: var(--myc-s2);
+  padding: var(--myc-s2) var(--myc-s3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* The on/off switch, first control in the tab order after the query
+ * line. It is not decoration: the worker is the only thing in this
+ * package that can reach the network, and it refuses every operation
+ * while this is off. */
+.hypha__switch {
+  display: flex;
+  align-items: center;
+  gap: var(--myc-s1);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.hypha__ws {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.hypha__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--myc-s1);
+  padding: var(--myc-s2) var(--myc-s3) 0;
+}
+
+.hypha__chip {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hypha__chip--ws {
+  border-color: var(--bark);
+  color: var(--bark);
+}
+
+.hypha__chip--client {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hypha__chip--project {
+  border-color: var(--info);
+  color: var(--info);
+}
+
+/* An atom the query line could not honour. It is dropped from the
+   request, so it has to be visible: the query that ran is not the query
+   that was typed. */
+.hypha__chip--bad {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.hypha__input {
+  margin: var(--myc-s2) var(--myc-s3);
+  padding: var(--myc-s2);
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hypha__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hypha__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--myc-s3) var(--myc-s3);
+}
+
+.hypha__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hypha__row {
+  padding: var(--myc-s2);
+  border-radius: var(--radius);
+  /* A transparent rail, so selecting a row does not move the text by
+   * two pixels. */
+  border-left: 2px solid transparent;
+  cursor: default;
+}
+
+/* Selection is marked by the fill AND a rail. The app marks it with the
+ * fill alone, and --surface-2 on --surface is about 1.15:1 -- below the
+ * 3:1 a non-text indicator needs, so on a bright screen the selected row
+ * is invisible. */
+.hypha__row--sel {
+  background: var(--surface-2);
+  border-left-color: var(--accent);
+}
+
+.hypha__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hypha__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--myc-s1);
+}
+
+.hypha__glyph {
+  color: var(--muted);
+}
+
+.hypha__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hypha__code {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.hypha__snippet {
+  margin: var(--myc-s1) 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hypha__hl {
+  background: var(--accent-weak);
+  color: inherit;
+}
+
+.hypha__meta {
+  display: flex;
+  gap: var(--myc-s2);
+  margin-top: var(--myc-s1);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.hypha__due {
+  color: var(--err);
+}
+
+.hypha__hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.hypha__notice {
+  font-size: 0.82rem;
+  color: var(--text);
+  background: var(--accent-weak);
+  border-radius: var(--radius);
+  padding: var(--myc-s2);
+}
+
+.hypha__failure {
+  font-size: 0.85rem;
+  color: var(--err);
+}
+
+.hypha__ref code {
+  font-family: var(--mono);
+  /* Selectable on purpose: it is the only thing a person can usefully
+   * report, and one they cannot copy they will describe instead. */
+  user-select: text;
+}
+
+.hypha__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--myc-s2);
+  padding: var(--myc-s2) var(--myc-s3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+button {
+  font: inherit;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A button that drops the accent FILL must drop the accent INK with it,
+ * or the ink is coloured for a surface it is no longer on: white on white
+ * in one theme and black on black in the other. */
+.hypha__linkbtn {
+  background: transparent;
+  color: var(--accent);
+  border-color: transparent;
+  padding: 0;
+  margin-left: auto;
+}
+
+/* Announcements for assistive technology only. clip-path rather than
+ * display:none, which would remove them from the accessibility tree and
+ * announce nothing. */
+.hypha__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The side panel's own surface. None of it exists in the popup: a popup
+   dies on focus loss, so by the time you had switched tabs it would be
+   gone. */
+.hypha__strip {
+  padding: var(--myc-s2);
+  margin-bottom: var(--myc-s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hypha__striptitle {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hypha__strip p,
+.hypha__pinned p {
+  margin: 0 0 var(--myc-s1);
+}
+
+.hypha__pinned {
+  padding: var(--myc-s2);
+  margin-bottom: var(--myc-s2);
+  background: var(--accent-weak);
+  border-radius: var(--radius);
+}
+
+.hypha__section {
+  margin: var(--myc-s3) 0 var(--myc-s1);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hypha__field {
+  display: flex;
+  align-items: center;
+  gap: var(--myc-s2);
+  flex-wrap: wrap;
+  margin: var(--myc-s1) 0;
+}
+
+.hypha__label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  min-width: 5.5rem;
+}
+
+.hypha__editor {
+  margin-top: var(--myc-s2);
+  padding: var(--myc-s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hypha__capture input[type='text'],
+.hypha__capture textarea,
+.hypha__editor input[type='text'] {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--myc-s1);
+}

@@ -27,7 +27,7 @@ import { useEditSession } from '../lib/useEditSession'
 import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useStaleWatch } from '../lib/useStaleWatch'
 import { MOBILE_QUERY } from '../lib/useMediaQuery'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Note = components['schemas']['NoteOut']
 type Turn = components['schemas']['NoteTurnOut']

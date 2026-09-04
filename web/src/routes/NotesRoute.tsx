@@ -14,7 +14,7 @@ import { NoteListItem } from '../components/NoteListItem'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { VoiceRecorder } from '../components/VoiceRecorder'
 import { useFocus } from '../lib/focus'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 type Kind = components['schemas']['NoteKind']

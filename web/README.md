@@ -12,7 +12,7 @@ Types are **generated from the backend OpenAPI**, never hand-written:
 pnpm gen:api   # backend must be running on :8000
 ```
 
-This rewrites `src/api/schema.d.ts`. The typed client
+This rewrites `src/shared/schema.d.ts`. The typed client
 (`openapi-fetch`) and all calls are bound to that schema, so a backend
 contract change surfaces as a type error here.
 
@@ -35,8 +35,28 @@ tenant scoping carried explicitly on typed calls.
 
 ```sh
 pnpm lint
-pnpm build      # tsc -b && vite build
+pnpm check:shared   # src/shared imports nothing outside itself
+pnpm check:i18n     # every static t('...') resolves
+pnpm check:css      # a de-filled button sets its own ink
+pnpm typecheck      # tsc -b -- NOT `tsc --noEmit` from the repo root
+pnpm test
+pnpm build          # tsc -b && vite build
 ```
+
+`make web-check` from the repo root runs the same sequence CI does.
+
+## `src/shared`
+
+Rules that belong to the REST API rather than to any one client: how the
+error envelope reads, what an entity code is, what a recents row is, what
+the search-click payload contains, what the query grammar's tokens mean,
+and the generated `schema.d.ts`. This directory is compiled into the
+browser extension as well as the SPA, so **it must import nothing outside
+itself** -- no React, no i18next, no store, no transport. Everything is
+taken as an argument and a value is returned; the caller owns the
+collaborator. `src/shared/index.ts` is the only entry point: deep imports
+are refused. `pnpm check:shared` enforces both rules, because neither can
+surface as a type error on this side of the boundary.
 
 ## Status
 

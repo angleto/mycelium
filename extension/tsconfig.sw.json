@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.sw.tsbuildinfo",
+    /* No DOM. The service worker has no document, and a compiler that
+       offers one lets `document.querySelector` past review into a context
+       where it throws at run time -- in the one place that owns the
+       credential and every network call. */
+    "lib": ["ES2023", "WebWorker"],
+    "types": ["chrome"]
+  },
+  "include": ["src/bg", "src/shared"]
+}

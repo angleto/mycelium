@@ -7,7 +7,7 @@ import { DayStartSettings } from '../components/DayStartSettings'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
 import { TimezoneSettings } from '../components/TimezoneSettings'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Status = components['schemas']['MfaStatusOut']
 type Setup = components['schemas']['MfaSetupOut']

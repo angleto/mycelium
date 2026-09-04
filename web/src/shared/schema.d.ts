@@ -316,6 +316,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/sdi-environment/intermediary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Sdi Intermediary
+         * @description Set the accredited channel's fiscal code, without a redeploy.
+         *
+         *     It used to exist only as ``MYCELIUM_SDI_INTERMEDIARY_ID_CODICE``, so
+         *     correcting it meant editing a ConfigMap and rolling the deployment -- for a
+         *     value FatturaPA is specific about (1.1.1.2 wants the trasmittente's CODICE
+         *     FISCALE, and SdI verifies it in Anagrafe Tributaria as such) and that a
+         *     deployment can therefore hold wrongly for a long time without knowing.
+         */
+        put: operations["set_sdi_intermediary_admin_sdi_environment_intermediary_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mfa/status": {
         parameters: {
             query?: never;
@@ -688,6 +714,16 @@ export interface paths {
          * @description Projects. Archived excluded by default (see GET /clients); the
          *     opt-in is for the Clients page and for callers that read this list
          *     as the project -> client map rather than as a picker.
+         *
+         *     ``q`` / ``limit`` / ``recent`` are the same picker affordances
+         *     ``GET /clients`` has always had. Their absence here was not
+         *     harmless: a project picker could only fetch every project and match
+         *     locally, which is a second implementation of a match the sibling
+         *     route already does in SQL, over a list nothing bounds.
+         *
+         *     ``client_tag_id`` narrows to one client's projects -- the natural
+         *     second step for a picker that has just been told which client it is
+         *     filing into, and a project has exactly one client.
          */
         get: operations["list_projects_projects_get"];
         put?: never;
@@ -2599,6 +2635,23 @@ export interface paths {
          *     service.
          */
         post: operations["cancel_run_agent_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/self": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Agent Self */
+        get: operations["get_agent_self_agent_self_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6771,6 +6824,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/recompose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompose Event
+         * @description Discard the document this event composed and re-run its frozen payload.
+         *
+         *     Owner-only: it deletes a document and re-arms an emission, which is the
+         *     same weight as promoting or discarding a shadow run, not the weight of
+         *     reading the ledger. Refuses anything but an untouched draft.
+         */
+        post: operations["recompose_event_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__recompose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/reshoot-dry-run-xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reshoot Dry Run Xml
+         * @description Rebuild this event's frozen shadow document from the invoice as it is now.
+         *
+         *     Owner-only, like the other two verbs that act on the shadow universe: it
+         *     REPLACES the artefact a parallel run was diffing against the incumbent, so
+         *     it is a decision about the comparison, not a way of reading it.
+         *
+         *     A document that no longer validates answers with the validator's own words
+         *     rather than a success and a stale blob.
+         */
+        post: operations["reshoot_dry_run_xml_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__reshoot_dry_run_xml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/issuer-profiles/{issuer_profile_id}/payment-connectors/{connector_id}/events/{event_id}/promote": {
         parameters: {
             query?: never;
@@ -9035,6 +9139,34 @@ export interface components {
              * Format: date-time
              */
             sent_at: string;
+        };
+        /**
+         * EventActionsOut
+         * @description What this row may actually do, decided HERE and rendered as given.
+         *
+         *     The SPA used to re-derive these rules and got them wrong in both
+         *     directions: Retry was offered whenever the status was not ``done`` while
+         *     the service accepts exactly three statuses, so ``ignored`` and ``pending``
+         *     rows showed a button that answered 409; and "Make sendable" was offered to
+         *     every role while its route is owner-only, so a member got a 403 on click.
+         *     A capability advertised and then refused is worse than an absent one --
+         *     the operator cannot tell a permission problem from a broken feature.
+         *
+         *     Deciding it once on the server is also what keeps the actions from
+         *     contradicting each other as more are added: they are computed from one
+         *     view of the row, not from four independent guesses in TSX.
+         */
+        EventActionsOut: {
+            /** Retry */
+            retry: boolean;
+            /** Promote */
+            promote: boolean;
+            /** Reshoot */
+            reshoot: boolean;
+            /** Recompose */
+            recompose: boolean;
+            /** Settles Existing Draft */
+            settles_existing_draft: boolean;
         };
         /**
          * ExecKind
@@ -11867,6 +11999,8 @@ export interface components {
             emission_event: string;
             /** Payment Sync Enabled */
             payment_sync_enabled: boolean;
+            /** Numbering */
+            numbering: string;
             /** Series */
             series: string | null;
             /** Default Purpose */
@@ -11969,6 +12103,7 @@ export interface components {
             counterpart_email: string | null;
             /** Dry Run */
             dry_run: boolean;
+            actions: components["schemas"]["EventActionsOut"];
             /** Has Dry Run Xml */
             has_dry_run_xml: boolean;
         };
@@ -12018,6 +12153,12 @@ export interface components {
              * @default true
              */
             payment_sync_enabled?: boolean;
+            /**
+             * Numbering
+             * @default client
+             * @enum {string}
+             */
+            numbering?: "client" | "series" | "provider";
             /** Series */
             series?: string | null;
             /** Default Purpose */
@@ -12100,6 +12241,8 @@ export interface components {
             emission_event: string;
             /** Payment Sync Enabled */
             payment_sync_enabled: boolean;
+            /** Numbering */
+            numbering: string;
             /** Series */
             series: string | null;
             /** Default Purpose */
@@ -12179,6 +12322,8 @@ export interface components {
             refund_event?: string | null;
             /** Payment Sync Enabled */
             payment_sync_enabled?: boolean | null;
+            /** Numbering */
+            numbering?: ("client" | "series" | "provider") | null;
             /** Series */
             series?: string | null;
             /** Default Purpose */
@@ -13030,6 +13175,30 @@ export interface components {
             prod_url: string;
             /** Active Endpoint */
             active_endpoint: string;
+            /** Intermediary Id Paese */
+            intermediary_id_paese: string;
+            /** Intermediary Id Codice */
+            intermediary_id_codice: string;
+            /** Intermediary Id Codice Warning */
+            intermediary_id_codice_warning: string | null;
+            /** Client Cert Configured */
+            client_cert_configured: boolean;
+            /** Client Key Configured */
+            client_key_configured: boolean;
+            /** Ca Bundle Configured */
+            ca_bundle_configured: boolean;
+        };
+        /**
+         * SdiIntermediaryIn
+         * @description The accredited channel's fiscal code. Empty clears the override and
+         *     returns the deployment to its env value.
+         */
+        SdiIntermediaryIn: {
+            /**
+             * Id Codice
+             * @default
+             */
+            id_codice?: string;
         };
         /** SdiMandateIn */
         SdiMandateIn: {
@@ -13118,6 +13287,13 @@ export interface components {
          *     The ``blob_id`` is always the underlying memory row. ``snippet`` is
          *     the server-side ``ts_headline`` extract; ``title`` is the task/note
          *     title when applicable, otherwise None.
+         *
+         *     ``tags`` carries the entity's own tags for a task or note hit,
+         *     batched server-side, and is empty for an opaque blob hit, which has
+         *     no entity to carry them. The field was declared here and never
+         *     filled, so a caller wanting to badge a result with its project had
+         *     exactly one option: a fetch per row, turning a twenty-row page into
+         *     twenty-one requests.
          */
         SearchHit: {
             /** Kind */
@@ -13186,6 +13362,58 @@ export interface components {
              * @default search
              */
             operation_id?: string;
+            /**
+             * Task Scope
+             * @default org
+             * @enum {string}
+             */
+            task_scope?: "org" | "project";
+            /** Due Before */
+            due_before?: string | null;
+            /** Assignee Handles */
+            assignee_handles?: string[] | null;
+            /** Task State Id */
+            task_state_id?: string | null;
+        };
+        /** SelfIdentityOut */
+        SelfIdentityOut: {
+            /** Id */
+            id?: string | null;
+            /** Handle */
+            handle?: string | null;
+            /** Kind */
+            kind?: string | null;
+            /** Label */
+            label?: string | null;
+        };
+        /** SelfOut */
+        SelfOut: {
+            workspace: components["schemas"]["SelfWorkspaceOut"];
+            identity: components["schemas"]["SelfIdentityOut"];
+            token: components["schemas"]["SelfTokenOut"];
+            /** Scope */
+            scope?: string[] | null;
+        };
+        /** SelfTokenOut */
+        SelfTokenOut: {
+            /** Prefix */
+            prefix?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+        };
+        /** SelfWorkspaceOut */
+        SelfWorkspaceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
         };
         /** SentOut */
         SentOut: {
@@ -15236,6 +15464,41 @@ export interface operations {
             };
         };
     };
+    set_sdi_intermediary_admin_sdi_environment_intermediary_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SdiIntermediaryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiEnvironmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     mfa_status_mfa_status_get: {
         parameters: {
             query?: never;
@@ -15970,6 +16233,10 @@ export interface operations {
         parameters: {
             query?: {
                 include_archived?: boolean;
+                q?: string | null;
+                limit?: number | null;
+                recent?: boolean;
+                client_tag_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -16227,6 +16494,7 @@ export interface operations {
     list_tasks_tasks_get: {
         parameters: {
             query?: {
+                ids?: string[] | null;
                 state_id?: string | null;
                 tag_id?: string | null;
                 assignee_id?: string | null;
@@ -16237,6 +16505,14 @@ export interface operations {
                 include_archived?: boolean;
                 include_deleted?: boolean;
                 include_checklist?: boolean;
+                q?: string | null;
+                open_only?: boolean;
+                due_before?: string | null;
+                due_after?: string | null;
+                updated_since?: string | null;
+                order_by?: ("priority" | "due_date" | "start_date" | "created_at" | "updated_at" | "necessity") | null;
+                order_desc?: boolean;
+                limit?: number | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -16273,6 +16549,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                "Idempotency-Key"?: string | null;
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
@@ -20541,6 +20818,40 @@ export interface operations {
             };
         };
     };
+    get_agent_self_agent_self_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tokens_agent_tokens_get: {
         parameters: {
             query?: never;
@@ -24161,6 +24472,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                "Idempotency-Key"?: string | null;
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
@@ -29873,6 +30185,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DiscardDryRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recompose_event_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__recompose_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorEventOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reshoot_dry_run_xml_issuer_profiles__issuer_profile_id__payment_connectors__connector_id__events__event_id__reshoot_dry_run_xml_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                connector_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentConnectorEventOut"];
                 };
             };
             /** @description Validation Error */

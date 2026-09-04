@@ -1,6 +1,5 @@
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { authFetch } from '../api/client'
 
 // Ported from bitvision_phoenix/frontend/src/app/settings/ai-assistants
 // (Mycelium API shape: scope is a flat ``string[]`` named ``scope``, not
@@ -11,66 +10,14 @@ import { authFetch } from '../api/client'
 // edit / rotate-secret / revoke (is_active toggle) / delete, secret
 // shown ONCE on create / rotate.
 
-type Scope = { key: string; category: 'read' | 'write' | 'danger'; label: string; description: string }
-type ConnectorInfo = { mcp_url: string; instructions_md: string }
-type Assistant = {
-  id: string
-  label: string
-  provider: string | null
-  model_id: string | null
-  notes: string | null
-  scope: string[]
-  is_active: boolean
-  version: number
-  created_at: string
-  updated_at: string
-  token_prefix: string | null
-}
-type AssistantCreated = { assistant: Assistant; raw_secret: string }
-
-const CATEGORY_ORDER: Array<Scope['category']> = ['read', 'write', 'danger']
-
-async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await authFetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-  })
-  if (!res.ok) {
-    let detail: string
-    try {
-      const j = (await res.json()) as unknown
-      detail =
-        typeof j === 'object' && j !== null && 'detail' in j
-          ? String((j as { detail: unknown }).detail)
-          : JSON.stringify(j)
-    } catch {
-      detail = await res.text().catch(() => '')
-    }
-    throw new Error(detail || `HTTP ${res.status}`)
-  }
-  if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
-}
-
-const aiApi = {
-  list: () => api<Assistant[]>('/ai-assistants'),
-  connectorInfo: () => api<ConnectorInfo>('/ai-assistants/connector-info'),
-  scopeCatalog: () => api<Scope[]>('/ai-assistants/scope-catalog'),
-  create: (body: object) =>
-    api<AssistantCreated>('/ai-assistants', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  update: (id: string, body: object) =>
-    api<Assistant>(`/ai-assistants/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
-  remove: (id: string) =>
-    api<void>(`/ai-assistants/${id}`, { method: 'DELETE' }),
-  rotate: (id: string) =>
-    api<AssistantCreated>(`/ai-assistants/${id}/rotate`, { method: 'POST' }),
-}
+import {
+  CATEGORY_ORDER,
+  type Assistant,
+  type AssistantCreated,
+  type ConnectorInfo,
+  type Scope,
+  aiApi,
+} from '../lib/aiAssistants'
 
 function categoryColor(cat: Scope['category']): string {
   return cat === 'danger' ? '#c0392b' : cat === 'write' ? '#d68910' : '#28a745'

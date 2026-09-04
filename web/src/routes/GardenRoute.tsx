@@ -20,7 +20,7 @@ import { MarkdownView } from '../components/Markdown'
 import { GardenMindmap } from '../components/GardenMindmap'
 import { useFocus } from '../lib/focus'
 import { getSession } from '../auth/session'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 type NoteWithLinks = components['schemas']['NoteWithLinksOut']

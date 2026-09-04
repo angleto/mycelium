@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import { ClientSearch } from './ClientSearch'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']

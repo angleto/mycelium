@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Project = components['schemas']['ProjectOut']
 

@@ -1,12 +1,15 @@
 # Mobile capture: notes from your phone
 
-Three channels, each landing in the SAME Mycelium `/notes`:
+Three channels for capture **from a phone**, each landing in the SAME
+Mycelium `/notes`:
 
 1. **PWA install** (browser → home-screen icon)
 2. **Apple Shortcut** (Siri "Hey Siri, nuova nota Mycelium…")
 3. **Telegram bot** (voice messages → notes; revived in v1.2.29)
 
-All three reuse the same backend; the difference is the front door.
+All three reuse the same backend; the difference is the front door. At a
+desktop the fourth door is the browser extension, which captures the page
+you are reading -- see [the browser extension](extension.md).
 
 ## 1. PWA install
 

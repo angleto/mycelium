@@ -25,7 +25,8 @@
 // Unknown keys / malformed tokens degrade to free-text — easier than
 // throwing parser errors at the user.
 
-import type { components } from '../api/schema'
+import type { components } from '../shared'
+import { RE_PREDICATE, type FilterKey, isFilterKey, tokenize } from '../shared'
 
 // Per-tab memory of the last /tasks URL search (``?q=…&filter=…``). The
 // query and tag filter live in the URL (source of truth) so the browser
@@ -44,8 +45,6 @@ export type FilterCtx = {
 }
 
 export type FilterPredicate = (t: Task) => boolean
-
-const RE_PREDICATE = /^([a-z_]+):(.+)$/i
 
 export function parseFilter(input: string, ctx: FilterCtx): FilterPredicate {
   const tokens = tokenize(input)
@@ -92,14 +91,20 @@ export function getFreeTextTokens(input: string): string[] {
   return out
 }
 
-function tokenize(input: string): string[] {
-  // Whitespace-separated, but ``|`` keeps as its own token even when
-  // adjacent to atoms (``a|b`` → ``a | b``).
-  const expanded = input.replace(/\s*\|\s*/g, ' | ')
-  return expanded
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
+// One meaning per key, and the type says so: ``Record<FilterKey, ...>``
+// makes a key declared in the shared grammar but not implemented here a
+// compile error, and a key implemented here but absent from the grammar
+// a compile error too. That is the whole point of the table -- the two
+// browser surfaces parse the same tokens, and the way they drift is one
+// of them quietly growing an eighth key.
+const COMPILERS: Record<FilterKey, (value: string, ctx: FilterCtx) => FilterPredicate> = {
+  tag: (value) => compileTagRef(value),
+  state: (value, ctx) => compileState(value, ctx),
+  due: (value, ctx) => compileDue(value, ctx),
+  priority: (value) => comparator((t) => t.priority ?? Infinity, value),
+  created: (value, ctx) => compileCreated(value, ctx),
+  executor: (value) => compileExecutor(value),
+  actor: (value) => compileActor(value),
 }
 
 function compileAtom(token: string, ctx: FilterCtx): FilterPredicate {
@@ -113,14 +118,7 @@ function compileAtom(token: string, ctx: FilterCtx): FilterPredicate {
   const m = RE_PREDICATE.exec(token)
   if (m) {
     const key = m[1].toLowerCase()
-    const value = m[2]
-    if (key === 'tag') return compileTagRef(value)
-    if (key === 'state') return compileState(value, ctx)
-    if (key === 'due') return compileDue(value, ctx)
-    if (key === 'priority') return comparator((t) => t.priority ?? Infinity, value)
-    if (key === 'created') return compileCreated(value, ctx)
-    if (key === 'executor') return compileExecutor(value)
-    if (key === 'actor') return compileActor(value)
+    if (isFilterKey(key)) return COMPILERS[key](m[2], ctx)
   }
   // free text → match title, description, checklist item text, or any
   // tag name. Description/checklist coverage is what lets "pane"

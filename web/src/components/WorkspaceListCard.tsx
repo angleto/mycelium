@@ -14,7 +14,7 @@ import {
   type WorkspaceChoice,
 } from '../lib/workspaceChoice'
 import { ConfirmDialog } from './ConfirmDialog'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Summary = components['schemas']['WorkspaceSummaryOut']
 

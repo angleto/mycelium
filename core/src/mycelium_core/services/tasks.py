@@ -466,6 +466,7 @@ _TASK_ORDER: dict[str, Any] = {
 def _apply_task_filters(
     stmt: Select[Any],
     *,
+    ids: Sequence[uuid.UUID] | None,
     state_id: uuid.UUID | None,
     tag_id: uuid.UUID | None,
     assignee_id: uuid.UUID | None,
@@ -500,6 +501,14 @@ def _apply_task_filters(
         stmt = stmt.where(
             Task.state_id.in_(select(WorkflowState.id).where(WorkflowState.is_terminal.is_(False)))
         )
+    if ids is not None:
+        # An explicit set of rows, for a caller that already knows which
+        # ones it wants: hydrating N search hits costs one query instead
+        # of N. An EMPTY sequence means "these zero rows" and returns
+        # nothing -- distinct from None, which means "no id filter". A
+        # caller that folds the two together turns a filtered-to-nothing
+        # page into the whole workspace.
+        stmt = stmt.where(Task.id.in_(list(ids)))
     if state_id is not None:
         stmt = stmt.where(Task.state_id == state_id)
     if parent_task_id is not None:
@@ -573,6 +582,7 @@ async def list_tasks(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
+    ids: Sequence[uuid.UUID] | None = None,
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
@@ -604,6 +614,7 @@ async def list_tasks(
         stmt = stmt.options(defer(Task.description))
     stmt = _apply_task_filters(
         stmt,
+        ids=ids,
         state_id=state_id,
         tag_id=tag_id,
         assignee_id=assignee_id,
@@ -656,6 +667,7 @@ async def count_tasks(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
+    ids: Sequence[uuid.UUID] | None = None,
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
@@ -680,6 +692,7 @@ async def count_tasks(
     stmt: Select[Any] = select(func.count(func.distinct(Task.id))).select_from(Task)
     stmt = _apply_task_filters(
         stmt,
+        ids=ids,
         state_id=state_id,
         tag_id=tag_id,
         assignee_id=assignee_id,

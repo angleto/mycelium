@@ -5,7 +5,7 @@ import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { useSession, useWorkspaceRole } from '../auth/useSession'
 import { canWriteWorkspace } from '../lib/workspaceChoice'
 import { ConfirmDialog } from './ConfirmDialog'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Member = components['schemas']['MemberOut']
 

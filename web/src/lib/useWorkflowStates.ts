@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type State = components['schemas']['StateOut']
 

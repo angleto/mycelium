@@ -72,6 +72,18 @@ mycelium/
   sdi-inbound/ # inbound SdI SOAP service
   worker/      # background jobs
   web/         # React/TS SPA
+    src/shared/  # rules that belong to the API, not to a client:
+                 # the error envelope, the entity code, the recents
+                 # contract, the query grammar, the generated types.
+                 # Compiled into the extension as well; imports nothing.
+  extension/   # Chrome MV3 extension (own lockfile, no runtime deps)
+  cli/         # `mycelium` command-line client
+  nvim/        # `mycelium-nvim` editor plugin
   deploy/      # Docker Compose, config, migrations
   docs/        # this documentation
 ```
+
+Four adapters over one domain: the SPA, the CLI, the editor plugin and the
+browser extension. None holds business logic (ADR-0001), and the two that
+share a language share the rules that belong to the API rather than to
+either of them (`web/src/shared`, ADR-0057).

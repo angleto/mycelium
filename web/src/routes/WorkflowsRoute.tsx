@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { downloadResponse, sanitizeFilename } from '../lib/downloadFile'
 
 type Workflow = components['schemas']['WorkflowOut']

@@ -1,0 +1,30 @@
+{
+  "name": "@mycelium/extension",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "pack": "node scripts/build.mjs --zip",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "gen:tokens": "node scripts/gen-tokens.mjs",
+    "check:tokens": "node scripts/gen-tokens.mjs --check",
+    "check:messages": "node scripts/check-messages.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "check:grammar": "node scripts/check-query-grammar.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.1.30",
+    "@types/node": "^24.12.3",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "jsdom": "^30.0.1",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.11"
+  }
+}

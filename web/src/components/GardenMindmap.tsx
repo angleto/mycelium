@@ -38,7 +38,7 @@ import '@xyflow/react/dist/base.css'
 import { useTranslation } from 'react-i18next'
 
 import { authFetch } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 type TagBrief = components['schemas']['TagBrief']

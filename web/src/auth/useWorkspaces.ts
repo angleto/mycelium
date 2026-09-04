@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { api } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import {
   getSession,
   subscribe as subscribeSession,

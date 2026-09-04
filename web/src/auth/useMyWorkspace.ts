@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import i18n from '../i18n'
 import { useSession } from './useSession'
 

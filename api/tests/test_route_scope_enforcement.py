@@ -19,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from mycelium_api import route_scopes
 from mycelium_api.app import create_app
 from mycelium_api.main import app
-from mycelium_api.route_scopes import HUMAN_ONLY, PUBLIC, ROUTE_SCOPES, scope_permits
+from mycelium_api.route_scopes import HUMAN_ONLY, META, PUBLIC, ROUTE_SCOPES, scope_permits
 from mycelium_core.mcp_scopes import VALID_SCOPE_KEYS
 from mycelium_mcp.tool_scopes import TOOL_SCOPES
 
@@ -59,9 +59,13 @@ def test_route_scopes_covers_every_live_route() -> None:
 
 
 def test_route_scopes_reference_only_catalog_keys() -> None:
+    # The sentinels are enumerated rather than "anything that is not a str":
+    # a value that is neither a sentinel nor a key must still fall through to
+    # the check below and fail, or a typo'd sentinel silently opens a route.
+    sentinels = (PUBLIC, HUMAN_ONLY, META)
     bad: dict[tuple[str, str], list[str]] = {}
     for k, v in ROUTE_SCOPES.items():
-        if v is PUBLIC or v is HUMAN_ONLY:
+        if any(v is sentinel for sentinel in sentinels):
             continue
         # A value is a single key or an any-of frozenset (kind multiplexer);
         # every member must be a real catalog key.

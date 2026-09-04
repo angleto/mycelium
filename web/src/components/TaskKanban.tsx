@@ -5,7 +5,7 @@ import { PriorityChip } from './PriorityChip'
 import { TagChip } from './TagChip'
 import { TaskTimer } from './TaskTimer'
 import { IdentityBadge } from './IdentityBadge'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { formatDueDate } from '../lib/time'
 
 type Task = components['schemas']['TaskOut']

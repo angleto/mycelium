@@ -35,6 +35,7 @@ import { TagManagerRoute } from './routes/TagManagerRoute'
 import { SettingsLayout } from './routes/SettingsLayout'
 import { SettingsAccountRoute } from './routes/SettingsAccountRoute'
 import { SettingsWorkspaceRoute } from './routes/SettingsWorkspaceRoute'
+import { SettingsExtensionRoute } from './routes/SettingsExtensionRoute'
 import { SettingsPlatformRoute } from './routes/SettingsPlatformRoute'
 import { PrefixOrUuid, PrefixResolver } from './routes/PrefixResolver'
 
@@ -101,6 +102,11 @@ function App() {
               <Route index element={<SettingsAccountRoute />} />
               <Route path="workspace" element={<SettingsWorkspaceRoute />} />
               <Route path="platform" element={<SettingsPlatformRoute />} />
+              {/* Reached two ways: a person clicking through, and the
+                  extension opening it with ?state=&id= to ask for a
+                  credential. One page, so the disclosure of what is
+                  being granted cannot differ between the two paths. */}
+              <Route path="extension" element={<SettingsExtensionRoute />} />
             </Route>
             {/* The workspace surface moved into Settings; the old
                 top-level route stays as a redirect. */}

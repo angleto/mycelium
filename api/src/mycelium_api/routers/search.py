@@ -16,9 +16,11 @@ from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 
 from mycelium_api.deps import TenantCtx, tenant_admin_ctx, tenant_ctx
-from mycelium_api.schemas import SearchClickIn, SearchHit, SearchIn
+from mycelium_api.schemas import SearchClickIn, SearchHit, SearchIn, TagBrief
+from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import search_clicks as clicks_svc
 from mycelium_core.services import task_search as svc
+from mycelium_core.services import tasks as tasks_svc
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -28,7 +30,7 @@ async def search(
     body: SearchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[SearchHit]:
-    hits = await svc.search_unified(
+    hits, _meta = await svc.search_unified_with_meta(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
@@ -42,7 +44,33 @@ async def search(
         include_deleted=body.include_deleted,
         operation_id=body.operation_id,
         rerank=body.rerank,
+        task_scope=body.task_scope,
+        due_before=body.due_before,
+        assignee_handles=body.assignee_handles,
+        task_state_id=body.task_state_id,
     )
+
+    # Two batched reads for the whole page rather than one per row. The
+    # field was declared on SearchHit from the start and never filled, so
+    # a caller that wanted to show which project a result belongs to had
+    # to fetch each hit -- twenty-one requests to render twenty rows.
+    task_ids = [h.task_id for h in hits if h.task_id is not None]
+    note_ids = [h.note_id for h in hits if h.note_id is not None]
+    task_tags = await tasks_svc.tags_by_task(ctx.session, task_ids=task_ids) if task_ids else {}
+    note_tags = await notes_svc.tags_by_note(ctx.session, note_ids=note_ids) if note_ids else {}
+
+    def _tags(h: svc.UnifiedHit) -> list[TagBrief]:
+        # A blob hit is opaque: it has no entity, so it has no tags. An
+        # empty list here says "nothing to show", which is the truth,
+        # rather than "not loaded".
+        if h.task_id is not None:
+            rows = task_tags.get(h.task_id, [])
+        elif h.note_id is not None:
+            rows = note_tags.get(h.note_id, [])
+        else:
+            return []
+        return [TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in rows]
+
     return [
         SearchHit(
             kind=h.kind,
@@ -53,6 +81,7 @@ async def search(
             title=h.title,
             snippet=h.snippet,
             score=h.score,
+            tags=_tags(h),
         )
         for h in hits
     ]

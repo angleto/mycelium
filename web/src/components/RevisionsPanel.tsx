@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { display, equal, fieldType } from '../lib/revisionDiff'
 
 type Revision = components['schemas']['RevisionOut']

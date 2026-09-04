@@ -92,6 +92,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm exec eslint . --no-cache
+      # src/shared is compiled into the browser extension as well as the
+      # SPA, so an import that leaves it -- a hook, a catalogue, a store,
+      # a transport -- breaks the OTHER package, later, for somebody else.
+      # It cannot surface here as a type error or a lint failure: inside
+      # the SPA the import resolves perfectly. Also refuses a deep import
+      # past src/shared/index.ts, so the barrel stays the entry point.
+      - name: Shared purity
+        run: pnpm check:shared
       # Every static t('...') must resolve in src/i18n/en.ts. The SPA-side
       # port of the backend's test_i18n_catalog: without it, a missing key
       # renders either the raw dotted key or -- behind a defaultValue --
@@ -128,6 +136,70 @@ jobs:
         run: pnpm test
       - name: Build
         run: pnpm build
+
+  # The browser extension. A separate package with its own lockfile: it
+  # ships no runtime dependency at all, so React, CodeMirror and the rest
+  # of the SPA's tree are not merely unused here, they are not
+  # installable -- a stray import is an unresolved module rather than a
+  # 900 kB popup.
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm exec eslint . --no-cache
+      # chrome.i18n answers an unknown key with an EMPTY STRING -- not an
+      # error, not the key name, a blank where a sentence should be. So a
+      # typo ships an unlabelled button, and it is invisible to anyone
+      # running in the language the typo is not in.
+      - name: Message catalogue
+        run: pnpm check:messages
+      # The /tasks search box and this panel parse the same short
+      # language and must never disagree about what a token IS. A `@name`
+      # meaning "tag" on one surface and something else on the other is
+      # the kind of divergence nobody notices until a saved query returns
+      # the wrong rows.
+      - name: Query grammar
+        run: pnpm check:grammar
+      # The palette is EXTRACTED from web/src/index.css rather than
+      # copied, so the two cannot drift. The same extractor also compares
+      # the app's two dark blocks -- the explicit choice and the system
+      # preference -- which were kept in step by a comment until now.
+      - name: Design tokens
+        run: pnpm check:tokens
+      # Two projects with different libs: the service worker compiles
+      # without a DOM, so `document` is not a name there, and the panel
+      # documents compile without the worker globals. `tsc -b`, because
+      # `tsc --noEmit` from a root with no project reference checks
+      # nothing at all.
+      - name: Typecheck
+        run: pnpm typecheck
+      # The credential handshake, the 401 path, the on/off switch at the
+      # seam, and the snippet renderer against an injected tag. After
+      # Typecheck, because vitest transpiles without typechecking and a
+      # type error would otherwise surface here as a confusing runtime
+      # failure.
+      - name: Unit tests
+        run: pnpm test
+      # Last, and with the origin passed explicitly: there is no default,
+      # so a build that reaches this step is a build that was told which
+      # deployment it is for.
+      - name: Build
+        run: pnpm build
+        env:
+          MYCELIUM_EXTENSION_ORIGIN: https://mycelium.xeno.garden
 
   # End-to-end browser suite (Playwright). Runs the real stack: Postgres
   # service + migrated schema + uvicorn(:8000) + the Vite dev server

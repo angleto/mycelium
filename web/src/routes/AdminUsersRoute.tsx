@@ -4,7 +4,7 @@ import { api, errMessage } from '../api/client'
 import { setAdminMode } from '../auth/session'
 import { useAdminMode } from '../auth/useSession'
 import { useMe } from '../auth/useMe'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type AdminUser = components['schemas']['AdminUserOut']
 

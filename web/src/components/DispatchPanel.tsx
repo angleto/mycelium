@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { saveWorkspaceSettings, useMyWorkspace } from '../auth/useMyWorkspace'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Req = components['schemas']['DispatchRequestOut']
 type Tick = components['schemas']['DispatchTickOut']

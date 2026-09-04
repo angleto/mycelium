@@ -19,7 +19,14 @@ make lint       # ruff check
 make fmt        # ruff format
 make type       # mypy --strict
 make test       # pytest
+make web-check  # the SPA: lint, shared purity, i18n, button ink, tsc -b, vitest
+make extension-check  # the browser extension: lint, messages, tokens, tsc -b, vitest
 ```
+
+The Python targets do not reach the interface. The two `-check` targets run
+the same sequences CI's `web` and `extension` jobs do, in the same order, so
+a green local run means the same thing a green job does; the browser suite
+(`pnpm e2e` in `web/`) needs the stack up and is not part of either.
 
 ## Local stack
 

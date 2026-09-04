@@ -291,12 +291,32 @@ async def list_clients(
 async def list_projects(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     include_archived: bool = False,
+    q: str | None = None,
+    limit: Annotated[int | None, Query(gt=0, le=200)] = None,
+    recent: bool = False,
+    client_tag_id: uuid.UUID | None = None,
 ) -> list[ProjectOut]:
     """Projects. Archived excluded by default (see GET /clients); the
     opt-in is for the Clients page and for callers that read this list
-    as the project -> client map rather than as a picker."""
+    as the project -> client map rather than as a picker.
+
+    ``q`` / ``limit`` / ``recent`` are the same picker affordances
+    ``GET /clients`` has always had. Their absence here was not
+    harmless: a project picker could only fetch every project and match
+    locally, which is a second implementation of a match the sibling
+    route already does in SQL, over a list nothing bounds.
+
+    ``client_tag_id`` narrows to one client's projects -- the natural
+    second step for a picker that has just been told which client it is
+    filing into, and a project has exactly one client."""
     rows = await taxonomy.list_projects(
-        ctx.session, org_id=ctx.org_id, include_archived=include_archived
+        ctx.session,
+        org_id=ctx.org_id,
+        include_archived=include_archived,
+        q=q,
+        limit=limit,
+        recent=recent,
+        client_tag_id=client_tag_id,
     )
     return [_project_out(t, p) for t, p in rows]
 

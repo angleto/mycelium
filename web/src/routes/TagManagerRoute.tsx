@@ -11,7 +11,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { useFocus } from '../lib/focus'
 import { TagChip } from '../components/TagChip'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Tag = components['schemas']['TagOut']
 

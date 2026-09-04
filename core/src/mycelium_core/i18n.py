@@ -177,6 +177,7 @@ class MessageCode(enum.StrEnum):
     RATE_LIMITED = "rate.limited"
     MCP_SCOPE_DENIED = "mcp.scope_denied"
     AGENT_SCOPE_DENIED = "agent.scope_denied"
+    AGENT_WORKSPACE_MISMATCH = "agent.workspace_mismatch"
     MANDATE_REQUIRED = "invoice.mandate_required"
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
@@ -590,6 +591,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.RATE_LIMITED: "Rate limit exceeded for this API key; retry later",
         MessageCode.MCP_SCOPE_DENIED: "This assistant's scope does not permit this tool",
         MessageCode.AGENT_SCOPE_DENIED: "This assistant's scope does not permit this request",
+        MessageCode.AGENT_WORKSPACE_MISMATCH: ("This credential belongs to another workspace"),
         MessageCode.MANDATE_REQUIRED: (
             "No active SdI transmission mandate for this issuer profile; grant one "
             "before transmitting through the accredited channel"

@@ -114,8 +114,8 @@ async def enforce_route_scope(
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
 
 
-def require_agent_scope(claims: dict[str, Any], scope_key: str) -> None:
-    """Enforce a single scope key inside a handler (task c19f2f63, review #5).
+def require_agent_scope(claims: dict[str, Any], scope_key: str | frozenset[str]) -> None:
+    """Enforce a scope requirement inside a handler (task c19f2f63, review #5).
 
     The app-level gate keys off (method, path) and runs before the body is
     parsed, so a route whose required scope depends on the request body (a kind
@@ -123,12 +123,23 @@ def require_agent_scope(claims: dict[str, Any], scope_key: str) -> None:
     any-of baseline there. The handler, which HAS the body, calls this to
     enforce the exact key the chosen operation needs. No-op for a human session
     or a bare token (``assistant_scope`` is None = full access); a bound
-    assistant lacking ``scope_key`` gets the same 403 the app-level gate raises."""
+    assistant lacking the requirement gets the same 403 the app-level gate
+    raises.
+
+    A frozenset means ANY ONE of those keys is enough, matching the value
+    shape ``route_scopes`` uses. The 403 has to name ONE key to ask for,
+    and it must be the narrow one: a transitional set exists so an old
+    wide grant keeps working, so telling the caller to go and get the wide
+    key would push grants in exactly the direction the split was made to
+    reverse. The lowest sorted member is used because a set has no order,
+    and that it IS the narrow key for every declared set is asserted by a
+    test rather than assumed here."""
     scope = claims.get("assistant_scope")
     if scope is None:
         return
-    if scope_key not in scope:
-        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED, scope=scope_key)
+    required = frozenset({scope_key}) if isinstance(scope_key, str) else scope_key
+    if not (required & set(scope)):
+        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED, scope=sorted(required)[0])
 
 
 async def current_claims_optional(
@@ -193,11 +204,17 @@ async def _active_user(user_id: uuid.UUID) -> User:
     return user
 
 
-async def _resolve_user(token: str) -> User:
+async def _resolve_user(token: str) -> tuple[User, dict[str, Any]]:
     """Decode a JWT / agent-token bearer, enforce jti revocation, and
-    return the active User. Mirrors ``current_user_id`` + ``current_user``
-    for the part-body-stream dep, which cannot reuse those FastAPI deps
-    because it must first branch on a capability-token bearer."""
+    return the active User WITH its claims. Mirrors ``current_user_id`` +
+    ``current_user`` for the part-body-stream dep, which cannot reuse
+    those FastAPI deps because it must first branch on a capability-token
+    bearer.
+
+    The claims come back with the user because the caller needs them to
+    confine an agent token to its workspace, and decoding a second time
+    to get them would mean a second SECURITY DEFINER lookup per request
+    on this path."""
     claims = await decode_token_async(token)
     sub = claims.get("sub")
     if not isinstance(sub, str):
@@ -211,7 +228,7 @@ async def _resolve_user(token: str) -> User:
         if jti_uuid is not None:
             async with admin_session() as session:
                 await assert_token_not_revoked(session, jti=jti_uuid)
-    return await _active_user(uuid.UUID(sub))
+    return await _active_user(uuid.UUID(sub)), claims
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -343,8 +360,49 @@ async def _tenant_scope(
         )
 
 
+def _confine_agent_token(claims: dict[str, Any], org_id: uuid.UUID) -> None:
+    """An agent token may only act in the workspace it was minted for.
+
+    The token has carried ``org_id`` since it was introduced, and every
+    client already believes the binding: the CLI stores a workspace
+    alongside each credential, refuses to switch, and tells the user to
+    re-mint ("agent tokens are workspace-scoped; there is no side-effect
+    switch"). The SERVER did not check it. So the header decided the
+    tenant, and a credential minted for one workspace worked in every
+    other workspace its user happened to belong to -- which makes the
+    per-workspace model a convention held up by clients rather than a
+    boundary.
+
+    The MCP surface never had the gap: there the tenant comes from the
+    principal, not from a header.
+
+    A human session JWT is untouched: it has no ``org_id`` claim, because
+    a person legitimately moves between their workspaces on one login.
+    That is the whole difference between a session and a credential."""
+    if claims.get("typ") != "agent":
+        return
+    bound = claims.get("org_id")
+    if not bound:
+        # A pre-binding token. Refusing would log people out of a
+        # credential that was valid when it was minted; the mint path has
+        # always set this, so this branch is defensive rather than
+        # expected.
+        return
+    try:
+        bound_id = uuid.UUID(str(bound))
+    except ValueError:
+        raise ForbiddenError(MessageCode.AGENT_WORKSPACE_MISMATCH) from None
+    if bound_id != org_id:
+        # Forbidden, not "absent": the caller may well be a member of the
+        # workspace they asked for, and hiding that behind a 404 would
+        # tell them the workspace does not exist. What is wrong is the
+        # CREDENTIAL, and the fix is to mint one for that workspace.
+        raise ForbiddenError(MessageCode.AGENT_WORKSPACE_MISMATCH)
+
+
 async def tenant_ctx(
     user: Annotated[User, Depends(current_user)],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
     x_workspace_id: Annotated[str, Header()],
     x_project_id: Annotated[str | None, Header()] = None,
     x_workspace_role: Annotated[str | None, Header()] = None,
@@ -354,6 +412,7 @@ async def tenant_ctx(
     # still org_id (RLS unchanged, ADR-0015); the rename lives here in
     # the adapter, not in core.
     org_id = uuid.UUID(x_workspace_id)
+    _confine_agent_token(claims, org_id)
     project_id = uuid.UUID(x_project_id) if x_project_id else None
     async with _tenant_scope(
         user,
@@ -539,8 +598,12 @@ async def _capability_or_bearer(
     # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).
     if not x_workspace_id:
         raise AuthError(MessageCode.AUTH_WORKSPACE_REQUIRED)
-    user = await _resolve_user(token)
+    user, claims = await _resolve_user(token)
     org_id = uuid.UUID(x_workspace_id)
+    # The same confinement tenant_ctx applies. This path exists because
+    # it must branch on a capability bearer first, and a rule enforced on
+    # one of two tenant doors is not enforced.
+    _confine_agent_token(claims, org_id)
     project_id = uuid.UUID(x_project_id) if x_project_id else None
     async with _tenant_scope(
         user,

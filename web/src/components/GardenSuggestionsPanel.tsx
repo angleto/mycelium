@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { GardenIcon, type GardenIconName } from './GardenIcon'
 
 type Classify = components['schemas']['GardenClassifyOut']

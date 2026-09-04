@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import type { EditSession } from '../lib/useEditSession'
 import { GardenIcon } from './GardenIcon'
 import { PartAnnotated } from './PartAnnotated'

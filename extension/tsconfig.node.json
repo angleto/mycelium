@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    /* The build scripts are .mjs and carry JSDoc types. checkJs is what
+       makes that more than decoration: the manifest generator and the
+       environment validator are the two places a mistake ships a package
+       pointing at the wrong deployment. */
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["scripts", "vite.config.ts"]
+}

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { currentUserId } from '../auth/session'
 import { useSession } from '../auth/useSession'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Notif = components['schemas']['NotificationOut']
 type Task = components['schemas']['TaskOut']

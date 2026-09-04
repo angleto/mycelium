@@ -837,7 +837,14 @@ async def list_clients(
 
 
 async def list_projects(
-    session: AsyncSession, *, org_id: uuid.UUID, include_archived: bool = False
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    include_archived: bool = False,
+    q: str | None = None,
+    limit: int | None = None,
+    recent: bool = False,
+    client_tag_id: uuid.UUID | None = None,
 ) -> list[tuple[Tag, ProjectProfile]]:
     """Projects with their profile. Archived excluded by default.
 
@@ -847,6 +854,23 @@ async def list_projects(
     client MAP (the focus chip's project name, the client<->project
     coupling behind a task's or a note's tag picker) needs the row of a
     project an existing entity still carries.
+
+    ``q`` / ``limit`` / ``recent`` mirror ``list_clients`` exactly. They
+    were missing here, and the asymmetry was not harmless: this is the
+    endpoint behind every project picker, so a caller that wanted the
+    same typeahead its client picker already had could only fetch every
+    project and match locally -- a second implementation of the match the
+    sibling function performs in SQL, on a list that grows without bound.
+
+    ``client_tag_id`` narrows to one client's projects. A project has
+    exactly one client, so this is the natural second step of a picker
+    that has just been told which client it is filing into, and doing it
+    here keeps the caller from having to know how the coupling is
+    stored.
+
+    The status predicate deliberately precedes ``q``/``recent``/``limit``,
+    for the reason ``list_clients`` gives: a ``limit`` applied on top of
+    an unfiltered set silently returns fewer than ``limit`` live rows.
     """
     stmt = (
         select(Tag, ProjectProfile)
@@ -856,6 +880,24 @@ async def list_projects(
     )
     if not include_archived:
         stmt = stmt.where(Tag.status == _TAG_ACTIVE)
+    if client_tag_id is not None:
+        stmt = stmt.where(ProjectProfile.client_tag_id == client_tag_id)
+    if q:
+        needle = f"%{q.strip().lower()}%"
+        stmt = stmt.where(func.lower(Tag.name).like(needle))
+    if recent:
+        # ``order_by(None)`` first: a second order_by APPENDS, so without
+        # the reset the alphabetical order would win and "recent" would
+        # order by nothing at all -- the failure the client-side twin was
+        # caught on by a test rather than by reading.
+        activity = _tag_activity_subquery(org_id)
+        stmt = (
+            stmt.outerjoin(activity, activity.c.tag_id == Tag.id)
+            .order_by(None)
+            .order_by(activity.c.last_used.desc().nullslast(), Tag.name)
+        )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     rows = await session.execute(stmt)
     return [(t, p) for t, p in rows.all()]
 

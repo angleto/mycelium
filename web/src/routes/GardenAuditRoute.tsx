@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 // ADR-0036 audit panel: the coordinated event stream on this workspace's
 // graph -- read/propose/commit/reject/snapshot events, newest first. A

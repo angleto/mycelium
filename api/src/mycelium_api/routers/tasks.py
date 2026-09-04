@@ -9,6 +9,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 
+from mycelium_api import idempotency as idem
+from mycelium_api import route_scopes
 from mycelium_api.deps import (
     TenantCtx,
     current_claims,
@@ -57,6 +59,7 @@ from mycelium_api.schemas import (
     TaskNoteCreateIn,
     TaskNoteLinkIn,
     TaskNoteLinksOut,
+    TaskOrderBy,
     TaskOut,
     TaskPatchIn,
     TaskStateIn,
@@ -324,7 +327,16 @@ async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.U
 
 @router.post("", response_model=TaskOut)
 async def create_task(
-    body: TaskCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
+    body: TaskCreateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    # OPTIONAL, unlike the invoice API where it is required. Every client
+    # that exists today creates without one and must keep working; what
+    # the header buys is for the callers that cannot tell a create that
+    # never arrived from one whose answer was lost -- a capture from a
+    # browser panel over a connection that timed out. Without it the only
+    # honest offer such a client can make is "go and look", and the only
+    # dishonest one is a retry that duplicates the task.
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TaskOut:
     # docs/adr/0003: the structural pair is stated by name, ``tag_ids``
     # carries the free-form facets. create_task hands the whole set to
@@ -335,6 +347,16 @@ async def create_task(
     # once their kind is asserted here (the bag alone cannot: it would
     # accept a client id under ``project_tag_id`` and quietly treat it
     # as the client).
+    claimed = await idem.claim_optional(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        endpoint="tasks.create",
+        idempotency_key=idempotency_key,
+        body=body.model_dump(mode="json"),
+    )
+    if claimed is not None and claimed.replay is not None:
+        return TaskOut.model_validate(claimed.replay)
     if body.project_tag_id is not None:
         await require_tag_kind(
             ctx.session, org_id=ctx.org_id, tag_id=body.project_tag_id, kind=TagKind.project
@@ -382,7 +404,7 @@ async def create_task(
     ctokens = await _creator_tokens(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
     ch, ck, cl = _resolve_creator(task, creators, ctokens)
-    return _out(
+    out = _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
@@ -392,11 +414,23 @@ async def create_task(
         created_by_kind=ck,
         created_by_label=cl,
     )
+    await idem.store_result(ctx.session, claimed, out.model_dump(mode="json"))
+    return out
 
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    # An explicit set of rows. Hydrating N search hits (which carry ids
+    # and no state, due date or priority) costs one request instead of N.
+    #
+    # An empty set is NOT expressible here: omitting the parameter means
+    # "no id filter" and returns the whole workspace. So a caller holding
+    # zero ids must not issue the request at all -- turning an empty page
+    # into a full one is the failure mode, and it is silent. The service
+    # below does distinguish the two, because an in-process caller can
+    # pass an empty sequence and must get nothing back.
+    ids: Annotated[list[uuid.UUID] | None, Query()] = None,
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
@@ -416,10 +450,36 @@ async def list_tasks(
     # free-text filter can match item text alongside title / tags /
     # description.
     include_checklist: bool = False,
+    # The narrowing the SERVICE has always accepted and this route did
+    # not expose. Without them a caller wanting "the five most overdue"
+    # had to download every task in the workspace and cut the list
+    # locally -- unbounded transfer to render five rows, and the cut is a
+    # second implementation of an ordering the database already does.
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    open_only: bool = False,
+    due_before: datetime.datetime | None = None,
+    due_after: datetime.datetime | None = None,
+    updated_since: datetime.datetime | None = None,
+    # A closed set, so an unrecognised key is a 422 rather than a silent
+    # fall back to the default ordering -- which looks like the sort was
+    # applied and was not. A drift guard keeps this in step with the
+    # service's whitelist.
+    order_by: TaskOrderBy | None = None,
+    order_desc: bool = False,
+    limit: Annotated[int | None, Query(gt=0, le=500)] = None,
 ) -> list[TaskOut]:
     rows = await svc.list_tasks(
         ctx.session,
         org_id=ctx.org_id,
+        ids=ids,
+        q=q,
+        open_only=open_only,
+        due_from=due_after,
+        due_to=due_before,
+        updated_since=updated_since,
+        order_by=order_by,
+        order_desc=order_desc,
+        limit=limit,
         state_id=state_id,
         tag_id=tag_id,
         assignee_id=assignee_id,
@@ -433,12 +493,12 @@ async def list_tasks(
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
-    ids = {t.id for t in rows}
-    idents = await _assignee_idents(ctx, ids)
-    creators = await _creator_idents(ctx, ids)
-    ctokens = await _creator_tokens(ctx, ids)
+    row_ids = {t.id for t in rows}
+    idents = await _assignee_idents(ctx, row_ids)
+    creators = await _creator_idents(ctx, row_ids)
+    ctokens = await _creator_tokens(ctx, row_ids)
     items_map = (
-        await checklist_svc.items_by_task(ctx.session, task_ids=list(ids))
+        await checklist_svc.items_by_task(ctx.session, task_ids=list(row_ids))
         if include_checklist
         else {}
     )
@@ -546,12 +606,14 @@ async def patch_task(
     if client_tag_id is None and "client_tag_id" in body.model_fields_set:
         raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
     if project_tag_id is not None or client_tag_id is not None:
-        # The route's coarse gate is tasks:write, but re-tagging is what
-        # /tasks/{id}/tags asks tags:write for. Enforce the exact key
-        # here so moving the field into the PATCH body does not hand a
-        # tasks-only assistant a door onto the taxonomy (task c19f2f63
-        # pattern, route_scopes.scope_permits).
-        require_agent_scope(claims, "tags:write")
+        # The route's coarse gate is tasks:write, but re-filing is what
+        # /tasks/{id}/tags asks for. Enforce the exact requirement here so
+        # moving the field into the PATCH body does not hand a tasks-only
+        # assistant a door onto the taxonomy (task c19f2f63 pattern,
+        # route_scopes.scope_permits). Filing into an existing client or
+        # project is tags:assign; tags:write also passes while the
+        # transitional set stands, and nothing else does.
+        require_agent_scope(claims, route_scopes.TAG_ASSIGN_ANY)
     # ``X-Edit-Session-Id`` flips the recovery-history channel to ``web``
     # so consecutive autosaves under the same session coalesce into one
     # open revision. Without the header, every PATCH is a sealed

@@ -11,7 +11,7 @@ import { mailtoHref } from '../lib/mailto'
 // emitted document its cedente, and a connector detached from one would be a
 // credential pointing at nothing.
 //
-// The management routes are brand new and src/api/schema.d.ts is GENERATED, so
+// The management routes are brand new and src/shared/schema.d.ts is GENERATED, so
 // the typed client does not know them yet. Same escape hatch SdiSettings uses:
 // untyped authFetch plus the hand-declared shapes below, narrowed to the fields
 // this card actually renders. When the schema is regenerated these types are

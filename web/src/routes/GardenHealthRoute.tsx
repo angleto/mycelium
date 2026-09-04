@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 // Garden health sensors (ADR-0035): one card per structural metric, with
 // its reading, health floor, a 30-day sparkline, and a plain-language

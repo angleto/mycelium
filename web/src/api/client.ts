@@ -1,5 +1,4 @@
 import createClient, { type Middleware } from 'openapi-fetch'
-import type { components, paths } from './schema'
 import {
   clearSession,
   getSession,
@@ -11,6 +10,14 @@ import {
 } from '../auth/session'
 import i18n from '../i18n'
 import { initialWorkspaceId } from '../lib/workspaceChoice'
+import {
+  SEARCH_CLICK_PATH,
+  type SearchClickEvent,
+  type components,
+  errMessage as sharedErrMessage,
+  type paths,
+  searchClickBody,
+} from '../shared'
 
 // Single-flight refresh promise: many in-flight requests may all
 // 401 at once when the access JWT expires; without coalescing, each
@@ -148,41 +155,20 @@ export async function authFetch(
   return fetch(`/api${path}`, { ...init, headers: retryHeaders })
 }
 
-/** Backend domain error envelope ({code, detail}); see api/app.py.
- * `detail` is a string for our domain errors but a FastAPI 422 sends
- * an ARRAY of {loc,msg,type,...} validation objects — never render it
- * raw (it white-screens React: "Objects are not valid as a child"). */
-export type ApiError = { code?: string; detail?: unknown }
+/** The backend's error envelope is read in web/src/shared/errors.ts,
+ * because how a failure becomes readable prose is a property of the
+ * server's contract and the extension reads the same one. Re-exported
+ * here so the SPA's ~60 call sites keep importing it from the client
+ * they already import. */
+export type { ApiError } from '../shared'
+export { errCode } from '../shared'
 
-export function errCode(e: unknown): string | undefined {
-  return (e as ApiError | undefined)?.code
-}
-
-function validationLine(x: unknown): string | null {
-  if (x && typeof x === 'object' && 'msg' in x) {
-    const o = x as { msg?: unknown; loc?: unknown }
-    const msg = typeof o.msg === 'string' ? o.msg : ''
-    const loc = Array.isArray(o.loc)
-      ? o.loc.filter((p) => p !== 'body').join('.')
-      : ''
-    return loc && msg ? `${loc}: ${msg}` : msg || null
-  }
-  return typeof x === 'string' ? x : null
-}
-
-// Always returns a string (a non-string detail must never reach JSX).
+/** The SPA's binding of the shared reader: it supplies the catalogue
+ * sentence for the case where the server said nothing usable and there
+ * is not even a code to show. Always a string -- a non-string ``detail``
+ * (FastAPI's 422 sends an ARRAY) must never reach JSX. */
 export function errMessage(e: unknown): string {
-  const d = (e as ApiError | undefined)?.detail
-  if (typeof d === 'string' && d) return d
-  if (Array.isArray(d)) {
-    const msgs = d.map(validationLine).filter((m): m is string => !!m)
-    if (msgs.length) return msgs.join('; ')
-  }
-  if (d && typeof d === 'object') {
-    const m = (d as { msg?: unknown }).msg
-    if (typeof m === 'string' && m) return m
-  }
-  return (e as ApiError | undefined)?.code ?? i18n.t('error.generic')
+  return sharedErrMessage(e, i18n.t('error.generic'))
 }
 
 /** Unified server-side search (tasks + memory blobs). Returns the
@@ -207,29 +193,16 @@ export type ServerSearchHit = {
   score: number
 }
 
-/** Fire-and-forget search-click telemetry (ADR-0035 recall_at_k):
- * which query led the user to open which entity, at which 1-based rank
- * of the ranked /search result list, out of how many ranked hits. The
- * nightly garden-health snapshot aggregates these into the recall
- * sensor. Errors are swallowed: telemetry must never break (or even
- * delay) navigation. */
-export function logSearchClick(ev: {
-  q: string
-  hitKind: 'task' | 'note' | 'blob'
-  hitId: string
-  rank: number
-  resultCount: number
-}): void {
-  void authFetch('/search/click', {
+/** Fire-and-forget search-click telemetry (ADR-0035 recall_at_k). The
+ * payload and what each field means live in web/src/shared/telemetry.ts,
+ * because the extension emits the same event; this is the SPA's
+ * transport for it. Errors are swallowed: telemetry must never break --
+ * or even delay -- a navigation. */
+export function logSearchClick(ev: SearchClickEvent): void {
+  void authFetch(SEARCH_CLICK_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      q: ev.q,
-      hit_kind: ev.hitKind,
-      hit_id: ev.hitId,
-      rank: ev.rank,
-      result_count: ev.resultCount,
-    }),
+    body: JSON.stringify(searchClickBody(ev)),
   }).catch(() => {
     /* telemetry only */
   })

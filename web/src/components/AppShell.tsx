@@ -35,7 +35,7 @@ import { useFocus } from '../lib/focus'
 import { ClientSearch } from './ClientSearch'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }

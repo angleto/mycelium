@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api, workspaceHeader } from '../api/client'
 import { getSession } from '../auth/session'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import { clearOnWorkspaceChange } from './tenantCache'
 
 // Single source of truth for "what is running now". A running timer is

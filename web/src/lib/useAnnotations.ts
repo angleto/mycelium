@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { authFetch } from '../api/client'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import type { AnnotationAnchor } from './markdownSource/annotationLayer'
 
 export type Annotation = components['schemas']['AnnotationOut']
@@ -59,7 +59,7 @@ export function useAnnotations(docKind: DocKind, docId: string) {
 /**
  * Which projection an anchor's quote is written in.
  *
- * Read defensively rather than off the generated type: `web/src/api/schema.d.ts`
+ * Read defensively rather than off the generated type: `web/src/shared/schema.d.ts`
  * has not been regenerated since `anchor_domain` was added server-side, and
  * regenerating it right now would sweep in another branch's in-flight API
  * changes. Anything that is not the literal 'rendered' reads as 'source',

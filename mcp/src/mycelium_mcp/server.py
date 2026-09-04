@@ -102,7 +102,7 @@ from mycelium_core.services.taxonomy import ClientInput
 from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
-from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, UNMAPPED
+from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, required_keys
 
 _INSTRUCTIONS = (
     "You are working through Mycelium, a shared work hub that is ALSO your durable, "
@@ -269,7 +269,8 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
       always allowed so an agent can bootstrap and discover its own scope.
     - the tool is absent from both maps -> FAIL-CLOSED, denied (a drift-guard
       test keeps them jointly total so this never bites a real tool).
-    - otherwise the tool's required scope must be in the granted list.
+    - otherwise the granted list must contain the tool's required key, or
+      ANY ONE of them where the entry is a transitional any-of set.
 
     ``arguments`` distinguishes two contexts for an argument-dependent tool
     (``DYNAMIC_TOOL_SCOPES``):
@@ -289,12 +290,15 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
             return bool(possible & set(scope))
         req_dyn = resolver(arguments)
         return req_dyn is not None and req_dyn in scope
-    req = TOOL_SCOPES.get(tool_name, UNMAPPED)
+    if tool_name not in TOOL_SCOPES:
+        return False  # UNMAPPED, and not dynamic either: fail closed
+    req = required_keys(tool_name)
     if req is None:
-        return True
-    if req is UNMAPPED:
-        return False
-    return req in scope
+        return True  # META
+    # A set means ANY ONE of these keys is enough. A single-key entry
+    # normalises to a one-element set, so there is one comparison here
+    # rather than a branch per value shape.
+    return bool(req & set(scope))
 
 
 @mcp.tool()

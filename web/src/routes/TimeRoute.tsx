@@ -29,7 +29,7 @@ import {
 } from '../components/timeChartColors'
 import { activeElapsedSec, hhmm, hhmmss, isPaused } from '../lib/time'
 import { refreshRunning, useRunningTimers } from '../lib/useRunningTimer'
-import type { components, paths } from '../api/schema'
+import type { components, paths } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 type Entry = components['schemas']['TimeEntryOut']

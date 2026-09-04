@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useFocus } from '../lib/focus'
 import { TagPickerGrid } from '../components/TagPickerGrid'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Feasible = components['schemas']['FeasibleTaskOut']
 type Errand = components['schemas']['ErrandItemOut']

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { clearSession, setActiveWorkspace, setSession } from '../auth/session'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 import {
   __resetRunningTimers,
   refreshRunning,
@@ -267,7 +267,7 @@ describe('one reader of /time/running', () => {
   // The generated schema DECLARES the path (it describes the API); the
   // store reads it, and this file names it to make that assertion.
   const ALLOWED = new Set([
-    '../api/schema.d.ts',
+    '../shared/schema.d.ts',
     './useRunningTimer.ts',
     './useRunningTimer.test.tsx',
   ])

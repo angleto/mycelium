@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { kindGlyph } from '../lib/tagGlyph'
 import { ClientSearch } from './ClientSearch'
 import { readableOn } from '../lib/color'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Tag = components['schemas']['TagOut']
 

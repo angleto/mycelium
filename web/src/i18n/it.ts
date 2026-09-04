@@ -844,8 +844,67 @@ export const it: Catalog = {
     configHint:
       'Condivisa da tutti i membri di questo workspace, e diversa in ogni altro.',
   },
+  ext: {
+    title: 'Mycelium nel browser',
+    intro:
+      'Un pannello che si apre con una scorciatoia sopra qualsiasi pagina: trovi un task o una nota, ne cambi stato o scadenza, e archivi la pagina che stai leggendo senza lasciarla.',
+    install: {
+      title: 'Installazione',
+      store: 'Installa dal Chrome Web Store',
+      unpublished:
+        'Non ancora pubblicata sul Chrome Web Store. Fino ad allora si carica a mano da una build di questo repository:',
+      step1: 'Compila l\'estensione: esegui "pnpm build" nella cartella extension/.',
+      step2: 'Apri chrome://extensions e attiva la Modalità sviluppatore.',
+      step3: 'Scegli "Carica estensione non pacchettizzata" e seleziona extension/dist/unpacked.',
+      step4: 'Apri il pannello con Ctrl+Maiusc+K (Cmd+Maiusc+K su Mac), poi premi Collega.',
+      chromeOnly:
+        'Chrome e browser basati su Chromium (Edge, Brave, Arc). Firefox e Safari usano un formato diverso e non sono ancora supportati.',
+    },
+    connect: {
+      title: 'Collega questo browser',
+      startFromExtension:
+        'Una connessione parte sempre dall\'estensione: apri il pannello e premi Collega. Ti riporta qui per approvare, perché questa pagina è l\'unico posto che può mostrarti che cosa stai concedendo.',
+      asking: 'L\'estensione {{id}} chiede di collegarsi al workspace {{workspace}}.',
+      grantIntro:
+        'Approvando crei per questo browser una credenziale che può fare esattamente questo e nient\'altro:',
+      notGranted:
+        'Non può leggere il tuo account, elencare gli altri workspace, creare o rinominare clienti e progetti, modificare i workflow, né cancellare nulla.',
+      approve: 'Collega',
+      label: 'Estensione browser — {{workspace}}',
+      done: 'Collegato a {{workspace}}.',
+      noRuntime:
+        'La credenziale è stata creata ma questo browser non ha potuto consegnarla all\'estensione: la messaggistica delle estensioni Chrome non è disponibile su questa pagina. Revoca la credenziale qui sotto e riprova da un browser basato su Chromium con l\'estensione installata.',
+      noReply:
+        'La credenziale è stata creata ma l\'estensione non ha risposto. Revocala qui sotto e ricomincia dall\'estensione.',
+      refused: {
+        'unknown-state':
+          'L\'estensione non ha riconosciuto questa richiesta. Ricomincia dall\'estensione invece che da un link salvato.',
+        expired: 'La richiesta è scaduta. Ricomincia dall\'estensione.',
+        'already-connected': 'Quell\'estensione è già collegata a questo workspace.',
+        'wrong-origin': 'L\'estensione ha rifiutato una consegna da questo indirizzo.',
+      },
+    },
+    connections: {
+      title: 'Browser collegati',
+      help: 'Credenziali create per l\'estensione in questo workspace. Una revoca ha effetto alla richiesta successiva di quel browser.',
+      empty: 'Nessun browser è collegato a questo workspace.',
+      paused: 'in pausa',
+      revoke: 'Revoca',
+      revoked: 'Revocata.',
+    },
+    limits: {
+      title: 'Contro che cosa questo non protegge',
+      profile:
+        'Qualsiasi cosa giri con il tuo profilo Chrome. La credenziale sta nella cartella del profilo e non è cifrata a parte: a proteggerla è la cifratura del disco.',
+      disconnect:
+        'Scollegare dentro l\'estensione dimentica il segreto solo su quella macchina. È la revoca qui che lo chiude sul server, ed è quella che conta se una macchina va persa.',
+      workspace:
+        'La credenziale è per workspace. Collegare un secondo workspace è un atto separato e deliberato, dall\'interno di quel workspace.',
+    },
+  },
   setnav: {
     account: 'Account',
+    extension: 'Estensione browser',
     workspace: 'Workspace',
     platform: 'Piattaforma',
     platformHint:

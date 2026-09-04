@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { IdentityBadge } from './IdentityBadge'
 import { relTime } from '../lib/time'
-import type { components } from '../api/schema'
+import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 

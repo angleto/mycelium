@@ -32,8 +32,35 @@ from typing import Any
 # = UNMAPPED (denied, fail-closed).
 UNMAPPED: object = object()
 
-# tool name -> required scope key, or None for META (always allowed).
-TOOL_SCOPES: dict[str, str | None] = {
+# --------------------------------------------------------------------------
+# Transitional any-of sets (2026-09-03). REMOVE BY 2026-12-01.
+#
+# Two keys were doing two jobs each, and a client that needed the small one
+# had to be granted the large one:
+#
+#   workflows:write  advance ONE task  +  create/edit/delete the state
+#                                         machine EVERY task runs on
+#   tags:write       file into an      +  invent, rename and rescope the
+#                    existing project     vocabulary itself
+#
+# Splitting them is the point (``tasks:state`` and ``tags:assign`` in
+# SCOPE_CATALOG). These sets exist only so an assistant granted the wide key
+# BEFORE the split keeps working after it: holding either passes.
+#
+# To remove: re-grant the narrow key to every assistant that holds the wide
+# one and relies on these tools, then collapse each set to its narrow key.
+# Left in place, the split is decorative -- everything still works with the
+# wide key, so nothing ever moves off it.
+TASK_STATE_ANY: frozenset[str] = frozenset({"tasks:state", "workflows:write"})
+TAG_ASSIGN_ANY: frozenset[str] = frozenset({"tags:assign", "tags:write"})
+
+# tool name -> the scope key it requires; None for META (always allowed); or
+# a frozenset meaning ANY ONE of those keys is enough, which is the shape
+# ``route_scopes`` already uses on the REST side. The two maps are kept the
+# same shape deliberately: an operation that costs an any-of on one surface
+# and a single key on the other is the drift this pair of files exists to
+# prevent.
+TOOL_SCOPES: dict[str, str | frozenset[str] | None] = {
     "help": None,
     "ping": None,
     "whoami": None,
@@ -252,16 +279,16 @@ TOOL_SCOPES: dict[str, str | None] = {
     "list_clients": "tags:read",
     "list_projects": "tags:read",
     "list_tags": "tags:read",
-    "add_task_tag": "tags:write",
+    "add_task_tag": TAG_ASSIGN_ANY,
     "create_client": "tags:write",
     "create_project": "tags:write",
     "create_tag": "tags:write",
-    "move_task_to_project": "tags:write",
-    "remove_task_tag": "tags:write",
+    "move_task_to_project": TAG_ASSIGN_ANY,
+    "remove_task_tag": TAG_ASSIGN_ANY,
     "set_tag_scope": "tags:write",
     # A TASK's client/project doors stay with the tag taxonomy, like the
     # add_task_tag / move_task_to_project pair they extend.
-    "set_task_client": "tags:write",
+    "set_task_client": TAG_ASSIGN_ANY,
     "update_client": "tags:write",
     "update_project": "tags:write",
     "update_tag": "tags:write",
@@ -327,7 +354,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "delete_workflow": "workflows:write",
     "set_default_workflow": "workflows:write",
     "set_project_workflow": "workflows:write",
-    "set_task_state": "workflows:write",
+    "set_task_state": TASK_STATE_ANY,
     "update_workflow": "workflows:write",
 }
 
@@ -423,3 +450,20 @@ def required_scope_for_call(
     if dyn is not None:
         return dyn[0](arguments or {})
     return TOOL_SCOPES.get(tool_name, UNMAPPED)
+
+
+def required_keys(tool_name: str) -> frozenset[str] | None:
+    """The scope keys that satisfy ``tool_name``, or None for META.
+
+    One place normalises the three value shapes, so a reader -- the gate, a
+    drift guard, the coverage doc generator -- never has to know whether an
+    entry is a bare key or an any-of set. A tool absent from the map raises
+    KeyError rather than answering "no keys": absent means UNMAPPED, and the
+    fail-closed decision belongs to the caller that can also see
+    DYNAMIC_TOOL_SCOPES."""
+    required = TOOL_SCOPES[tool_name]
+    if required is None:
+        return None
+    if isinstance(required, frozenset):
+        return required
+    return frozenset({required})

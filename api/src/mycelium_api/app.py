@@ -5,6 +5,7 @@ messages via the i18n catalog (docs/adr/0017). No business logic here
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -13,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
+from mycelium_api import correlation
 from mycelium_api.deps import enforce_route_scope
 from mycelium_api.routers import (
     actors,
@@ -20,6 +22,7 @@ from mycelium_api.routers import (
     admin_users,
     advisory,
     agent_runs,
+    agent_self,
     agent_tokens,
     ai_assistants,
     attachments,
@@ -76,6 +79,7 @@ from mycelium_core.errors import (
     NotFoundError,
     QuotaExceededError,
     UnprocessableError,
+    jsonable_params,
 )
 from mycelium_core.i18n import DEFAULT_LOCALE, render
 from mycelium_core.llm_ollama import OllamaLLM
@@ -100,18 +104,82 @@ def _locale(request: Request) -> str:
     return raw.split(",")[0].split("-")[0].strip().lower() or DEFAULT_LOCALE
 
 
+def _error_body(request: Request, exc: DomainError) -> dict[str, Any]:
+    """The envelope every surface reads: a stable ``code`` to branch on,
+    localized ``detail`` for a person, the ``params`` that name what was
+    violated, and the identifier that ties this answer to the log line.
+
+    ``params`` is the half that used to be dropped here. The domain
+    already computes it -- a stale-version conflict carries the version
+    the caller should have presented -- and the MCP adapter has always
+    emitted it, so a client on this side had to issue a blind extra read
+    to learn what the server already knew, and could livelock doing it
+    when someone was writing continuously. The params are coerced to
+    JSON-safe scalars by the same helper the other adapter uses, so the
+    two envelopes cannot drift.
+
+    Nothing internal goes in: ``params`` holds domain values (an id, a
+    version, a limit), never a schema name, a path or a stack."""
+    body: dict[str, Any] = {
+        "code": exc.code.value,
+        "detail": render(exc.code, _locale(request), **exc.params),
+        "correlation_id": correlation.current(request),
+    }
+    params = jsonable_params(exc.params)
+    if params:
+        body["params"] = params
+    return body
+
+
 def _make_handler(
     status: int,
 ) -> Callable[[Request, Exception], Awaitable[Response]]:
     async def handler(request: Request, exc: Exception) -> Response:
+        correlation_id = correlation.current(request)
         if isinstance(exc, DomainError):
-            detail = render(exc.code, _locale(request), **exc.params)
-            body = {"code": exc.code.value, "detail": detail}
+            body = _error_body(request, exc)
         else:
-            body = {"code": "internal", "detail": "internal error"}
-        return JSONResponse(status_code=status, content=body)
+            body = {
+                "code": "internal",
+                "detail": "internal error",
+                "correlation_id": correlation_id,
+            }
+        return JSONResponse(
+            status_code=status,
+            content=body,
+            headers={correlation.HEADER: correlation_id},
+        )
 
     return handler
+
+
+async def _unhandled(request: Request, exc: Exception) -> Response:
+    """The fault that reached here is ours, and the caller gets the same
+    envelope every other failure uses -- one error model, or a client
+    ends up with a branch per surface.
+
+    The two halves of the rule are visible in one function: the internal
+    detail goes to the LOG, under the identifier the caller is shown, and
+    nothing about the exception goes into the response. Before this
+    existed the caller got Starlette's bare "Internal Server Error" with
+    nothing to quote, which is the failure that makes a user describe an
+    error instead of reporting it."""
+    correlation_id = correlation.current(request)
+    logging.getLogger(__name__).exception(
+        "unhandled error correlation_id=%s method=%s path=%s",
+        correlation_id,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": "internal",
+            "detail": "internal error",
+            "correlation_id": correlation_id,
+        },
+        headers={correlation.HEADER: correlation_id},
+    )
 
 
 def _wire_local_llm_override(settings: Settings) -> bool:
@@ -234,6 +302,12 @@ def create_app() -> FastAPI:
 
     for exc_type, status in _STATUS.items():
         app.add_exception_handler(exc_type, _make_handler(status))
+    app.add_exception_handler(Exception, _unhandled)
+
+    # Outermost of the user middleware, so the identifier exists before
+    # anything else can fail and every response carries it back. Raw
+    # ASGI: a BaseHTTPMiddleware would buffer the streaming endpoints.
+    app.add_middleware(correlation.CorrelationMiddleware)
 
     # Cross-origin SPA (production serves the SPA and the API on
     # different hosts: mycelium.xeno.garden vs api.mycelium.xeno.garden). Enabled
@@ -254,6 +328,11 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            # Response headers are not readable cross-origin unless they
+            # are named here. Without this the SPA can see the identifier
+            # in a same-origin deploy and not in a split one, which is the
+            # deployment this block exists for.
+            expose_headers=[correlation.HEADER],
         )
 
     app.include_router(auth.router)
@@ -271,6 +350,7 @@ def create_app() -> FastAPI:
     app.include_router(schedule.router)
     app.include_router(executors.router)
     app.include_router(agent_runs.router)
+    app.include_router(agent_self.router)
     app.include_router(agent_tokens.router)
     app.include_router(ai_assistants.router)
     app.include_router(actors.router)
