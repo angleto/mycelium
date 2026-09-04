@@ -10057,6 +10057,11 @@ export interface components {
          */
         IdentityKind: "user" | "ai_assistant";
         /**
+         * IndexScope
+         * @enum {string}
+         */
+        IndexScope: "org" | "none";
+        /**
          * InvoiceCounterOut
          * @description A counter row for the admin override UI. ``max_emitted`` is the
          *     floor (the highest number already on an invoice under the same key);
@@ -11294,6 +11299,8 @@ export interface components {
             audio_ref?: string | null;
             /** Audio Seconds */
             audio_seconds?: number | null;
+            /** @default org */
+            index_scope?: components["schemas"]["IndexScope"];
         };
         /** NoteDeriveTaskIn */
         NoteDeriveTaskIn: {
@@ -11427,6 +11434,8 @@ export interface components {
              * @default seed
              */
             maturity?: string;
+            /** @default org */
+            index_scope?: components["schemas"]["IndexScope"];
             /** Promoted At */
             promoted_at?: string | null;
             /** Humus Kind */
@@ -11515,6 +11524,8 @@ export interface components {
              * @default seed
              */
             maturity?: string;
+            /** @default org */
+            index_scope?: components["schemas"]["IndexScope"];
             /** Promoted At */
             promoted_at?: string | null;
             /** Humus Kind */
@@ -11742,6 +11753,7 @@ export interface components {
             project_tag_id?: string | null;
             /** Client Tag Id */
             client_tag_id?: string | null;
+            index_scope?: components["schemas"]["IndexScope"] | null;
         };
         /** NotePromoteIn */
         NotePromoteIn: {
@@ -13763,6 +13775,8 @@ export interface components {
             location?: string | null;
             /** @default should */
             necessity?: components["schemas"]["Necessity"];
+            /** @default org */
+            index_scope?: components["schemas"]["IndexScope"];
             /** Budget Id */
             budget_id?: string | null;
             /** Tag Ids */
@@ -13863,6 +13877,8 @@ export interface components {
             title?: string | null;
             /** Text */
             text?: string | null;
+            /** @default org */
+            index_scope?: components["schemas"]["IndexScope"];
         };
         /**
          * TaskNoteLinkIn
@@ -13955,6 +13971,7 @@ export interface components {
             /** Location */
             location: string | null;
             necessity: components["schemas"]["Necessity"];
+            index_scope: components["schemas"]["IndexScope"];
             /** Budget Id */
             budget_id: string | null;
             /** Billable */
@@ -14028,6 +14045,7 @@ export interface components {
             /** Location */
             location?: string | null;
             necessity?: components["schemas"]["Necessity"] | null;
+            index_scope?: components["schemas"]["IndexScope"] | null;
             /** Budget Id */
             budget_id?: string | null;
             /** Client Tag Id */
