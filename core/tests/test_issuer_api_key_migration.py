@@ -79,8 +79,15 @@ def test_issuer_api_keys_table_and_rls() -> None:
 
 
 def test_api_idempotency_table_and_force_rls() -> None:
-    """api_idempotency exists with FORCE RLS (no cross-tenant reader) and the
-    issuer-scoped uniqueness claim."""
+    """api_idempotency exists with FORCE RLS (no cross-tenant reader) and one
+    uniqueness claim per principal.
+
+    Migration 0008 widened the claim to a second principal and, with it,
+    replaced the single unique CONSTRAINT by two PARTIAL unique indexes:
+    ``issuer_profile_id`` is nullable now, and NULLs are distinct in a
+    unique index, so one constraint over both branches would have made
+    every actor claim unique by accident and deduplicated nothing.
+    """
     engine = _engine()
     try:
         with engine.connect() as conn:
@@ -92,16 +99,42 @@ def test_api_idempotency_table_and_force_rls() -> None:
             ).one()
             assert row.relrowsecurity is True
             assert row.relforcerowsecurity is True
-            cdef = conn.execute(
-                sa.text(
-                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-                    "WHERE conname = 'uq_api_idempotency_claim'"
-                )
+            issuer = conn.execute(
+                sa.text("SELECT indexdef FROM pg_indexes WHERE indexname = :n"),
+                {"n": "uq_api_idempotency_issuer_claim"},
             ).scalar_one()
             # Scoped to the ISSUER (not the key), so a rotation mid-retry keeps dedupe.
-            assert "issuer_profile_id" in cdef
-            assert "endpoint" in cdef
-            assert "idempotency_key" in cdef
+            assert "UNIQUE" in issuer
+            assert "issuer_profile_id" in issuer
+            assert "endpoint" in issuer
+            assert "idempotency_key" in issuer
+            assert "issuer_profile_id IS NOT NULL" in issuer
+            actor = conn.execute(
+                sa.text("SELECT indexdef FROM pg_indexes WHERE indexname = :n"),
+                {"n": "uq_api_idempotency_actor_claim"},
+            ).scalar_one()
+            # The actor branch carries org_id and the issuer branch does not: an
+            # issuer profile already implies one workspace, a person does not.
+            assert "UNIQUE" in actor
+            assert "org_id" in actor
+            assert "actor_id" in actor
+            assert "actor_id IS NOT NULL" in actor
+            # Exactly one principal per row: neither claims nothing, both would
+            # be reachable under two different keys. Looked up by table and
+            # kind rather than by name: the project's naming convention
+            # prefixes ``ck_<table>_`` onto whatever the migration passes.
+            checks = (
+                conn.execute(
+                    sa.text(
+                        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                        "WHERE conrelid = 'public.api_idempotency'::regclass "
+                        "AND contype = 'c'"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert any("num_nonnulls(issuer_profile_id, actor_id) = 1" in c for c in checks), checks
     finally:
         engine.dispose()
 
