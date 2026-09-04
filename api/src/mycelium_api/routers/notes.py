@@ -178,6 +178,7 @@ def _list_out(
         tags=[_brief(t) for t in (tags or [])],
         version=n.version,
         maturity=n.maturity,
+        index_scope=n.index_scope,
         promoted_at=n.promoted_at,
         humus_kind=n.humus_kind,
         derived_task_ids=list(derived_task_ids or []),
@@ -283,6 +284,7 @@ async def create_note(
         text=body.text,
         audio_ref=body.audio_ref,
         audio_seconds=body.audio_seconds,
+        index_scope=body.index_scope,
     )
     if body.client_tag_id is not None:
         # create_note derives the client from the project, or falls back
@@ -657,15 +659,19 @@ async def update_note(
         kwargs["task_id"] = body.task_id
     if "audio_ref" in body.model_fields_set:
         kwargs["audio_ref"] = body.audio_ref
+    if "index_scope" in body.model_fields_set:
+        # A stated null is refused by the write funnel with the field named,
+        # not dropped here: silently ignoring it would answer 200 to a
+        # request the server did not carry out.
+        kwargs["index_scope"] = body.index_scope
     channel = "web" if edit_session_id else "api"
-    # ``update_note`` REPLACES title/body with what the request carries
-    # (an omitted title is re-derived from the body, i.e. blanked when
-    # there is none), so a structural-only PATCH must not reach it: it
-    # would wipe the title of a note the caller only wanted to move. The
-    # pair lives in note_tags, not on the row, so nothing there bumps
-    # ``version`` -- exactly like /notes/{id}/tags, which carries no
-    # version at all.
-    content = {"title", "text", "task_id", "audio_ref"} & body.model_fields_set
+    # A structural-only PATCH does not reach ``update_note``: the pair lives
+    # in note_tags, not on the row, so nothing there bumps ``version`` --
+    # exactly like /notes/{id}/tags, which carries no version at all. It used
+    # to have a second reason, that ``update_note`` re-derived an omitted
+    # title from an absent body and so blanked it; that is now fixed at the
+    # source, where the title is written only when the caller states one.
+    content = {"title", "text", "task_id", "audio_ref", "index_scope"} & body.model_fields_set
     if content:
         v = await svc.update_note(
             ctx.session,

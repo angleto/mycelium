@@ -40,6 +40,7 @@ from mycelium_core.errors import (
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.models.classification_job import ClassificationJob
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from mycelium_core.models.note_tag import NoteTag
@@ -932,6 +933,9 @@ async def update_note(
     text: str | None = None,
     task_id: uuid.UUID | None | _Unset = _UNSET,
     audio_ref: str | None | _Unset = _UNSET,
+    # ``None`` is accepted so a stated null is refused by the write funnel
+    # with the field named, instead of being dropped at the door.
+    index_scope: IndexScope | None | _Unset = _UNSET,
     # Recovery history. ``channel='web'`` plus an ``edit_session_id``
     # coalesces consecutive PATCHes from the same SPA session into a
     # single open revision (autosave-friendly). Other channels write
@@ -951,7 +955,20 @@ async def update_note(
     # notes <-> note_parts cycle (note_parts already imports notes lazily).
     from mycelium_core.services.note_parts import _assert_not_promoted
 
-    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+    # ...but only when the patch touches content. That guard's own contract is
+    # "every CONTENT mutation"; ``index_scope`` is an indexing class, not
+    # content, and fencing it too would leave a promoted note permanently
+    # unable to be taken out of the index -- while the remedy A1 offers is
+    # exactly that flip, row by row.
+    scope_only = (
+        not isinstance(index_scope, _Unset)
+        and title is None
+        and text is None
+        and isinstance(task_id, _Unset)
+        and isinstance(audio_ref, _Unset)
+    )
+    if not scope_only:
+        await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
     # ``text`` is the FLAT body: the very string ``get_body`` returns, which
     # is the ``\n\n`` join of EVERY part. The join is not invertible -- a
     # blank line inside a part reads the same as a part boundary -- so this
@@ -984,8 +1001,12 @@ async def update_note(
     # the still-on-row fields (title, audio_ref, ...); the part write
     # follows the optimistic _note_set so a stale version aborts both.
     values: dict[str, Any] = {}
-    eff_title = title if (title and title.strip()) else _derive_title(text)
-    values["title"] = eff_title
+    # Only when the caller supplied content to derive it from. Writing the
+    # title unconditionally means a patch that touches neither ``title`` nor
+    # ``text`` -- setting ``audio_ref`` once an upload lands, or the index
+    # scope -- derives a title from nothing and blanks the one the note had.
+    if title is not None or text is not None:
+        values["title"] = title if (title and title.strip()) else _derive_title(text)
     # docs/adr/0029 P3: ``note.task_id`` is gone. The same setter API
     # now writes (or clears) the ``artifact`` typed link.
     pending_task_link: tuple[bool, uuid.UUID | None] = (False, None)
@@ -1005,6 +1026,8 @@ async def update_note(
         # known only after the upload completes. Same sentinel semantic
         # as task_id: omit = no change, ``None`` = clear.
         values["audio_ref"] = audio_ref
+    if not isinstance(index_scope, _Unset):
+        values["index_scope"] = index_scope
     new_version = await _note_set(
         session,
         org_id=org_id,
@@ -1016,6 +1039,45 @@ async def update_note(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    if not isinstance(index_scope, _Unset):
+        # The scope lives on the note while the indexed unit is the part,
+        # and no mapper listener is registered on ``Note``, so the Core
+        # UPDATE just issued marked nothing dirty: the index has to be told.
+        # One call for both directions -- the per-part guard in the resync
+        # reads the scope that is now on the row and erases or re-indexes
+        # accordingly, so neither this nor the caller reads the old value.
+        # A part created further down is marked dirty by its own mapper
+        # listener. Lazy import: ``note_search`` imports this module.
+        from mycelium_core.services import note_search as _note_search
+
+        await _note_search.mark_note_parts_dirty(session, note_id=note_id)
+        if index_scope == IndexScope.none:
+            # A transplant is one thing in two rows: the task carries a
+            # verbatim copy of this note's body, and its blob is written
+            # ``project_id=NULL``, so leaving it behind would hold the text
+            # in a WIDER perimeter than the part blobs just dropped.
+            # ``promote_note_to_task`` already carries the class the other way
+            # round, at promote time; this is the same rule in the order the
+            # promoted-note exemption above made reachable.
+            # One direction only: pushing ``org`` back onto the task would
+            # re-index a task its owner may have scoped out on its own, and
+            # since the promotion froze the note the two descriptions can have
+            # diverged. Lazy import: ``tasks`` imports this module's siblings.
+            promoted = await note_links_svc.promoted_task_id_for_note(session, note_id=note_id)
+            if promoted is not None:
+                from mycelium_core.services import tasks as _tasks
+
+                task = await _tasks.get_task(session, org_id=org_id, task_id=promoted)
+                if task.index_scope != IndexScope.none:
+                    await _tasks.update_task(
+                        session,
+                        org_id=org_id,
+                        actor_id=actor_id,
+                        task_id=promoted,
+                        expected_version=task.version,
+                        values={"index_scope": IndexScope.none},
+                        channel="system",
+                    )
     # Phase 6 final: write the text edit to note_part(ord=0). The
     # _note_set call above no longer touches a ``transcript`` column
     # (it's gone in migration 0012); the part write completes the
@@ -1318,6 +1380,7 @@ async def create_note(
     text: str | None = None,
     audio_ref: str | None = None,
     audio_seconds: int | None = None,
+    index_scope: IndexScope = IndexScope.org,
     # Recovery history: the channel this create came in through. The
     # baseline revision is written sealed so the timeline shows the
     # note's starting point.
@@ -1345,6 +1408,7 @@ async def create_note(
         title=title,
         audio_ref=audio_ref,
         audio_seconds=audio_seconds,
+        index_scope=index_scope,
     )
     session.add(note)
     await session.flush()
@@ -1496,6 +1560,7 @@ async def create_note_for_task(
     task_id: uuid.UUID,
     title: str | None = None,
     text: str | None = None,
+    index_scope: IndexScope = IndexScope.org,
 ) -> Note:
     """Create a fresh work note pre-linked to ``task_id`` (the TASK-side
     of the bidirectional Proposal A link). Unlike
@@ -1520,6 +1585,7 @@ async def create_note_for_task(
         project_id=project_id,
         title=title if (title and title.strip()) else (task.title or "Work note"),
         text=text,
+        index_scope=index_scope,
     )
     await session.flush()
     # docs/adr/0029 P3: the Proposal A link is the typed

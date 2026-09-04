@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import mimetypes
 import os
 import shutil
@@ -111,6 +112,16 @@ def _resolve_task(c: Any, partial: str) -> str:
     return resolve_id(c, partial, endpoint="/tasks", kind="task")
 
 
+class _IndexScope(enum.StrEnum):
+    """The values of the server's ``index_scope``. Restated here because
+    the CLI speaks REST and does not import the core package; a wrong
+    value would otherwise reach the API as a 422 instead of being
+    refused by typer with the valid set."""
+
+    org = "org"
+    none = "none"
+
+
 @app.command()
 def add(
     title: str | None = typer.Option(None, "--title", "-t", help="Optional title."),
@@ -136,6 +147,12 @@ def add(
     tag: list[str] = typer.Option(
         [], "--tag", help="Generic tag name or UUID; pass multiple times."
     ),
+    index_scope: _IndexScope | None = typer.Option(
+        None,
+        "--index-scope",
+        help="org|none. 'none' creates the note already out of the search index, "
+        "instead of indexing it and unindexing it a moment later.",
+    ),
 ) -> None:
     """Create a text note. With no -m/--text, opens $EDITOR."""
     if text == "-":
@@ -151,6 +168,8 @@ def add(
     if title:
         payload["title"] = title
     payload["text"] = text
+    if index_scope is not None:
+        payload["index_scope"] = index_scope.value
     with client() as c:
         # Every tag is resolved (and kind-checked) BEFORE the note is
         # written: a typo in --tag used to abort halfway through the
@@ -259,6 +278,12 @@ def edit(
         autocompletion=complete_task_id,
         help="Set the note→task link. Use '-' to unlink.",
     ),
+    index_scope: _IndexScope | None = typer.Option(
+        None,
+        "--index-scope",
+        help="org|none. 'none' keeps every part of the note out of the search index. "
+        "It does not hide the note: it stays readable and stays matched by 'note list -q'.",
+    ),
 ) -> None:
     """Patch title/text/task-link on an existing note."""
     with client() as c:
@@ -277,6 +302,8 @@ def edit(
             payload["task_id"] = None
         elif task is not None:
             payload["task_id"] = _resolve_task(c, task)
+        if index_scope is not None:
+            payload["index_scope"] = index_scope.value
         result = get_json(c.patch(f"/notes/{full}", json=payload))
     if json_mode():
         emit_json(result)

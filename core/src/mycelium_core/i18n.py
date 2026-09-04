@@ -277,6 +277,7 @@ class MessageCode(enum.StrEnum):
     PATCH_DOES_NOT_APPLY = "patch.does_not_apply"
     PATCH_MALFORMED = "patch.malformed"
     DOMAIN_ERROR = "domain.error"
+    FIELD_NOT_NULLABLE = "field.not_nullable"
     PROVIDER_KEY_INVALID = "provider.key_invalid"
     # Worker-generated reminder text (localised per recipient, see
     # services.notifications.scan_reminders). ``{when}`` is the due
@@ -787,6 +788,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.SUGGESTION_TEXT_REQUIRED: ("A suggestion needs the original text it replaces."),
         MessageCode.DOMAIN_ERROR: "Domain error",
+        MessageCode.FIELD_NOT_NULLABLE: (
+            "'{field}' cannot be cleared: omit it to leave it unchanged."
+        ),
         MessageCode.PROVIDER_KEY_INVALID: (
             "The provider API key could not be validated; check the key and model."
         ),

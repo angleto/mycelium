@@ -175,6 +175,7 @@ def _out(
         monetary_cost=t.monetary_cost,
         location=t.location,
         necessity=t.necessity,
+        index_scope=t.index_scope,
         budget_id=t.budget_id,
         billable=t.billable,
         is_archived=t.is_archived,
@@ -197,8 +198,13 @@ def _note_out(
     task_title: str | None = None,
     transcript: str | None = None,
 ) -> NoteOut:
-    # Built exactly like routers/notes.py::_out so the SPA gets the same
-    # NoteOut shape (incl. tags + task_id) from either entry point.
+    # Meant to be the same NoteOut shape routers/notes.py::_out returns
+    # (incl. tags + task_id) from either entry point, and not yet that: the
+    # fields this one does not fill (maturity, protected, humus_kind,
+    # audio_seconds, promoted_at, derived_task_ids, linked_task_count) fall
+    # back to schema defaults and read as facts. Pre-existing; ``index_scope``
+    # is filled here so this path does not report a scoped-out note as
+    # indexed, but the duplication is the defect and it is still open.
     # docs/adr/0029 P3: task_id is derived from the typed link table.
     # Phase 6 final: ``transcript`` is derived from note_part(ord=0)+
     # at the caller, not from a Note column.
@@ -220,6 +226,7 @@ def _note_out(
         summary=n.summary,
         audio_ref=n.audio_ref,
         is_archived=n.is_archived,
+        index_scope=n.index_scope,
         deleted_at=n.deleted_at,
         tags=[TagBrief(id=t.id, kind=t.kind, name=t.name, color=t.color) for t in (tags or [])],
         version=n.version,
@@ -390,6 +397,7 @@ async def create_task(
         monetary_cost=body.monetary_cost,
         location=body.location,
         necessity=body.necessity,
+        index_scope=body.index_scope,
         budget_id=body.budget_id,
         tag_ids=tag_ids,
         assignee_ids=body.assignee_ids,
@@ -1210,6 +1218,7 @@ async def create_task_note(
         task_id=task_id,
         title=body.title,
         text=body.text,
+        index_scope=body.index_scope,
     )
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
     pid = await note_links_svc.primary_task_id_for_note(

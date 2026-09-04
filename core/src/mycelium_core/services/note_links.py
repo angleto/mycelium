@@ -568,6 +568,24 @@ async def primary_task_id_for_note(
     return uuid.UUID(str(raw[0][0]))
 
 
+async def promoted_task_id_for_note(
+    session: AsyncSession, *, note_id: uuid.UUID
+) -> uuid.UUID | None:
+    """The task this note was transplanted into, if it was.
+
+    At most one: ``unlink_note_task`` refuses to remove a
+    ``promoted_from`` link, so the original promotion is the only one a
+    note ever gets.
+    """
+    return (
+        await session.execute(
+            select(NoteTaskLink.task_id).where(
+                NoteTaskLink.note_id == note_id, NoteTaskLink.kind == "promoted_from"
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def primary_task_ids_for_notes(
     session: AsyncSession,
     *,
@@ -991,6 +1009,11 @@ async def promote_note_to_task(
         actor_id=actor_id,
         title=chosen_title,
         description=note.summary or body_text,
+        # The transplant copies the note's own body into the task, so the
+        # note's indexing class comes with it: a task born at the default
+        # would put the text of a scoped-out note back into the org-wide
+        # index, which is the one thing ``index_scope='none'`` is for.
+        index_scope=note.index_scope,
         tag_ids=_resolved_tag_ids(structural),
     )
     link = await _link_note_task(

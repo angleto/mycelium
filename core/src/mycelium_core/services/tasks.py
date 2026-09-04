@@ -23,6 +23,7 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.models.annotation import Annotation
 from mycelium_core.models.classification_job import ClassificationJob
 from mycelium_core.models.identity import Identity, IdentityKind
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.membership import Role
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import ExecKind, Necessity, Task
@@ -97,6 +98,11 @@ _UPDATABLE = frozenset(
         "necessity",
         "budget_id",
         "billable",
+        # The write path for the indexing opt-out has to be this one:
+        # ``update_task`` marks the task dirty afterwards, and the
+        # ``after_update`` mapper listener does not fire for the Core
+        # UPDATE that ``optimistic_update`` issues.
+        "index_scope",
         # Appointment unification (migration 0094, ADR-0008 addendum).
         # ``start_at`` + ``duration_minutes`` are paired (CHECK
         # constraint); ``recurrence`` is independent.
@@ -218,6 +224,7 @@ async def create_task(
     monetary_cost: Decimal | None = None,
     location: str | None = None,
     necessity: Necessity = Necessity.should,
+    index_scope: IndexScope = IndexScope.org,
     budget_id: uuid.UUID | None = None,
     tag_ids: Sequence[uuid.UUID] = (),
     assignee_ids: Sequence[uuid.UUID] = (),
@@ -360,6 +367,7 @@ async def create_task(
         monetary_cost=monetary_cost,
         location=location,
         necessity=necessity,
+        index_scope=index_scope,
         budget_id=budget_id,
         created_by_identity_id=created_by_identity_id,
         created_by_token_id=created_by_token_id,
@@ -1245,9 +1253,11 @@ async def set_schedule_fields(
         values=values,
     )
     # Scheduler write-back doesn't touch ``title``/``description``/
-    # checklist, so the resync's content_hash will short-circuit and no
-    # embed will be paid; the mark is still required so the listener
-    # path doesn't go stale on a future combined update.
+    # checklist, so the resync either short-circuits on the unchanged
+    # content_hash or, on a task at ``index_scope='none'``, repeats an
+    # already-idempotent delete; no embed is paid on either branch. The
+    # mark is still required so the listener path doesn't go stale on a
+    # future combined update.
     _task_search.mark_task_dirty(session, task_id)
     await audit.log(
         session,

@@ -36,6 +36,12 @@ Project scoping: a part blob inherits the note's project (via
 (voice transcripts already landed project-scoped on the "note" channel).
 This preserves per-project search isolation -- it is NOT widened to the
 org-wide surface the task index uses.
+
+Index scope: a note at ``index_scope='none'`` is not indexed at all. The
+scope is read per part in the resync, before the content_hash
+short-circuit, and fanned out over the note's parts by
+``services.notes.update_note`` -- no mapper listener is registered on
+``Note``, so the flip itself has to say so.
 """
 
 from __future__ import annotations
@@ -53,10 +59,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, object_session
 
 from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
+from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.services.fts_language import detect_fts_language
+from mycelium_core.services.memory import erase_blobs_for_sources
 
 logger = logging.getLogger(__name__)
 
@@ -201,11 +210,18 @@ async def flush_note_search_dirty(session: AsyncSession) -> None:
     dirty_ids -= deleted_ids
     if not deleted_ids and not dirty_ids:
         return
+    from mycelium_core.db import index_maintenance_scope
+
     try:
-        for part_id in deleted_ids:
-            await _delete_part_blob(session, part_id)
-        for part_id in dirty_ids:
-            await _resync_part_blob(session, part_id)
+        # Org-scoped maintenance, not the caller's project perimeter: see
+        # ``db.index_maintenance_scope``. Inside the ``try`` and after the
+        # early return, so an aborted transaction with nothing pending still
+        # emits no SQL.
+        async with index_maintenance_scope(session):
+            for part_id in deleted_ids:
+                await _delete_part_blob(session, part_id)
+            for part_id in dirty_ids:
+                await _resync_part_blob(session, part_id)
     except InvalidRequestError as exc:
         logger.warning(
             "note-search resync skipped (session unusable, likely partial savepoint rollback): %s",
@@ -226,6 +242,27 @@ async def delete_part_index_now(session: AsyncSession, part_id: uuid.UUID) -> No
     Deleting the blob here cascades the pointer (blob->pointer FK), so the
     subsequent part delete finds nothing left to cascade."""
     await _delete_part_blob(session, part_id)
+
+
+async def _drop_part_blobs(session: AsyncSession, part_id: uuid.UUID) -> None:
+    """Erase every blob this part is the source of, by provenance.
+
+    Not ``_delete_part_blob``: that one resolves through the pointer,
+    whose primary key is ``part_id``, so it names exactly one blob. A
+    part owns N blobs as soon as the indexer chunks a long one, and this
+    branch has to keep holding then without being rewritten -- and it
+    does, because provenance is the relation that is already 1:N.
+
+    What it does not cover: a blob claimed by a second source survives,
+    since ``erase_blobs_for_sources`` drops a blob only once nothing
+    else points at it. Consolidation copies each member's provenance
+    onto the merged concept, so the concept IS reached here -- this
+    part's provenance row on it goes -- but the concept survives on the
+    other members' rows, still carrying the merged text. ``index_scope``
+    is an opt-out from indexing a row, not a retraction of everything
+    ever derived from it.
+    """
+    await erase_blobs_for_sources(session, sources=[("note_part", str(part_id))])
 
 
 async def _delete_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
@@ -250,10 +287,37 @@ async def _delete_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
 # ---------------------------------------------------------------- resync
 
 
-async def _load_part(session: AsyncSession, part_id: uuid.UUID) -> NotePart | None:
-    return (
-        await session.execute(select(NotePart).where(NotePart.id == part_id))
-    ).scalar_one_or_none()
+async def _load_part(
+    session: AsyncSession, part_id: uuid.UUID
+) -> tuple[NotePart, IndexScope] | None:
+    """The part, plus the index scope of the note that owns it.
+
+    The scope lives on ``notes`` while the indexed unit is the part, so
+    the resync has to read across the two. It rides along in the load
+    the resync already pays rather than costing a SELECT of its own:
+    this path runs on every commit that touches a part, including the
+    cheap hash-unchanged one.
+
+    LEFT rather than INNER as a belt on a brace, not because the case is
+    expected: ``note_part.note_id`` is NOT NULL and cascades, so a part
+    does not outlive its note (the same fact the backfill sweep below
+    relies on to use an inner join). If one ever did, LEFT keeps it in
+    the resync -- where the ``pointer is None`` and part-gone paths can
+    still clean up -- instead of dropping it silently. A missing note
+    reads as ``org``, the default: a part with no note to answer for it
+    is not evidence that someone asked for the opt-out.
+    """
+    row = (
+        await session.execute(
+            select(NotePart, Note.index_scope)
+            .outerjoin(Note, Note.id == NotePart.note_id)
+            .where(NotePart.id == part_id)
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    part, scope = row
+    return part, IndexScope(scope) if scope is not None else IndexScope.org
 
 
 async def _resync_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
@@ -264,11 +328,20 @@ async def _resync_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
       - pointer + same hash: skip (cheap path, no embed)
       - pointer + new hash: UPDATE blob text+embedding, UPDATE hash
     """
-    part = await _load_part(session, part_id)
-    if part is None:
+    loaded = await _load_part(session, part_id)
+    if loaded is None:
         # Part is gone (hard delete that didn't go through after_delete,
         # e.g. a note-cascade DELETE). Clean the pointer/blob too.
         await _delete_part_blob(session, part_id)
+        return
+    part, index_scope = loaded
+    if index_scope == IndexScope.none:
+        # Before the content_hash short-circuit below, deliberately. A scope
+        # flip leaves the rendered text identical, so the hash is unchanged
+        # and a guard placed after the short-circuit would never run on a
+        # part that is already indexed -- which is the whole remedy case.
+        # Delete rather than skip, or the stale blob stays retrievable.
+        await _drop_part_blobs(session, part_id)
         return
     text_body = render_part_for_search(part)
     new_hash = content_hash(text_body)
@@ -426,6 +499,36 @@ async def _refresh_pointer_note(
     pointer.note_id = part.note_id
 
 
+async def _part_ids_of_note(session: AsyncSession, note_id: uuid.UUID) -> list[uuid.UUID]:
+    return list(
+        (await session.execute(select(NotePart.id).where(NotePart.note_id == note_id)))
+        .scalars()
+        .all()
+    )
+
+
+async def mark_note_parts_dirty(session: AsyncSession, *, note_id: uuid.UUID) -> None:
+    """Queue every part of a note for re-index at commit.
+
+    The note-level half of the ``index_scope`` guard, for the flip
+    itself. No mapper listener is registered on ``Note`` and the scope
+    lives there, so the UPDATE that sets it marks nothing dirty: without
+    this call the change would reach the index only when some part's
+    body next happened to change.
+
+    One call covers BOTH directions, which is why it does not have to
+    read the previous value: the per-part guard in ``_resync_part_blob``
+    reads the scope that is now on the row and either erases that part's
+    blobs or re-indexes them. Deferring to the flush rather than erasing
+    here also keeps every index write inside the one window that runs
+    without the caller's project perimeter (``db._index_maintenance_scope``);
+    an erase issued inline from a project-scoped request deletes the
+    provenance and leaves the blob.
+    """
+    for pid in await _part_ids_of_note(session, note_id):
+        mark_note_part_dirty(session, pid)
+
+
 async def rescope_note_blobs(
     session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
 ) -> None:
@@ -519,13 +622,25 @@ async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -
 
     The listener path catches every new mutation, but parts that pre-date
     this deploy never went through it. This sweep picks the first
-    ``batch_size`` unindexed parts and runs the same ``_resync_part_blob``
-    the listener would have. Returns the count indexed in this batch."""
+    ``batch_size`` unindexed parts, skipping the ones whose note is at
+    ``index_scope='none'`` (those have no pointer by design), and runs
+    the same ``_resync_part_blob`` the listener would have. Returns the
+    count indexed in this batch."""
     rows = (
         await session.execute(
             select(NotePart.id)
             .outerjoin(NotePartIndexPointer, NotePartIndexPointer.part_id == NotePart.id)
-            .where(NotePartIndexPointer.part_id.is_(None))
+            .join(Note, Note.id == NotePart.note_id)
+            .where(
+                NotePartIndexPointer.part_id.is_(None),
+                # A scoped-out part has no pointer by definition, so without
+                # this term it stays a candidate on every tick, fills the
+                # batch (which has no ORDER BY) and starves the real backlog.
+                # The guard in the resync makes it harmless; this makes it
+                # free. Inner join: ``note_part.note_id`` is NOT NULL and
+                # cascades, so a part without a note does not outlive it.
+                Note.index_scope != IndexScope.none,
+            )
             .limit(batch_size)
         )
     ).all()

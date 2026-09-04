@@ -16,6 +16,7 @@ from mycelium_core.models.dependency import DependencyType
 from mycelium_core.models.dispatch_request import AutonomousDispatch, DispatchStatus
 from mycelium_core.models.email import EmailAccountStatus, EmailProvider
 from mycelium_core.models.executor import ExecutorKind
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.invoice import (
     ConservationStatus,
     DocumentType,
@@ -679,6 +680,13 @@ class TaskCreateIn(BaseModel):
     monetary_cost: Decimal | None = None
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity = Necessity.should
+    # Opt-out from automatic search indexing. Not a read boundary and not
+    # ``SearchIn.task_scope``, which narrows a query to a project: this one
+    # decides whether the row is indexed at all. See models/index_scope.py.
+    # Deliberately not gated beyond ``tasks:write``: at ``none`` the row is
+    # still readable and still matched by the free-text filter, so there is
+    # no privilege to fence off here.
+    index_scope: IndexScope = IndexScope.org
     budget_id: uuid.UUID | None = None
     # Free-form facets only (kind generic / memory_channel). Structural
     # ids are still accepted here for the callers that predate the two
@@ -756,6 +764,7 @@ class TaskPatchIn(BaseModel):
     monetary_cost: Decimal | None = None
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity | None = None
+    index_scope: IndexScope | None = None
     budget_id: uuid.UUID | None = None
     # Structural re-tagging, single-valued (docs/adr/0003). Before these
     # existed the only way to move a task was attach/detach on
@@ -932,6 +941,7 @@ class TaskOut(BaseModel):
     monetary_cost: Decimal | None
     location: str | None
     necessity: Necessity
+    index_scope: IndexScope
     budget_id: uuid.UUID | None
     billable: bool | None = None
     is_archived: bool
@@ -2544,6 +2554,9 @@ class NoteCreateIn(BaseModel):
     text: str | None = None
     audio_ref: str | None = Field(default=None, max_length=512)
     audio_seconds: int | None = None
+    # Opt-out from automatic search indexing, for the whole note. Not a
+    # read boundary: see models/index_scope.py.
+    index_scope: IndexScope = IndexScope.org
 
     @model_validator(mode="after")
     def _collapse_project_alias(self) -> NoteCreateIn:
@@ -2826,6 +2839,10 @@ class _NoteCommon(BaseModel):
     # ``promoted_at`` is set the note is read-only at the service
     # layer (transplanted to a task).
     maturity: str = "seed"
+    # Typed, unlike ``maturity`` above: the column is a native enum and
+    # the SPA gets a union instead of a bare string, matching how
+    # ``TaskOut.necessity`` is declared.
+    index_scope: IndexScope = IndexScope.org
     promoted_at: datetime.datetime | None = None
     # Humus atom subtype (distillation/pattern/season); None for ordinary
     # notes. Lets the SPA show the "sorgente/ripristina" affordance
@@ -2983,6 +3000,9 @@ class NotePatchIn(BaseModel):
     # there is refused too (a note always has exactly one client).
     project_tag_id: uuid.UUID | None = None
     client_tag_id: uuid.UUID | None = None
+    # Omit = no change. Unlike the two above there is no "clear": the
+    # column is NOT NULL, so the way back is ``org``, stated.
+    index_scope: IndexScope | None = None
 
 
 class TaskNoteCreateIn(BaseModel):
@@ -2990,6 +3010,7 @@ class TaskNoteCreateIn(BaseModel):
     # title); a fresh work note pre-linked to the task.
     title: str | None = Field(default=None, max_length=300)
     text: str | None = None
+    index_scope: IndexScope = IndexScope.org
 
 
 class NoteTranscribeIn(BaseModel):

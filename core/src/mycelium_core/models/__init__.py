@@ -79,6 +79,7 @@ from mycelium_core.models.google_calendar import (
     CalendarSubscription,
     GoogleCalendarStatus,
 )
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.invoice import (
     BuyerVerdict,
     ConservationAdhesion,
@@ -243,6 +244,7 @@ __all__ = [
     "HandoffStatus",
     "Identity",
     "IdentityKind",
+    "IndexScope",
     "Invoice",
     "InvoiceCounter",
     "InvoiceKind",

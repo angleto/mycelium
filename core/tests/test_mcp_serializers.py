@@ -12,7 +12,8 @@ import datetime as dt
 from types import SimpleNamespace
 from typing import Any
 
-from mycelium_mcp.server import _client, _compact, _project, _task, _task_full
+from mycelium_core.models.index_scope import IndexScope
+from mycelium_mcp.server import _client, _compact, _note, _project, _task, _task_full
 
 
 def test_compact_drops_only_none() -> None:
@@ -51,6 +52,7 @@ def _mock_task(**over: Any) -> Any:
         monetary_cost=None,
         location=None,
         necessity=SimpleNamespace(value="should"),
+        index_scope=IndexScope.org,
         budget_id=None,
         is_archived=False,
         offered=False,
@@ -89,6 +91,9 @@ def test_task_full_drops_unset_nullables_keeps_falsy() -> None:
     # Identity / required scalars always present.
     assert out["id"] and out["title"] and out["state_id"]
     assert out["priority"] == 2 and out["version"] == 1
+    # The full shape is the read-back an agent confirms a write against,
+    # so it states the index scope even at its default.
+    assert out["index_scope"] == "org"
 
 
 def test_task_full_keeps_set_values() -> None:
@@ -123,6 +128,7 @@ def test_task_lean_enriched_drops_unset_keeps_axes() -> None:
     assert out["tags"] == []  # empty list, kept
     for k in ("start_date", "due_date", "parent_task_id", "assignee_id", "owner_id"):
         assert k not in out, f"{k} should be dropped when None"
+    assert "index_scope" not in out, "the default costs no tokens on the lean row"
 
 
 def test_task_lean_enriched_surfaces_set_fields() -> None:
@@ -141,6 +147,47 @@ def test_task_lean_enriched_surfaces_set_fields() -> None:
     assert out["parent_task_id"] == "66666666-6666-6666-6666-666666666666"
     assert out["assignee_id"] == "44444444-4444-4444-4444-444444444444"
     assert out["collaborators_count"] == 2
+
+
+def test_index_scope_costs_a_key_only_when_it_is_not_the_default() -> None:
+    # The column is NOT NULL and 'org' on nearly every row, so the lean
+    # row (one per list result) pays for the exception only; absence
+    # there means 'org'. The full shape states it either way.
+    lean_default = _task(_mock_task(), [])
+    lean_scoped_out = _task(_mock_task(index_scope=IndexScope.none), [])
+    assert "index_scope" not in lean_default
+    assert lean_scoped_out["index_scope"] == "none"
+    assert _task_full(_mock_task(), [])["index_scope"] == "org"
+    assert _task_full(_mock_task(index_scope=IndexScope.none), [])["index_scope"] == "none"
+
+
+def _mock_note(**over: Any) -> Any:
+    base = dict(
+        id="77777777-7777-7777-7777-777777777777",
+        kind=SimpleNamespace(value="text"),
+        status=SimpleNamespace(value="ready"),
+        title="A note",
+        version=1,
+        maturity="seed",
+        is_archived=False,
+        index_scope=IndexScope.org,
+        created_at=dt.datetime(2026, 7, 1, tzinfo=dt.UTC),
+        updated_at=dt.datetime(2026, 7, 2, tzinfo=dt.UTC),
+        review_state=None,
+        summary=None,
+        deleted_at=None,
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_note_states_its_index_scope_at_either_value() -> None:
+    # Unlike the lean task row, one serializer answers both ``list_notes``
+    # and ``get_note``, so the field is stated rather than elided: a caller
+    # that just flipped the scope has no other way to read the flip back.
+    assert _note(_mock_note(), [], include_transcript=False)["index_scope"] == "org"
+    out = _note(_mock_note(index_scope=IndexScope.none), [], include_transcript=False)
+    assert out["index_scope"] == "none"
 
 
 def test_client_drops_unset_card_fields_keeps_falsy() -> None:

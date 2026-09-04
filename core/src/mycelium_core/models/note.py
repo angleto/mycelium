@@ -31,6 +31,7 @@ from mycelium_core.models.base import (
     UUIDPKMixin,
     VersionMixin,
 )
+from mycelium_core.models.index_scope import IndexScope
 
 
 class NoteKind(enum.StrEnum):
@@ -107,6 +108,16 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # compact. User-set; excludes the note from ``is_inert`` and from
     # every distillation surface (sources and candidates).
     protected: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Opt-out from automatic search indexing, for the whole note. The
+    # indexed unit is the part, so this column is read per-part in the
+    # resync and fanned out by ``services.notes.update_note``: no
+    # mapper listener is registered on ``Note``. Not a read boundary --
+    # see ``models/index_scope.py``.
+    index_scope: Mapped[IndexScope] = mapped_column(
+        SAEnum(IndexScope, name="index_scope", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="org",
+    )
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

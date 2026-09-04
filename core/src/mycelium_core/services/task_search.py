@@ -71,6 +71,7 @@ from sqlalchemy.orm import Session, object_session
 from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
 from mycelium_core.errors import DomainError
 from mycelium_core.models.identity import Identity
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
@@ -262,11 +263,19 @@ async def flush_task_search_dirty(session: AsyncSession) -> None:
     dirty_ids -= deleted_ids
     if not deleted_ids and not dirty_ids:
         return
+    from mycelium_core.db import index_maintenance_scope
+
     try:
-        for task_id in deleted_ids:
-            await _delete_task_blob(session, task_id)
-        for task_id in dirty_ids:
-            await _resync_task_blob(session, task_id)
+        # The blobs this maintains are org-scoped by construction, so the
+        # request's project perimeter must not filter them: see
+        # ``db.index_maintenance_scope``. Inside the ``try`` and after the
+        # early return above, so a caller that reaches the flush with an
+        # aborted transaction and nothing pending still emits no SQL.
+        async with index_maintenance_scope(session):
+            for task_id in deleted_ids:
+                await _delete_task_blob(session, task_id)
+            for task_id in dirty_ids:
+                await _resync_task_blob(session, task_id)
     except InvalidRequestError as exc:
         logger.warning(
             "task-search resync skipped (session unusable, likely partial savepoint rollback): %s",
@@ -348,6 +357,16 @@ async def _resync_task_blob(session: AsyncSession, task_id: uuid.UUID) -> None:
         await _delete_task_blob(session, task_id)
         return
     task, items = loaded
+    if task.index_scope == IndexScope.none:
+        # Before the content_hash short-circuit below, deliberately. A scope
+        # flip does not change the rendered text, so the hash is unchanged and
+        # a guard placed after the short-circuit would never run on a row that
+        # is already indexed -- which is the whole remedy case. Delete rather
+        # than skip, or the stale blob stays retrievable for good. The blob of
+        # a task is 1:1 by construction (no chunker on this path), so the
+        # pointer resolves the whole set.
+        await _delete_task_blob(session, task_id)
+        return
     text_body = render_task_for_search(task, items)
     new_hash = content_hash(text_body)
 
@@ -1256,8 +1275,9 @@ async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -
     live in the DB without a pointer/blob, so /search misses them.
     This sweep picks the first ``batch_size`` unindexed tasks (skipping
     soft-deleted: they would just be resync'd and immediately cleaned
-    up by the pointer ``_load_task_with_items`` invariant) and runs the
-    same ``_resync_task_blob`` the listener would have.
+    up by the pointer ``_load_task_with_items`` invariant, and skipping
+    ``index_scope='none'``: those have no pointer by design) and runs
+    the same ``_resync_task_blob`` the listener would have.
 
     Returns the count of tasks indexed in this batch. The worker calls
     this every tick so a large backlog drains gradually
@@ -1270,7 +1290,15 @@ async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -
         await session.execute(
             select(Task.id)
             .outerjoin(TaskIndexPointer, TaskIndexPointer.task_id == Task.id)
-            .where(TaskIndexPointer.task_id.is_(None), Task.deleted_at.is_(None))
+            .where(
+                TaskIndexPointer.task_id.is_(None),
+                Task.deleted_at.is_(None),
+                # A task at ``none`` has no pointer by definition, so without
+                # this term it stays a candidate on every tick, fills the
+                # batch, and starves the real backlog. The guard in the resync
+                # makes it harmless; this makes it free.
+                Task.index_scope != IndexScope.none,
+            )
             .limit(batch_size)
         )
     ).all()

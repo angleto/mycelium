@@ -284,6 +284,64 @@ ActorKind = str  # human_direct|human_api|human_telegram|agent_run|mcp_token|sys
 
 
 @asynccontextmanager
+async def index_maintenance_scope(session: AsyncSession) -> AsyncIterator[None]:
+    """Run search-index maintenance without the caller's PROJECT perimeter.
+
+    ``p_memory_blobs`` carries a project term that ``p_blob_sources``,
+    ``p_notes``, ``p_note_part`` and ``p_tasks`` do not (baseline 0001), so
+    a request that arms ``app.current_project`` can read and write the
+    source row while the blob derived from it is invisible. The index is
+    not in the caller's perimeter: a task blob is deliberately
+    ``project_id`` NULL so the hit is org-wide, and a note blob takes the
+    project of its NOTE, not of the request. Maintaining it under the
+    request's filter was reading the wrong perimeter, and silently: the
+    blob DELETE behind ``index_scope='none'`` matched nothing while the
+    opt-out looked applied, and on the note side the provenance DELETE
+    (org-scoped) succeeded while the blob DELETE did not, leaving a blob
+    with the note's text and no provenance -- a row no erase-by-provenance
+    path can reach again. Reproduced on both before this existed.
+
+    The previous value comes from the stash ``tenant_session`` writes, not
+    from a probe query: this runs on the commit path of every transaction,
+    and a statement issued here would also break the callers that reach the
+    flush with an aborted transaction and no pending work, which today pass
+    through it without emitting SQL.
+
+    What this widens: for the length of the flush the org term still binds,
+    and it is the only one that ever governed these rows. What it does not
+    cover: the inline ``delete_part_index_now`` helpers, which have the same
+    shape and the same pre-existing exposure on a project-scoped request.
+    """
+    stashed = session.info.get("tenant_gucs")
+    prev = stashed[2] if stashed else ""
+    if not prev:
+        yield
+        return
+    await session.execute(text("SELECT set_config('app.current_project', '', true)"))
+    yield
+    # Restored on the clean path only, deliberately: no ``finally``. A
+    # statement issued on the failure path lands on a transaction that is
+    # already going away, and it does not fail quietly. If the body died in
+    # an ORM flush the Session is deactivated, so the restore raises
+    # ``PendingRollbackError`` -- a subclass of ``InvalidRequestError``,
+    # which is exactly what both flush functions catch and downgrade to a
+    # warning: the original error is discarded, the flush returns normally
+    # and the caller is told a rolled-back transaction succeeded. Measured:
+    # with a project armed an in-window FK violation exited ``tenant_session``
+    # with no exception and nothing committed, while the same transaction
+    # without a project raised. Nothing is lost by skipping the restore: the
+    # blank is ``is_local``, so it dies with the rollback that an in-window
+    # failure makes unavoidable, and ``tenant_rollback`` re-arms from the
+    # same stash this reads. What it does not cover: an ``InvalidRequestError``
+    # raised while the transaction is still healthy leaves the GUC blank for
+    # the rest of it; both callers commit or re-arm immediately after, and
+    # neither reads anything project-scoped in between.
+    await session.execute(
+        text("SELECT set_config('app.current_project', :prj, true)"), {"prj": prev}
+    )
+
+
+@asynccontextmanager
 async def tenant_session(
     org_id: str,
     user_id: str,

@@ -33,6 +33,7 @@ from mycelium_core.models.base import (
     UUIDPKMixin,
     VersionMixin,
 )
+from mycelium_core.models.index_scope import IndexScope
 
 
 class ExecKind(enum.StrEnum):
@@ -218,6 +219,16 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         SAEnum(Necessity, name="necessity", native_enum=True, create_type=False),
         nullable=False,
         server_default="should",
+    )
+    # Opt-out from automatic search indexing. ``none`` deletes this
+    # task's blob and keeps the indexer off it; it is not a read
+    # boundary -- see ``models/index_scope.py`` for what it does not
+    # cover. Written through ``services.tasks.update_task``, which
+    # marks the task dirty; a Core UPDATE elsewhere would not.
+    index_scope: Mapped[IndexScope] = mapped_column(
+        SAEnum(IndexScope, name="index_scope", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="org",
     )
     budget_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

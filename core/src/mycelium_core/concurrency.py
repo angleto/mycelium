@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
-from mycelium_core.errors import ConflictError
+from mycelium_core.errors import ConflictError, UnprocessableError
 from mycelium_core.i18n import MessageCode
 
 
@@ -34,6 +34,19 @@ async def optimistic_update(
     current tenant context, so pk + version is sufficient here.
     """
     table = model.__table__
+    # An explicit ``null`` for a NOT NULL column can only ever end as an
+    # IntegrityError, i.e. a 500 for what is a client mistake. Both PATCH
+    # surfaces can produce one: a field typed ``T | None = None`` accepts a
+    # stated null and ``exclude_unset`` / ``model_fields_set`` keep it, which
+    # is how ``{"index_scope": null}`` and ``{"necessity": null}`` reach here.
+    # Refused once, in the single funnel for versioned writes, rather than
+    # per field on each surface. Nothing legitimate is lost: the write could
+    # not have succeeded.
+    nulled = sorted(
+        k for k, v in values.items() if v is None and k in table.c and not table.c[k].nullable
+    )
+    if nulled:
+        raise UnprocessableError(MessageCode.FIELD_NOT_NULLABLE, field=nulled[0])
     stmt = (
         update(model)
         .where(

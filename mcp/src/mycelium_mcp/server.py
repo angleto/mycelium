@@ -42,6 +42,7 @@ from mycelium_core.models.email import (
     EmailResponderJob,
 )
 from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.index_scope import IndexScope
 from mycelium_core.models.invoice import Invoice, InvoiceLine, InvoiceLineAltriDati, InvoiceState
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note, NoteKind, NoteTurn
@@ -674,6 +675,10 @@ def _task(
             "importance": t.importance,
             "urgency": t.urgency,
             "necessity": t.necessity.value if t.necessity else None,
+            # Only the exception is worth a key on the lean row: the column
+            # is NOT NULL and 'org' on nearly every task, and _compact drops
+            # None. Absent here means 'org'.
+            "index_scope": (t.index_scope.value if t.index_scope != IndexScope.org else None),
             "start_date": t.start_date.isoformat() if t.start_date else None,
             "due_date": t.due_date.isoformat() if t.due_date else None,
             "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
@@ -1012,6 +1017,7 @@ async def create_task(
     monetary_cost: float | None = None,
     location: str | None = None,
     necessity: str | None = None,
+    index_scope: str | None = None,
     budget_id: str | None = None,
     assignee_ids: list[str] | None = None,
     assignee_id: str | None = None,
@@ -1022,7 +1028,10 @@ async def create_task(
     """Create a task. ``importance``/``urgency`` 1..5 Eisenhower
     (1=most pressing, default 4/4); ``priority`` is derived
     (importance*urgency, never settable). ``necessity`` is MoSCoW
-    (must|should|could, default should). ``required_capabilities``
+    (must|should|could, default should). ``index_scope`` is
+    ``org`` (default) or ``none``, which keeps the title and description
+    out of the automatic search index -- not out of ``get_task``, and not
+    out of the ``q=`` filter of ``list_tasks``. ``required_capabilities``
     declare what an executor needs (empty=any). Pass ``start_at``
     + ``duration_minutes`` to make it an appointment-task subject to
     no-overlap on assignee and explicit participants.
@@ -1060,6 +1069,7 @@ async def create_task(
             monetary_cost=(Decimal(str(monetary_cost)) if monetary_cost is not None else None),
             location=location,
             necessity=Necessity(necessity) if necessity is not None else Necessity.should,
+            index_scope=IndexScope(index_scope) if index_scope is not None else IndexScope.org,
             budget_id=uuid.UUID(budget_id) if budget_id else None,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             assignee_ids=[uuid.UUID(u) for u in (assignee_ids or [])],
@@ -1791,6 +1801,9 @@ def _task_full(
             "monetary_cost": (str(t.monetary_cost) if t.monetary_cost is not None else None),
             "location": t.location,
             "necessity": t.necessity.value,
+            # Unconditional here, unlike the lean ``_task``: this is the shape
+            # an agent reads back to confirm a write.
+            "index_scope": t.index_scope.value,
             "budget_id": str(t.budget_id) if t.budget_id else None,
             "is_archived": t.is_archived,
             "offered": t.offered,
@@ -1982,12 +1995,16 @@ async def update_task(
     monetary_cost: float | None = None,
     location: str | None = None,
     necessity: str | None = None,
+    index_scope: str | None = None,
     budget_id: str | None = None,
 ) -> dict[str, Any]:
     """Edit task fields (only the given ones). ``priority`` is a
     calculated field and is not accepted here --- patch ``importance``
     / ``urgency`` (1..5) and the service re-derives priority.
     ``necessity`` is MoSCoW: ``must`` | ``should`` | ``could``.
+    ``index_scope`` is ``org`` | ``none``; ``none`` drops this task's
+    blob and keeps the indexer off it, and moving back to ``org``
+    re-indexes it. Neither direction changes who can read the row.
     ``required_capabilities`` is the P2 executor capability requirement
     (docs/adr/0025); pass [] to clear it."""
     values: dict[str, Any] = {}
@@ -2025,6 +2042,8 @@ async def update_task(
         values["location"] = location
     if necessity is not None:
         values["necessity"] = Necessity(necessity)
+    if index_scope is not None:
+        values["index_scope"] = IndexScope(index_scope)
     if budget_id is not None:
         values["budget_id"] = uuid.UUID(budget_id)
     async with _tenant(token, org_id) as (s, org, user):
@@ -5179,6 +5198,10 @@ def _note(
         # token cost).
         "maturity": n.maturity,
         "is_archived": n.is_archived,
+        # Stated even at its default, unlike the lean task row: this one
+        # serializer answers ``get_note`` too, and a caller that just flipped
+        # the scope has no other way to read the flip back.
+        "index_scope": n.index_scope.value,
         "created_at": n.created_at.isoformat(),
         "updated_at": n.updated_at.isoformat(),
     }
@@ -5215,13 +5238,17 @@ async def create_note(
     text: str | None = None,
     title: str | None = None,
     project_id: str | None = None,
+    index_scope: str | None = None,
 ) -> dict[str, Any]:
     """Capture a note (voice|text|conversation). Unmetered.
     ``project_id`` is a PROJECT tag id (anything else is rejected): the
     note is filed under it and takes that project's client. Omit it for
     a personal note -- no project, default client, a first-class
     retrieval perimeter (docs/adr/0021), not a defect; share it later
-    with ``move_note_to_project``."""
+    with ``move_note_to_project``. ``index_scope`` is ``org`` (default)
+    or ``none``, which keeps every part of the note out of the automatic
+    search index -- not out of ``get_note``, and not out of the ``q=``
+    filter of ``list_notes``."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.create_note(
             s,
@@ -5231,6 +5258,7 @@ async def create_note(
             project_id=uuid.UUID(project_id) if project_id else None,
             title=title,
             text=text,
+            index_scope=IndexScope(index_scope) if index_scope is not None else IndexScope.org,
             channel="mcp",
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
@@ -5801,11 +5829,13 @@ async def create_task_note(
     task_id: str,
     title: str | None = None,
     text: str | None = None,
+    index_scope: str | None = None,
 ) -> dict[str, Any]:
     """TASK-side of the bidirectional Proposal A link: create a *fresh*
     work note pre-linked to the task (NOT idempotent, unlike
     get_or_create_task_note). Title defaults to the task title. Time
-    logged in the note rolls up to the task."""
+    logged in the note rolls up to the task. ``index_scope`` is ``org``
+    (default) or ``none``, as on ``create_note``."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.create_note_for_task(
             s,
@@ -5814,6 +5844,7 @@ async def create_task_note(
             task_id=uuid.UUID(task_id),
             title=title,
             text=text,
+            index_scope=IndexScope(index_scope) if index_scope is not None else IndexScope.org,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
@@ -5877,9 +5908,14 @@ async def update_note(
     text: str | None = None,
     task_id: str | None = None,
     clear_task_id: bool = False,
+    index_scope: str | None = None,
 ) -> dict[str, Any]:
     """Edit a note's title/body. A blank title is re-derived from the
-    first line of the body. Bidirectional Proposal A link: pass
+    first line of the body, and a call that states neither leaves the
+    title alone. ``index_scope`` is ``org`` | ``none``; ``none`` drops
+    the blobs of every part and keeps the indexer off them, ``org``
+    re-indexes them. Neither direction changes who can read the note.
+    Bidirectional Proposal A link: pass
     ``task_id`` to link the note to a task (validated in-org, else
     TASK_NOT_FOUND), or ``clear_task_id=True`` to unlink; omitting both
     leaves the existing link untouched.
@@ -5899,6 +5935,8 @@ async def update_note(
             extra["task_id"] = None
         elif task_id is not None:
             extra["task_id"] = uuid.UUID(task_id)
+        if index_scope is not None:
+            extra["index_scope"] = IndexScope(index_scope)
         version = await notes_svc.update_note(
             s,
             org_id=org,

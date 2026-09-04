@@ -35,7 +35,10 @@ org-scoped entity. Memory is partitioned by `org_id`.
   executor_user_id?, schedule_mode[auto|manual],
   constraint_kind[none|SNET|MSO|MFO], constraint_date?,
   monetary_cost?, location?, necessity[must|should|nice], budget_id?,
-  parent_task_id?, created_by, version)`
+  index_scope[org|none], parent_task_id?, created_by, version)`
+  - `index_scope='none'` keeps title and description out of the
+    automatic search index. It is not a read boundary and not a filter
+    on the free-text `q=`; see ADR-0056.
   - context/preconditions via `generic` tags with a namespace
     convention (e.g. `ctx:requires-computer`, `place:hardware`)
 - `task_assignees(task_id, user_id)`
@@ -122,8 +125,10 @@ org-scoped entity. Memory is partitioned by `org_id`.
 ## Notes and voice capture
 
 - `notes(id, org_id, kind[voice|text|conversation], title?, summary?,
-  audio_ref?, status, created_by, version)` (the body lives in
-  `note_part`; migration 0012 dropped `notes.transcript`)
+  audio_ref?, status, index_scope[org|none], created_by, version)` (the
+  body lives in `note_part`; migration 0012 dropped `notes.transcript`)
+  - `index_scope` is on the note, not on the part, so a part added to a
+    scoped-out note is born scoped out too. ADR-0056.
 - `note_tags(note_id, tag_id)` (one relation per kind, like
   `task_tags`; migration 0016 dropped `notes.project_id`, so the
   junction is the only truth). A note carries exactly one `client` row

@@ -112,6 +112,10 @@ _TASK_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "location",
     "necessity",
     "budget_id",
+    # Recorded, never restored: it is in neither RESTORABLE set below,
+    # so reverting a task cannot silently put a scoped-out row back into
+    # the index. Same treatment as ``is_archived`` / ``deleted_at``.
+    "index_scope",
     "is_archived",
     "deleted_at",
     "start_at",
@@ -136,6 +140,7 @@ _NOTE_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "deleted_at",
     "audio_ref",
     "audio_seconds",
+    "index_scope",
     "promoted_at",
 )
 # Columns that live on the Note row -- the snapshot loader iterates

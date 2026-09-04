@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import enum
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +197,16 @@ def show(
             out().print(f"  [{short_id(cm.get('id'))}] {cm.get('body')}")
 
 
+class _IndexScope(enum.StrEnum):
+    """The values of the server's ``index_scope``. Restated here because
+    the CLI speaks REST and does not import the core package; a wrong
+    value would otherwise reach the API as a 422 instead of being
+    refused by typer with the valid set."""
+
+    org = "org"
+    none = "none"
+
+
 @app.command()
 def add(
     title: str = typer.Argument(..., help="Task title."),
@@ -241,6 +252,12 @@ def add(
     no_editor: bool = typer.Option(
         False, "--no-editor", help="Do not open $EDITOR even if description is empty."
     ),
+    index_scope: _IndexScope | None = typer.Option(
+        None,
+        "--index-scope",
+        help="org|none. 'none' creates the task already out of the search index, "
+        "instead of indexing it and unindexing it a moment later.",
+    ),
 ) -> None:
     """Create a task. With no -d/--description, opens $EDITOR for the body."""
     if description == "-":
@@ -263,6 +280,8 @@ def add(
     due_date = _parse_due(due)
     if due_date:
         payload["due_date"] = due_date.isoformat()
+    if index_scope is not None:
+        payload["index_scope"] = index_scope.value
     with client() as c:
         if client_tag or project_tag or tag:
             rows = _tag_index(c)
@@ -302,6 +321,12 @@ def edit(
     urgency: int | None = typer.Option(None, "--urgency", "-U", min=1, max=5),
     billable: bool | None = typer.Option(None, "--billable/--unbillable"),
     location: str | None = typer.Option(None, "--location"),
+    index_scope: _IndexScope | None = typer.Option(
+        None,
+        "--index-scope",
+        help="org|none. 'none' keeps title and description out of the search index. "
+        "It does not hide the task: it stays readable and stays matched by 'task list -q'.",
+    ),
 ) -> None:
     """Patch task fields. Only fields you pass are changed. ``priority``
     is a calculated field (importance x urgency); patch the axes."""
@@ -329,6 +354,7 @@ def edit(
             ("urgency", urgency),
             ("billable", billable),
             ("location", location),
+            ("index_scope", index_scope.value if index_scope else None),
         ):
             if val is not None:
                 payload[key] = val
