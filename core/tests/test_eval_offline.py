@@ -131,23 +131,29 @@ async def test_offline_eval_dense_tier_is_healthy(_embedder: None) -> None:
     assert dense == total  # no blob fell back to keyword-only (model_id='none')
 
 
-async def test_run_eval_threads_rerank_logit_floor(
+async def test_run_eval_threads_rerank_score_floor(
     _embedder: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reranker-logit abstain floor (task f0d24fdb) threads through
+    """The reranker abstain floor (task f0d24fdb) threads through
     ``run_eval`` so a bench can sweep the honest-abstain gate: with the
-    reranker firing, a floor above the top relevance probability abstains
-    every case (recall 0, abstained), below it recall is restored. Proves the
-    eval path reaches the grader, not just ``retrieve``."""
+    reranker firing, a floor above the top relevance score abstains every case
+    (recall 0, abstained), below it recall is restored. Proves the eval path
+    reaches the grader, not just ``retrieve``."""
     from mycelium_core.config import get_settings
     from mycelium_core.reranker import RerankResult, set_reranker_override
 
     class _ConstReranker:
+        """A middling score, in the [0,1] the seam promises (RerankResult).
+
+        It used to return 0.0, which was a raw LOGIT meaning "middling" only
+        because the grader squashed it. Under the contract 0.0 is the bottom
+        of the range, and this test would have abstained on both floors."""
+
         model_id = "const"
 
         async def rerank(self, query: str, pairs: object) -> RerankResult:
             n = len(pairs)  # type: ignore[arg-type]
-            return RerankResult(scores=[0.0] * n, model_id=self.model_id)
+            return RerankResult(scores=[0.5] * n, model_id=self.model_id)
 
     token = "zebra quumix vortex"  # 3 tokens + 6 blobs -> the rerank gate fires
     async with admin_session() as s:
@@ -178,13 +184,13 @@ async def test_run_eval_threads_rerank_logit_floor(
     try:
         async with tenant_session(str(org), str(user)) as s:
             hi = await eval_offline.run_eval(
-                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_logit=0.9
+                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_score=0.9
             )
         assert hi.recall_at_k == 0.0
         assert hi.abstained_cases == 1
         async with tenant_session(str(org), str(user)) as s:
             lo = await eval_offline.run_eval(
-                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_logit=0.1
+                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_score=0.1
             )
         assert lo.recall_at_k == 1.0
         assert lo.abstained_cases == 0

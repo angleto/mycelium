@@ -71,6 +71,14 @@ class CaseResult:
     # when no expected blob made the cut.
     rank: int | None
     hit_ids: tuple[uuid.UUID, ...]
+    # The cross-encoder score of the TOP hit, or None when the reranker did
+    # not run for this query (gated off, gate declined, or it failed open).
+    # It is the single number GraderMinStage's abstain floor grades on, so
+    # recording it lets a sweep of that floor be computed exactly from ONE
+    # pass instead of re-scoring the corpus once per candidate value: the
+    # floor either empties the whole result or leaves it untouched, so every
+    # rank at every floor is a function of this number and the unfloored rank.
+    top_rerank: float | None = None
 
 
 @dataclass(frozen=True)
@@ -129,7 +137,7 @@ async def run_eval(
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
     grader_min_rrf: float | None = None,
-    grader_min_rerank_logit: float | None = None,
+    grader_min_rerank_score: float | None = None,
 ) -> EvalReport:
     """Run every gold case through the real ``memory.retrieve`` and
     aggregate recall@k + MRR, plus the dense-tier health of the org's
@@ -150,7 +158,7 @@ async def run_eval(
     semantics as ``memory.retrieve_with_meta``): it lets a bench sweep the
     floor (task f0d24fdb) without touching the org setting. None (default)
     keeps the org's configured floor, i.e. the historical behaviour.
-    ``grader_min_rerank_logit`` is the sibling override for the reranker-logit
+    ``grader_min_rerank_score`` is the sibling override for the reranker-logit
     quality floor (a [0,1] probability; only bites when the reranker ran), so
     the bench can sweep the honest-abstain gate the same way."""
     results: list[CaseResult] = []
@@ -173,7 +181,7 @@ async def run_eval(
             humus_kinds=humus_kinds,
             exclude_humus_from_base=exclude_humus_from_base,
             grader_min_rrf=grader_min_rrf,
-            grader_min_rerank_logit=grader_min_rerank_logit,
+            grader_min_rerank_score=grader_min_rerank_score,
             # Eval sweeps are probes: they must not leave retrieval
             # traces (Fase 0, task 561c6aca) or measurement would forge
             # the search demand the graph aggregation reads.
@@ -182,11 +190,14 @@ async def run_eval(
         if meta.abstained:
             abstained_cases += 1
         hit_ids = tuple(h.blob.id for h in hits)
+        top_rerank = hits[0].scores_by_stage.get("rerank") if hits else None
         rank = next((i + 1 for i, bid in enumerate(hit_ids) if bid in case.expected), None)
         if rank is not None:
             found += 1
             rr_sum += 1.0 / rank
-        results.append(CaseResult(query=case.query, rank=rank, hit_ids=hit_ids))
+        results.append(
+            CaseResult(query=case.query, rank=rank, hit_ids=hit_ids, top_rerank=top_rerank)
+        )
     n = len(cases)
     dense, total = await dense_tier_health(session, org_id=org_id)
     return EvalReport(

@@ -76,20 +76,26 @@ async def test_rerank_failure_degrades_and_surfaces_in_meta() -> None:
     assert len(hits) >= 1  # results still returned (RRF order preserved)
 
 
-class _ConstLogitReranker:
-    """Returns a fixed logit for every doc, so the reranker-logit abstain
-    floor is exercised deterministically end-to-end (task f0d24fdb)."""
+class _ConstScoreReranker:
+    """Returns a fixed score for every doc, so the reranker abstain floor is
+    exercised deterministically end-to-end (task f0d24fdb).
 
-    model_id = "const-logit"
+    The score is in [0,1], which is the seam's contract (``RerankResult``) and
+    not this double's invention. The earlier version of this fake returned a
+    raw LOGIT and the floor squashed it, so both sides of a broken contract
+    agreed with each other and the tests were green while a real provider
+    would have been graded on a doubly-squashed number."""
 
-    def __init__(self, logit: float) -> None:
-        self._logit = logit
+    model_id = "const-score"
+
+    def __init__(self, score: float) -> None:
+        self._score = score
 
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
-        return RerankResult(scores=[self._logit] * len(pairs), model_id=self.model_id)
+        return RerankResult(scores=[self._score] * len(pairs), model_id=self.model_id)
 
 
-async def test_rerank_logit_grader_abstains_and_passes_end_to_end() -> None:
+async def test_rerank_score_grader_abstains_and_passes_end_to_end() -> None:
     """The honest-abstain quality floor keys off the cross-encoder logit
     (task f0d24fdb / N3), wired retrieve -> reranker -> grader: a fixed logit
     of 0.0 (relevance prob 0.5) abstains under a 0.9 floor with the
@@ -107,7 +113,7 @@ async def test_rerank_logit_grader_abstains_and_passes_end_to_end() -> None:
                 title=f"n{i}",
                 text=f"{token} note number {i}",
             )
-    set_reranker_override(lambda: _ConstLogitReranker(0.0))  # sigmoid(0.0) == 0.5
+    set_reranker_override(lambda: _ConstScoreReranker(0.5))
     try:
         async with tenant_session(str(org), str(user)) as s:
             hits_hi, meta_hi = await memory.retrieve_with_meta(
@@ -119,11 +125,11 @@ async def test_rerank_logit_grader_abstains_and_passes_end_to_end() -> None:
                 operation_id=f"rrklogit-hi-{uuid.uuid4().hex}",
                 limit=10,
                 rerank=True,
-                grader_min_rerank_logit=0.9,  # 0.9 > 0.5 -> abstain
+                grader_min_rerank_score=0.9,  # 0.9 > 0.5 -> abstain
             )
             assert hits_hi == []
             assert meta_hi.abstained is True
-            assert meta_hi.abstain_reason == "grader_min_rerank_logit"
+            assert meta_hi.abstain_reason == "grader_min_rerank_score"
         async with tenant_session(str(org), str(user)) as s:
             hits_lo, meta_lo = await memory.retrieve_with_meta(
                 s,
@@ -134,7 +140,7 @@ async def test_rerank_logit_grader_abstains_and_passes_end_to_end() -> None:
                 operation_id=f"rrklogit-lo-{uuid.uuid4().hex}",
                 limit=10,
                 rerank=True,
-                grader_min_rerank_logit=0.1,  # 0.1 < 0.5 -> hits kept
+                grader_min_rerank_score=0.1,  # 0.1 < 0.5 -> hits kept
             )
             assert len(hits_lo) >= 1
             assert meta_lo.abstained is False

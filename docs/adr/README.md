@@ -70,3 +70,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0059 The extension asks to be let in, it is not handed a secret](0059-the-extension-asks-to-be-let-in.md) — supersedes decision 5 of [0057](0057-the-browser-is-a-fourth-surface.md)
 - [0060 The fleet embedding dim is schema, and truncation is declared](0060-the-fleet-dim-is-schema-not-configuration.md)
 - [0061 The embedder seam has a side, and the prefix comes from the checkpoint](0061-the-embedder-seam-has-a-side.md)
+- [0062 The reranker's number has a scale, and the pipeline stops guessing it](0062-the-reranker-number-has-a-scale.md)

@@ -149,29 +149,39 @@ async def grader_min_rrf_floor(session: AsyncSession, org_id: uuid.UUID) -> floa
 
 
 # Per-org key for the QUALITY grader/abstain floor keyed off the reranker's
-# cross-encoder logit (task f0d24fdb / N3). The RRF grader floor above is
+# own relevance score (task f0d24fdb / N3). The RRF grader floor above is
 # rank-based and was MEASURED useless for honest abstention (note 3276b266
 # §5): a floor on the fused score is a step function -- it encodes only
 # cross-branch consensus, not relevance, so no value separates "answerable"
-# from "not in memory". The cross-encoder logit DOES score query-doc
-# relevance, so the honest abstain keys off it instead.
+# from "not in memory". The cross-encoder scores query-doc RELEVANCE, which
+# is why the honest abstain was keyed off it instead -- and, measured, that
+# is not the same question as "is there an answer here" (see below).
 #
-# STORED/COMPARED AS A PROBABILITY in [0, 1], NOT a raw logit (despite the
-# ``_logit`` in the key, kept for continuity with the task): the top hit's
-# logit is squashed through the sigmoid and the search abstains when that
-# relevance probability is below the floor. Rationale: a 0..1 probability is
-# interpretable in the admin GUI ("abstain below 0.5 relevance") and fits the
-# shared ``_org_setting_float`` [0, 1] clamp, while sigmoid is monotone so a
-# probability sweep is equivalent to a logit sweep. 0 / absent = off.
-GRADER_MIN_RERANK_LOGIT_KEY = "retrieval_grader_min_rerank_logit"
+# STORED AND COMPARED IN THE SEAM'S OWN SCALE, [0, 1] (``RerankResult``), with
+# no transform on the way in. The key used to say ``_logit`` and the stage used
+# to squash what it read: the provider had already applied the checkpoint's
+# sigmoid, so that was a second one, and it left the floor with a usable band of
+# [0.5, 0.731]. Renaming the key is free because no surface ever wrote it (the
+# workspace settings endpoint exposes only ``retrieval_grader_min_rrf``), so no
+# stored value can exist, and any that did would have been calibrated against
+# the broken scale. 0 / absent = off.
+#
+# MEASURED WORTH, 2026-09-13 (docs/eval/reranker-quality-2026-09.md): none that
+# survives a test. Over both candidate rerankers, counting "answered correctly
+# or honestly silent" across 301 LoCoMo questions, the best floor either one
+# reaches is +5 questions at McNemar p=0.18; the top score tells "there is an
+# answer here" from "there is not" with AUC 0.598-0.639 against 0.5 for a coin.
+# The gate stays off and unexposed rather than shipping a knob with no good
+# value.
+GRADER_MIN_RERANK_SCORE_KEY = "retrieval_grader_min_rerank_score"
 
 
-async def grader_min_rerank_logit_floor(session: AsyncSession, org_id: uuid.UUID) -> float | None:
-    """Read the per-org reranker-logit quality floor as a PROBABILITY in
-    [0, 1] (see GRADER_MIN_RERANK_LOGIT_KEY). Absent / malformed / <= 0 ->
-    None (no abstain). Only bites when the reranker actually ran (see
-    GraderMinStage): the logit exists only then."""
-    return await _org_setting_float(session, org_id, GRADER_MIN_RERANK_LOGIT_KEY)
+async def grader_min_rerank_score_floor(session: AsyncSession, org_id: uuid.UUID) -> float | None:
+    """Read the per-org reranker quality floor, in the seam's [0, 1] scale
+    (see GRADER_MIN_RERANK_SCORE_KEY). Absent / malformed / <= 0 -> None (no
+    abstain). Only bites when the reranker actually ran (see GraderMinStage):
+    the score exists only then."""
+    return await _org_setting_float(session, org_id, GRADER_MIN_RERANK_SCORE_KEY)
 
 
 # Sentinel model id recorded on a blob written while the embedder is
@@ -227,9 +237,9 @@ class RetrievalMeta:
     - ``abstained``: a grader/abstain floor dropped an otherwise-present top
       hit, so an EMPTY result means "no answer above the quality bar", not
       "nothing indexed". ``abstain_reason`` names the gate that fired (None
-      otherwise): ``grader_min_rerank_logit`` (the quality floor on the
-      cross-encoder logit, task f0d24fdb) or ``grader_min_rrf`` (the coarse
-      RRF floor, WS-B1).
+      otherwise): ``grader_min_rerank_score`` (the quality floor on the
+      cross-encoder's own [0,1] relevance score, task f0d24fdb) or
+      ``grader_min_rrf`` (the coarse RRF floor, WS-B1).
     - ``rerank_failed``: the cross-encoder reranker was requested but errored
       (model missing / OOM) and the pipeline degraded to RRF order. Results are
       still returned, but the precision uplift is absent -- surface it so the
@@ -584,7 +594,7 @@ async def retrieve_with_meta(
     operation_id: str,
     limit: int = 10,
     grader_min_rrf: float | None = None,
-    grader_min_rerank_logit: float | None = None,
+    grader_min_rerank_score: float | None = None,
     tag_ids: Sequence[uuid.UUID] | None = None,
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
@@ -780,12 +790,12 @@ async def retrieve_with_meta(
     effective_grader_min = grader_min_rrf
     if effective_grader_min is None:
         effective_grader_min = await grader_min_rrf_floor(session, org_id)
-    # The reranker-logit quality floor (task f0d24fdb): an explicit caller
+    # The reranker quality floor (task f0d24fdb): an explicit caller
     # value wins, else the per-org setting. Only bites when the reranker ran
     # (GraderMinStage); resolving it here keeps every surface consistent.
-    effective_grader_min_rerank = grader_min_rerank_logit
+    effective_grader_min_rerank = grader_min_rerank_score
     if effective_grader_min_rerank is None:
-        effective_grader_min_rerank = await grader_min_rerank_logit_floor(session, org_id)
+        effective_grader_min_rerank = await grader_min_rerank_score_floor(session, org_id)
     from mycelium_core.services.retrieval.types import Stage as _Stage
 
     stages: list[_Stage] = [LexicalFTSStage(oversample=_OVERSAMPLE, exact_only=exact_only)]
@@ -838,7 +848,7 @@ async def retrieve_with_meta(
             RelativeFloorStage(ratio=_RELATIVE_FLOOR_RATIO),
             GraderMinStage(
                 min_score=effective_grader_min,
-                min_rerank_prob=effective_grader_min_rerank,
+                min_rerank_score=effective_grader_min_rerank,
             ),
         ]
     )
@@ -867,7 +877,7 @@ async def retrieve_with_meta(
         # designated per-call scratch slot); read them back here.
         diag = ctx.extras.get("semantic_diag") or {}
         abstained = bool(ctx.extras.get("grader_abstained"))
-        # The stage records WHICH floor fired (rrf vs rerank-logit); fall back
+        # The stage records WHICH floor fired (rrf vs rerank score); fall back
         # to the RRF reason for the legacy path that didn't set it.
         reason = ctx.extras.get("grader_abstain_reason") or "grader_min_rrf"
         return RetrievalMeta(
@@ -939,7 +949,7 @@ async def retrieve(
     operation_id: str,
     limit: int = 10,
     grader_min_rrf: float | None = None,
-    grader_min_rerank_logit: float | None = None,
+    grader_min_rerank_score: float | None = None,
     tag_ids: Sequence[uuid.UUID] | None = None,
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
@@ -965,7 +975,7 @@ async def retrieve(
         operation_id=operation_id,
         limit=limit,
         grader_min_rrf=grader_min_rrf,
-        grader_min_rerank_logit=grader_min_rerank_logit,
+        grader_min_rerank_score=grader_min_rerank_score,
         tag_ids=tag_ids,
         channel_tag_id=channel_tag_id,
         channel_key=channel_key,

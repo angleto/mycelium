@@ -111,7 +111,7 @@ async def _run_pass(
                 k=args.k,
                 limit_questions=args.limit_questions,
                 grader_min_rrf=args.grader_floor,
-                grader_min_rerank_logit=args.grader_rerank_floor,
+                grader_min_rerank_score=args.grader_rerank_floor,
             )
             embedder_models.update(await bench.corpus_embedder_models(s, org_id=org))
         scores.append(score)
@@ -126,7 +126,7 @@ async def _run_pass(
         scores,
         sorted(embedder_models),
         grader_min_rrf=args.grader_floor,
-        grader_min_rerank_logit=args.grader_rerank_floor,
+        grader_min_rerank_score=args.grader_rerank_floor,
     )
     return report, tuple(scores)
 
@@ -163,6 +163,57 @@ async def _run_round(
     print(round_.render_round(outcomes, baseline=spec.baseline))
 
 
+def _sweep(paths: list[str], floors: list[float]) -> str:
+    """What the honest-abstain floor would have done, from a finished run.
+
+    EXACT rather than estimated. ``GraderMinStage`` either drops the entire
+    result (top rerank score below the floor) or leaves it exactly as it is,
+    so a question's outcome at floor F is decided by two numbers already in
+    the dump: the score of the top hit and the rank it had without a floor.
+    Re-scoring the corpus once per candidate floor would produce the same
+    table for 11 minutes a row (gte) or an hour (the incumbent).
+
+    A question whose ``top_rerank`` is null was never reranked -- the gate
+    declined, or the feature was off -- and no floor can touch it. That is
+    the same condition the stage checks, and printing the count keeps a sweep
+    over a no-reranker dump from reading as "the floor does nothing".
+    """
+    lines = [
+        f"{'system':<26}{'floor':>7}{'n':>6}{'recall':>8}{'MRR':>8}{'abstain ok':>12}{'served':>8}"
+    ]
+    for raw in paths:
+        obj = json.loads(Path(raw).read_text(encoding="utf-8"))
+        recs = obj["records"]
+        scored = [r for r in recs if not r["impossible"]]
+        impossible = [r for r in recs if r["impossible"]]
+        graded = sum(1 for r in recs if r.get("top_rerank") is not None)
+        for floor in [None, *floors]:
+
+            def cut(r: dict[str, object], f: float | None = floor) -> bool:
+                top = r.get("top_rerank")
+                return f is not None and isinstance(top, float) and top < f
+
+            hits = [r for r in scored if not cut(r) and r["rank"] is not None]
+            rr = sum(1.0 / int(r["rank"]) for r in hits)
+            n = len(scored)
+            # An abstention question's rank is None BY CONSTRUCTION (nothing
+            # is expected), so it says nothing here: what counts is whether
+            # the pipeline abstained, or the floor now makes it.
+            ok = sum(1 for r in impossible if cut(r) or r["abstained"])
+            served = [0 if cut(r) else int(r["served_tokens"]) for r in recs]
+            lines.append(
+                f"{obj['system']:<26}{'off' if floor is None else format(floor, 'g'):>7}"
+                f"{n:>6}{len(hits) / n if n else 0.0:>8.3f}{rr / n if n else 0.0:>8.3f}"
+                f"{ok / len(impossible) if impossible else 0.0:>12.3f}"
+                f"{round(sum(served) / len(served)) if served else 0:>8d}"
+            )
+        lines.append(
+            f"  ({graded}/{len(recs)} questions carry a rerank score; "
+            f"a floor cannot reach the rest)"
+        )
+    return "\n".join(lines)
+
+
 def _dump(path: Path, run: SystemRun) -> None:
     path.write_text(
         json.dumps({"system": run.system, "records": run.records}, indent=1),
@@ -190,7 +241,9 @@ def _compare(paths: list[str]) -> str:
     return paired_table(runs, base_system=runs[0].system)
 
 
-async def _install_candidate_reranker(model: str) -> None:
+async def _install_candidate_reranker(
+    model: str, *, revision: str | None, code_revision: str | None
+) -> None:
     """Point the reranker seam at a candidate model for this process.
 
     Same shape as the embedder round's ``set_embedder_override``: the
@@ -204,10 +257,15 @@ async def _install_candidate_reranker(model: str) -> None:
     report identical to the no-reranker baseline. That report would be read
     as "this model changes nothing" when it means "this model never ran".
     """
-    provider = LocalReranker(model, trust_remote_code=True)
+    provider = LocalReranker(
+        model,
+        trust_remote_code=bool(code_revision),
+        revision=revision,
+        code_revision=code_revision,
+    )
     probe = await provider.rerank(
         "quale soglia usa il reranker?",
-        ["la soglia di abstain va letta sul logit del reranker", "ricetta della carbonara"],
+        ["la soglia di abstain va letta sul punteggio del reranker", "ricetta della carbonara"],
     )
     set_reranker_override(lambda: provider)
     print(f"reranker override: {model} (trust_remote_code, eval only) probe={probe.scores}")
@@ -241,23 +299,61 @@ async def main() -> None:
         "--grader-rerank-floor",
         type=float,
         default=None,
-        help="per-call retrieval_grader_min_rerank_logit override (honest-abstain "
-        "sweep, task f0d24fdb): a [0,1] relevance-probability floor on the reranker "
-        "logit; only bites with --rerank / reranker enabled",
+        help="per-call retrieval_grader_min_rerank_score override (honest-abstain "
+        "gate, task f0d24fdb): a floor in the reranker's own [0,1] score; only "
+        "bites with --rerank / reranker enabled. To SWEEP it use --sweep-floors "
+        "on a dump instead, which is exact and costs one pass rather than one "
+        "per value.",
+    )
+    ap.add_argument(
+        "--sweep-floors",
+        nargs="+",
+        default=None,
+        metavar="RUN.json",
+        help="do not run the bench: for each --dump-results file, print what "
+        "the honest-abstain floor would have produced at every value of "
+        "--sweep-at. EXACT, not a model: the floor either empties a result or "
+        "leaves it untouched, so each question's outcome is a function of the "
+        "recorded top rerank score and its unfloored rank. Needs a dump from a "
+        "run with the reranker ON (task f0d24fdb).",
+    )
+    ap.add_argument(
+        "--sweep-at",
+        default="0.01,0.05,0.1,0.2,0.3,0.5,0.7,0.9",
+        metavar="A,B,C",
+        help="floors to evaluate with --sweep-floors (the unfloored arm is "
+        "always printed first as the baseline).",
     )
     ap.add_argument(
         "--reranker-model",
         default=None,
         metavar="HF_ID",
         help="measure a CANDIDATE cross-encoder instead of the configured one "
-        "(task f0d24fdb), through the reranker override seam. Loaded with "
-        "trust_remote_code, which is why this lives in the bench and not in "
-        "the factory: the candidates in this size class ship their own "
-        "architecture, and running their code is a supply-chain decision that "
-        "has to be taken deliberately, not inherited from a benchmark. "
+        "(task f0d24fdb), through the reranker override seam. Remote code is "
+        "executed only when --reranker-code-revision pins the commit it comes "
+        "from, which is why this lives in the bench and not in the factory: "
+        "the candidates in this size class ship their own architecture, and "
+        "running their code is a supply-chain decision that has to be taken "
+        "deliberately, not inherited from a benchmark. "
         "Needs the stage ON (MYCELIUM_RERANKER_ENABLED=true); "
         "MYCELIUM_RERANKER_TOP_K decides how many pairs it scores, which is "
         "what it costs.",
+    )
+    ap.add_argument(
+        "--reranker-code-revision",
+        default=None,
+        metavar="SHA",
+        help="commit of the repository the candidate's REMOTE CODE comes from "
+        "(gte: a sha of Alibaba-NLP/new-impl). Required by LocalReranker "
+        "whenever remote code is executed, here too: a measurement that runs "
+        "unpinned code is measuring something nobody can name later.",
+    )
+    ap.add_argument(
+        "--reranker-revision",
+        default=None,
+        metavar="SHA",
+        help="commit of the candidate's CHECKPOINT repository (optional; "
+        "weights moving under a fixed id is a reproducibility problem).",
     )
     ap.add_argument(
         "--dump-results",
@@ -290,13 +386,21 @@ async def main() -> None:
         print(_compare(args.compare))
         return
 
+    if args.sweep_floors:
+        print(_sweep(args.sweep_floors, [float(x) for x in args.sweep_at.split(",")]))
+        return
+
     instances = _load_instances(args.dataset, Path(args.path))
     if args.limit_instances is not None:
         instances = instances[: args.limit_instances]
     print(f"{args.dataset}: {len(instances)} instance(s) from {args.path}")
 
     if args.reranker_model:
-        await _install_candidate_reranker(args.reranker_model)
+        await _install_candidate_reranker(
+            args.reranker_model,
+            revision=args.reranker_revision,
+            code_revision=args.reranker_code_revision,
+        )
     try:
         if args.embedders:
             await _run_round(instances, args, round_.load_round_spec(args.embedders))

@@ -15,21 +15,12 @@ over "weak answer").
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from sqlalchemy import select
 
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.services.retrieval.types import Candidate, RetrievalContext, Stage
-
-
-def _sigmoid(x: float) -> float:
-    """Numerically stable logistic sigmoid (overflow-safe both directions)."""
-    if x >= 0.0:
-        return 1.0 / (1.0 + math.exp(-x))
-    z = math.exp(x)
-    return z / (1.0 + z)
 
 
 @dataclass
@@ -73,25 +64,47 @@ class GraderMinStage(Stage):
 
     Two floors, checked with a precedence rule (task f0d24fdb / N3):
 
-    * ``min_rerank_prob`` -- the QUALITY floor on the cross-encoder logit
-      (squashed to a [0,1] probability). This is the honest-abstain signal:
-      the logit scores query-doc relevance directly. It is only meaningful
-      when the reranker actually ran (it writes ``scores_by_stage["rerank"]``).
+    * ``min_rerank_score`` -- the QUALITY floor on the cross-encoder's own
+      relevance score, which the reranker seam delivers in [0,1] (see
+      ``RerankResult``). This is the honest-abstain signal: it scores
+      query-doc relevance directly, where the RRF sum only scores position.
+      It is only meaningful when the reranker actually ran (it writes
+      ``scores_by_stage["rerank"]``).
+
+      It is compared AS IT ARRIVES. It used to be squashed through a sigmoid
+      here, on the assumption that the seam carried a raw logit; the seam
+      carries a [0,1] score, so the squash was a second one, and it pressed
+      the whole usable band of this floor into [0.5, 0.731] -- a relevant
+      document and a certainly-irrelevant one, 0.5017 and 0.0000161 from the
+      provider, arrived here 0.6229 and 0.5000. Ordering never noticed,
+      because a sigmoid is monotone, and every test of this floor used a
+      fixture that invented its own scale. Measured 2026-09-13.
+
+      What the floor is WORTH, swept on LoCoMo the same day over both
+      candidate models (230 answerable questions, 71 whose right answer is
+      silence): nothing that survives a test. Counting "answered correctly or
+      honestly silent" over all 301, the best floor either model reaches is
+      +5 questions at McNemar p=0.18, and every other one is a wash or a
+      loss. The top score tells "there is an answer here" from "there is not"
+      with AUC 0.598-0.639 against 0.5 for a coin. Left in, correct and off by
+      default, because the mechanism is right and the SIGNAL is what failed;
+      read docs/eval/reranker-quality-2026-09.md before setting it to
+      anything.
     * ``min_score`` -- the coarse RRF floor on the FUSED score (WS-B1),
       rank-based and measured near-useless for abstention (note 3276b266 §5),
       kept for continuity.
 
     PRECEDENCE: when the reranker ran AND a rerank floor is set, the rerank
     floor is the SOLE authority and the RRF floor is skipped -- after
-    reranking ``candidates[0]`` is the top by logit, not by RRF, so a
+    reranking ``candidates[0]`` is the top by rerank score, not by RRF, so a
     high-quality hit that reranked up from a low RRF rank would be spuriously
     cut by the RRF floor. With no rerank signal (or no rerank floor) the RRF
-    floor applies exactly as before, so a caller that leaves ``min_rerank_prob``
+    floor applies exactly as before, so a caller that leaves ``min_rerank_score``
     None is byte-identical to the historical behaviour."""
 
     name: str = "grader_min"
     min_score: float | None = None
-    min_rerank_prob: float | None = None
+    min_rerank_score: float | None = None
 
     async def run(
         self,
@@ -105,10 +118,10 @@ class GraderMinStage(Stage):
         reranked = "rerank" in top.scores_by_stage
         # Quality gate takes precedence when the reranker ran (see class doc):
         # grade on the logit of the item the cross-encoder ranked #1.
-        if self.min_rerank_prob is not None and reranked:
-            if _sigmoid(top.scores_by_stage["rerank"]) < self.min_rerank_prob:
+        if self.min_rerank_score is not None and reranked:
+            if top.scores_by_stage["rerank"] < self.min_rerank_score:
                 ctx.extras["grader_abstained"] = True
-                ctx.extras["grader_abstain_reason"] = "grader_min_rerank_logit"
+                ctx.extras["grader_abstain_reason"] = "grader_min_rerank_score"
                 return []
             return candidates
         if self.min_score is None:
@@ -179,7 +192,7 @@ class RelativeFloorStage(Stage):
     query against 482 with no reranker, and recall@10 fell to 0.713 from
     0.735 -- the reranker was being blamed for a cut this stage made. The
     absolute cut in the rerank domain belongs to ``GraderMinStage``'s
-    ``min_rerank_prob``, which is calibrated in that domain and off by
+    ``min_rerank_score``, which is calibrated in that domain and off by
     default.
 
     The condition is the fact, not the configuration: a candidate carrying
