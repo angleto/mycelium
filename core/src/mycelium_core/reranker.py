@@ -64,8 +64,21 @@ class LocalReranker:
     Noop path. The load and the predict both run in a worker thread
     so the asyncio loop stays responsive even on cold start."""
 
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3") -> None:
+    def __init__(
+        self, model_name: str = "BAAI/bge-reranker-v2-m3", *, trust_remote_code: bool = False
+    ) -> None:
+        """``trust_remote_code`` lets sentence-transformers EXECUTE python
+        that ships with the checkpoint, which several strong multilingual
+        rerankers need (``gte-multilingual-reranker-base`` defines its own
+        architecture that way). It is False here and must stay False for
+        anything a deployment loads: it turns a model id into arbitrary code
+        from a third party, which is a supply-chain decision and not a model
+        choice. The evaluation harness passes True deliberately, on a
+        throwaway database, to measure candidates before anyone argues for
+        adopting one -- and adopting one would mean making that decision
+        explicitly, not inheriting it from a benchmark."""
         self._model_name = model_name
+        self._trust_remote_code = trust_remote_code
         self._model: object | None = None
         self._load_lock = asyncio.Lock()
 
@@ -81,7 +94,7 @@ class LocalReranker:
                 raise RuntimeError(
                     "LocalReranker requires the 'sentence-transformers' extra"
                 ) from exc
-            self._model = CrossEncoder(self._model_name)
+            self._model = CrossEncoder(self._model_name, trust_remote_code=self._trust_remote_code)
         return self._model
 
     async def _model_ready(self) -> object:

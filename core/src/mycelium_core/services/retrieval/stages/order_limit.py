@@ -169,6 +169,26 @@ class RelativeFloorStage(Stage):
     semantic hit from a bad one inside a conceptual query -- that needs an
     ABSOLUTE signal, the cross-encoder logit of task f0d24fdb.
 
+    And once that signal is there, this stage steps aside. When the
+    reranker has scored the candidates, ``score`` is no longer an RRF sum
+    but the cross-encoder's own number, and ``ratio`` measures nothing in
+    that domain: on ``bge-reranker-v2-m3`` a relevant document routinely
+    scores 1e-5 against a top of 0.5, so a ratio of 0.4 deletes it.
+    Measured on LoCoMo (2026-09-13, 230 paired questions, top_k=16): with
+    the floor applied to rerank scores the incumbent served 181 tokens per
+    query against 482 with no reranker, and recall@10 fell to 0.713 from
+    0.735 -- the reranker was being blamed for a cut this stage made. The
+    absolute cut in the rerank domain belongs to ``GraderMinStage``'s
+    ``min_rerank_prob``, which is calibrated in that domain and off by
+    default.
+
+    The condition is the fact, not the configuration: a candidate carrying
+    a ``rerank`` component is one the cross-encoder actually scored. With
+    the feature enabled the reranker still declines on short queries and on
+    thin candidate sets (``RerankGate``), and can fail open -- in all of
+    those the scores are still RRF sums and this floor still applies,
+    which is what a flag-shaped test would have got wrong.
+
     Runs after OrderingStage (candidates already score-DESC)."""
 
     name: str = "relative_floor"
@@ -176,6 +196,11 @@ class RelativeFloorStage(Stage):
     #: At or below this many tokens the query is treated as a keyword/name
     #: lookup and the floor spans both match kinds.
     keyword_max_tokens: int = 3
+    #: Name of the stage whose presence in ``scores_by_stage`` means the
+    #: scores are absolute relevance and not an RRF sum. Matches
+    #: ``CrossEncoderRerankerStage.name``; it is a field so the two can be
+    #: wired together in a test without importing across stage modules.
+    rerank_stage: str = "rerank"
 
     @staticmethod
     def _matched_lexically(candidate: Candidate) -> bool:
@@ -191,6 +216,8 @@ class RelativeFloorStage(Stage):
         candidates: list[Candidate],
     ) -> list[Candidate]:
         if self.ratio <= 0.0 or not candidates:
+            return candidates
+        if any(self.rerank_stage in c.scores_by_stage for c in candidates):
             return candidates
         conceptual = len(query.split()) > self.keyword_max_tokens
         tops: dict[bool, float] = {True: 0.0, False: 0.0}

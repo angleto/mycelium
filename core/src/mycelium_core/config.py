@@ -635,6 +635,16 @@ class Settings(BaseSettings):
     # work with) or on candidate sets too small to be worth the cost.
     reranker_min_query_tokens: int = 3
     reranker_min_candidates: int = 5
+    # How many of the fused candidates the cross-encoder actually scores,
+    # and the knob that dominates the cost of having it on at all: the model
+    # runs once per (query, document) pair, so this multiplies directly.
+    # Measured 2026-09-13 on CPU with production-length documents, which is
+    # what the pod has (torch CPU, no GPU): `bge-reranker-v2-m3` takes 7.8s
+    # at 10 pairs and 44s at 50; `gte-multilingual-reranker-base`, a third
+    # the size, 1.4s and 8.8s. Until then this was a dataclass default on
+    # the stage that no caller passed, so the most expensive setting in the
+    # pipeline was the one that could not be set.
+    reranker_top_k: int = 50
 
     # Fase 0 of the search-informed graph (task 561c6aca): append-only
     # trace of the returned top-m per search (``retrieval_trace``

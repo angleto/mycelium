@@ -815,6 +815,7 @@ async def retrieve_with_meta(
     if use_rerank:
         stages.append(
             CrossEncoderRerankerStage(
+                top_k=settings.reranker_top_k,
                 gate=RerankGate(
                     min_query_tokens=settings.reranker_min_query_tokens,
                     min_candidates=settings.reranker_min_candidates,

@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob
 from mycelium_core.models.tag import TagKind
 from mycelium_core.services import eval_offline, memory, taxonomy
+from mycelium_core.services.eval_baselines import SystemRun
 from mycelium_core.services.eval_offline import GoldCase
 
 SOURCE_KIND_LONGMEMEVAL = "longmemeval"
@@ -300,6 +301,40 @@ class InstanceScore:
     instance_id: str
     results: tuple[QuestionResult, ...]
     skipped_no_evidence: tuple[str, ...]  # qids whose evidence resolved to no blob
+
+
+def system_run(scores: Sequence[InstanceScore], *, system: str) -> SystemRun:
+    """One pass's per-question results in the shape ``paired_stats`` consumes.
+
+    ``fact_id`` is the bench instance: questions inside one instance share a
+    haystack, so they are not independent and the bootstrap must resample
+    instances, not questions.
+
+    It lives here, next to the scores it reads, rather than in the embedder
+    round that first needed it: the reranker comparison pairs the same
+    questions across passes for a different reason, and two copies of this
+    mapping would be two chances for the pairing key to drift apart.
+    """
+    records: list[dict[str, Any]] = []
+    for score in scores:
+        for r in score.results:
+            records.append(
+                {
+                    # Question ids are unique within an instance but not
+                    # necessarily across them (LOCOMO reuses short ids), and
+                    # the pairing keys on qid alone.
+                    "qid": f"{score.instance_id}:{r.qid}",
+                    "category": r.category,
+                    "fact_id": score.instance_id,
+                    "rank": r.rank,
+                    "impossible": r.abstention,
+                    "abstained": bool(r.abstain_correct),
+                    "served_tokens": r.served_tokens,
+                    "system": system,
+                    "proxy": False,
+                }
+            )
+    return SystemRun(system=system, proxy=False, records=records, skipped_non_note=0)
 
 
 async def _served_tokens(session: AsyncSession, hit_ids: Sequence[uuid.UUID]) -> int:

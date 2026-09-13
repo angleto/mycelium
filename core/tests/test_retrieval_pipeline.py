@@ -328,6 +328,38 @@ async def test_relative_floor_cuts_low_tail() -> None:
     assert len(out) == 3
 
 
+async def test_the_relative_floor_steps_aside_once_the_reranker_has_scored() -> None:
+    """A ratio of the top means nothing in the cross-encoder's domain.
+
+    `bge-reranker-v2-m3` gives a relevant document 1e-5 against a top of
+    0.5, so a 0.4 ratio deletes it. Measured on LoCoMo before this: the
+    incumbent served 181 tokens per query against 482 with no reranker, and
+    recall@10 fell BELOW the no-reranker arm (0.713 against 0.735). The
+    absolute cut in that domain is GraderMinStage's min_rerank_prob.
+
+    The condition is the presence of a rerank component, not a flag: with
+    the feature on, the gate still declines short queries and thin
+    candidate sets, and the provider can fail open. Those candidates carry
+    RRF sums and must still be floored, which is the second half below.
+    """
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    reranked = [
+        Candidate(blob_id=uuid.uuid4(), score=0.50, scores_by_stage={"rrf": 0.02, "rerank": 0.50}),
+        Candidate(blob_id=uuid.uuid4(), score=1e-5, scores_by_stage={"rrf": 0.016, "rerank": 1e-5}),
+    ]
+    out = await RelativeFloorStage(ratio=0.4).run("una domanda concettuale", _ctx_stub(), reranked)
+    assert len(out) == 2, "a rerank score below 40% of the top is not noise, it is a judgement"
+
+    # Same shape of scores, no rerank component: the floor is back on duty.
+    fused = [
+        Candidate(blob_id=uuid.uuid4(), score=0.50, scores_by_stage={"lexical_exact": 1.0}),
+        Candidate(blob_id=uuid.uuid4(), score=1e-5, scores_by_stage={"lexical_stem": 9.0}),
+    ]
+    out = await RelativeFloorStage(ratio=0.4).run("codice", _ctx_stub(), fused)
+    assert len(out) == 1
+
+
 async def test_a_lexical_hit_does_not_drag_the_semantic_class_under_the_floor() -> None:
     """The mixed query, which is where a single top gets it wrong.
 

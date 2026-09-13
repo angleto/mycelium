@@ -48,9 +48,11 @@ from pathlib import Path
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import Embedder, EmbedSide, set_embedder_override
+from mycelium_core.reranker import LocalReranker, set_reranker_override
 from mycelium_core.services import eval_embedder_round as round_
 from mycelium_core.services import eval_public_bench as bench
 from mycelium_core.services.auth import signup
+from mycelium_core.services.eval_baselines import SystemRun, paired_table
 
 
 def _load_instances(dataset: str, path: Path) -> list[bench.BenchInstance]:
@@ -161,6 +163,56 @@ async def _run_round(
     print(round_.render_round(outcomes, baseline=spec.baseline))
 
 
+def _dump(path: Path, run: SystemRun) -> None:
+    path.write_text(
+        json.dumps({"system": run.system, "records": run.records}, indent=1),
+        encoding="utf-8",
+    )
+    print(f"per-question results -> {path} ({len(run.records)} records)")
+
+
+def _compare(paths: list[str]) -> str:
+    """Paired table over passes dumped by --dump-results.
+
+    Comparing two runs by their printed recall is comparing two numbers that
+    were each computed over the same 230 questions: the questions are paired,
+    and a paired test over the discordant ones is both stronger and the only
+    one entitled to a p-value here."""
+    runs: list[SystemRun] = []
+    for raw in paths:
+        obj = json.loads(Path(raw).read_text(encoding="utf-8"))
+        runs.append(
+            SystemRun(system=obj["system"], proxy=False, records=obj["records"], skipped_non_note=0)
+        )
+    seen = {r.system for r in runs}
+    if len(seen) != len(runs):
+        raise SystemExit(f"--compare: two runs share a label ({sorted(seen)}); use --label")
+    return paired_table(runs, base_system=runs[0].system)
+
+
+async def _install_candidate_reranker(model: str) -> None:
+    """Point the reranker seam at a candidate model for this process.
+
+    Same shape as the embedder round's ``set_embedder_override``: the
+    measurement swaps the provider, not the pipeline, so what is compared is
+    one model against another through the stage production would run.
+
+    It loads and scores a probe pair BEFORE the bench starts, and lets the
+    failure through. The stage swallows a reranker exception by design (it
+    degrades to the RRF order so enabling the feature cannot break search),
+    which means a candidate that fails to load produces a full, plausible
+    report identical to the no-reranker baseline. That report would be read
+    as "this model changes nothing" when it means "this model never ran".
+    """
+    provider = LocalReranker(model, trust_remote_code=True)
+    probe = await provider.rerank(
+        "quale soglia usa il reranker?",
+        ["la soglia di abstain va letta sul logit del reranker", "ricetta della carbonara"],
+    )
+    set_reranker_override(lambda: provider)
+    print(f"reranker override: {model} (trust_remote_code, eval only) probe={probe.scores}")
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser(description="LongMemEval/LOCOMO retrieval bench.")
     ap.add_argument("--dataset", required=True, choices=["longmemeval", "locomo"])
@@ -193,20 +245,71 @@ async def main() -> None:
         "sweep, task f0d24fdb): a [0,1] relevance-probability floor on the reranker "
         "logit; only bites with --rerank / reranker enabled",
     )
+    ap.add_argument(
+        "--reranker-model",
+        default=None,
+        metavar="HF_ID",
+        help="measure a CANDIDATE cross-encoder instead of the configured one "
+        "(task f0d24fdb), through the reranker override seam. Loaded with "
+        "trust_remote_code, which is why this lives in the bench and not in "
+        "the factory: the candidates in this size class ship their own "
+        "architecture, and running their code is a supply-chain decision that "
+        "has to be taken deliberately, not inherited from a benchmark. "
+        "Needs the stage ON (MYCELIUM_RERANKER_ENABLED=true); "
+        "MYCELIUM_RERANKER_TOP_K decides how many pairs it scores, which is "
+        "what it costs.",
+    )
+    ap.add_argument(
+        "--dump-results",
+        default=None,
+        metavar="OUT.json",
+        help="write this pass's PER-QUESTION results (qid, category, instance, "
+        "rank, served tokens) so two passes can be compared as a paired "
+        "design later. An aggregate recall alone cannot say whether a delta "
+        "is the model or the resampling.",
+    )
+    ap.add_argument(
+        "--label",
+        default=None,
+        help="name this pass carries in --dump-results and in the compared "
+        "table (default: the reranker model, else 'baseline')",
+    )
+    ap.add_argument(
+        "--compare",
+        nargs="+",
+        default=None,
+        metavar="RUN.json",
+        help="do not run the bench: load these --dump-results files and print "
+        "the paired comparison (exact McNemar on discordant hits, "
+        "cluster-bootstrap CI on the MRR delta, clusters = bench instance). "
+        "The FIRST file is the baseline every other is compared against.",
+    )
     args = ap.parse_args()
+
+    if args.compare:
+        print(_compare(args.compare))
+        return
 
     instances = _load_instances(args.dataset, Path(args.path))
     if args.limit_instances is not None:
         instances = instances[: args.limit_instances]
     print(f"{args.dataset}: {len(instances)} instance(s) from {args.path}")
 
-    if args.embedders:
-        await _run_round(instances, args, round_.load_round_spec(args.embedders))
-        return
+    if args.reranker_model:
+        await _install_candidate_reranker(args.reranker_model)
+    try:
+        if args.embedders:
+            await _run_round(instances, args, round_.load_round_spec(args.embedders))
+            return
 
-    report = await _run_pass(instances, args, tag="")
-    print()
-    print(report[0].render())
+        report, scores = await _run_pass(instances, args, tag="")
+        if args.dump_results:
+            label = args.label or args.reranker_model or "baseline"
+            _dump(Path(args.dump_results), bench.system_run(scores, system=label))
+        print()
+        print(report.render())
+    finally:
+        set_reranker_override(None)
 
 
 if __name__ == "__main__":

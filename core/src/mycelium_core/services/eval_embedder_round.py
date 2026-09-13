@@ -53,13 +53,14 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from mycelium_core.config import get_settings
 from mycelium_core.embed_dims import EMBED_DIM, EMBED_DIM_HOSTED
 from mycelium_core.embedder import EmbedResult, EmbedSide, HostedEmbedder, LocalEmbedder
 from mycelium_core.services.eval_baselines import PairedStat, SystemRun, paired_stats, paired_table
 from mycelium_core.services.eval_public_bench import BenchReport, InstanceScore
+from mycelium_core.services.eval_public_bench import system_run as bench_system_run
 
 #: Hosted endpoints a candidate may name. A closed set rather than a free
 #: string because an unrecognised provider must stop the round: the
@@ -330,32 +331,10 @@ def build_embedder(candidate: EmbedderCandidate) -> RoundEmbedder:
 
 
 def system_run(outcome: CandidateOutcome) -> SystemRun:
-    """One candidate's per-question results in the shape ``paired_table``
-    consumes. ``fact_id`` is the bench instance: questions inside one
-    instance share a haystack, so they are not independent and the
-    bootstrap must resample instances, not questions."""
-    records: list[dict[str, Any]] = []
-    for score in outcome.scores:
-        for r in score.results:
-            records.append(
-                {
-                    # Question ids are unique within an instance but not
-                    # necessarily across them (LOCOMO reuses short ids), and
-                    # paired_table keys on qid alone.
-                    "qid": f"{score.instance_id}:{r.qid}",
-                    "category": r.category,
-                    "fact_id": score.instance_id,
-                    "rank": r.rank,
-                    "impossible": r.abstention,
-                    "abstained": bool(r.abstain_correct),
-                    "served_tokens": r.served_tokens,
-                    "system": outcome.candidate.name,
-                    "proxy": False,
-                }
-            )
-    return SystemRun(
-        system=outcome.candidate.name, proxy=False, records=records, skipped_non_note=0
-    )
+    """One candidate's per-question results, labelled with the candidate
+    name. The mapping itself belongs to the bench (see
+    ``eval_public_bench.system_run``), which is what produced the scores."""
+    return bench_system_run(outcome.scores, system=outcome.candidate.name)
 
 
 def verdict(stat: PairedStat, *, label: str, n_comparisons: int) -> Verdict:
