@@ -1398,6 +1398,7 @@ export const en = {
     modeToSource: 'Edit as plain markdown',
     modeToVisual: 'Edit as rendered text',
     revealBlock: 'Click to edit the markdown source',
+    taskToggle: 'Tick or untick this item',
     refused:
       'Not applied here. Format a selection inside one paragraph, or put the cursor on a word: not inside code, and not in a table delimiter row.',
     refusedLink:

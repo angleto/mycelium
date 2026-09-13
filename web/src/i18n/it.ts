@@ -1393,6 +1393,7 @@ export const it: Catalog = {
     modeToSource: 'Modifica come markdown grezzo',
     modeToVisual: 'Modifica come testo formattato',
     revealBlock: 'Clicca per modificare il sorgente markdown',
+    taskToggle: 'Spunta o togli la spunta a questa voce',
     refused:
       'Non applicato qui. Seleziona il testo dentro un solo paragrafo, o metti il cursore su una parola: non dentro del codice o nella riga di delimitazione di una tabella.',
     refusedLink:

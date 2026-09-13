@@ -10,17 +10,23 @@ import {
 import type { SyntaxNodeRef } from '@lezer/common'
 import { overlaps, revealedRanges } from './reveal'
 import { isInlineLink } from './commands'
-import { ImageWidget, parseImageEmbed } from './widgets'
+import { ImageWidget, parseImageEmbed, TaskBoxWidget } from './widgets'
 import type { ImageUploadParent } from '../imageUpload'
 
 // Live preview: markdown that LOOKS rendered while the document stays the
 // markdown source.
 //
-// This is a decoration layer and nothing else. It never dispatches a change,
-// so `state.sliceDoc()` is the same string with the layer on as with it off
-// -- which is the whole reason the editor moved onto this substrate, and the
-// property the tests assert first. A decoration that needed to rewrite the
-// document to display it would have reinvented the serializer this replaces.
+// This is a decoration layer and nothing else. Building it never dispatches a
+// change, so `state.sliceDoc()` is the same string with the layer on as with
+// it off -- which is the whole reason the editor moved onto this substrate,
+// and the property the tests assert first. A decoration that needed to
+// rewrite the document to display it would have reinvented the serializer
+// this replaces.
+//
+// One widget does write, and the line is worth drawing where it belongs:
+// ticking a checkbox (TaskBoxWidget) is INPUT, the one character a user
+// would otherwise type between the brackets. Nothing about rendering the
+// document changes it.
 //
 // The rule for what is hidden: markup recedes except on the CONSTRUCT the
 // selection touches. Put the caret in a bold word and its `**` come back,
@@ -202,6 +208,28 @@ function buildDecorations(
             }).range(node.from, node.to),
           )
           return false
+        }
+        if (node.name === 'TaskMarker') {
+          // `[ ]` becomes the checkbox it draws -- unless the caret is in
+          // this item, where the shared reveal rule gives the source back
+          // like any other markup. `revealOwner` needs no case for it: the
+          // marker's parent is the `Task` node, which spans `[ ] testo`,
+          // so a caret anywhere in the item's own text brings it back and a
+          // caret in the item BELOW does not.
+          const owner = revealOwner(state, node)
+          if (overlaps(revealed, owner.from, owner.to)) return
+          const checked = /^\[[xX]\]$/.test(state.sliceDoc(node.from, node.to))
+          // The separator after the marker goes with it, for the reason
+          // `hiddenRange` eats the one after `##`: it belongs to the markup,
+          // not to the text, and leaving it behind puts a second space in
+          // front of every item.
+          const line = state.doc.lineAt(node.from)
+          let to = node.to
+          while (to < line.to && /[ \t]/.test(state.doc.sliceString(to, to + 1))) to += 1
+          out.push(
+            Decoration.replace({ widget: new TaskBoxWidget(checked) }).range(node.from, to),
+          )
+          return
         }
         if (node.from === node.to) return
         const parent = node.node.parent?.name

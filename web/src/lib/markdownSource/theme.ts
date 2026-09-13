@@ -149,6 +149,20 @@ const visualFaces = EditorView.theme({
     textUnderlineOffset: '2px',
   },
 
+  // A GFM task marker, as its checkbox (livePreview.ts). It stands in for
+  // `[ ] ` -- four characters -- so it is sized and spaced to occupy that
+  // gap instead of shifting the item's text away from the lines around it.
+  // `cursor: pointer`, unlike every other widget here: this one is a
+  // control, not a rendering waiting to be clicked back into source.
+  '.cm-md-taskbox': {
+    verticalAlign: 'middle',
+    margin: '0 0.25em 0 0',
+    width: '0.95em',
+    height: '0.95em',
+    accentColor: 'var(--accent)',
+    cursor: 'pointer',
+  },
+
   // Block widgets (blockPreview.ts). They stand where several source lines
   // would be, so they own their vertical rhythm; ``user-select: none`` keeps
   // a drag across one from producing a selection that has no counterpart in

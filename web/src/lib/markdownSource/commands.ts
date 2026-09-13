@@ -316,6 +316,52 @@ function applyLines(
   return true
 }
 
+/**
+ * Open a prefixed block on lines that carry no text.
+ *
+ * The prefixing commands SKIP a blank line: it is not a list item, and
+ * counting it made an ordered selection that starts on one begin at `2.`.
+ * A selection with nothing but blank lines is the opposite request. There
+ * is no text to skip past, so it can only mean "the construct starts
+ * here" -- and the overwhelmingly common shape of it is a bare caret on an
+ * empty line, which is how anyone starts a list: put the caret on a fresh
+ * line, press the button, type the first item. Skipping there produced no
+ * change at all, and the toolbar registers these four buttons `quiet`
+ * (RichEditor.tsx), so the refusal was not shown either: the button looked
+ * dead.
+ *
+ * Not `applyLines`, for the caret. An insertion at the caret's own
+ * position leaves the caret BEFORE it, so the user would then type behind
+ * the marker they just asked for; this places the selection explicitly
+ * after the last prefix written.
+ */
+function openBlock(
+  view: EditorView,
+  lines: { from: number; to: number; text: string }[],
+  prefixFor: (index: number, indent: string) => string,
+): boolean {
+  const changes: ChangeSpec[] = []
+  // Positions in the document the dispatch PRODUCES: each earlier line
+  // grew by the prefix it gained and shrank by the whitespace it lost.
+  let shift = 0
+  let anchor = 0
+  lines.forEach((line, i) => {
+    const indent = /^[ \t]*/.exec(line.text)?.[0] ?? ''
+    const prefix = prefixFor(i, indent)
+    changes.push({ from: line.from, to: line.to, insert: prefix })
+    anchor = line.from + shift + prefix.length
+    shift += prefix.length - (line.to - line.from)
+  })
+  view.dispatch({
+    changes,
+    selection: { anchor },
+    scrollIntoView: true,
+    userEvent: 'input.format',
+  })
+  view.focus()
+  return true
+}
+
 export function toggleHeading(level: 1 | 2 | 3) {
   return (view: EditorView): boolean => {
     const want = '#'.repeat(level) + ' '
@@ -337,7 +383,8 @@ function toggleListPrefix(
   return (view: EditorView): boolean => {
     const lines = selectedLines(view.state)
     const nonEmpty = lines.filter((l) => l.text.trim() !== '')
-    const all = nonEmpty.length > 0 && nonEmpty.every((l) => detect.test(l.text))
+    if (nonEmpty.length === 0) return openBlock(view, lines, prefixFor)
+    const all = nonEmpty.every((l) => detect.test(l.text))
     // Numbered from the lines actually PREFIXED, not from the index into the
     // selection. A blank line is skipped (the `null` above) but still occupied
     // an index, so a selection starting on one used to begin at `2.`.
@@ -365,7 +412,8 @@ export const toggleOrderedList = toggleListPrefix(
 export function toggleQuote(view: EditorView): boolean {
   const lines = selectedLines(view.state)
   const nonEmpty = lines.filter((l) => l.text.trim() !== '')
-  const all = nonEmpty.length > 0 && nonEmpty.every((l) => QUOTE_RE.test(l.text))
+  if (nonEmpty.length === 0) return openBlock(view, lines, () => '> ')
+  const all = nonEmpty.every((l) => QUOTE_RE.test(l.text))
   return applyLines(view, (text) => {
     if (text.trim() === '' && !all) return null
     return all ? text.replace(QUOTE_RE, '') : '> ' + text

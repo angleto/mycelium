@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { undo } from '@codemirror/commands'
 import { forceParsing } from '@codemirror/language'
 import { markdownSourceExtensions } from './extensions'
 import type { MarkdownMode } from './mode'
@@ -280,6 +281,7 @@ describe('source mode installs no preview at all', () => {
     '# Titolo\n\nun **grassetto** e [un link](https://example.com)\n',
     '| a | b |\n| --- | --- |\n| 1 | 2 |\n',
     '```mermaid\ngraph TD; A-->B;\n```\n',
+    '- [ ] da fare\n',
   ]
 
   it.each(cases.map((s) => [s.split('\n')[0], s]))(
@@ -309,5 +311,84 @@ describe('structure gets a line class instead of a rewrite', () => {
     expect(classes.some((c) => c.includes('cm-md-code'))).toBe(true)
     expect(classes.some((c) => c.includes('cm-md-hr'))).toBe(true)
     expect(view.state.sliceDoc()).toBe(src)
+  })
+})
+
+describe('a task marker is drawn as the checkbox it is', () => {
+  /** The checkboxes currently on screen, in document order. */
+  function boxes(view: EditorView): HTMLInputElement[] {
+    return Array.from(view.contentDOM.querySelectorAll('input.cm-md-taskbox'))
+  }
+
+  it('renders one, in either bullet syntax, ticked from the source', () => {
+    // `*` and `+` are GFM bullets exactly as `-` is. The source stayed
+    // literal for all three: nothing consumed the TaskMarker node, so a
+    // checklist written by hand read as `* [ ] ...` in the rendered view.
+    const src = '- [ ] uno\n* [x] due\n+ [X] tre\n'
+    const view = open(src)
+    putCaret(view, src.length)
+    expect(boxes(view).map((b) => b.checked)).toEqual([false, true, true])
+    // The bullet stays: this editor shows list markers (a `- ` is not
+    // markup that a rendering replaces). What goes is `[ ] `, marker and
+    // its separator, so the text does not sit a space further right than
+    // the lines around it.
+    expect(rendered(view)).toBe('- uno\n* due\n+ tre\n')
+    expect(view.state.sliceDoc()).toBe(src)
+  })
+
+  it('gives the source back on the item the caret is in, and only that one', () => {
+    const src = '- [ ] uno\n- [ ] due\n'
+    const view = open(src)
+    putCaret(view, src.indexOf('uno') + 1)
+    expect(rendered(view)).toBe('- [ ] uno\n- due\n')
+    expect(boxes(view)).toHaveLength(1)
+    putCaret(view, src.indexOf('due') + 1)
+    expect(rendered(view)).toBe('- uno\n- [ ] due\n')
+  })
+
+  it('ticks and unticks on a click, writing one character', () => {
+    const src = '- [ ] uno\n- [x] due\n'
+    const view = open(src)
+    putCaret(view, src.length)
+    boxes(view)[0].click()
+    expect(view.state.sliceDoc()).toBe('- [x] uno\n- [x] due\n')
+    expect(boxes(view).map((b) => b.checked)).toEqual([true, true])
+    boxes(view)[1].click()
+    expect(view.state.sliceDoc()).toBe('- [x] uno\n- [ ] due\n')
+    expect(boxes(view).map((b) => b.checked)).toEqual([true, false])
+  })
+
+  it('unticks an uppercase tick, and re-ticks it lowercase', () => {
+    // `[X]` is a tick GFM accepts; what gets written back is this editor's
+    // own spelling, which is the `[x]` its toolbar inserts.
+    const src = '- [X] uno\n'
+    const view = open(src)
+    putCaret(view, src.length)
+    boxes(view)[0].click()
+    expect(view.state.sliceDoc()).toBe('- [ ] uno\n')
+    boxes(view)[0].click()
+    expect(view.state.sliceDoc()).toBe('- [x] uno\n')
+  })
+
+  it('a tick is input, so undo takes it back', () => {
+    const src = '- [ ] uno\n'
+    const view = open(src)
+    putCaret(view, src.length)
+    boxes(view)[0].click()
+    expect(view.state.sliceDoc()).toBe('- [x] uno\n')
+    undo(view)
+    expect(view.state.sliceDoc()).toBe(src)
+  })
+
+  it('is not a checklist unless GFM says it is', () => {
+    // A bracket run that is not a task marker (it is not at the head of a
+    // list item) must stay the text it is: `array[0]` and `nota[^1]` read
+    // the same way, and drawing a checkbox in the middle of a sentence
+    // would be the same class of error as hiding those brackets.
+    const src = 'prendi [ ] e lascialo stare\n'
+    const view = open(src)
+    putCaret(view, src.length)
+    expect(boxes(view)).toHaveLength(0)
+    expect(rendered(view)).toBe(src)
   })
 })

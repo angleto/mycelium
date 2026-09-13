@@ -52,10 +52,13 @@ function open(marked: string): EditorView {
   return view
 }
 
-function run(marked: string, cmd: (v: EditorView) => boolean): { doc: string; ok: boolean } {
+function run(
+  marked: string,
+  cmd: (v: EditorView) => boolean,
+): { doc: string; ok: boolean; caret: number } {
   const view = open(marked)
   const ok = cmd(view)
-  return { doc: view.state.sliceDoc(), ok }
+  return { doc: view.state.sliceDoc(), ok, caret: view.state.selection.main.head }
 }
 
 afterEach(() => {
@@ -247,6 +250,29 @@ describe('line prefixes', () => {
 
   it('leaves a blank line alone when adding a list marker', () => {
     expect(run('«uno\n\ndue»', toggleBulletList).doc).toBe('- uno\n\n- due')
+  })
+
+  it('starts the list on an empty line instead of refusing', () => {
+    // How anyone starts a list: caret on a fresh line, press the button,
+    // type the item. The blank-line skip above used to swallow this — no
+    // change, and `quiet` on the toolbar button so no message either.
+    // The caret lands AFTER the marker, ready for the first item.
+    expect(run('«»', toggleTaskList)).toEqual({ doc: '- [ ] ', ok: true, caret: 6 })
+    expect(run('«»', toggleBulletList)).toEqual({ doc: '- ', ok: true, caret: 2 })
+    expect(run('«»', toggleOrderedList)).toEqual({ doc: '1. ', ok: true, caret: 3 })
+    expect(run('«»', toggleQuote)).toEqual({ doc: '> ', ok: true, caret: 2 })
+  })
+
+  it('starts the list on a blank line between two paragraphs', () => {
+    expect(run('testo\n«»\naltro', toggleTaskList).doc).toBe('testo\n- [ ] \naltro')
+  })
+
+  it('numbers a selection of blank lines from one', () => {
+    expect(run('«\n\n»', toggleOrderedList).doc).toBe('1. \n2. \n3. ')
+  })
+
+  it('keeps skipping blank lines when the selection has text too', () => {
+    expect(run('«uno\n\ndue»', toggleTaskList).doc).toBe('- [ ] uno\n\n- [ ] due')
   })
 })
 

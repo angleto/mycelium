@@ -171,6 +171,81 @@ export class MathWidget extends WidgetType {
   }
 }
 
+/**
+ * Flip `[ ]` <-> `[x]` at `at`, writing the ONE character between the
+ * brackets. Re-read from the document rather than carried on the widget:
+ * a widget may have been built many keystrokes before it is clicked, and
+ * the only thing that says what is there now is the document.
+ */
+function toggleTaskAt(view: EditorView, at: number): void {
+  const found = /^\[([ xX])\]$/.exec(view.state.sliceDoc(at, at + 3))
+  // Not a marker: the position moved under us (a concurrent change, a
+  // widget clicked after its decoration was rebuilt). Write nothing rather
+  // than one character into the middle of someone's prose.
+  if (!found) return
+  view.dispatch({
+    changes: { from: at + 1, to: at + 2, insert: found[1] === ' ' ? 'x' : ' ' },
+    userEvent: 'input.toggleTask',
+  })
+}
+
+/**
+ * A GFM task marker (`[ ]` / `[x]`), as the checkbox it draws.
+ *
+ * The only widget here that WRITES, and the exception is narrow enough to
+ * state exactly. The live-preview layer never dispatches a document change
+ * to DISPLAY something -- a layer that rewrote the source to render it
+ * would have reinvented the serializer this substrate exists to delete.
+ * A click on this box is not display, it is input: the same single
+ * character the user would type between the brackets, through the same
+ * history, so undo takes it back like any keystroke.
+ *
+ * Inert was the alternative, and it is what every other widget here does
+ * (click it, get the source back, edit that). For a checklist it is the
+ * wrong answer: a checkbox drawn next to an item is a control, and one
+ * that answers a click by turning into `[ ]` is a picture of a control.
+ */
+export class TaskBoxWidget extends WidgetType {
+  readonly checked: boolean
+
+  constructor(checked: boolean) {
+    super()
+    this.checked = checked
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof TaskBoxWidget && other.checked === this.checked
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = this.checked
+    box.className = 'cm-md-taskbox'
+    // As every widget here: not part of the editable text, so the caret
+    // cannot land inside it and the DOM observer never reads it as input.
+    // It is therefore a MOUSE control; the keyboard path to the same
+    // change is the source itself, which the reveal rule puts back under
+    // the caret as `[ ]` the moment it reaches the item.
+    box.contentEditable = 'false'
+    box.title = i18n.t('editor.taskToggle')
+    box.setAttribute('aria-label', i18n.t('editor.taskToggle'))
+    box.addEventListener('click', (event) => {
+      // The document is the state; the box only draws it. Letting the
+      // browser flip `checked` as well would leave the DOM asserting a
+      // tick the source does not carry whenever the change is refused
+      // (a read-only state) or the position no longer holds a marker.
+      event.preventDefault()
+      toggleTaskAt(view, view.posAtDOM(box))
+    })
+    return box
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
 /** Split a GFM table row into cells, honouring `\|` escapes.
  *  An unescaped pipe separates; `\|` is a literal pipe inside a cell. This
  *  is the case the tiptap serializer got wrong (it unescaped the pipe and
