@@ -150,7 +150,7 @@ async def test_cluster_of_inert_notes_is_a_pattern_candidate() -> None:
         out = await cand.list_distillation_candidates(s, org_id=org, kind="pattern")
         patterns = [c for c in out["nodes"] if c["kind"] == "pattern"]
         assert patterns, "expected a pattern candidate for the 2-note community"
-        ids = set(patterns[0]["note_ids"])
+        ids = {str(n) for n in patterns[0]["note_ids"]}
         assert {str(a.id), str(b.id)} <= ids
 
 

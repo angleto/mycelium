@@ -131,7 +131,7 @@ async def test_pattern_cluster_counts_only_unprotected_members() -> None:
         out = await cand.list_distillation_candidates(s, org_id=org, kind="pattern")
         patterns = [c for c in out["nodes"] if c["kind"] == "pattern"]
         assert patterns, "expected a pattern candidate over the unprotected pair"
-        ids = set(patterns[0]["note_ids"])
+        ids = {str(n) for n in patterns[0]["note_ids"]}
         assert ids == {str(a.id), str(b.id)}
 
 

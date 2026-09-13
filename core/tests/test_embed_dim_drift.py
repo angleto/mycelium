@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 import sqlalchemy as sa
@@ -50,11 +52,26 @@ EXPECTED = (
 _TYPE = re.compile(r"^(?P<name>[a-z_]+)\((?P<dim>\d+)\)$")
 
 
-def _engine() -> sa.Engine:
+@contextmanager
+def _connect() -> Iterator[sa.Connection]:
+    """A connection on a short-lived engine, disposed on the way out.
+
+    Closing the connection is not enough: the engine's pool keeps it open
+    afterwards, and psycopg reports it as deleted-while-open when the engine
+    is finally collected. Harmless in a single test and not harmless in a
+    suite, where it is a leaked connection per test against a database with a
+    connection limit. The sibling migration gates already dispose; this one
+    did not, which is what made it one of the tests that fail under
+    warnings-as-errors."""
     sync_url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
     if not sync_url:
         pytest.skip("MYCELIUM_DATABASE_URL_SYNC not set")
-    return sa.create_engine(sync_url, future=True)
+    engine = sa.create_engine(sync_url, future=True)
+    try:
+        with engine.connect() as conn:
+            yield conn
+    finally:
+        engine.dispose()
 
 
 def _declared(conn: sa.Connection, table: str, column: str) -> list[tuple[str, str]]:
@@ -91,8 +108,7 @@ def _declared(conn: sa.Connection, table: str, column: str) -> list[tuple[str, s
 def test_column_matches_the_fleet_constant(
     table: str, column: str, type_name: str, dim: int
 ) -> None:
-    engine = _engine()
-    with engine.connect() as conn:
+    with _connect() as conn:
         declared = _declared(conn, table, column)
 
     assert declared, (
@@ -121,8 +137,7 @@ def test_every_partition_of_memory_blobs_was_checked() -> None:
     returned only the parent would pass while saying nothing about the
     partitions. ``memory_blobs`` is hash-partitioned, so it must come back
     with more than the parent relation."""
-    engine = _engine()
-    with engine.connect() as conn:
+    with _connect() as conn:
         declared = _declared(conn, "memory_blobs", "embedding")
         partitioned = conn.execute(
             sa.text(

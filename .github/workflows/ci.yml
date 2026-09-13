@@ -23,6 +23,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy -p mycelium_core -p mycelium_api -p mycelium_mcp -p mycelium_worker -p mycelium_sdi_inbound
+      # The trees that used to sit outside the type gate: tests, conftest,
+      # scripts. Narrowed by the mypy overrides in pyproject.toml to the
+      # checks that catch a caller which cannot run.
+      - run: uv run mypy core/tests api/tests worker/tests cli/tests scripts
       - name: MCP coverage doc is current (generated from the live registry)
         run: uv run python scripts/gen_mcp_coverage.py --check
       - name: Validate compose

@@ -11,6 +11,8 @@ riproduce da solo: va costruito.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 import sqlalchemy as sa
@@ -23,17 +25,34 @@ from mycelium_core.migration_rls import (
 )
 
 
-def _engine() -> sa.Engine:
+@contextmanager
+def _conn(*, transaction: bool = False) -> Iterator[sa.Connection]:
+    """Una connessione su un engine effimero, che viene DISPOSTO all'uscita.
+
+    Chiudere la connessione non basta: il pool dell'engine la tiene aperta
+    dopo il blocco, e psycopg la segnala come cancellata-mentre-aperta quando
+    l'engine viene raccolto. In un test solo e' innocuo, in una suite e' una
+    connessione persa per test contro un database che ha un limite. Gli altri
+    gate di migrazione dispongono gia'; questo no, ed e' per questo che
+    falliva con i warning trattati come errori.
+
+    ``transaction=True`` apre con ``begin()`` invece che ``connect()``, che e'
+    l'unica differenza fra i due usi in questo file."""
     url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
     if not url:
         pytest.skip("MYCELIUM_DATABASE_URL_SYNC non impostata")
-    return sa.create_engine(url, future=True)
+    engine = sa.create_engine(url, future=True)
+    try:
+        with engine.begin() if transaction else engine.connect() as conn:
+            yield conn
+    finally:
+        engine.dispose()
 
 
 def test_dove_il_ruolo_scavalca_gia_rls_non_tocca_niente() -> None:
     """In sviluppo e CI il ruolo e' superuser: il contesto non deve
     emettere nessun ALTER, quindi nessun lock e nessuna differenza."""
-    with _engine().connect() as conn:
+    with _conn() as conn:
         if not role_bypasses_rls(conn):
             pytest.skip("questo ambiente non usa un ruolo che scavalca l'RLS")
         prima = forced_tables(conn)
@@ -48,7 +67,7 @@ def test_solleva_e_ripristina_force_esattamente() -> None:
 
     Esercitato sulle primitive, perche' il contesto va in corto circuito
     quando il ruolo e' superuser."""
-    with _engine().begin() as conn:
+    with _conn(transaction=True) as conn:
         conn.execute(sa.text("CREATE TABLE _rls_probe (id int, org_id uuid)"))
         conn.execute(sa.text("ALTER TABLE _rls_probe ENABLE ROW LEVEL SECURITY"))
         conn.execute(sa.text("ALTER TABLE _rls_probe FORCE ROW LEVEL SECURITY"))
@@ -68,7 +87,7 @@ def test_il_padre_partizionato_non_viene_dimenticato() -> None:
     filtrare mentre le partizioni no: la lettura torna vuota senza errore.
     E' esattamente cosi' che 1073 righe sono quasi andate perse durante il
     recupero del 22/08."""
-    with _engine().connect() as conn:
+    with _conn() as conn:
         forzate = forced_tables(conn)
         if "memory_blobs" not in [t for t in forzate]:
             pytest.skip("memory_blobs non ha FORCE in questo database")
@@ -92,7 +111,7 @@ def test_percorso_produzione_solleva_force_e_lo_rimette(monkeypatch: pytest.Monk
     FORCE venga sollevato su tutte le tabelle e rimesso identico."""
     import mycelium_core.migration_rls as m
 
-    with _engine().begin() as conn:
+    with _conn(transaction=True) as conn:
         prima = forced_tables(conn)
         assert prima, "lo schema dovrebbe avere tabelle con FORCE"
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
@@ -111,7 +130,7 @@ def test_un_errore_non_lascia_force_spento(monkeypatch: pytest.MonkeyPatch) -> N
     che e' la parte che potrebbe sbagliare da sola."""
     import mycelium_core.migration_rls as m
 
-    with _engine().begin() as conn:
+    with _conn(transaction=True) as conn:
         prima = forced_tables(conn)
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
         with pytest.raises(RuntimeError, match="migrazione fallita"):

@@ -11,7 +11,17 @@ dependencies = [
     # WeasyPrint powers /export/pdf (markdown editor → vector PDF).
     # Needs pango/cairo system libs (brew install pango on macOS,
     # libpango-1.0-0 on Debian); the wheel itself is pure-Python.
-    "weasyprint>=62",
+    #
+    # The <69 ceiling is not caution, it is a verified incompatibility.
+    # `routers/export.py` imports `default_url_fetcher`, which 68.1
+    # deprecates ("use URLFetcher instead") and 69.0 removes. That import is
+    # at module level, so on 69 the API would not start at all, and the
+    # call sites are inside `_safe_url_fetcher`, the control that confines
+    # PDF resource loading to data: URIs and the bundled static dir. Lifting
+    # the ceiling means porting that control to `URLFetcher` and re-proving
+    # it still refuses file:// and http(s)://, which is a change to a
+    # security boundary and not a version bump.
+    "weasyprint>=62,<69",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

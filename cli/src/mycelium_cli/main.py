@@ -55,9 +55,13 @@ def root(
     json: Annotated[
         bool,
         typer.Option(
+            # No `is_flag=True`: Typer derives it from the `bool` annotation
+            # and warns that the parameter is unsupported and will be
+            # removed, which is a warning per invocation and 14 failures
+            # under warnings-as-errors. `--version` below never passed it
+            # and has always behaved as a flag.
             "--json",
             help="Emit machine-readable JSON (suppresses tables/colour).",
-            is_flag=True,
         ),
     ] = False,
     version: Annotated[

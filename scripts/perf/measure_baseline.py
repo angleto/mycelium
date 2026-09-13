@@ -313,7 +313,10 @@ def measure_dir(path: Path, glob: str = "**/*.md") -> dict[str, Any]:
                 "lines": text.count("\n") + 1,
             }
         )
-    biggest.sort(key=lambda x: x["bytes"], reverse=True)
+    # ``int()`` rather than a cast: the dicts are built two lines up with a
+    # literal int under "bytes", and the annotation that loses it is the
+    # dict's own value type, not a doubt about the value.
+    biggest.sort(key=lambda x: int(str(x["bytes"])), reverse=True)
     return {
         "exists": True,
         "root": str(path),

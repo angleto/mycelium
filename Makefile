@@ -10,8 +10,16 @@ lint:
 fmt:
 	uv run ruff format .
 
+# Two invocations, because they check different things. The first is the
+# shipped code under `strict`. The second covers the trees that used to sit
+# outside the gate entirely -- the tests, the conftest, and scripts/ -- where
+# the configured override keeps only the checks that catch a caller which
+# cannot run (see the mypy overrides in pyproject.toml for why the rest is
+# off). A test that no longer matches the signature it calls is invisible to
+# ruff and costs a full suite run to find; this is the cheap way to see it.
 type:
 	uv run mypy -p mycelium_core -p mycelium_api -p mycelium_mcp -p mycelium_worker -p mycelium_sdi_inbound
+	uv run mypy core/tests api/tests worker/tests cli/tests scripts
 
 test:
 	uv run pytest

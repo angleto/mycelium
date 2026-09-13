@@ -86,6 +86,49 @@ module = [
 ]
 ignore_missing_imports = true
 
+# The test trees are inside the type gate, but only for the checks that
+# catch a test which cannot run. A signature change that a test still calls
+# the old way is invisible to every other gate: ruff does not know
+# signatures, and pytest only finds it by running that one test, which on a
+# suite this size means finding it late or not at all (it happened on
+# 2026-09-12, when `Embedder.embed` gained a required `side` and one call
+# site in a test was missed).
+#
+# Everything else is OFF here deliberately, because the noise is test idiom
+# rather than defect: a `SimpleNamespace` standing in for a model, a `Row`
+# fed to `dict`, a helper that returns `object`. Requiring those to type
+# would be 955 errors of work to make the doubles less convenient, and
+# `arg-type` alone is 763 of them. Full typing of the tests is a separate
+# decision, not a prerequisite for closing this hole.
+[[tool.mypy.overrides]]
+module = [
+    "core.tests.*",
+    "api.tests.*",
+    "worker.tests.*",
+    "cli.tests.*",
+    "conftest",
+    "tests_helpers",
+]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "comparison-overlap",
+    "import-untyped",
+    "index",
+    "misc",
+    "no-any-return",
+    "no-untyped-call",
+    "no-untyped-def",
+    "operator",
+    "return-value",
+    "type-arg",
+    "type-var",
+    "union-attr",
+    "unused-ignore",
+    "var-annotated",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["core/tests", "api/tests", "cli/tests", "worker/tests"]
