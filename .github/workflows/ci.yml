@@ -142,6 +142,16 @@ jobs:
       # existed (task 805a569c), and neither eslint nor tsc can see CSS.
       - name: Button fill/ink pairs
         run: pnpm check:css
+      # Spacing and corner radius come from the scales in :root, never from
+      # a literal. Before them this stylesheet held 36 distinct spacing
+      # values across 790 declarations and 15 radii across 143 -- `button`
+      # at 7px inside a `.card` at 9px beside a kanban card at 8px, four
+      # radii one pixel apart for one role. Each literal was reasonable on
+      # its own and nothing ever complains about a gap or a corner, so
+      # without the check the scales decay back one plausible value at a
+      # time, invisibly in review.
+      - name: Spacing and radius scales
+        run: pnpm check:lengths
       # Explicit, before the bundle. `pnpm build` already runs `tsc -b`
       # first, so this adds no coverage -- it buys attribution: a type
       # error surfaces as "Typecheck" instead of a Build failure whose

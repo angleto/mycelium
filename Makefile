@@ -42,6 +42,7 @@ web-check:
 	  && pnpm check:shared \
 	  && pnpm check:i18n \
 	  && pnpm check:css \
+	  && pnpm check:lengths \
 	  && pnpm typecheck \
 	  && pnpm test
 

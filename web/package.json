@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:css": "node scripts/check-button-ink.mjs",
+    "check:lengths": "node scripts/check-lengths.mjs",
     "check:shared": "node scripts/check-shared-purity.mjs",
     "check:api-types": "node scripts/check-api-types.mjs",
     "e2e": "playwright test",
