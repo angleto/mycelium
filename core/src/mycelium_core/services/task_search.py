@@ -94,12 +94,29 @@ logger = logging.getLogger(__name__)
 _DIRTY_KEY = "task_search_dirty"
 _DELETED_KEY = "task_search_deleted"
 _EMBED_TIMEOUT_S = 2.0
-# Cross-branch relative floor for the unified merge: keep hits within this
-# fraction of the top score. Deliberately its own constant rather than a
-# reuse of memory's per-branch ratio -- same shape and same starting value,
-# but a different cut (between branches, not inside one) that can be tuned
-# on its own evidence.
-_CROSS_BRANCH_FLOOR_RATIO = 0.4
+# Rank-fusion constant for the unified merge. The branches are fused by the
+# RANK a hit holds inside its OWN branch, not by its absolute score, because
+# the scores are not comparable across branches and the arithmetic says so:
+# a hit accumulates one RRF term per stage that ranked it, and
+# ``lexical_exact`` is weighted 1.0 against 0.2 for stem and semantic. A note
+# quoting one word of the query therefore scores 0.0227 (exact + stem +
+# semantic) while a task that is rank 1 in its own branch on stem+semantic
+# scores 0.0066 -- three and a half times less, for being a different kind of
+# document rather than a worse answer.
+#
+# This replaced a cross-branch relative floor (keep hits within 0.4 of the
+# top score, 2026-09-06) whose comment claimed "the branches share one RRF
+# scale, so their scores are directly comparable". They share the formula,
+# not the scale. The consequence was measured on the frozen gold set on
+# 2026-09-12: asking for notes AND tasks together returned ZERO task hits on
+# all twenty questions, recall@5 0/20 against a 3/20 baseline, while the task
+# branch alone answered three of them at position 1. One corpus was
+# silencing the other.
+#
+# k=60 is RRF's usual constant and the one the per-branch fusion already
+# uses. Ties inside a rank tier are broken by the raw score, so quality still
+# orders what rank has made equal.
+_MERGE_RRF_K = 60
 _NO_EMBED_MODEL = "none"
 
 
@@ -921,26 +938,39 @@ async def search_unified_with_meta(
             named = {(h.kind, h.task_id, h.note_id) for h in resolved}
             hits = resolved + [h for h in hits if (h.kind, h.task_id, h.note_id) not in named]
 
-    hits.sort(key=lambda r: (-r.score, r.kind, str(r.blob_id)))
-    if not code_query:
-        # Cross-branch relative floor. Each branch already drops its own tail
-        # (RelativeFloorStage), but that floor is relative to the branch's OWN
-        # top -- so a branch holding no real match has a FLAT score profile,
-        # where the floor is deliberately a no-op to protect recall on
-        # conceptual queries, and it contributes its full quota of weak hits
-        # to a merge that had no floor at all. That is how a query with one
-        # strong note match came back padded with four unrelated tasks.
-        #
-        # The branches share one RRF scale (same k, same weights), so their
-        # scores are directly comparable. Same shape as the per-branch rule:
-        # a wide gap means real hits set the top and the tail is noise; a flat
-        # all-semantic profile is untouched.
-        top = hits[0].score if hits else 0.0
-        if top > 0.0:
-            floor = _CROSS_BRANCH_FLOOR_RATIO * top
-            hits = [h for h in hits if h.score >= floor]
+    hits = _fuse_branches(hits) if not code_query else hits
     final = hits[:limit]
     return final, _aggregate(final)
+
+
+def _fuse_branches(hits: list[UnifiedHit]) -> list[UnifiedHit]:
+    """Order the merged branches by rank-within-branch (RRF), not by score.
+
+    ``hits`` arrives grouped by branch, each group already in its branch's
+    order, so a hit's position among its own kind IS its branch rank. The
+    fused key is ``1 / (k + rank)``, which is the same rule the per-branch
+    fusion uses on its stages and for the same reason: it compares positions,
+    which mean the same thing everywhere, instead of scores, which do not
+    (see ``_MERGE_RRF_K``).
+
+    What this buys, concretely: the best answer each corpus has always
+    reaches the merge. A note that matched a word exactly can lead, and it
+    can no longer delete the task that was rank 1 in its own branch. What it
+    costs is the other half of the old rule: a branch with nothing relevant
+    still places its best hit high, so a page can carry one weak row per
+    corpus. That is the known price of fusing heterogeneous lists, and the
+    thing that would actually remove it is an ABSOLUTE relevance signal --
+    the cross-encoder logit of task f0d24fdb -- not a relative comparison
+    between branches, which is what has just been removed.
+    """
+    ranked: list[tuple[float, float, str, str, UnifiedHit]] = []
+    per_kind: dict[str, int] = {}
+    for h in hits:
+        rank = per_kind.get(h.kind, 0) + 1
+        per_kind[h.kind] = rank
+        ranked.append((-1.0 / (_MERGE_RRF_K + rank), -h.score, h.kind, str(h.blob_id), h))
+    ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
+    return [t[4] for t in ranked]
 
 
 async def _entity_code_matches(
@@ -967,8 +997,12 @@ async def _entity_code_matches(
     try:
         p = lookup_svc.normalise_prefix(prefix)
     except DomainError:
-        # Unreachable via ``looks_like_entity_code`` (stricter on both ends);
-        # cheap insurance for any other caller.
+        # REACHABLE, and deliberately so: ``looks_like_entity_code`` is
+        # stricter at the bottom and unbounded at the top, so a 40-char git
+        # sha is recognised as a code and arrives here, where it cannot be a
+        # UUID prefix. No prefix match is the right answer for it; the
+        # verbatim FTS branch beside this one is what can still find it,
+        # because a note that quotes a commit contains the string.
         return []
     matches = await lookup_svc.resolve_prefix(
         session,

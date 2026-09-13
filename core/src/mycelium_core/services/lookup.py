@@ -59,19 +59,34 @@ MAX_PREFIX_LEN = 36
 # rare, and answering it with exact matches is still sensible.
 IDENTIFIER_MIN_HEX = 8
 
+# Detection has NO upper length, and that is the difference between this
+# question and ``normalise_prefix``'s. They were the same regex until
+# 2026-09-13, which made a 40-char git commit sha -- longer than a UUID --
+# fail to be recognised, get embedded, and come back with ten arbitrary
+# nearest neighbours. Asking whether a query is an identifier and asking
+# whether it can be a mycelium UUID prefix are different questions, and
+# only the second has a reason to stop at 36 characters. A long hex run is
+# MORE certainly an identifier than a short one, not less, and the answer
+# for one that cannot resolve is still "verbatim occurrences only": a
+# commit sha is quoted in notes, so it can genuinely be found, and if it is
+# nowhere the right answer is nothing.
+_CODE_RE = re.compile(r"^[0-9a-f][0-9a-f-]*[0-9a-f]$", re.IGNORECASE)
+
 
 def looks_like_entity_code(raw: str) -> bool:
     """True when the whole query is an entity-code lookup (see above).
 
-    Deliberately strict: one token, no whitespace, hex with optional
-    dashes, at least ``IDENTIFIER_MIN_HEX`` hex digits, no longer than a
-    canonical UUID."""
+    Deliberately strict about SHAPE: one token, no whitespace, hex with
+    optional dashes, at least ``IDENTIFIER_MIN_HEX`` hex digits. Length is
+    bounded below and not above -- see ``_CODE_RE``. A recognised code that
+    is too long to be a UUID prefix simply resolves to nothing, which the
+    search path already handles."""
     s = raw.strip().lower()
-    if not s or len(s) > MAX_PREFIX_LEN or any(ch.isspace() for ch in s):
+    if not s or any(ch.isspace() for ch in s):
         return False
     if len(s.replace("-", "")) < IDENTIFIER_MIN_HEX:
         return False
-    return bool(_PREFIX_RE.match(s))
+    return bool(_CODE_RE.match(s))
 
 
 @dataclass(frozen=True, slots=True)

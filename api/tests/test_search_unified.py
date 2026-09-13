@@ -507,13 +507,33 @@ async def test_an_id_that_matches_nothing_returns_nothing(_fake_embedder: None) 
         assert hits == [], f"an unknown id must return nothing, got {hits}"
 
 
-async def test_a_branch_with_no_real_match_cannot_pad_the_page(_fake_embedder: None) -> None:
-    """Cross-branch floor: an exact hit in one branch must not drag the
-    other branch's semantic tail along.
+async def test_the_branch_with_the_real_match_leads_even_when_the_other_pads(
+    _fake_embedder: None,
+) -> None:
+    """A DELIBERATE WEAKENING, recorded here rather than quietly dropped.
 
-    Each branch already drops its own tail, but relative to its OWN top --
-    so a branch holding nothing has a flat profile, keeps everything, and
-    used to hand it all to a merge with no floor at all."""
+    This test used to assert that a branch with no real match contributes
+    NOTHING: the cross-branch relative floor (2026-09-06) cut every hit below
+    0.4 of the top score, and a flat semantic profile fell under it.
+
+    That rule compared numbers that are not comparable. A hit accumulates one
+    RRF term per stage that ranked it and ``lexical_exact`` is weighted 1.0
+    against 0.2, so a note quoting one word of the query scores 0.0227 while a
+    task that is rank 1 in its OWN branch on stem+semantic scores 0.0066 --
+    below the 0.0091 cut. Measured on the frozen gold set on 2026-09-12: asking
+    for notes and tasks together returned ZERO task hits on all twenty
+    questions, recall@5 0/20 against a 3/20 baseline, while the task branch
+    alone answered three of them at position 1. One corpus silenced the other.
+
+    So the merge now fuses by rank (``_fuse_branches``), and the cost is this
+    test: a branch with nothing relevant can place hits on the page again. The
+    trade is not close -- padding costs a slot, erasure costs the function --
+    but it IS a trade, and the property that would remove both is an absolute
+    relevance signal (the cross-encoder logit, task f0d24fdb), not a relative
+    comparison between branches.
+
+    What must still hold, and is asserted below: the branch that really
+    matched is found, and it LEADS."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
@@ -537,6 +557,7 @@ async def test_a_branch_with_no_real_match_cannot_pad_the_page(_fake_embedder: N
         ).json()
 
         assert any(hit["kind"] == "task" and hit["task_id"] == tid for hit in hits)
-        assert [hit for hit in hits if hit["kind"] == "note"] == [], (
-            f"the note branch had no match for 'zqxwvu' and must contribute nothing, got {hits}"
+        assert hits[0]["kind"] == "task" and hits[0]["task_id"] == tid, (
+            "the only real match for 'zqxwvu' must lead the page, whatever the "
+            f"other branch contributed behind it; got {hits}"
         )
