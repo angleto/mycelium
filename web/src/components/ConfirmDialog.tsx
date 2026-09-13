@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ModalShell } from './ModalShell'
 
 // An in-DOM confirmation dialog for actions that cannot be undone.
 //
@@ -12,10 +13,10 @@ import { useTranslation } from 'react-i18next'
 //      a handler, so every `window.confirm` path in this SPA is
 //      currently untestable end to end. This one is assertable.
 //
-// The markup follows the house modal contract (`.modal__backdrop[role=
-// dialog]` + `.modal__panel`), so the three dismissal paths the e2e
-// suite already checks elsewhere — the header close button, Escape and
-// a backdrop click — all work here too.
+// The shell is ModalShell, which was lifted out of this file: the three
+// dismissal paths the e2e suite already checks elsewhere — the header
+// close button, Escape and a backdrop click — live there now, and what
+// stays here is only what a CONFIRMATION adds to a dialog.
 export function ConfirmDialog({
   title,
   intro,
@@ -47,119 +48,74 @@ export function ConfirmDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const titleId = useId()
   const formId = useId()
   const [typed, setTyped] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
   const cancelRef = useRef<HTMLButtonElement | null>(null)
-  // A backdrop click closes — but only when the press STARTED there.
-  // Selecting the workspace name inside the panel and releasing outside
-  // it would otherwise discard what the user just typed.
-  const downOnBackdrop = useRef(false)
-
-  // Escape closes. `stopPropagation` matters: AppShell listens for
-  // Escape at the window to close the mobile drawer, and the command
-  // palette does the same — without it, dismissing this dialog on a
-  // phone would also collapse the sidebar underneath.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  // Focus lands on the safe control (the proof-of-intent field when
-  // there is one, the Cancel button otherwise) — never on the
-  // destructive button, which a stray Enter would then fire.
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.focus()
-    else cancelRef.current?.focus()
-  }, [])
 
   const armed = !confirmWord || typed.trim() === confirmWord.trim()
 
   return (
-    <div
-      className="modal__backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onMouseDown={(e) => {
-        downOnBackdrop.current = e.target === e.currentTarget
-      }}
-      onMouseUp={(e) => {
-        if (downOnBackdrop.current && e.target === e.currentTarget) onClose()
-        downOnBackdrop.current = false
-      }}
+    <ModalShell
+      title={title}
+      panelClassName="modal__panel--narrow modal__panel--auto"
+      // Focus lands on the safe control (the proof-of-intent field when
+      // there is one, the Cancel button otherwise) — never on the
+      // destructive button, which a stray Enter would then fire.
+      initialFocus={confirmWord ? inputRef : cancelRef}
+      onClose={onClose}
     >
-      <div className="modal__panel modal__panel--narrow modal__panel--auto">
-        <div className="modal__head">
-          <strong id={titleId}>{title}</strong>
-          <span className="modal__sp" />
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            aria-label={t('wsmgr.cancel')}
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
-        <form
-          id={formId}
-          className="modal__body"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (armed && !busy) onConfirm()
-          }}
+      <form
+        id={formId}
+        className="modal__body"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (armed && !busy) onConfirm()
+        }}
+      >
+        <p className={danger ? 'confirm__intro confirm__intro--danger' : 'confirm__intro'}>
+          {intro}
+        </p>
+        {children}
+        {confirmWord && (
+          <label>
+            {confirmWordHint ?? t('wsmgr.typeToConfirm', { name: confirmWord })}
+            <input
+              ref={inputRef}
+              value={typed}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </label>
+        )}
+        {error && <p className="err">{error}</p>}
+      </form>
+      {/* The foot is a SIBLING of the body, not a child: `.modal__body`
+          is the panel's only scroller, so a footer inside it scrolls
+          away with the content and its top border lands in the body
+          padding. `form={formId}` keeps the submit button wired to the
+          form it sits outside of, so Enter in the field still
+          confirms. */}
+      <div className="modal__foot">
+        <button
+          ref={cancelRef}
+          type="button"
+          className="btn--ghost"
+          onClick={onClose}
         >
-          <p className={danger ? 'confirm__intro confirm__intro--danger' : 'confirm__intro'}>
-            {intro}
-          </p>
-          {children}
-          {confirmWord && (
-            <label>
-              {confirmWordHint ?? t('wsmgr.typeToConfirm', { name: confirmWord })}
-              <input
-                ref={inputRef}
-                value={typed}
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(e) => setTyped(e.target.value)}
-              />
-            </label>
-          )}
-          {error && <p className="err">{error}</p>}
-        </form>
-        {/* The foot is a SIBLING of the body, not a child: `.modal__body`
-            is the panel's only scroller, so a footer inside it scrolls
-            away with the content and its top border lands in the body
-            padding. `form={formId}` keeps the submit button wired to the
-            form it sits outside of, so Enter in the field still
-            confirms. */}
-        <div className="modal__foot">
-          <button
-            ref={cancelRef}
-            type="button"
-            className="btn--ghost"
-            onClick={onClose}
-          >
-            {t('wsmgr.cancel')}
-          </button>
-          <span className="modal__sp" />
-          <button
-            type="submit"
-            form={formId}
-            className={danger ? 'btn--danger' : undefined}
-            disabled={!armed || busy}
-          >
-            {confirmLabel}
-          </button>
-        </div>
+          {t('wsmgr.cancel')}
+        </button>
+        <span className="modal__sp" />
+        <button
+          type="submit"
+          form={formId}
+          className={danger ? 'btn--danger' : undefined}
+          disabled={!armed || busy}
+        >
+          {confirmLabel}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   )
 }

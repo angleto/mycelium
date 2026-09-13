@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { TagChip } from './TagChip'
+import { CopyIdButton } from './CopyIdButton'
+import { PeekButton } from './PeekButton'
 import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
@@ -83,6 +85,17 @@ export function NoteListItem({
           ))}
         </span>
         <span className="noteitem__actions">
+          {/* The two that do not change the note, first: take the id, or
+              read it where it is. Everything after them acts on it. */}
+          <CopyIdButton
+            id={note.id}
+            variant="icon"
+            label={t('notes.copyId')}
+            copiedLabel={t('notes.idCopied')}
+          />
+          <PeekButton
+            target={{ kind: 'note', id: note.id, title: note.title || note.kind }}
+          />
           <button
             type="button"
             className="btn--sm"

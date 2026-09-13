@@ -4,6 +4,7 @@ import { authFetch, errMessage } from '../api/client'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { attachmentKind } from '../lib/attachmentKind'
 import { attachmentMarkdownRef } from '../lib/attachmentRef'
+import { copyToClipboard } from '../lib/clipboard'
 
 // Attachments on a note OR a task (exactly one parent). Binary
 // upload/download go through authFetch (raw, authenticated) since the
@@ -253,63 +254,11 @@ export function Attachments({
     setTick((n) => n + 1)
   }
 
-  // Put `text` on the clipboard, degrading through every path a browser
-  // may still leave open — the async Clipboard API is unavailable outside
-  // a secure context (a plain-http deployment has no `navigator.clipboard`
-  // at all) and rejects when the permission is denied or the document is
-  // not focused:
-  //   1. navigator.clipboard.writeText — the modern, permissioned path;
-  //   2. a throwaway textarea + execCommand('copy') — deprecated, but the
-  //      only thing that works on http. Still inside the click gesture, so
-  //      the transient user activation it requires is alive;
-  //   3. window.prompt with the text preselected — no automatic copy, yet
-  //      the string is in front of the user, who can select and copy it.
-  // Returns whether the text reached the clipboard WITHOUT manual work, so
-  // the caller can be honest in the UI instead of flashing a lying
-  // "Copied". The one thing that never happens is a silent no-op.
-  async function copyToClipboard(text: string): Promise<boolean> {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-        return true
-      }
-    } catch {
-      /* insecure context / denied / unfocused — try the fallbacks */
-    }
-    // Built outside the try so the finally below can always take it back
-    // out: if execCommand throws, a textarea left in the body would keep
-    // the (focused, off-screen) selection and swallow the keyboard.
-    const ta = document.createElement('textarea')
-    try {
-      ta.value = text
-      // Off-screen but still rendered and focusable: `hidden` or
-      // display:none makes the selection — and therefore the copy — a
-      // no-op. readonly keeps the mobile keyboard from popping up.
-      ta.setAttribute('readonly', '')
-      ta.style.position = 'fixed'
-      ta.style.top = '-1000px'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      if (document.execCommand('copy')) return true
-    } catch {
-      /* execCommand unsupported or blocked — fall through to the prompt */
-    } finally {
-      ta.remove()
-    }
-    try {
-      window.prompt(t('attach.copyRefManual'), text)
-    } catch {
-      /* modals blocked (sandboxed frame): the failed badge is all we have */
-    }
-    return false
-  }
-
   // Copy this row's paste-ready markdown reference. The string comes from
   // attachmentRef.ts, the single place the web builds one (the editor's
   // attach picker inserts the very same reference through it).
   async function onCopyRef(it: AttachmentMeta) {
-    const ok = await copyToClipboard(attachmentMarkdownRef(it))
+    const ok = await copyToClipboard(attachmentMarkdownRef(it), t('attach.copyRefManual'))
     setCopied({ id: it.id, ok })
     window.clearTimeout(copyTimer.current)
     copyTimer.current = window.setTimeout(

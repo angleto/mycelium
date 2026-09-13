@@ -9,6 +9,8 @@ import { IdentityBadge } from '../components/IdentityBadge'
 import { TaskKanban } from '../components/TaskKanban'
 import { RecentTasks } from '../components/RecentTasks'
 import { TaskTimer } from '../components/TaskTimer'
+import { CopyIdButton } from '../components/CopyIdButton'
+import { PeekButton } from '../components/PeekButton'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
@@ -1336,6 +1338,13 @@ export function TasksRoute() {
                   ) : (
                     <span className="muted">{tk.state}</span>
                   )}
+                  <CopyIdButton
+                    id={tk.id}
+                    variant="icon"
+                    label={t('tasks.copyId')}
+                    copiedLabel={t('tasks.idCopied')}
+                  />
+                  <PeekButton target={{ kind: 'task', id: tk.id, title: tk.title }} />
                   <TaskTimer taskId={tk.id} />
                 </span>
               </li>

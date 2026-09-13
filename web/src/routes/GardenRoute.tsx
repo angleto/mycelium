@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { MarkdownView } from '../components/Markdown'
 import { GardenMindmap } from '../components/GardenMindmap'
+import { CopyIdButton } from '../components/CopyIdButton'
 import { useFocus } from '../lib/focus'
 import { getSession } from '../auth/session'
 import type { components } from '../shared'
@@ -100,7 +101,6 @@ export function GardenRoute() {
   const [openData, setOpenData] = useState<NoteWithLinks | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [idCopied, setIdCopied] = useState(false)
   // First-load flag: show the empty-state copy only once the fetch has
   // resolved, never during the initial (possibly slow) load.
   const [loading, setLoading] = useState(true)
@@ -514,23 +514,11 @@ export function GardenRoute() {
                 // can paste it elsewhere (e.g. share a reference with an
                 // assistant) without leaving the modal. Same affordance
                 // used by /notes edit modal.
-                <button
-                  type="button"
-                  className="chip"
-                  title={idCopied ? t('notes.idCopied') : openId}
-                  aria-label={t('notes.copyId')}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(openId)
-                      setIdCopied(true)
-                      window.setTimeout(() => setIdCopied(false), 1500)
-                    } catch {
-                      setIdCopied(false)
-                    }
-                  }}
-                >
-                  {idCopied ? t('notes.idCopied') : `ID ${openId.slice(0, 8)}…`}
-                </button>
+                <CopyIdButton
+                  id={openId}
+                  label={t('notes.copyId')}
+                  copiedLabel={t('notes.idCopied')}
+                />
               )}
               <span className="modal__sp" />
               {openId && (

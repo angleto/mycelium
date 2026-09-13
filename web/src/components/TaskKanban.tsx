@@ -5,6 +5,8 @@ import { PriorityChip } from './PriorityChip'
 import { TagChip } from './TagChip'
 import { TaskTimer } from './TaskTimer'
 import { IdentityBadge } from './IdentityBadge'
+import { CopyIdButton } from './CopyIdButton'
+import { PeekButton } from './PeekButton'
 import type { components } from '../shared'
 import { formatDueDate } from '../lib/time'
 
@@ -189,14 +191,25 @@ export function TaskKanban({
                         ) : null}
                         {tk.title}
                       </Link>
-                      {/* Shared timer widget, pinned top-right. The
-                          wrapper stops mousedown/click from bubbling into
-                          the LI's dragstart heuristic. */}
+                      {/* Shared timer widget plus the two controls that
+                          save a round trip through the detail page: take
+                          the id, or read the card. The wrapper stops
+                          mousedown/click from bubbling into the LI's
+                          dragstart heuristic. */}
                       <div
                         className="kanban__card-actions"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <CopyIdButton
+                          id={tk.id}
+                          variant="icon"
+                          label={t('tasks.copyId')}
+                          copiedLabel={t('tasks.idCopied')}
+                        />
+                        <PeekButton
+                          target={{ kind: 'task', id: tk.id, title: tk.title }}
+                        />
                         <TaskTimer taskId={tk.id} />
                       </div>
                     </div>

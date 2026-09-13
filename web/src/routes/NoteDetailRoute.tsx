@@ -23,6 +23,7 @@ import { NoteLinksPanel } from '../components/NoteLinksPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
+import { CopyIdButton } from '../components/CopyIdButton'
 import { useEditSession } from '../lib/useEditSession'
 import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useStaleWatch } from '../lib/useStaleWatch'
@@ -65,7 +66,6 @@ export function NoteDetailRoute() {
   // (DomainError -> 400) has to be visible where it was triggered.
   const [tagErr, setTagErr] = useState<string | null>(null)
   const [converting, setConverting] = useState(false)
-  const [idCopied, setIdCopied] = useState(false)
 
   const [eTitle, setETitle] = useState('')
   const [eText, setEText] = useState('')
@@ -561,16 +561,6 @@ export function NoteDetailRoute() {
     if (noteDirty) await autoSaveNote()
   }, [noteDirty, autoSaveNote])
 
-  async function copyId() {
-    try {
-      await navigator.clipboard.writeText(id)
-      setIdCopied(true)
-      window.setTimeout(() => setIdCopied(false), 1500)
-    } catch {
-      setIdCopied(false)
-    }
-  }
-
   if (err && !note) return <p className="err">{err}</p>
   if (!note) return <p className="hint">{t('common.loading')}</p>
 
@@ -634,15 +624,11 @@ export function NoteDetailRoute() {
                 ? t('notes.unsaved')
                 : t('notes.autosaved')}
           </span>
-          <button
-            type="button"
-            className="chip chip--copy"
-            title={idCopied ? t('notes.idCopied') : id}
-            aria-label={t('notes.copyId')}
-            onClick={() => void copyId()}
-          >
-            {idCopied ? t('notes.idCopied') : `ID ${id.slice(0, 8)}…`}
-          </button>
+          <CopyIdButton
+            id={id}
+            label={t('notes.copyId')}
+            copiedLabel={t('notes.idCopied')}
+          />
           <button
             type="button"
             className="btn--sm"
