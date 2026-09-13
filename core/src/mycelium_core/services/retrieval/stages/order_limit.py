@@ -130,7 +130,8 @@ class GraderMinStage(Stage):
 
 @dataclass
 class RelativeFloorStage(Stage):
-    """Drop candidates whose fused score falls far below the top hit.
+    """Drop candidates whose fused score falls far below the top hit OF
+    THEIR OWN KIND OF MATCH.
 
     A keyword/name query produces a wide score gap: the lexical hits sit
     near the top while pure-semantic noise (weighted down in fusion)
@@ -139,11 +140,49 @@ class RelativeFloorStage(Stage):
     than ``ratio`` below the top and the cut is a no-op: recall for
     genuinely-semantic queries is preserved. ``ratio`` 0 disables it.
 
-    Runs after OrderingStage (candidates already score-DESC) so the top
-    is ``candidates[0]``."""
+    The correction, 2026-09-13: whether one top or two is decided by the
+    SHAPE OF THE QUERY, which is the thing the paragraph above is actually
+    about and which the code used to infer from the score gap instead of
+    reading.
+
+    The proxy fails on a MIXED query: one document quotes the question's
+    words and takes ``lexical_exact``, the real answer matches conceptually
+    and has only a semantic stage. Their scores differ because a hit
+    accumulates one RRF term per stage that ranked it and ``lexical_exact``
+    is weighted 1.0 against 0.2 -- a gap set by WHICH STAGES FIRED, not by
+    how good the answer is -- and the real answer lands on the far side of a
+    gap it did not earn. On the frozen gold set (nota e5de06b0) the note
+    holding the questions quotes each one verbatim, takes lexical rank 1 on
+    all twenty, and the floor cut every conceptual candidate behind it:
+    recall@5 0/20 measured on 2026-09-12, against a 3/20 baseline.
+
+    So: for a KEYWORD query (few tokens, a name or a term) one top, exactly
+    as before -- a semantic-only hit there is the "unrelated essays"
+    failure and is cut. For a CONCEPTUAL query the two classes are floored
+    against their own tops, because there the semantic-only hits are what
+    the question is asking for and no lexical hit's score says anything
+    about their quality.
+
+    The threshold is deliberately the same shape as ``RerankGate``'s
+    ``min_query_tokens``: both answer "is this a lookup or a question",
+    and they should not drift apart. What neither can do is tell a good
+    semantic hit from a bad one inside a conceptual query -- that needs an
+    ABSOLUTE signal, the cross-encoder logit of task f0d24fdb.
+
+    Runs after OrderingStage (candidates already score-DESC)."""
 
     name: str = "relative_floor"
     ratio: float = 0.0
+    #: At or below this many tokens the query is treated as a keyword/name
+    #: lookup and the floor spans both match kinds.
+    keyword_max_tokens: int = 3
+
+    @staticmethod
+    def _matched_lexically(candidate: Candidate) -> bool:
+        """Whether any lexical stage ranked this candidate. The stage names
+        are the branch names ``lexical_exact`` / ``lexical_stem``; anything
+        else (semantic, semantic_hosted, humus) is a similarity signal."""
+        return any(name.startswith("lexical") for name in candidate.scores_by_stage)
 
     async def run(
         self,
@@ -153,11 +192,19 @@ class RelativeFloorStage(Stage):
     ) -> list[Candidate]:
         if self.ratio <= 0.0 or not candidates:
             return candidates
-        top = max(c.score for c in candidates)
-        if top <= 0.0:
+        conceptual = len(query.split()) > self.keyword_max_tokens
+        tops: dict[bool, float] = {True: 0.0, False: 0.0}
+        for c in candidates:
+            key = self._matched_lexically(c) if conceptual else False
+            tops[key] = max(tops[key], c.score)
+        if max(tops.values()) <= 0.0:
             return candidates
-        floor = self.ratio * top
-        return [c for c in candidates if c.score >= floor]
+
+        def keep(c: Candidate) -> bool:
+            top = tops[self._matched_lexically(c) if conceptual else False]
+            return top <= 0.0 or c.score >= self.ratio * top
+
+        return [c for c in candidates if keep(c)]
 
 
 @dataclass

@@ -328,6 +328,65 @@ async def test_relative_floor_cuts_low_tail() -> None:
     assert len(out) == 3
 
 
+async def test_a_lexical_hit_does_not_drag_the_semantic_class_under_the_floor() -> None:
+    """The mixed query, which is where a single top gets it wrong.
+
+    One document quotes the question's words and takes a lexical stage; the
+    real answer matches conceptually and has only a semantic one. Their
+    scores differ because of WHICH STAGES FIRED -- lexical weight 1.0
+    against 0.2 -- not because one is a worse answer. Measured consequence
+    before this was split: on the frozen gold set the note holding the
+    questions took lexical rank 1 on all twenty and the floor cut every
+    conceptual candidate behind it, recall@5 0/20.
+    """
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    quoted = Candidate(
+        blob_id=uuid.uuid4(), score=0.0227, scores_by_stage={"lexical_exact": 1.0, "semantic": 6.0}
+    )
+    answer = Candidate(blob_id=uuid.uuid4(), score=0.0033, scores_by_stage={"semantic": 1.0})
+    also_semantic = Candidate(blob_id=uuid.uuid4(), score=0.0031, scores_by_stage={"semantic": 2.0})
+
+    # A CONCEPTUAL query: the shape is what selects this half of the rule,
+    # and passing "q" here would have measured the other half.
+    out = await RelativeFloorStage(ratio=0.4).run(
+        "con quale criterio si decide se appartiene al prodotto",
+        _ctx_stub(),
+        [quoted, answer, also_semantic],
+    )
+    ids = {c.blob_id for c in out}
+    # 0.0033 is 0.15 of the lexical top: a single top would have cut it.
+    assert answer.blob_id in ids
+    assert also_semantic.blob_id in ids
+    assert quoted.blob_id in ids
+
+
+async def test_the_floor_still_cuts_inside_the_semantic_class() -> None:
+    """Splitting the top is not disabling the floor: a semantic candidate
+    far below the best SEMANTIC one is still noise and still goes."""
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    best = Candidate(blob_id=uuid.uuid4(), score=0.010, scores_by_stage={"semantic": 1.0})
+    tail = Candidate(blob_id=uuid.uuid4(), score=0.002, scores_by_stage={"semantic": 9.0})
+    out = await RelativeFloorStage(ratio=0.4).run(
+        "una domanda concettuale abbastanza lunga", _ctx_stub(), [best, tail]
+    )
+    assert [c.blob_id for c in out] == [best.blob_id]
+
+
+async def test_the_floor_still_cuts_inside_the_lexical_class() -> None:
+    """And symmetrically: a weak lexical hit behind a strong one is cut on
+    the strong one, not on whatever the semantic class happens to hold."""
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    strong = Candidate(blob_id=uuid.uuid4(), score=0.020, scores_by_stage={"lexical_exact": 1.0})
+    weak = Candidate(blob_id=uuid.uuid4(), score=0.004, scores_by_stage={"lexical_stem": 7.0})
+    out = await RelativeFloorStage(ratio=0.4).run(
+        "una domanda concettuale abbastanza lunga", _ctx_stub(), [strong, weak]
+    )
+    assert [c.blob_id for c in out] == [strong.blob_id]
+
+
 async def test_weighted_rrf_lexical_beats_semantic_only() -> None:
     """With lexical weight 1.0 and semantic 0.3, a lexical-only hit
     outscores a semantic-only hit at the same rank, and a both-branch hit
@@ -421,3 +480,38 @@ async def test_dense_only_score_is_a_function_of_rank_and_nothing_else() -> None
     values = sorted(by_id.values(), reverse=True)
     assert values[0] / values[-1] == pytest.approx(70 / 61)
     assert values[0] / values[-1] < 1.15
+
+
+async def test_a_keyword_query_still_cuts_the_semantic_class_whole() -> None:
+    """The other half of the rule, and the reason it is a rule and not a
+    removal. On a keyword or name query a semantic-only hit is the
+    "unrelated essays" failure: there is nothing conceptual being asked, so
+    a document that shares no term with the query has no business on the
+    page. One top, both classes, exactly as before 2026-09-13."""
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    lexical = Candidate(blob_id=uuid.uuid4(), score=0.0164, scores_by_stage={"lexical_exact": 1.0})
+    noise = Candidate(blob_id=uuid.uuid4(), score=0.0033, scores_by_stage={"semantic": 1.0})
+    out = await RelativeFloorStage(ratio=0.4).run("alpha", _ctx_stub(), [lexical, noise])
+    assert [c.blob_id for c in out] == [lexical.blob_id]
+
+
+async def test_the_two_halves_are_selected_by_token_count_alone() -> None:
+    """The same candidates, the same scores, two queries: the only thing
+    that changes the verdict is the shape of the question. Asserted because
+    the previous rule inferred this from the score gap, and that inference
+    is what failed on a query someone had quoted."""
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
+
+    def pair() -> list[Candidate]:
+        return [
+            Candidate(blob_id=uuid.uuid4(), score=0.0164, scores_by_stage={"lexical_exact": 1.0}),
+            Candidate(blob_id=uuid.uuid4(), score=0.0033, scores_by_stage={"semantic": 1.0}),
+        ]
+
+    stage = RelativeFloorStage(ratio=0.4)
+    assert len(await stage.run("marzia", _ctx_stub(), pair())) == 1
+    assert (
+        len(await stage.run("dove abbiamo deciso la regola di promozione", _ctx_stub(), pair()))
+        == 2
+    )
