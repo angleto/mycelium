@@ -89,7 +89,7 @@ body {
   font-size: 0.75rem;
   padding: 0.05rem 0.4rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
   background: var(--surface-2);
   color: var(--muted);
   white-space: nowrap;
@@ -136,7 +136,7 @@ body {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
 }
 
 .hypha__input:focus-visible {
@@ -159,7 +159,7 @@ body {
 
 .hypha__row {
   padding: var(--myc-s2);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
   /* A transparent rail, so selecting a row does not move the text by
    * two pixels. */
   border-left: 2px solid transparent;
@@ -240,7 +240,7 @@ body {
   font-size: 0.82rem;
   color: var(--text);
   background: var(--accent-weak);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
   padding: var(--myc-s2);
 }
 
@@ -269,7 +269,7 @@ button {
   font: inherit;
   padding: 0.25rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
   background: var(--accent);
   color: var(--accent-fg);
   cursor: pointer;
@@ -313,7 +313,7 @@ button:focus-visible {
   margin-bottom: var(--myc-s2);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
 }
 
 .hypha__striptitle {
@@ -333,7 +333,7 @@ button:focus-visible {
   padding: var(--myc-s2);
   margin-bottom: var(--myc-s2);
   background: var(--accent-weak);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
 }
 
 .hypha__section {
@@ -364,7 +364,7 @@ button:focus-visible {
   padding: var(--myc-s2);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
 }
 
 .hypha__capture input[type='text'],
@@ -375,7 +375,7 @@ button:focus-visible {
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-8);
   padding: var(--myc-s1);
 }
 
