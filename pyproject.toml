@@ -67,7 +67,9 @@ explicit_package_bases = true
 mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src:cli/src"
 
 # Untyped third-party libs: pgvector ships no py.typed;
-# sentence-transformers is an optional extra (lazily imported);
+# sentence-transformers and torch are an optional extra (lazily imported, and
+# NOT installed in the type-check job, which is how a local `mypy` that had
+# them passed while CI did not);
 # reportlab (invoice PDF generator) ships no py.typed; boto3 (S3
 # attachment backend, lazily imported) ships no inline types and the
 # repo convention is ignore_missing_imports, not a stubs dep.
@@ -75,6 +77,7 @@ mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src:cli/src"
 module = [
     "pgvector.*",
     "sentence_transformers.*",
+    "torch.*",
     "pyotp.*",
     "qrcode.*",
     "reportlab.*",
