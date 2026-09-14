@@ -5166,6 +5166,11 @@ def _note_part(p: Any) -> dict[str, Any]:
         "id": str(p.id),
         "note_id": str(p.note_id),
         "ord": p.ord,
+        # The outline has carried ``title`` all along and this one did
+        # not, so an agent that asked for bodies could not see the names
+        # of the blocks it was reading -- and a tool that had just
+        # written a title got a part back without it.
+        "title": p.title,
         "body": p.body or "",
         # The same digest the outline publishes, so a caller that read
         # the body can write back against it without hashing the string
@@ -5498,13 +5503,14 @@ async def add_note_part(
     org_id: str,
     note_id: str,
     body: str,
+    title: str | None = None,
     lang: str | None = None,
     ord: int | None = None,
 ) -> dict[str, Any]:
     """Append a markdown block to a note (task 7070a456 Phase 3).
     Pass ``ord`` to insert at a specific position; every part with
     ord >= value is shifted forward. Omit ``ord`` to land at the end.
-    Returns the new part."""
+    ``title`` names the block in the outline. Returns the new part."""
     from mycelium_core.services import note_parts as parts_svc_local
 
     async with _tenant(token, org_id) as (s, org, user):
@@ -5514,6 +5520,7 @@ async def add_note_part(
             actor_id=user,
             note_id=uuid.UUID(note_id),
             body=body,
+            title=title,
             lang=lang,
             ord=ord,
         )
@@ -5527,16 +5534,26 @@ async def update_note_part(
     part_id: str,
     expected_version: int,
     body: str | None = None,
+    title: str | None = None,
     lang: str | None = None,
 ) -> dict[str, Any]:
-    """Edit a part's body / lang. ``expected_version`` enforces
-    optimistic concurrency (same contract as update_note). To clear
-    the language tag pass ``lang=null`` (the omit-vs-clear semantic
-    is preserved through the kwargs)."""
+    """Edit a part's body / title / lang. ``expected_version`` enforces
+    optimistic concurrency (same contract as update_note). Omit a field
+    to leave it untouched.
+
+    Setting only: an omitted argument and an explicit ``null`` are the
+    same value by the time they arrive here, so neither ``title`` nor
+    ``lang`` can be CLEARED over MCP -- only rewritten. Clearing one
+    needs PATCH /notes/{id}/parts/{pid}, which reads the JSON body and
+    can tell an absent key from a stated null. Said plainly because the
+    previous wording promised ``lang=null`` would clear the tag, which
+    this signature cannot express and the code never did."""
     from mycelium_core.services import note_parts as parts_svc_local
 
     async with _tenant(token, org_id) as (s, org, user):
         kwargs: dict[str, Any] = {}
+        if title is not None:
+            kwargs["title"] = title
         if lang is not None:
             kwargs["lang"] = lang
         version = await parts_svc_local.update_part(

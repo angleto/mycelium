@@ -239,7 +239,7 @@ over-fetch the org table and filter in its head.
 | `transcribe_note` | Run STT on a voice note (metered per audio-minute). |
 | `trash_note_part` | DELETE one part of a note, restorably: the block leaves the note |
 | `update_note` | Edit a note's title/body. A blank title is re-derived from the |
-| `update_note_part` | Edit a part's body / lang. ``expected_version`` enforces |
+| `update_note_part` | Edit a part's body / title / lang. ``expected_version`` enforces |
 
 ### billing (19)
 

@@ -462,6 +462,9 @@ def parts_add(
         "--body-file",
         help="Read body from a file. Use '-' for stdin. Omit to open $EDITOR.",
     ),
+    title: str | None = typer.Option(
+        None, "--title", "-t", help="Name this block in the note's outline. Optional."
+    ),
     lang: str | None = typer.Option(
         None, "--lang", "-l", help="ISO 639-1 hint (en, it, ...). Optional."
     ),
@@ -483,6 +486,8 @@ def parts_add(
     with client() as c:
         full = _resolve_note(c, note_id)
         payload: dict[str, Any] = {"body": body}
+        if title:
+            payload["title"] = title
         if lang:
             payload["lang"] = lang
         if ord is not None:
@@ -761,23 +766,33 @@ def parts_list(
 def parts_edit(
     note_id: str = typer.Argument(..., autocompletion=complete_note_id),
     part_id: str = typer.Argument(...),
+    title: str | None = typer.Option(
+        None, "--title", "-t", help="Rename the block in the outline. Skips $EDITOR when alone."
+    ),
 ) -> None:
-    """Open the part body in $EDITOR; save to PATCH back."""
+    """Open the part body in $EDITOR; save to PATCH back. With --title
+    and nothing else, renames the block without opening the editor."""
     with client() as c:
         full = _resolve_note(c, note_id)
         pid = _resolve_part(c, full, part_id)
         current = get_json(c.get(f"/notes/{full}/parts"))
         part = next(p for p in current if p["id"] == pid)
-        new_body = edit_in_editor(part.get("body") or "")
-        if new_body == (part.get("body") or ""):
+        payload: dict[str, Any] = {"expected_version": part["version"]}
+        if title is not None:
+            payload["title"] = title
+        # A rename on its own has no reason to open an editor on a body
+        # nobody asked to touch, and opening one would turn every rename
+        # into an opportunity to save an accidental edit.
+        if title is None:
+            new_body = edit_in_editor(part.get("body") or "")
+            if new_body != (part.get("body") or ""):
+                payload["body"] = new_body
+        # "Nothing to send" is now two fields, not one: a rename must not
+        # be swallowed by an unchanged body.
+        if len(payload) == 1:
             info("no changes; skip")
             return
-        resp = get_json(
-            c.patch(
-                f"/notes/{full}/parts/{pid}",
-                json={"expected_version": part["version"], "body": new_body},
-            )
-        )
+        resp = get_json(c.patch(f"/notes/{full}/parts/{pid}", json=payload))
     success(f"updated part {short_id(pid)} (v{resp.get('version')})")
 
 
