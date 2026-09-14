@@ -7,6 +7,10 @@ from __future__ import annotations
 from mycelium_core.services.retrieval.stages.access import AccessCounterStage
 from mycelium_core.services.retrieval.stages.dedupe import DedupeBySourceStage
 from mycelium_core.services.retrieval.stages.fusion import RRFFusionStage
+from mycelium_core.services.retrieval.stages.graph_proximity import (
+    GraphGate,
+    GraphProximityStage,
+)
 from mycelium_core.services.retrieval.stages.humus import (
     HumusCapStage,
     HumusStage,
@@ -33,6 +37,8 @@ __all__ = [
     "CrossEncoderRerankerStage",
     "DedupeBySourceStage",
     "GraderMinStage",
+    "GraphGate",
+    "GraphProximityStage",
     "HumusCapStage",
     "HumusStage",
     "LexicalFTSStage",

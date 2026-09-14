@@ -86,6 +86,11 @@ _RELATIVE_FLOOR_RATIO = 0.4
 #   * ``_HUMUS_FOCUSED_CAP`` (0.3): hard cap = 30% of the focused slots.
 _HUMUS_RRF_BOOST = 0.2
 _HUMUS_FOCUSED_CAP = 0.3
+# Fase 4 (task 561c6aca): the graph-proximity source is fused as an extra RRF
+# branch weighted like humus (a nudge on the low-precision tier, never an
+# override of an exact lexical match), at the same ``_RRF_K``. Dark by default
+# (``settings.graph_stage_enabled``).
+_GRAPH_RRF_WEIGHT = 0.2
 
 # Provenance-erase statement chunk (task c5da112c). Each (kind, id) pair
 # compiles to 2 binds on asyncpg (hard cap 32767 args): 5000 pairs keeps
@@ -240,6 +245,8 @@ class RetrievalMeta:
       otherwise): ``grader_min_rerank_score`` (the quality floor on the
       cross-encoder's own [0,1] relevance score, task f0d24fdb) or
       ``grader_min_rrf`` (the coarse RRF floor, WS-B1).
+    - ``graph_ran`` / ``graph_contributed``: the Fase 4 graph-proximity source
+      ran, and how many candidates it added that no live branch had found.
     - ``rerank_failed``: the cross-encoder reranker was requested but errored
       (model missing / OOM) and the pipeline degraded to RRF order. Results are
       still returned, but the precision uplift is absent -- surface it so the
@@ -253,6 +260,12 @@ class RetrievalMeta:
     abstained: bool = False
     abstain_reason: str | None = None
     rerank_failed: bool = False
+    # Fase 4 graph-proximity source (task 561c6aca): whether the gated graph
+    # stage ran, and how many NEW candidates it injected (notes no live branch
+    # found). Both zero/false when the stage is off (the default), so an A/B
+    # report can attribute a recall delta to the source.
+    graph_ran: bool = False
+    graph_contributed: int = 0
 
 
 async def _safe_embed(emb: Embedder, text: str, *, side: EmbedSide) -> EmbedResult | None:
@@ -604,6 +617,7 @@ async def retrieve_with_meta(
     humus: bool | None = None,
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
+    graph: bool | None = None,
     probe: bool = False,
     include_deleted_sources: bool = False,
     exact_only: bool = False,
@@ -691,6 +705,8 @@ async def retrieve_with_meta(
         CrossEncoderRerankerStage,
         DedupeBySourceStage,
         GraderMinStage,
+        GraphGate,
+        GraphProximityStage,
         HumusCapStage,
         HumusStage,
         LexicalFTSStage,
@@ -782,6 +798,12 @@ async def retrieve_with_meta(
         # Humus is a dense branch; there is nothing for it to do without a
         # query embedding.
         use_humus = False
+    # Fase 4 graph-proximity source on/off (task 561c6aca): an explicit
+    # ``graph=`` wins, else the workspace default (dark). Its seeds are the
+    # first pass's own hits, so it is mounted after fusion; byte-identical to
+    # today when off. An exact-code lookup never walks: that path is answering
+    # "this id", and a neighbourhood is the opposite of an exact answer.
+    use_graph = (settings.graph_stage_enabled if graph is None else graph) and not exact_only
     sem_min_sim = await semantic_min_similarity(session, org_id)
     # The grader/abstain floor: an explicit caller value wins; otherwise
     # fall back to the per-org setting (WS-B1). Resolving it here means
@@ -819,9 +841,32 @@ async def retrieve_with_meta(
                 # Harmless when the humus branch is off (no candidate carries a
                 # ``humus`` stage score, so the weight applies to nothing).
                 "humus": _HUMUS_RRF_BOOST,
+                # Fase 4: the graph source folds its own rank into the fused
+                # score post-fusion (GraphProximityStage), so this entry is
+                # documentation parity rather than arithmetic. Harmless when
+                # the stage is off: no candidate carries a ``graph`` score.
+                "graph": _GRAPH_RRF_WEIGHT,
             },
         )
     )
+    if use_graph:
+        # Fase 4 (task 561c6aca): seed the bounded neighbourhood walk from the
+        # top fused hits and fold graph-reachable notes in as an extra RRF
+        # branch. Mounted AFTER fusion (the seeds need the first pass) and
+        # BEFORE the reranker, so an injected candidate is reranked and graded
+        # like any other. Size-independent (Fase 1).
+        stages.append(
+            GraphProximityStage(
+                k=_RRF_K,
+                weight=_GRAPH_RRF_WEIGHT,
+                seeds=settings.graph_stage_seeds,
+                node_budget=settings.graph_stage_node_budget,
+                gate=GraphGate(
+                    min_query_tokens=settings.graph_min_query_tokens,
+                    min_candidates=settings.graph_min_candidates,
+                ),
+            )
+        )
     if use_rerank:
         stages.append(
             CrossEncoderRerankerStage(
@@ -880,6 +925,7 @@ async def retrieve_with_meta(
         # The stage records WHICH floor fired (rrf vs rerank score); fall back
         # to the RRF reason for the legacy path that didn't set it.
         reason = ctx.extras.get("grader_abstain_reason") or "grader_min_rrf"
+        graph_diag = ctx.extras.get("graph_diag") or {}
         return RetrievalMeta(
             query_embedded=qres is not None or qres_hosted is not None,
             dense_branch_contributed=bool(diag.get("contributed", False)),
@@ -890,6 +936,8 @@ async def retrieve_with_meta(
             abstained=abstained,
             abstain_reason=reason if abstained else None,
             rerank_failed=bool(ctx.extras.get("rerank_failed")),
+            graph_ran=bool(graph_diag.get("ran", False)),
+            graph_contributed=int(graph_diag.get("contributed", 0)),
         )
 
     if not top:

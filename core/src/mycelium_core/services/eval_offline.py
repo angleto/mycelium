@@ -138,6 +138,7 @@ async def run_eval(
     exclude_humus_from_base: bool = False,
     grader_min_rrf: float | None = None,
     grader_min_rerank_score: float | None = None,
+    graph: bool | None = None,
 ) -> EvalReport:
     """Run every gold case through the real ``memory.retrieve`` and
     aggregate recall@k + MRR, plus the dense-tier health of the org's
@@ -160,7 +161,12 @@ async def run_eval(
     keeps the org's configured floor, i.e. the historical behaviour.
     ``grader_min_rerank_score`` is the sibling override for the reranker-logit
     quality floor (a [0,1] probability; only bites when the reranker ran), so
-    the bench can sweep the honest-abstain gate the same way."""
+    the bench can sweep the honest-abstain gate the same way.
+
+    ``graph`` toggles the Fase 4 graph-proximity source per-call (task
+    561c6aca): None keeps the workspace default (dark), so the CI gate is
+    unaffected; True/False runs the publishable A/B (recall_at_k graph on vs
+    off) through the same harness."""
     results: list[CaseResult] = []
     found = 0
     rr_sum = 0.0
@@ -182,6 +188,7 @@ async def run_eval(
             exclude_humus_from_base=exclude_humus_from_base,
             grader_min_rrf=grader_min_rrf,
             grader_min_rerank_score=grader_min_rerank_score,
+            graph=graph,
             # Eval sweeps are probes: they must not leave retrieval
             # traces (Fase 0, task 561c6aca) or measurement would forge
             # the search demand the graph aggregation reads.

@@ -654,6 +654,24 @@ class Settings(BaseSettings):
     # Probe traffic (the eval harness) is never traced regardless.
     retrieval_trace_enabled: bool = True
 
+    # Fase 4 of the search-informed graph (task 561c6aca): a gated,
+    # DARK-by-default graph-proximity source in the main retrieval. After
+    # the first-pass fusion, it seeds the bounded neighbourhood walk (Fase
+    # 1) from the top-j fused hits and late-fuses graph-reachable notes as
+    # an extra RRF branch -- surfacing a note that no lexical/dense branch
+    # found but that the graph links to a hit. Default OFF: this is the
+    # publishable A/B lever (recall_at_k graph on vs off). An explicit
+    # ``graph=`` arg to ``memory.retrieve`` overrides it per-call.
+    graph_stage_enabled: bool = False
+    # ``seeds`` = how many top fused hits expand (kept small; the walk is
+    # size-independent but each seed is one bounded traversal).
+    graph_stage_seeds: int = 3
+    graph_stage_node_budget: int = 16
+    # Gate thresholds (mirror the reranker gate): skip on queries too short
+    # to have real structure and on candidate sets too small to seed from.
+    graph_min_query_tokens: int = 3
+    graph_min_candidates: int = 5
+
     # Fuel-path retention (ADR-0048, task 68052297). Historically the ONLY
     # ``retrieval_trace`` pruning lived inside the edge-usage fold, which
     # rides the default-off garden sweep -- so a stock deployment wrote

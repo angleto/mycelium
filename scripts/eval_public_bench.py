@@ -112,6 +112,7 @@ async def _run_pass(
                 limit_questions=args.limit_questions,
                 grader_min_rrf=args.grader_floor,
                 grader_min_rerank_score=args.grader_rerank_floor,
+                graph=(None if args.graph is None else args.graph == "on"),
             )
             embedder_models.update(await bench.corpus_embedder_models(s, org_id=org))
         scores.append(score)
@@ -127,6 +128,7 @@ async def _run_pass(
         sorted(embedder_models),
         grader_min_rrf=args.grader_floor,
         grader_min_rerank_score=args.grader_rerank_floor,
+        graph=(None if args.graph is None else args.graph == "on"),
     )
     return report, tuple(scores)
 
@@ -323,6 +325,14 @@ async def main() -> None:
         metavar="A,B,C",
         help="floors to evaluate with --sweep-floors (the unfloored arm is "
         "always printed first as the baseline).",
+    )
+    ap.add_argument(
+        "--graph",
+        choices=["on", "off"],
+        default=None,
+        help="Fase 4 graph-proximity source A/B (task 561c6aca): 'on'/'off' "
+        "overrides the workspace default, which is dark. Run twice, on against "
+        "off, for the publishable recall@k delta.",
     )
     ap.add_argument(
         "--reranker-model",
