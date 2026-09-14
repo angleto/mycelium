@@ -662,6 +662,64 @@ async def test_a_rejected_proposal_can_be_un_rejected() -> None:
         assert note.id in {p.note_id for p in pending}
 
 
+async def test_an_unreviewed_proposal_cannot_be_linked_from_either_end() -> None:
+    """``link_notes`` guards TWO notes, and a guard applied to one end only
+    is the failure that survives review: the happy path still works, the
+    mirror case does not, and nothing says so.
+
+    Both positions are exercised with a DIRECTED kind on purpose. For an
+    undirected kind (``related``) the endpoints are canonicalised by id
+    string before the guards run, so "parent" and "child" are decided by
+    which uuid sorted first -- a test written that way would silently
+    exercise one position twice and call it coverage. ``hypha_of`` rather
+    than ``supersedes`` or ``contradicts``, which decay the child on
+    creation: a side effect would blur what is being measured."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        live = await _note(s, org, user, "live body YANKEE")
+        gated = await _note(s, org, user, "gated body ZULU")
+        await _propose(s, gated.id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        # The proposal as the CHILD.
+        with pytest.raises(NotFoundError) as err:
+            await note_links.link_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=live.id,
+                child_note_id=gated.id,
+                kind="hypha_of",
+            )
+        assert err.value.code is MessageCode.NOTE_NOT_FOUND
+
+        # ...and as the PARENT, which a one-sided guard would let through.
+        with pytest.raises(NotFoundError):
+            await note_links.link_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=gated.id,
+                child_note_id=live.id,
+                kind="hypha_of",
+            )
+
+    # Approving it makes the same call succeed, so what was measured is the
+    # perimeter and not a broken argument.
+    async with tenant_session(str(org), str(user)) as s:
+        await garden_review.approve_node(s, org_id=org, actor_id=user, note_id=gated.id)
+    async with tenant_session(str(org), str(user)) as s:
+        link = await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=live.id,
+            child_note_id=gated.id,
+            kind="hypha_of",
+        )
+        assert link.child_note_id == gated.id
+
+
 async def test_the_link_family_is_symmetric_on_the_perimeter() -> None:
     """Creating an edge was gated and destroying it was not, which is the
     wrong way round: nothing in the codebase unlinks as cleanup (the hard

@@ -73,9 +73,12 @@ async def suggest_links_for_note(
     """
     # Only EFFECTIVE notes are candidates (task f8402e7f): suggesting a link
     # to a note nobody can open -- an un-approved proposal (ADR-0043) or one
-    # in the bin -- offers the user an invisible node, and accepting it would
-    # write an edge the weave then drops at query time. Mirrors the task arm
-    # below, which has read this way since ADR-0042.
+    # in the bin -- offers the user an invisible node, and accepting it is
+    # now REFUSED outright: ``link_notes`` guards both endpoints through
+    # ``_get_note``, which carries the same clause (task 890d2a03). Until
+    # that landed the acceptance succeeded and wrote an edge the weave
+    # dropped at query time, which is what this comment used to describe.
+    # Mirrors the task arm below, which has read this way since ADR-0042.
     note_rows = (
         await session.execute(select(Note.id).where(Note.org_id == org_id, effective_note_clause()))
     ).all()
