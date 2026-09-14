@@ -15,9 +15,24 @@ into a crash loop.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from mycelium_api.app import create_app
+
+# The suite's own transport, not fastapi's TestClient, and the reason is the
+# EVENT LOOP rather than taste. TestClient drives the app from a portal thread
+# with a loop of its own; the readiness probe opens a pooled asyncpg
+# connection on THAT loop, and the process-wide engine outlives it. The
+# autouse `_dispose_engine` fixture then awaits dispose() on pytest-asyncio's
+# loop, which cannot close a transport belonging to a loop that is already
+# gone: "RuntimeError: Event loop is closed", the connection stays open, and
+# the ResourceWarning surfaces later against whichever test the garbage
+# collector happens to interrupt. Driving the app on the suite's loop puts the
+# connections and their disposal back on the same one.
+#
+# Nothing about the probes changes: neither transport emits lifespan events
+# without a context manager, and entering the app's lifespan here would start
+# the MCP session manager and prewarm its embedding index for a health check.
 
 
 @pytest.fixture
@@ -36,9 +51,13 @@ def unreachable_database(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("mycelium_core.readiness.get_engine", _no_database)
 
 
-def test_readyz_fails_when_the_database_is_unreachable(unreachable_database: None) -> None:
-    client = TestClient(create_app())
-    response = client.get("/readyz")
+async def test_readyz_fails_when_the_database_is_unreachable(
+    unreachable_database: None,
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        response = await client.get("/readyz")
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "not-ready"
@@ -49,28 +68,34 @@ def test_readyz_fails_when_the_database_is_unreachable(unreachable_database: Non
     assert "connection refused" not in response.text
 
 
-def test_healthz_still_answers_when_the_database_is_unreachable(
+async def test_healthz_still_answers_when_the_database_is_unreachable(
     unreachable_database: None,
 ) -> None:
     """Liveness is a process check. A dependency being down is not a
     reason to restart the process, and this is the assertion that keeps
     the two probes from being merged back together."""
-    client = TestClient(create_app())
-    response = client.get("/healthz")
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        response = await client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_readyz_answers_ready_against_a_live_database() -> None:
-    client = TestClient(create_app())
-    response = client.get("/readyz")
+async def test_readyz_answers_ready_against_a_live_database() -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        response = await client.get("/readyz")
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
 
 
-def test_readyz_needs_no_credential() -> None:
+async def test_readyz_needs_no_credential() -> None:
     """The kubelet has none to present. Asserted rather than assumed,
     because the route-scope gate refuses anything not in its allowlist
     and a probe that starts returning 401 fails the pod silently."""
-    client = TestClient(create_app())
-    assert client.get("/readyz").status_code in (200, 503)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        assert (await client.get("/readyz")).status_code in (200, 503)

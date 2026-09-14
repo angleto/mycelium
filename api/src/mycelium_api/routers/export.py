@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from weasyprint import HTML, default_url_fetcher  # type: ignore[import-untyped]
+from weasyprint import HTML, URLFetcher  # type: ignore[import-untyped]
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.filenames import slugify_filename
@@ -35,7 +35,7 @@ _STATIC = Path(__file__).resolve().parents[1] / "static"
 _PRINT_CSS = _STATIC / "print.css"
 
 
-def _safe_url_fetcher(url: str) -> Any:
+class _SafeUrlFetcher(URLFetcher):  # type: ignore[misc]  # weasyprint ships no stubs
     """Confine WeasyPrint's resource loading to what the export legitimately
     needs. The document HTML is CALLER-SUPPLIED, and WeasyPrint would otherwise
     resolve ``file:///...`` (reading arbitrary backend-pod files into the PDF --
@@ -44,15 +44,31 @@ def _safe_url_fetcher(url: str) -> Any:
     SPA inlines attachment images as data: before sending) and ``file://`` under
     the bundled ``static/`` dir (print.css's own @font-face fonts + KaTeX). Any
     other url is refused; WeasyPrint then simply skips that resource, so the
-    export still renders, minus the blocked (hostile) reference."""
-    scheme = urlparse(url).scheme.lower()
-    if scheme == "data":
-        return default_url_fetcher(url)
-    if scheme == "file":
-        path = Path(unquote(urlparse(url).path)).resolve()
-        if path == _STATIC or _STATIC in path.parents:
-            return default_url_fetcher(url)
-    raise ValueError(f"export: refused resource url (scheme {scheme or 'relative'!r})")
+    export still renders, minus the blocked (hostile) reference.
+
+    A subclass of WeasyPrint's own fetcher rather than the bare callable it
+    accepted until 68: the callable form is deprecated, and a deprecation left
+    alone here is a security fence that disappears on an upgrade nobody
+    connected with security. The scheme allowlist is now the base class's
+    ``allowed_protocols``, which refuses everything else before this code
+    runs; what stays here is the part no library can know, the containment of
+    ``file:`` to one directory.
+
+    The refusal is a plain ``ValueError`` on purpose. WeasyPrint catches
+    everything that is not a ``FatalURLFetchingError`` and carries on without
+    the resource, which is the behaviour the export wants: a hostile document
+    must still render, minus what it tried to reach.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(allowed_protocols=frozenset({"data", "file"}))
+
+    def fetch(self, url: str, headers: Any = None) -> Any:
+        if urlparse(url).scheme.lower() == "file":
+            path = Path(unquote(urlparse(url).path)).resolve()
+            if not (path == _STATIC or _STATIC in path.parents):
+                raise ValueError("export: refused resource url (file outside static)")
+        return super().fetch(url, headers)
 
 
 # Cap the inbound body so a runaway client can't OOM the renderer.
@@ -124,7 +140,10 @@ async def export_pdf(
     # emits absolute /attachments/... but we inline those client-side)
     # resolve sensibly without hitting the network. ``url_fetcher`` fences the
     # caller HTML off local files / the network (LFI / SSRF); see it above.
-    html = HTML(string=doc, base_url=str(_STATIC), url_fetcher=_safe_url_fetcher)
+    # A fetcher per export, not a module singleton: it is an OpenerDirector with
+    # a handler chain, which urllib does not document as thread-safe, and
+    # building nine handlers is nothing beside rendering a PDF.
+    html = HTML(string=doc, base_url=str(_STATIC), url_fetcher=_SafeUrlFetcher())
     buf = io.BytesIO()
     html.write_pdf(buf, stylesheets=[str(_PRINT_CSS)])
     pdf_bytes = buf.getvalue()

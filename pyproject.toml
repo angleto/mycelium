@@ -132,3 +132,32 @@ disable_error_code = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["core/tests", "api/tests", "cli/tests", "worker/tests"]
+# Warnings are errors. What it cost to get here is the argument for keeping it:
+# the run that turned it on found three leaked psycopg connections, a leaked
+# asyncpg transport per TestClient-driven probe test, and a redundant Typer flag
+# that was already announced for removal. None of those failed anything; all of
+# them were visible only as a warning nobody read.
+#
+# A ResourceWarning is attributed to whatever test the garbage collector happens
+# to interrupt, never to the code that leaked. When one appears, bisect by
+# running the suspect file together with the test that reported it (`-p
+# no:randomly`), not by reading the reported test.
+filterwarnings = [
+    "error",
+    # anyio's memory streams, left unclosed by mcp's STATELESS transport
+    # (mcp 1.27.1, anyio 4.13.0). `StreamableHTTPServerTransport.connect()`
+    # closes all four streams in a `finally`, but the closes are plain awaits
+    # in a task the session manager's task group cancels when the app lifespan
+    # exits, so the first one is cancelled and the rest never run. Fixing it
+    # means shielding that cleanup, which is inside the library; reaching it
+    # from here would mean timing the lifespan exit against a background task,
+    # which is a worse thing to own than the warning.
+    #
+    # WHAT THIS STOPS CATCHING: an unclosed anyio memory stream, from anywhere.
+    # Narrow on purpose -- scoped to the message and to the module that raises
+    # it -- because the general form would hide the leaked DB connections this
+    # gate exists to find. This repository creates no memory object streams of
+    # its own (`grep -r create_memory_object_stream` finds none outside the
+    # dependency), so today the blast radius is exactly mcp's.
+    "ignore:Unclosed <MemoryObject:ResourceWarning:anyio.streams.memory",
+]

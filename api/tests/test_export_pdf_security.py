@@ -2,9 +2,14 @@
 
 The document HTML is caller-supplied and rendered by WeasyPrint, which by
 default resolves ``file:///...`` (reading backend-pod files into the PDF) and
-``http(s)://`` (SSRF). ``_safe_url_fetcher`` allows only inline ``data:`` and
+``http(s)://`` (SSRF). ``_SafeUrlFetcher`` allows only inline ``data:`` and
 ``file://`` under the bundled static dir; everything else is refused, and
 WeasyPrint then simply skips the resource.
+
+Exercised through the fetcher OBJECT, which is what the renderer is given:
+WeasyPrint 68 deprecated the plain-callable form this fence used to take, and
+a test that kept calling the old shape would have gone on passing while the
+renderer stopped using it.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mycelium_api.main import app
-from mycelium_api.routers.export import _STATIC, _safe_url_fetcher
+from mycelium_api.routers.export import _STATIC, _SafeUrlFetcher
 
 
 def test_url_fetcher_refuses_local_files_and_network() -> None:
@@ -27,16 +32,24 @@ def test_url_fetcher_refuses_local_files_and_network() -> None:
         "http://169.254.169.254/latest/meta-data/",  # SSRF (cloud metadata)
         "https://evil.example/x",
         "ftp://host/x",
+        # Traversal out of the static dir: the containment check resolves the
+        # path, so a prefix that merely STARTS inside it is not enough.
+        f"file://{_STATIC}/../../etc/passwd",
+        # Scheme matching is case-insensitive on both sides of the fence: the
+        # allowlist lowercases, and so must the containment check that
+        # decides whether to apply the path rule at all.
+        "FILE:///etc/passwd",
+        "HTTPS://evil.example/x",
     ):
         with pytest.raises(ValueError):
-            _safe_url_fetcher(bad)
+            _SafeUrlFetcher().fetch(bad)
 
 
 def test_url_fetcher_allows_data_and_bundled_static() -> None:
     # Inline images (the SPA inlines attachments as data:) are fine.
-    assert _safe_url_fetcher("data:text/plain;base64,aGk=")
+    assert _SafeUrlFetcher().fetch("data:text/plain;base64,aGk=")
     # print.css's own bundled assets under the static dir are fine.
-    assert _safe_url_fetcher((_STATIC / "print.css").as_uri())
+    assert _SafeUrlFetcher().fetch((_STATIC / "print.css").as_uri())
 
 
 async def _owner_headers(c: AsyncClient) -> dict[str, str]:

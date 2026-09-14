@@ -130,20 +130,29 @@ def test_parse_rejects_missing_required_field() -> None:
         parse_notification(incomplete)
 
 
-def test_inbound_app_rejects_malformed_xml_with_400() -> None:
+async def test_inbound_app_rejects_malformed_xml_with_400() -> None:
     # ADR-0011: SdI push must never see a 500 (its retry/log path gets
     # noisy). Both an empty body and arbitrary non-XML must surface as 400,
     # not bubble lxml.XMLSyntaxError into a 500.
-    from fastapi.testclient import TestClient
+    #
+    # ASGITransport and not TestClient: the latter runs the app on a portal
+    # loop of its own, and this app's readiness probe opens a pooled asyncpg
+    # connection there that the suite's engine disposal (a different loop)
+    # cannot close. See api/tests/test_probes_do_not_share_a_check.py.
+    from httpx import ASGITransport, AsyncClient
 
     from mycelium_sdi_inbound.app import create_app
 
-    client = TestClient(create_app())
-    assert client.post("/sdi/notification", content=b"").status_code == 400
-    assert client.post("/sdi/notification", content=b"HELLO").status_code == 400
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        assert (await client.post("/sdi/notification", content=b"")).status_code == 400
+        assert (await client.post("/sdi/notification", content=b"HELLO")).status_code == 400
 
 
-def test_inbound_app_separates_liveness_from_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_inbound_app_separates_liveness_from_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """This service writes every delivery it accepts, so a pod that
     cannot reach the database must fall out of rotation rather than
     acknowledge an invoice it will not record. Readiness says so;
@@ -154,22 +163,24 @@ def test_inbound_app_separates_liveness_from_readiness(monkeypatch: pytest.Monke
     because these are two FastAPI apps and the route registration, not
     the shared check, is what a change would break.
     """
-    from fastapi.testclient import TestClient
+    from httpx import ASGITransport, AsyncClient
 
     from mycelium_sdi_inbound.app import create_app
 
-    client = TestClient(create_app())
-    assert client.get("/readyz").json() == {"status": "ready"}
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://t"
+    ) as client:
+        assert (await client.get("/readyz")).json() == {"status": "ready"}
 
-    def _no_database() -> object:
-        raise OSError("connection refused")
+        def _no_database() -> object:
+            raise OSError("connection refused")
 
-    monkeypatch.setattr("mycelium_core.readiness.get_engine", _no_database)
-    not_ready = client.get("/readyz")
-    assert not_ready.status_code == 503
-    assert not_ready.json()["dependency"] == "database"
-    # Liveness is unmoved by the same outage.
-    assert client.get("/healthz").status_code == 200
+        monkeypatch.setattr("mycelium_core.readiness.get_engine", _no_database)
+        not_ready = await client.get("/readyz")
+        assert not_ready.status_code == 503
+        assert not_ready.json()["dependency"] == "database"
+        # Liveness is unmoved by the same outage.
+        assert (await client.get("/healthz")).status_code == 200
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:
