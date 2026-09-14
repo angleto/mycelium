@@ -4065,16 +4065,38 @@ button.btn--danger:hover {
   align-items: flex-start;
   gap: var(--sp-6);
 }
+/* The actions cluster may wrap and may shrink; what it may not do is leave
+   the card. It used to be able to: `flex-shrink: 0` on a row holding copy +
+   peek + a RUNNING timer (pause, memo, stop with a live ⏱■ H:MM:SS readout)
+   is wider than a 16rem column's content box, so the line it wrapped onto
+   still overflowed sideways. Wrapping inside the cluster is what bounds it,
+   and `min-width: 0` is what lets the wrap actually happen -- a flex item's
+   automatic minimum size is its content, so without it the row refuses to
+   narrow however much room it is given. */
 .kanban__card-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--sp-4);
   margin-left: auto;
-  flex-shrink: 0;
+  min-width: 0;
 }
-.kanban__timer {
-  padding: var(--sp-2) var(--sp-6);
+/* The same, one level down: the timer is its own flex row and has to be
+   allowed to break between its buttons. The compact sizing lives here, on
+   the context, rather than behind a prop: a `.kanban__timer` class was
+   written for it and never reached the element, so for as long as this card
+   has had a timer it has been rendering at full size inside a 16rem
+   column. */
+.kanban__card-actions .tasktimer {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.kanban__card-actions .tasktimer button {
   font-size: 0.78rem;
   line-height: 1.2;
+  padding: var(--sp-2) var(--sp-6);
 }
 .kanban__title {
   font-weight: 500;
