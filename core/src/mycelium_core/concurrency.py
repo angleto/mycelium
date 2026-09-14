@@ -3,12 +3,16 @@
 UPDATE ... WHERE id AND version = expected; 0 rows -> ConflictError
 (adapters map it to HTTP 409). No implicit ORM magic. The service
 layer is the only place that mutates versioned state.
+
+:func:`raise_stale_version` is that conflict's shape, exported because
+a caller that short-circuits before reaching the funnel still owes the
+caller the same reply.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,7 +71,26 @@ async def optimistic_update(
         current = (
             await session.execute(select(table.c.version).where(table.c.id == pk))
         ).scalar_one_or_none()
-        if current is None:
-            raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION, current_version=int(current))
+        raise_stale_version(current)
     return int(row[0])
+
+
+def raise_stale_version(current: int | None) -> NoReturn:
+    """What a stale optimistic write means, stated once.
+
+    ``optimistic_update`` is the funnel for versioned writes and would
+    be the only site that needs this, except that a caller which
+    short-circuits BEFORE reaching the funnel still owes the caller the
+    same answer. ``note_parts.update_part`` is one: a re-sent identical
+    body is not a write, but a stale ``expected_version`` on it is
+    still a conflict. Spelling the raise there too would put the shape
+    of the reply -- the code, and the current version attached to it --
+    in two places, and they would drift.
+
+    ``current`` is None when the row is gone (deleted, or invisible
+    under RLS); the message template is field-less, so the extra param
+    is simply absent rather than wrong.
+    """
+    if current is None:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    raise ConflictError(MessageCode.CONFLICT_STALE_VERSION, current_version=int(current))

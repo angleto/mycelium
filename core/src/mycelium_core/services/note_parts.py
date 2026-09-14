@@ -32,7 +32,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.concurrency import optimistic_update
+from mycelium_core.concurrency import optimistic_update, raise_stale_version
 from mycelium_core.config import get_settings
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
@@ -481,15 +481,37 @@ async def update_part(
         values["lang"] = lang
     if not values:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    # The version gate runs HERE, above the no-op short circuit, and not
+    # only inside ``optimistic_update`` below.
+    #
+    # It used to run only below, and the comment on the short circuit
+    # asserted the opposite ("the version gate above has already run").
+    # It had not. The reachable shape is narrow and it is not the one it
+    # sounds like: the caller's values must match the LIVE row while its
+    # ``expected_version`` is behind, which is what a concurrent edit to
+    # a DIFFERENT field of the same part produces -- someone retitles
+    # part 3, and our caller, still holding the version it read, writes
+    # back the body it already had. It got a 200 and a version it never
+    # wrote, so a successful write stopped implying the writer had seen
+    # what it was writing over. When the bodies differ the write reaches
+    # the compare-and-swap and conflicts there, which is why this was
+    # invisible: the ordinary retry re-sends identical bytes and was
+    # accidentally safe.
+    #
+    # This does not replace the compare-and-swap below: that one is the
+    # serialization point, and another transaction can still commit
+    # between this read and that UPDATE. This exists so the short
+    # circuit cannot be a way past it.
+    if int(part.version) != expected_version:
+        raise_stale_version(int(part.version))
     # A write that changes nothing is not a write. Without this an
     # interactive client that re-sends the body it was given (an editor
     # whose serializer happens to reproduce it, a retried request, a
     # "Save" on an untouched form) bumps ``version`` and stamps a
     # recovery-history row that says an edit happened when none did --
     # which is exactly the noise that made the silent-rewrite incident
-    # hard to read. The version gate above has already run, so callers
-    # still get a conflict on stale writes; this only collapses the
-    # genuinely idempotent case.
+    # hard to read. The gate above has run, so this collapses only the
+    # genuinely idempotent case of a caller that is up to date.
     if all(getattr(part, field) == value for field, value in values.items()):
         return int(part.version)
     new_version = await optimistic_update(

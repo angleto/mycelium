@@ -149,6 +149,64 @@ async def test_resending_the_same_body_is_not_an_edit() -> None:
         assert real.json()["version"] == 2
 
 
+async def test_a_stale_version_conflicts_even_when_the_body_is_identical() -> None:
+    """The no-op short circuit must not be a way past the version gate.
+
+    The short circuit used to be evaluated BEFORE ``expected_version``
+    was consulted -- that happened only inside ``optimistic_update``,
+    which the short circuit skips -- while the comment beside it claimed
+    the opposite.
+
+    The reachable shape is narrow, and writing it wrong makes a test
+    that passes either way: the caller's values must match the LIVE row
+    while its version is behind. Re-sending an OLD body after somebody
+    changed the body does NOT do it -- the values differ, so the write
+    reaches the compare-and-swap and conflicts there. What does it is a
+    concurrent edit to a DIFFERENT field: someone retitles the part, and
+    our caller, still holding the version it read, writes back the body
+    it already had. That used to return 200 and a version it never
+    wrote.
+
+    Paired with ``test_resending_the_same_body_is_not_an_edit`` above,
+    which holds the other half: a CURRENT version still collapses to the
+    no-op. One rule must not have eaten the other."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "stale")
+        body = "una riga\n"
+        pid = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": body})).json()["id"]
+
+        # A concurrent edit to another field: the version moves to 2 and
+        # the body is untouched.
+        retitled = await c.patch(
+            f"/notes/{note_id}/parts/{pid}",
+            headers=h,
+            json={"expected_version": 1, "title": "Rititolata"},
+        )
+        assert retitled.status_code == 200, retitled.text
+        assert retitled.json()["version"] == 2
+
+        # Our caller never saw that. It still holds version 1 and writes
+        # back the body it already had -- which is byte-identical to the
+        # live one.
+        stale = await c.patch(
+            f"/notes/{note_id}/parts/{pid}",
+            headers=h,
+            json={"expected_version": 1, "body": body},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["code"] == "concurrency.stale_version"
+        # And it is told where the world got to, so it can re-read.
+        assert stale.json()["params"]["current_version"] == 2
+
+        # The refused write changed nothing, the title included.
+        listed = (await c.get(f"/notes/{note_id}/parts", headers=h)).json()
+        assert listed[0]["body"] == body
+        assert listed[0]["title"] == "Rititolata"
+        assert listed[0]["version"] == 2
+
+
 async def test_create_at_specific_ord_shifts_existing_parts() -> None:
     """Inserting at ord=0 pushes every existing part forward by one
     via a single UPDATE; the deferred unique constraint tolerates
