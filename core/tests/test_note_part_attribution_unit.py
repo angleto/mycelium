@@ -131,7 +131,14 @@ def test_neither_projection_has_lost_a_field_it_used_to_carry() -> None:
         "id",
         "note_id",
         "ord",
+        # Added with the outline's twin: this projection carried a body
+        # whose blocks had no names, while the cheap one had shown the
+        # titles all along.
+        "title",
         "body",
+        # The digest the conditional-write gate accepts, on both
+        # projections so a caller does not have to hash the body itself.
+        "body_sha256",
         "lang",
         "merged_from_note_id",
         "version",
@@ -146,6 +153,7 @@ def test_neither_projection_has_lost_a_field_it_used_to_carry() -> None:
         "title",
         "lang",
         "bytes",
+        "body_sha256",
         "head",
         "version",
         "created_by",
