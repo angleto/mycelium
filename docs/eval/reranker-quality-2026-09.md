@@ -139,6 +139,61 @@ neither, so a deployment cannot execute remote code at all. Adopting gte means
 writing the two shas down and saying who read them; the incumbent needs none of
 this, which is a real part of its price difference.
 
+## Coda, 2026-09-14: the two numbers taken on the pod, and what they close
+
+The section above ends on "both numbers can only be taken on the pod". They
+were, with a throwaway Job on the `mycelium` pool (node
+`scw-bvphoenix-production-clus-mycelium--67b247`, arm64, 4 CPU / 3800m
+allocatable), the backend image of the tag in service, the model cache in its
+own `emptyDir`, and memory read from the container's cgroup rather than from
+the process. Task `03cdf674`; the probe is `scripts/perf/reranker_pod_probe.py`
+and the manifest lives in the deploy repository.
+
+**The small candidate does not run there at all.**
+`gte-multilingual-reranker-base` loads (24.6s, 1.48 GiB of cgroup) and then
+fails every forward pass, including on a single short pair:
+
+    modeling.py, line 392, in forward
+        rope_cos = rope_cos[position_ids].unsqueeze(2)
+    IndexError: index 2464942325760 is out of bounds for dimension 0 with size 304
+
+The index differs each run (2464942325760, then 4276378337280), so it is
+uninitialised memory read as an index inside the remote code, not an input out
+of range. The same id and the same pinned sha work on the development machine.
+This is the one thing no laptop measurement could have said, and it removes the
+model the latency argument above was pointing at.
+
+**The incumbent runs, and costs about 2.2x its laptop figure.**
+
+| | pod | laptop | ratio |
+|---|---|---|---|
+| load | 114.6s | - | - |
+| top_k=10 | **16.74s** | 7.8s | 2.15x |
+| top_k=16 | **27.18s** | 12s | 2.27x |
+| top_k=50 (the code default) | **120.9s** | 44s | 2.75x |
+
+Memory, from the cgroup: 668 MiB before, **3390 MiB after the load**, peak
+**3743 MiB**, so the model adds ~2.7 GiB to the container. That sits inside the
+interval this document predicted (2.27 GiB of fp32 weights plus activations and
+allocator arena) and confirms the local +0.42 GB reading was an artefact of
+counting RSS on memory-mapped weights.
+
+**What that decides.** The criterion was gte under ~1s at top_k=10 with room
+under 6Gi. Not only is it unmet, the model it rested on does not work on the
+node. The global switch stays off with a number beside it, and the sentence
+"2-5s is within the noise of an agent turn" is falsified: on the node it is
+16.7s at top_k=10 and 121s at the shipped default of 50, so a caller that flips
+`rerank=true` without also lowering `reranker_top_k` waits two minutes. A
+cross-encoder on this node, on CPU, is not an interactive-path component. What
+remains open, and unmeasured, is a hosted reranker, a much smaller int8 model,
+or reranking off the response path -- none of which this measurement touched.
+
+**A supply-chain detail found in the logs.** With `code_revision` pinned,
+`modeling.py` came from the pinned sha but transformers still reported
+downloading a new version of `configuration.py` from the head of the same
+`new-impl` repository. The pin `LocalReranker` demands therefore covers the
+model definition and not everything that executes.
+
 ## The honest-abstain floor: swept on both models, and it buys nothing
 
 `abstention_correct` is 0.000 in every arm above: 71 questions whose right

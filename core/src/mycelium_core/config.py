@@ -638,12 +638,22 @@ class Settings(BaseSettings):
     # How many of the fused candidates the cross-encoder actually scores,
     # and the knob that dominates the cost of having it on at all: the model
     # runs once per (query, document) pair, so this multiplies directly.
-    # Measured 2026-09-13 on CPU with production-length documents, which is
-    # what the pod has (torch CPU, no GPU): `bge-reranker-v2-m3` takes 7.8s
-    # at 10 pairs and 44s at 50; `gte-multilingual-reranker-base`, a third
-    # the size, 1.4s and 8.8s. Until then this was a dataclass default on
-    # the stage that no caller passed, so the most expensive setting in the
-    # pipeline was the one that could not be set.
+    # Measured 2026-09-13 on a laptop (Apple Silicon, 4 threads):
+    # `bge-reranker-v2-m3` takes 7.8s at 10 pairs and 44s at 50;
+    # `gte-multilingual-reranker-base`, a third the size, 1.4s and 8.8s.
+    # Until then this was a dataclass default on the stage that no caller
+    # passed, so the most expensive setting in the pipeline was the one
+    # that could not be set.
+    #
+    # Measured again 2026-09-14 ON THE PRODUCTION NODE (task 03cdf674, arm64,
+    # 4 CPU), which is the only place the number means anything, and it is
+    # roughly 2.2x worse: `bge-reranker-v2-m3` takes 16.7s at 10 pairs, 27.2s
+    # at 16 and **121s at this default of 50**. So the default is a trap for
+    # whoever flips `rerank=true` without also lowering it, and the small
+    # candidate cannot stand in for it: `gte-multilingual-reranker-base`
+    # loads on that node and then fails every forward pass (see reranker.py).
+    # The global switch stays off, and that is now a measurement rather than
+    # a caution.
     reranker_top_k: int = 50
 
     # Fase 0 of the search-informed graph (task 561c6aca): append-only

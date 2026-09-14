@@ -141,7 +141,27 @@ class LocalReranker:
         ``revision`` pins the CHECKPOINT repo, which is a different repository
         from the code one and moves independently; it is optional because
         weights that change under a fixed id are a reproducibility problem
-        rather than an execution one."""
+        rather than an execution one.
+
+        TWO THINGS THE 2026-09-14 RUN ON THE PRODUCTION NODE FOUND, and both
+        limit what the paragraphs above can promise (task 03cdf674):
+
+        1. The pin does not cover everything. With ``code_revision`` set,
+           ``modeling.py`` did come from the pinned sha, but transformers
+           still logged "A new version of the following files was downloaded"
+           for ``configuration.py`` of the same ``new-impl`` repository. So
+           one file of the trusted code came from a moving reference anyway.
+           What would close it is pinning through the transformers cache
+           rather than through this constructor; until then, "pinned" here
+           means the model definition and not the whole of what executes.
+        2. ``gte-multilingual-reranker-base`` LOADS on that node (arm64,
+           torch CPU) and then fails every forward pass with an out-of-range
+           index into its rope table -- a different, absurd index each run,
+           i.e. uninitialised memory read as an index, inside that remote
+           code. The same id and sha run on the laptop. Executing a third
+           party's python is therefore not only a supply-chain decision, it
+           is a portability one, and neither is visible from where the model
+           is chosen."""
         if trust_remote_code and not code_revision:
             raise ValueError(
                 "LocalReranker: trust_remote_code needs code_revision -- "
