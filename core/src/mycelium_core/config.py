@@ -305,6 +305,26 @@ class Settings(BaseSettings):
     # where a refusal would make a legitimate revision unrecoverable.
     note_body_max_bytes: int = 1 * 1024 * 1024
 
+    # Above this many CHARACTERS in a body sent as a tool ARGUMENT, the
+    # agent surface adds a non-fatal hint naming the token-free path.
+    # Characters and not bytes, because what it bounds is a model's
+    # output, which is billed in tokens and counted in characters.
+    #
+    # The number is not invented: it is the chunk size ``append_note_part``
+    # already recommends. Below one chunk, streaming buys nothing
+    # structural; from there up the body is in the class that path was
+    # built for.
+    #
+    # A hint and never a refusal, for three reasons that are properties of
+    # the surface and not preferences. It cannot save the call it fires
+    # on: the argument bytes were emitted as output before the server saw
+    # them. For content generated in context, the economical path still
+    # has to write those same bytes to a file first, so refusing charges
+    # twice. And a per-argument threshold is walked around at identical
+    # token cost by splitting the body into chunks.
+    # Override via MYCELIUM_TOOL_ARG_BODY_HINT_CHARS.
+    tool_arg_body_hint_chars: int = 32 * 1024
+
     # Cap on a POSTed unified-diff patch body (services/text_patch.py).
     # A full-replace diff carries both the old and the new body, so it can
     # legitimately exceed note_body_max_bytes; ~2x + headroom. The applier

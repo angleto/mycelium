@@ -5194,6 +5194,52 @@ def _note_part(p: Any) -> dict[str, Any]:
     }
 
 
+# The tools a large body should have travelled through instead. Named
+# rather than described, so the hint is actionable by a model. The two
+# capability-mint tools are deliberately NOT here: whether an agent may
+# call them at all is still open (task 1428a184), and a hint that points
+# at a door about to be closed teaches the wrong habit.
+# The replacement twin: a whole-body rewrite has its own recipe.
+_SET_BODY_HINT = "set_note_part_body_instructions (a token-free whole-body upload recipe)"
+
+_STREAM_PART_HINT = (
+    "add_note_part_instructions (a token-free upload recipe), or "
+    "append_note_part (MCP-native, chunked) if there is no shell"
+)
+
+
+def _big_body_hint(body: str | None, *, alternative: str) -> dict[str, str]:
+    """A ``hint`` field for a body that arrived as a tool argument and was
+    large enough that a token-free path would have been cheaper.
+
+    Returns ``{}`` below the threshold, so the field is simply absent on
+    the ordinary call and costs nothing.
+
+    Never a refusal. The argument bytes are the model's OUTPUT, already
+    emitted and already billed by the time this runs, so refusing cannot
+    save the call it fires on; for content generated in context the
+    economical path must write those same bytes to a file first, so
+    refusing charges for them twice; and the threshold is walked around
+    at identical cost by chunking. What it can do is make the next call
+    cheaper, which is why it names a tool instead of a rule.
+    """
+    if body is None:
+        return {}
+    from mycelium_core.config import get_settings
+
+    limit = get_settings().tool_arg_body_hint_chars
+    if len(body) <= limit:
+        return {}
+    return {
+        "hint": (
+            f"{len(body)} characters arrived as a tool argument, over the "
+            f"{limit} this surface expects. Those characters were billed as "
+            f"output. For a body this size use {alternative}, which moves it "
+            f"without putting it through a tool call."
+        )
+    }
+
+
 def _note_part_outline(p: Any) -> dict[str, Any]:
     """Body-free projection of a NotePart for the outline / table of
     contents of a long note: id, ord, title, lang, UTF-8 byte length,
@@ -5326,7 +5372,13 @@ async def create_note(
     with ``move_note_to_project``. ``index_scope`` is ``org`` (default)
     or ``none``, which keeps every part of the note out of the automatic
     search index -- not out of ``get_note``, and not out of the ``q=``
-    filter of ``list_notes``."""
+    filter of ``list_notes``.
+
+    Returns the note with the OUTLINE of its parts, not their bodies:
+    you just sent the text, and handing it back would bill the same
+    characters twice in one turn. ``parts[].body_sha256`` is the
+    byte-exact confirmation of what landed. Use ``get_note`` to read a
+    body back."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.create_note(
             s,
@@ -5341,8 +5393,20 @@ async def create_note(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        body = await notes_svc.get_body(s, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
+        # The outline of part 0 rather than the text just sent in. With
+        # ``part_bodies=False`` the derived ``transcript`` is not emitted
+        # either, so the body does not come back by the other door.
+        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=n.id)
+        return {
+            **_note(
+                n,
+                tagmap.get(n.id, []),
+                primary_task_id=pid,
+                parts=parts,
+                part_bodies=False,
+            ),
+            **_big_body_hint(text, alternative=_STREAM_PART_HINT),
+        }
 
 
 @mcp.tool()
@@ -5510,7 +5574,11 @@ async def add_note_part(
     """Append a markdown block to a note (task 7070a456 Phase 3).
     Pass ``ord`` to insert at a specific position; every part with
     ord >= value is shifted forward. Omit ``ord`` to land at the end.
-    ``title`` names the block in the outline. Returns the new part."""
+    ``title`` names the block in the outline.
+
+    Returns the new part WITHOUT its body: you just sent it. The
+    ``body_sha256`` in the outline confirms byte-exactly what landed,
+    at a fraction of the cost of echoing the block back."""
     from mycelium_core.services import note_parts as parts_svc_local
 
     async with _tenant(token, org_id) as (s, org, user):
@@ -5524,7 +5592,12 @@ async def add_note_part(
             lang=lang,
             ord=ord,
         )
-        return _note_part(part)
+        # The outline, not the body. The caller just SENT this body as an
+        # argument: returning it makes the same characters output once and
+        # input again in the same turn. ``body_sha256`` on the outline is
+        # the byte-exact confirmation of what landed, at about 25 tokens
+        # instead of the whole block.
+        return {**_note_part_outline(part), **_big_body_hint(body, alternative=_STREAM_PART_HINT)}
 
 
 @mcp.tool()
@@ -5565,7 +5638,11 @@ async def update_note_part(
             body=body,
             **kwargs,
         )
-        return {"part_id": part_id, "version": version}
+        return {
+            "part_id": part_id,
+            "version": version,
+            **_big_body_hint(body, alternative=_SET_BODY_HINT),
+        }
 
 
 @mcp.tool()
@@ -5949,7 +6026,9 @@ async def create_task_note(
     work note pre-linked to the task (NOT idempotent, unlike
     get_or_create_task_note). Title defaults to the task title. Time
     logged in the note rolls up to the task. ``index_scope`` is ``org``
-    (default) or ``none``, as on ``create_note``."""
+    (default) or ``none``, as on ``create_note``. Returns the part
+    outline rather than the body, for the same reason ``create_note``
+    does."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.create_note_for_task(
             s,
@@ -5962,8 +6041,18 @@ async def create_task_note(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        body = await notes_svc.get_body(s, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
+        # Same economy as ``create_note``: the outline, not the echo.
+        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=n.id)
+        return {
+            **_note(
+                n,
+                tagmap.get(n.id, []),
+                primary_task_id=pid,
+                parts=parts,
+                part_bodies=False,
+            ),
+            **_big_body_hint(text, alternative=_STREAM_PART_HINT),
+        }
 
 
 @mcp.tool()
@@ -6062,7 +6151,11 @@ async def update_note(
             channel="mcp",
             **extra,
         )
-        return {"note_id": note_id, "version": version}
+        return {
+            "note_id": note_id,
+            "version": version,
+            **_big_body_hint(text, alternative=_SET_BODY_HINT),
+        }
 
 
 @mcp.tool()
