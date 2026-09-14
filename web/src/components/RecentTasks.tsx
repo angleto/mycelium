@@ -25,7 +25,12 @@ function readOpen(): boolean {
   } catch {
     /* private mode / quota: fall through to default */
   }
-  return true // default open: a shortcut is only useful when visible
+  // Default CLOSED. Open it costs 268px measured, on a page where the board
+  // already started 902px down a 749px viewport: the shortcut to what you
+  // just touched was pushing the thing you came for below the fold. Whoever
+  // opens it keeps it open -- the choice is remembered, and only the absence
+  // of a choice changed.
+  return false
 }
 
 function readCount(): number {
