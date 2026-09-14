@@ -1024,6 +1024,7 @@ export const en = {
     ownerHint: 'Who is accountable for this task. Always a real person; reassign to transfer responsibility.',
     filterTag: 'Filter by tag',
     filterByTagLabel: 'Filter by tag:',
+    filterClear: 'Clear the filter',
     bulkSection: 'Bulk actions',
     bulkTagPick: 'Tag to apply…',
     all: 'All',

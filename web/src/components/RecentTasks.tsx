@@ -4,34 +4,18 @@ import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { IdentityBadge } from './IdentityBadge'
 import { relTime } from '../lib/time'
+import { usePersistedFlag } from '../lib/persistedFlag'
 import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
 
-// Persisted UI state (same localStorage pattern as the Tasks view
-// toggle): the widget remembers whether the user left it open and how
-// many rows they want.
+// Persisted UI state: the widget remembers whether the user left it open
+// (``usePersistedFlag``) and how many rows they want.
 const OPEN_KEY = 'mycelium.tasks.recent.open'
 const COUNT_KEY = 'mycelium.tasks.recent.count'
 const DEFAULT_COUNT = 4
 const MIN_COUNT = 1
 const MAX_COUNT = 20
-
-function readOpen(): boolean {
-  try {
-    const v = localStorage.getItem(OPEN_KEY)
-    if (v === '0') return false
-    if (v === '1') return true
-  } catch {
-    /* private mode / quota: fall through to default */
-  }
-  // Default CLOSED. Open it costs 268px measured, on a page where the board
-  // already started 902px down a 749px viewport: the shortcut to what you
-  // just touched was pushing the thing you came for below the fold. Whoever
-  // opens it keeps it open -- the choice is remembered, and only the absence
-  // of a choice changed.
-  return false
-}
 
 function readCount(): number {
   try {
@@ -58,16 +42,13 @@ function recencyMs(tk: Task): number {
 // search box and date lens.
 export function RecentTasks({ tasks }: { tasks: Task[] }) {
   const { t, i18n } = useTranslation()
-  const [open, setOpen] = useState(readOpen)
+  // Closed on a profile that has never chosen: open it measured at 268px on a
+  // page whose board already started below the fold, so the shortcut to what
+  // you just touched was pushing the thing you came for out of sight. Whoever
+  // opens it keeps it open.
+  const [open, setOpen] = usePersistedFlag(OPEN_KEY, false)
   const [count, setCount] = useState(readCount)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(OPEN_KEY, open ? '1' : '0')
-    } catch {
-      /* ignore */
-    }
-  }, [open])
   useEffect(() => {
     try {
       localStorage.setItem(COUNT_KEY, String(count))
@@ -85,7 +66,7 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
           type="button"
           className="recentwidget__toggle"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(!open)}
         >
           <span className="recentwidget__caret" aria-hidden="true">
             {open ? '▾' : '▸'}

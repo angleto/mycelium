@@ -1021,6 +1021,7 @@ export const it: Catalog = {
     ownerHint: 'Chi risponde di questo task. Sempre una persona reale; cambiare per trasferire la responsabilità.',
     filterTag: 'Filtra per tag',
     filterByTagLabel: 'Filtra per tag:',
+    filterClear: 'Togli il filtro',
     bulkSection: 'Azioni in blocco',
     bulkTagPick: 'Tag da applicare…',
     all: 'Tutti',

@@ -13,6 +13,7 @@ import { CopyIdButton } from '../components/CopyIdButton'
 import { PeekButton } from '../components/PeekButton'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
+import { usePersistedFlag } from '../lib/persistedFlag'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import {
   getFreeTextTokens,
@@ -157,6 +158,14 @@ export function TasksRoute() {
   // use ``replace`` so typing in the search box does not push a history
   // entry per keystroke; the prior list URL stays the Back target.
   const filter = searchParams.get('filter') ?? ''
+  // The tag grid is a disclosure, remembered per profile (see the block that
+  // renders it for why it starts closed).
+  const [tagsOpen, setTagsOpen] = usePersistedFlag('mycelium.tasks.filtertags.open', false)
+  // The tag the filter names, so the header can show it while the grid is
+  // shut. `undefined` when the URL carries an id the tag list does not hold
+  // (a deleted tag, a link from another workspace): the filter still applies,
+  // and showing nothing is better than inventing a name for it.
+  const activeTag = filter ? tags.find((g) => g.id === filter) : undefined
   const q = searchParams.get('q') ?? ''
   const setFilter = useCallback(
     (next: string | ((cur: string) => string)) => {
@@ -1055,16 +1064,53 @@ export function TasksRoute() {
       </div>
       {tags.length > 0 && (
         <div className="filterbar__tags">
-          <span className="muted">{t('tasks.filterByTagLabel')}</span>
-          <TagPickerGrid
-            tags={tags}
-            selected={filter ? [filter] : []}
-            // Single-select: clicking the active chip clears the filter,
-            // clicking another swaps it. Matches /notes' fTag behaviour
-            // and the backend's single ``tag_id`` query param.
-            onToggle={(id) => setFilter((cur) => (cur === id ? '' : id))}
-            searchable={tags.length > 20}
-          />
+          {/* Closed by default: the grid measured 197px, on a page where the
+              board started 673px down a 693px viewport even after the recent
+              widget was collapsed. It is the last block between the user and
+              the thing they came for.
+
+              The ACTIVE filter stays in the header whether the grid is open
+              or shut, and clearing it does not need the grid. A collapsed
+              filter that hides what it is filtering by is the worse bug: a
+              list missing rows for a reason nobody can see. */}
+          <div className="filterbar__tagshead">
+            <button
+              type="button"
+              className="filterbar__tagstoggle"
+              aria-expanded={tagsOpen}
+              onClick={() => setTagsOpen(!tagsOpen)}
+            >
+              <span aria-hidden="true">{tagsOpen ? '▾' : '▸'}</span>{' '}
+              {t('tasks.filterByTagLabel')}
+            </button>
+            {activeTag && (
+              <button
+                type="button"
+                className="filterbar__tagsactive"
+                title={t('tasks.filterClear')}
+                onClick={() => setFilter(() => '')}
+              >
+                <TagChip
+                  name={activeTag.name}
+                  color={activeTag.color}
+                  kind={activeTag.kind}
+                />
+                <span aria-hidden="true">✕</span>
+                <span className="sr-only">{t('tasks.filterClear')}</span>
+              </button>
+            )}
+          </div>
+          {tagsOpen && (
+            <TagPickerGrid
+              tags={tags}
+              selected={filter ? [filter] : []}
+              // Single-select: clicking the active chip clears the filter,
+              // clicking another swaps it. Matches /notes' fTag behaviour
+              // and the backend's single ``tag_id`` query param.
+              onToggle={(id) => setFilter((cur) => (cur === id ? '' : id))}
+              searchable={tags.length > 20}
+            />
+          )}
         </div>
       )}
 

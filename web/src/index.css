@@ -872,14 +872,49 @@ textarea {
 /* A second row below the main filter row, hosting the TagPickerGrid
    (chip grid). Mirrors what /notes does so the tag-filter widget reads
    identically across routes. */
+/* The tag filter, as a disclosure: a header that is always there and a grid
+   that is not. Column, not row, because the grid now sits BELOW its header
+   rather than beside its label. */
 .filterbar__tags {
   display: flex;
-  align-items: flex-start;
-  gap: var(--sp-8);
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-4);
   margin: var(--sp-4) 0 var(--sp-8);
 }
-.filterbar__tags > .tagpickgrid { flex: 1; min-width: 0; }
+.filterbar__tagshead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.filterbar__tagstoggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+}
+.filterbar__tagstoggle:hover { color: var(--text); }
+/* The active filter, shown whether the grid is open or shut, and clickable
+   to clear it: the state of the list must be legible without opening
+   anything. */
+.filterbar__tagsactive {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: var(--sp-2) var(--sp-6);
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+}
+.filterbar__tagsactive:hover { border-color: var(--accent); color: var(--text); }
+.filterbar__tags > .tagpickgrid { min-width: 0; }
 /* Bulk-actions panel: only visible when selection > 0. Styled as a
    distinct subdued strip so it doesn't read as a second filter bar. */
 .filterbar__bulk {
