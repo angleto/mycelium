@@ -2116,43 +2116,29 @@ button.btn--danger:hover {
   opacity: 1;
 }
 
-/* The preview dialog. Narrower than the editing modals: this is reading
-   width, and the panel sizes to its content (a two-line task must not
-   open a full-height column). */
-.peek__panel {
-  width: min(46rem, 96vw);
+/* The dialog that opens a task or a note over its list. It holds the SAME
+   screen the route holds, so it gets the room that screen needs: the detail
+   is a two-column grid that collapses to one below 900px, and squeezing it
+   into reading width was what made the first version look like a worse
+   version of the page rather than the page. The body scrolls; the head
+   stays, because the close button is the way out of a screen this tall. */
+.modal__panel--detail {
+  width: min(1200px, 96vw);
+  height: 92vh;
 }
-.peek__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
-  flex-wrap: wrap;
-  margin: 0;
-}
-.peek__checklist {
-  list-style: none;
-  margin: 0;
+.peek__body {
+  overflow: auto;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
 }
-.peek__checklist li {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-6);
-}
-.peek__checklist li.is-done {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-.peek__part + .peek__part {
-  border-top: 1px solid var(--border);
-  padding-top: var(--sp-12);
-}
-.peek__parttitle {
-  margin: 0 0 var(--sp-4);
-  font-size: 0.95rem;
+/* The detail brings its own card chrome (border, radius, padding) from the
+   page, where it sits on the app background. Inside the panel that is a
+   second frame around the first: drop it and let the panel be the frame. */
+.peek__body > .card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  max-width: none;
 }
 
 .confirm__intro {

@@ -60,10 +60,34 @@ function annoSig(
 
 // Task detail with optimistic concurrency: edits send expected_version;
 // a stale write yields 409 and we reload the canonical task.
-export function TaskDetailRoute() {
+//
+// It is a ROUTE and a WIDGET, which is why the id is a prop with the route
+// param as its fallback. Opening a task over a list is the same screen, not
+// a smaller rendering of it: a second, read-only imitation was written once
+// (a peek dialog with its own markdown view and its own checkbox list) and
+// what it actually delivered was a different typography, no annotations, no
+// mention chips and no way to change anything -- a surface that looked like
+// the task and was not it. One component, two mounts.
+//
+// ``embedded`` is what a dialog needs and a page does not: no back link (the
+// list is behind the modal, not behind a link) and no self-navigation. The
+// four gestures that leave the task -- archive, delete, new child, new
+// linked note -- call ``leave()``, which navigates on the page and closes
+// the dialog when embedded, because navigating under an open modal would
+// leave the modal floating over a screen it no longer describes.
+export function TaskDetailRoute({
+  id: idProp,
+  embedded = false,
+  onLeave,
+}: {
+  id?: string
+  embedded?: boolean
+  onLeave?: () => void
+} = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { id = '' } = useParams()
+  const { id: idParam = '' } = useParams()
+  const id = idProp ?? idParam
   // Annotations on the task description (its work diary + review). One
   // shared fetch feeds both the inline editor decorations and the panel.
   const {
@@ -82,6 +106,16 @@ export function TaskDetailRoute() {
   // surfaced "Task not found" intermittently). Cleared after consumption
   // so a navigation away + back via deep link still triggers GET.
   const location = useLocation()
+  // Leaving the task. On a page that is a navigation; in a dialog the
+  // navigation IS the dismissal, and doing both would drop the user on the
+  // destination with the modal still open over it.
+  const leave = useCallback(
+    (to: string) => {
+      if (embedded) onLeave?.()
+      else navigate(to)
+    },
+    [embedded, onLeave, navigate],
+  )
   // The "back to tasks" link returns to the filtered list the user came
   // from. ``q`` + tag filter live in the /tasks URL; the list route
   // mirrors its current search into sessionStorage per tab, so the link
@@ -325,6 +359,14 @@ export function TaskDetailRoute() {
       // When we have the seed we skip the task GET; otherwise it goes
       // in the Promise.all bundle as before. Modelled with a typed
       // sentinel so the tuple shape stays stable.
+      //
+      // The whole bundle is wrapped below: a THROW is not an error
+      // response, and `Promise.all` turns one rejection into no state
+      // being set at all. Without the catch the rejection escapes the
+      // effect and the screen sits on "Loading…" forever -- which is the
+      // one outcome it must not have, because there is nothing on it to
+      // retry with. Surfaced by mounting this screen in a dialog, where a
+      // test could finally reject `fetch` and watch.
       const tkPromise = seed
         ? Promise.resolve(null)
         : api.GET('/tasks/{task_id}', {
@@ -369,7 +411,9 @@ export function TaskDetailRoute() {
             .filter((n) => n.task_id === id)
             .map((n) => ({ id: n.id, title: n.title })),
         )
-    })()
+    })().catch((e: unknown) => {
+      if (active) setErr(errMessage(e))
+    })
     return () => {
       active = false
     }
@@ -426,7 +470,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks/${data.id}`)
+    leave(`/tasks/${data.id}`)
   }
 
   async function onDelete() {
@@ -441,7 +485,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks${tasksBackSearch}`)
+    leave(`/tasks${tasksBackSearch}`)
   }
 
   async function onArchive() {
@@ -455,7 +499,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks${tasksBackSearch}`)
+    leave(`/tasks${tasksBackSearch}`)
   }
 
   async function onRestore() {
@@ -835,7 +879,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/notes/${data.id}`)
+    leave(`/notes/${data.id}`)
   }
 
   function fmtOffset(m: number): string {
@@ -909,7 +953,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/notes/${data.id}`)
+    leave(`/notes/${data.id}`)
   }
 
   async function onAddDep() {
@@ -1036,9 +1080,11 @@ export function TaskDetailRoute() {
         />
       )}
       <header className="taskdetail__header">
-        <p className="hint taskdetail__back">
-          <Link to={`/tasks${tasksBackSearch}`}>{t('tasks.back')}</Link>
-        </p>
+        {!embedded && (
+          <p className="hint taskdetail__back">
+            <Link to={`/tasks${tasksBackSearch}`}>{t('tasks.back')}</Link>
+          </p>
+        )}
         {/* The two most-used controls (advance the state, start/stop the
             clock) plus the autosave status live in the header so they
             stay visible on every breakpoint — never behind the mobile

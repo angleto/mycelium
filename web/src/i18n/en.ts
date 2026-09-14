@@ -183,9 +183,7 @@ export const en = {
     archived: 'archived',
     copyManual: 'The clipboard is not available here — copy this by hand:',
     copyFailed: 'Copy failed',
-    peek: 'Preview without opening',
-    peekOpen: 'Open',
-    peekEmpty: 'Nothing written here yet.',
+    peek: 'Open here, without leaving the list',
   },
   taskLinkKind: {
     subject: 'subject',

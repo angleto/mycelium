@@ -45,10 +45,32 @@ type Project = components['schemas']['ProjectOut']
 // Optimistic concurrency: every write sends expected_version; a 409
 // reloads the canonical note. Title autosaves (debounced) and the parts
 // body autosaves per-part; the header status reflects the saved state.
-export function NoteDetailRoute() {
+// A ROUTE and a WIDGET: the id is a prop with the route param as its
+// fallback, so opening a note over a list mounts THIS screen in a dialog
+// rather than a read-only imitation of it. See TaskDetailRoute for the
+// argument. ``embedded`` drops the back link (the list is behind the modal)
+// and turns the gestures that leave the note into a dismissal.
+export function NoteDetailRoute({
+  id: idProp,
+  embedded = false,
+  onLeave,
+}: {
+  id?: string
+  embedded?: boolean
+  onLeave?: () => void
+} = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { id = '' } = useParams<{ id: string }>()
+  const { id: idParam = '' } = useParams<{ id: string }>()
+  const id = idProp ?? idParam
+  // Leaving the note: a navigation on the page, the dismissal in a dialog.
+  const leave = useCallback(
+    (to: string, opts?: { replace?: boolean }) => {
+      if (embedded) onLeave?.()
+      else navigate(to, opts)
+    },
+    [embedded, onLeave, navigate],
+  )
 
   const [note, setNote] = useState<Note | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
@@ -154,7 +176,7 @@ export function NoteDetailRoute() {
       if (!active) return
       if (n.error || !n.data) {
         setErr(errMessage(n.error))
-        navigate('/notes', { replace: true })
+        leave('/notes', { replace: true })
         return
       }
       applyNote(n.data)
@@ -389,7 +411,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks/${data.task_id}`)
+    leave(`/tasks/${data.task_id}`)
   }
 
   // Promote (kind=promoted_from): the thought IS the action. The note is
@@ -408,7 +430,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks/${data.task_id}`)
+    leave(`/tasks/${data.task_id}`)
   }
 
   // Spin a task off the current text selection (derive-task, note stays
@@ -436,7 +458,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/tasks/${data.task_id}`)
+    leave(`/tasks/${data.task_id}`)
   }
 
   // Archive / soft-delete are reversible (no confirm); erase is
@@ -452,7 +474,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate('/notes')
+    leave('/notes')
   }
 
   // Fase P: ``protected`` marks finished prose the distiller never
@@ -488,7 +510,7 @@ export function NoteDetailRoute() {
       return
     }
     const target = data?.restored_source_ids?.[0] ?? data?.source_ids?.[0]
-    navigate(target ? `/notes/${target}` : '/notes')
+    leave(target ? `/notes/${target}` : '/notes')
   }
 
   async function delNote() {
@@ -502,7 +524,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate('/notes')
+    leave('/notes')
   }
 
   async function eraseNote() {
@@ -521,7 +543,7 @@ export function NoteDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate('/notes')
+    leave('/notes')
   }
 
   async function onSend(e: FormEvent) {
@@ -570,9 +592,11 @@ export function NoteDetailRoute() {
     return (
       <section className="card card--wide notedetail">
         <header className="notedetail__header">
-          <p className="hint notedetail__back">
-            <Link to="/notes">{t('notes.back')}</Link>
-          </p>
+          {!embedded && (
+            <p className="hint notedetail__back">
+              <Link to="/notes">{t('notes.back')}</Link>
+            </p>
+          )}
         </header>
         <h1 className="notedetail__title-h">
           {note.title || t('notes.untitled')}
@@ -609,9 +633,11 @@ export function NoteDetailRoute() {
         />
       )}
       <header className="notedetail__header">
-        <p className="hint notedetail__back">
-          <Link to="/notes">{t('notes.back')}</Link>
-        </p>
+        {!embedded && (
+          <p className="hint notedetail__back">
+            <Link to="/notes">{t('notes.back')}</Link>
+          </p>
+        )}
         <div className="notedetail__headeractions">
           <span
             className="notedetail__savestate hint"

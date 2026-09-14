@@ -182,9 +182,7 @@ export const it: Catalog = {
     archived: 'in archivio',
     copyManual: 'Gli appunti non sono disponibili qui — copia a mano questo testo:',
     copyFailed: 'Copia non riuscita',
-    peek: 'Anteprima senza aprire',
-    peekOpen: 'Apri',
-    peekEmpty: 'Qui non è ancora scritto niente.',
+    peek: 'Apri qui, senza lasciare la lista',
   },
   taskLinkKind: {
     subject: 'oggetto',

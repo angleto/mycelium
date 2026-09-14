@@ -6,12 +6,15 @@ import { PeekButton } from './PeekButton'
 import { clearSession, setSession } from '../auth/session'
 import '../i18n'
 
-// The promise of the eye: read the row without leaving the list.
+// The promise of the eye: open the row without leaving the list.
 //
-// So the assertion that carries the feature is the NEGATIVE one — the
-// route does not change — and after it, that what the dialog shows is the
-// entity's own body rather than the row's preview, which is why it fetches
-// at all.
+// Two assertions carry it. The NEGATIVE one — the route does not change —
+// and the one that says WHAT opened: the detail screen itself, not a second
+// rendering of it. The first version of this dialog drew its own markdown
+// view and its own checkbox list, and the way that shows in a test is that
+// there is nothing to assert except markup this file invented. So the probe
+// is the editor toolbar and the properties column, which only the real
+// screen has, plus the absence of the back link, which only a page has.
 //
 // The stub has to be installed BEFORE this module's imports run, not in a
 // `beforeEach`: openapi-fetch destructures `globalThis.fetch` when the
@@ -38,11 +41,14 @@ function path(): string {
   return host.querySelector('.probe-path')?.textContent ?? ''
 }
 
+const STATE_ID = '00000000-0000-4000-8000-0000000000aa'
 const TASK = {
   id: '7b2ea76f-a08e-460c-854f-1ec265aceaec',
   title: 'Una card',
   description: 'il **corpo** del task',
   state: 'todo',
+  state_id: STATE_ID,
+  version: 1,
   tags: [],
   checklist: [
     { id: 'c1', text: 'fatto', done: true },
@@ -50,13 +56,49 @@ const TASK = {
   ],
 }
 
-function answer(body: unknown, status = 200): void {
-  fetchMock.mockResolvedValue(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'content-type': 'application/json' },
-    }),
-  )
+/** Endpoints whose payload is an OBJECT. Everything else in this screen is
+ *  a collection, and the difference is not cosmetic: `/garden/classify`
+ *  returns `{tags, links, maturity}` and its panel reads `.tags.length`
+ *  straight away. */
+const OBJECT_ENDPOINTS = new Set([
+  `/tasks/${TASK.id}`,
+  '/workspaces/me',
+  `/garden/classify/${TASK.id}`,
+])
+
+/** The detail screen is not one request: it asks for the task, its states,
+ *  the tags, the projects, the sibling tasks, the dependencies, the
+ *  workspace, the reminders, the notes, the relations and its own
+ *  annotations. A double that answers only the first would put the screen
+ *  in a permanent loading state and prove nothing, so this answers each by
+ *  path with the emptiest shape that endpoint really returns. */
+function answerAll(task: unknown = TASK): void {
+  fetchMock.mockImplementation((input: unknown) => {
+    // The client prefixes every path with /api; the set below names the
+    // endpoints, not the mount point.
+    const url = new URL(
+      typeof input === 'string' ? input : (input as Request).url,
+      'http://t',
+    ).pathname.replace(/^\/api/, '')
+    // Shape matters, not just status: a panel that reads `data.tags.length`
+    // crashes on `[]` exactly as it would on a wrong payload in production,
+    // which is the contract a double owes (TST-01).
+    const body = OBJECT_ENDPOINTS.has(url)
+      ? url === `/tasks/${TASK.id}`
+        ? task
+        : url === '/workspaces/me'
+          ? { id: 'w', name: 'W', settings: {} }
+          : { tags: [], links: [], maturity: null, signals_used: [] }
+      : url === `/tasks/${TASK.id}/states`
+        ? [{ id: STATE_ID, name: 'todo', ord: 0, is_terminal: false }]
+        : []
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+  })
 }
 
 async function open(): Promise<HTMLElement> {
@@ -110,8 +152,8 @@ afterEach(() => {
 })
 
 describe('PeekButton', () => {
-  it('opens a dialog over the list without navigating away from it', async () => {
-    answer(TASK)
+  it('opens over the list without navigating away from it', async () => {
+    answerAll()
     mount()
     expect(path()).toBe('/tasks')
     const dialog = await open()
@@ -120,21 +162,42 @@ describe('PeekButton', () => {
     expect(path()).toBe('/tasks')
   })
 
-  it('shows the entity body, which the row does not carry', async () => {
-    answer(TASK)
+  it('holds the detail screen itself, not a second rendering of it', async () => {
+    answerAll()
     mount()
     const dialog = await open()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const req = fetchMock.mock.calls[0][0] as Request
-    expect(req.url).toContain(`/tasks/${TASK.id}`)
-    // Rendered as markdown, not printed as source.
-    expect(dialog.querySelector('.md strong')?.textContent).toBe('corpo')
-    // And the checklist, which every list payload leaves empty.
-    expect(dialog.querySelectorAll('.peek__checklist li')).toHaveLength(2)
+    // Things only the real screen has. A read-only imitation had none of
+    // them, which is what made it look like a worse version of the page.
+    expect(dialog.querySelector('.taskdetail')).not.toBeNull()
+    expect(dialog.querySelector('.taskdetail__main')).not.toBeNull()
+    expect(dialog.querySelector('[role="tablist"], .tabs__tab')).not.toBeNull()
+    // And the thing only a PAGE has: the way back to the list. In a dialog
+    // the list is behind the modal, so a link to it is a second exit that
+    // leaves the modal open over a route that changed underneath.
+    expect(dialog.querySelector('.taskdetail__back')).toBeNull()
+  })
+
+  it('asks for the task it was given, not for the row it was rendered from', async () => {
+    answerAll()
+    mount()
+    await open()
+    const urls = fetchMock.mock.calls.map((c) =>
+      typeof c[0] === 'string' ? c[0] : (c[0] as Request).url,
+    )
+    expect(urls.some((u) => u.includes(`/tasks/${TASK.id}`))).toBe(true)
   })
 
   it('reports a failed read instead of staying on "loading" forever', async () => {
-    answer({ detail: 'Task not found' }, 404)
+    // A factory, not one Response: the screen makes many calls and a body
+    // can only be read once.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ detail: 'Task not found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
     mount()
     const dialog = await open()
     expect(dialog.querySelector('.err')?.textContent).toBe('Task not found')
@@ -146,6 +209,6 @@ describe('PeekButton', () => {
     fetchMock.mockRejectedValue(new Error('network down'))
     mount()
     const dialog = await open()
-    expect(dialog.querySelector('.err')).not.toBeNull()
+    expect(dialog.textContent).not.toContain('Loading')
   })
 })
