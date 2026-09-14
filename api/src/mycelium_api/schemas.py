@@ -2723,13 +2723,21 @@ class NotePartOut(BaseModel):
     """One ordered markdown block of a note (task 71c9d670 Phase 2a).
     ``ui_collapsed`` is the caller's current collapse state for this
     part; missing/no row → ``false`` (default expanded). Populated
-    on GET /notes/{id} only; bulk listings omit it to stay light."""
+    on GET /notes/{id} only; bulk listings omit it to stay light.
+
+    ``body_sha256`` is the digest the conditional-write gate accepts
+    (``PATCH .../body/patch``, and the ``X-Body-SHA256`` header on the
+    raw download). Served rather than left to the client so the two
+    sides cannot hash byte-differently -- a trailing newline or a
+    normalisation step is enough to make a correct client look like a
+    drifted one."""
 
     id: uuid.UUID
     note_id: uuid.UUID
     ord: int
     title: str | None = None
     body: str
+    body_sha256: str
     lang: str | None = None
     merged_from_note_id: uuid.UUID | None = None
     version: int

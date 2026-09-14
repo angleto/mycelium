@@ -4543,6 +4543,10 @@ export interface paths {
          * @description Append (default) or insert a part. Pass ``ord`` to insert at
          *     a specific position; every part at or after that ord is shifted
          *     forward by one in the same transaction.
+         *
+         *     The body is capped at ``note_body_max_bytes`` by the domain, not by
+         *     this route: 400 ``body.limit_exceeded``, the same answer the stream
+         *     twin and every other writer give.
          */
         post: operations["create_note_part_notes__note_id__parts_post"];
         delete?: never;
@@ -4682,6 +4686,11 @@ export interface paths {
          *     revision coalesces with other edits in the same session window
          *     (same UX as PATCH /notes/{id}). Without the header the channel
          *     falls back to ``api`` and each save seals its own revision.
+         *
+         *     The body is capped at ``note_body_max_bytes`` by the domain: 400
+         *     ``body.limit_exceeded``. Re-sending an unchanged over-cap legacy
+         *     body stays a no-op, so a read / write-back round trip still
+         *     works.
          */
         patch: operations["patch_note_part_notes__note_id__parts__part_id__patch"];
         trace?: never;
@@ -11926,6 +11935,13 @@ export interface components {
          *     ``ui_collapsed`` is the caller's current collapse state for this
          *     part; missing/no row → ``false`` (default expanded). Populated
          *     on GET /notes/{id} only; bulk listings omit it to stay light.
+         *
+         *     ``body_sha256`` is the digest the conditional-write gate accepts
+         *     (``PATCH .../body/patch``, and the ``X-Body-SHA256`` header on the
+         *     raw download). Served rather than left to the client so the two
+         *     sides cannot hash byte-differently -- a trailing newline or a
+         *     normalisation step is enough to make a correct client look like a
+         *     drifted one.
          */
         NotePartOut: {
             /**
@@ -11944,6 +11960,8 @@ export interface components {
             title?: string | null;
             /** Body */
             body: string;
+            /** Body Sha256 */
+            body_sha256: string;
             /** Lang */
             lang?: string | null;
             /** Merged From Note Id */

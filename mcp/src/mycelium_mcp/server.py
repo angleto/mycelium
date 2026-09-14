@@ -72,7 +72,7 @@ from mycelium_core.services import calendar as calendars
 from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import coordination as coordination_svc
 from mycelium_core.services import decomposition as decomposition_svc
-from mycelium_core.services import dependencies, scheduler, tasks, taxonomy
+from mycelium_core.services import dependencies, scheduler, tasks, taxonomy, text_patch
 from mycelium_core.services import dispatch_loop as dispatch_loop_svc
 from mycelium_core.services import email as email_svc
 from mycelium_core.services import embedding_migration as embedding_svc
@@ -5167,6 +5167,13 @@ def _note_part(p: Any) -> dict[str, Any]:
         "note_id": str(p.note_id),
         "ord": p.ord,
         "body": p.body or "",
+        # The same digest the outline publishes, so a caller that read
+        # the body can write back against it without hashing the string
+        # itself -- which is where client and server stop agreeing byte
+        # for byte. Present on both projections on purpose: a field on
+        # the cheap one and absent from the full one would be an
+        # asymmetry a caller has to discover by failing.
+        "body_sha256": text_patch.body_sha256(p.body or ""),
         "lang": p.lang,
         "merged_from_note_id": (str(p.merged_from_note_id) if p.merged_from_note_id else None),
         "version": p.version,
@@ -5206,6 +5213,17 @@ def _note_part_outline(p: Any) -> dict[str, Any]:
         "title": p.title,
         "lang": p.lang,
         "bytes": len(body.encode("utf-8")),
+        # The digest ``apply_patch_to_part`` gates on. Deliberately
+        # ``text_patch.body_sha256`` and NOT ``note_search.content_hash``:
+        # the latter hashes a different preimage (title, a blank line,
+        # then the stripped body), so publishing it here would answer
+        # "unchanged" and "drifted" wrongly on exactly the racing path
+        # this field exists to serve.
+        #
+        # Body-free, which is the point. Telling whether a part changed
+        # used to mean fetching it: a six-part note cost an outline plus
+        # six body reads to learn that nothing had moved.
+        "body_sha256": text_patch.body_sha256(body),
         "head": head[:120],
         "version": p.version,
         "created_by": (str(p.created_by) if p.created_by else None),

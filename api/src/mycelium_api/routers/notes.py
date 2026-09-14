@@ -96,6 +96,7 @@ from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import note_parts as parts_svc
 from mycelium_core.services import notes as svc
 from mycelium_core.services import task_checklist as checklist_svc
+from mycelium_core.services import text_patch
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -114,6 +115,7 @@ def _part_out(p: Any, *, ui_collapsed: bool = False) -> NotePartOut:
         ord=p.ord,
         title=getattr(p, "title", None),
         body=p.body or "",
+        body_sha256=text_patch.body_sha256(p.body or ""),
         lang=p.lang,
         merged_from_note_id=p.merged_from_note_id,
         version=p.version,
