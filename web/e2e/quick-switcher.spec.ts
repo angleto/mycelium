@@ -27,6 +27,14 @@ async function createTask(page: Page, title: string): Promise<string> {
   await page.goto('/tasks')
   const form = page.locator('form.quickadd')
   await expect(form.locator('select[required]')).not.toHaveValue('')
+  // The recent widget is how this helper reaches the task it just created,
+  // and it is closed by default (its own test owns that decision). Open it
+  // when it is closed rather than unconditionally: a context that has already
+  // chosen must not be toggled shut.
+  if ((await page.locator('.recentlist').count()) === 0) {
+    await page.locator('.recentwidget__toggle').click()
+    await expect(page.locator('.recentlist')).toBeVisible()
+  }
   await form.locator('.quickadd__title').fill(title)
   await form.locator('button[type=submit]').click()
   const row = page.locator('.recentlist .recentrow__title', { hasText: title })

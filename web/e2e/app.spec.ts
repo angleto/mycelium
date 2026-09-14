@@ -410,6 +410,15 @@ test('tasks: recent widget — newest first, configurable N, toggle persists', a
   const form = page.locator('form.quickadd')
   await expect(form.locator('select[required]')).not.toHaveValue('')
 
+  // Closed on a profile that has never chosen: open it measured at 268px on a
+  // page whose board already started below the fold, so the shortcut to what
+  // you just touched was hiding the thing you came for. Asserted here because
+  // this test owns the widget: the default is part of its behaviour, not a
+  // detail of its setup.
+  await expect(page.locator('.recentlist')).toHaveCount(0)
+  await page.locator('.recentwidget__toggle').click()
+  await expect(page.locator('.recentlist')).toBeVisible()
+
   const stamp = Date.now()
   const titles = [`Recent A ${stamp}`, `Recent B ${stamp}`, `Recent C ${stamp}`]
   for (const tt of titles) {
