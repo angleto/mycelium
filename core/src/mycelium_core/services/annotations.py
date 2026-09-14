@@ -671,9 +671,7 @@ async def append_to_body(
     if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
         return ann.version, 0
     new_body = _collapsed_concat(current, separator, text)
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await edit(
         session,
         org_id=org_id,
@@ -709,9 +707,7 @@ async def prepend_to_body(
     if dedupe_if_head_matches and current and current.lstrip().startswith(text.lstrip()):
         return ann.version, 0
     new_body = _collapsed_concat(text, separator, current)
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await edit(
         session,
         org_id=org_id,
@@ -761,9 +757,7 @@ async def replace_in_body(
         return ann.version, 0
     n = occurrences if count <= 0 else min(count, occurrences)
     new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await edit(
         session,
         org_id=org_id,

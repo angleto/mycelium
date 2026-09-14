@@ -254,6 +254,8 @@ async def create_task(
     edit_session_id: str | None = None,
 ) -> Task:
     _validate_event_pairing(start_at, duration_minutes)
+    if description is not None:
+        text_patch.assert_body_within_cap(description, max_bytes=get_settings().note_body_max_bytes)
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
         await get_task(session, org_id=org_id, task_id=parent_task_id)
@@ -849,6 +851,10 @@ async def update_task(
     unknown = set(values) - _UPDATABLE - {"assignee_handle"}
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    if values.get("description") is not None:
+        text_patch.assert_body_within_cap(
+            values["description"], max_bytes=get_settings().note_body_max_bytes
+        )
     await require_role(session, org_id, actor_id, Role.member)
     current = await get_task(session, org_id=org_id, task_id=task_id)
     if values.get("owner_id") is not None:
@@ -979,9 +985,7 @@ async def append_to_description(
     if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
         return task.version, 0
     new_value = _concat(current, separator, text)
-    max_bytes = _get_settings().note_body_max_bytes
-    if len(new_value.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_value, max_bytes=_get_settings().note_body_max_bytes)
     eff_version = expected_version if expected_version is not None else task.version
     values: dict[str, Any] = {"description": new_value}
     new_version = await optimistic_update(
@@ -1045,9 +1049,7 @@ async def prepend_to_description(
         return task.version, 0
     # Swap the concat order vs append: text goes BEFORE the current body.
     new_value = _concat(text, separator, current)
-    max_bytes = _get_settings().note_body_max_bytes
-    if len(new_value.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_value, max_bytes=_get_settings().note_body_max_bytes)
     eff_version = expected_version if expected_version is not None else task.version
     new_version = await optimistic_update(
         session,
@@ -1147,9 +1149,7 @@ async def replace_in_description(
         return task.version, 0
     n = occurrences if count <= 0 else min(count, occurrences)
     new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
-    max_bytes = _get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=_get_settings().note_body_max_bytes)
     eff_version = expected_version if expected_version is not None else task.version
     new_version = await optimistic_update(
         session,

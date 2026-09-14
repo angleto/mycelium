@@ -47,7 +47,7 @@ from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
-from mycelium_core.services import audit, billing, lifecycle, tag_assignment
+from mycelium_core.services import audit, billing, lifecycle, tag_assignment, text_patch
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
@@ -919,6 +919,11 @@ async def _collapse_parts_to_body(
     for pid in stale:
         await note_search.delete_part_index_now(session, pid)
         await session.execute(delete(NotePart).where(NotePart.id == pid, NotePart.org_id == org_id))
+    # Not capped, by decision. This restores a snapshot taken before
+    # bodies were split into parts; the body already exists and was
+    # already accepted. A cap here would not stop an over-cap body from
+    # being written -- that happened long ago -- it would only make a
+    # legitimate revision impossible to restore.
     await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=body)
 
 
@@ -991,6 +996,7 @@ async def update_note(
     # are the ones that can say which part changed.
     skip_body_write = False
     if text is not None:
+        text_patch.assert_body_within_cap(text, max_bytes=get_settings().note_body_max_bytes)
         bodies = await _ordered_part_bodies(session, note_id=note_id)
         if len(bodies) > 1:
             if text != _BODY_JOIN.join(bodies):
@@ -1191,9 +1197,7 @@ async def append_to_note_field(
     if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
         return note.version, 0
     new_value = _collapsed_concat(current, separator, text)
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_value.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_value, max_bytes=get_settings().note_body_max_bytes)
     eff_version = expected_version if expected_version is not None else note.version
     values: dict[str, Any] = {}
     # Re-derive the title from the head of the body when the note has
@@ -1388,8 +1392,14 @@ async def create_note(
     edit_session_id: str | None = None,
 ) -> Note:
     """Capture only. NOT metered, works at zero credits (ADR-0020:
-    never lose the idea)."""
+    never lose the idea).
+
+    ``text`` is capped at ``note_body_max_bytes``: it becomes part 0,
+    and a whole-body writer is under the same ceiling as an incremental
+    one."""
     await require_role(session, org_id, actor_id, Role.member)
+    if text is not None:
+        text_patch.assert_body_within_cap(text, max_bytes=get_settings().note_body_max_bytes)
     if kind is NoteKind.text:
         status = NoteStatus.ready
     elif kind is NoteKind.conversation:
@@ -1748,6 +1758,12 @@ async def transcribe(
     # Phase 6 final: the STT body lands in note_part(ord=0), not a
     # transcript column. Status flips to ``ready`` so the rest of the
     # flow (memory write, audit) sees a finalised note.
+    # Not capped, by decision. ``res.text`` is the result of a
+    # transcription that has already run and has already been metered
+    # two statements above: refusing it here spends the work and throws
+    # the output away, which is the opposite of what a cap is for. The
+    # ceiling that belongs on this path is on the audio accepted for
+    # upload, upstream of the spend.
     if res.text:
         await _upsert_part_zero(session, org_id=org_id, note_id=note.id, body=res.text)
     note.status = NoteStatus.ready

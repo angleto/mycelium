@@ -1,0 +1,122 @@
+Riprendi il lavoro su mycelium. Non ricostruire il contesto a naso: prendilo da
+mycelium, che e' la memoria durevole, e dal repo.
+
+## Da dove prendere il lavoro
+
+1. `whoami()` sul server MCP Mycelium: identita', scope, task assegnati, richiamo
+   della corsia di memoria.
+2. I task del progetto, che NON si leggono a colpo d'occhio dalla lista generale:
+
+       list_tasks(tag_id="b5ec1167-11f0-47bf-ba11-f5c25885928c",
+                  state_id="181c039a-8536-43a0-9281-ce3fcba83f00", limit=30)
+
+   `b5ec1167...` e' il tag di progetto `mycelium`, `181c039a...` lo stato `todo`.
+   Al 2026-09-14 ce n'erano una trentina: il design multi-agente (`41295c80`, con
+   i figli C1-C7 e A5-A8), la lentezza in produzione (`ac582bea`), il grafo
+   search-informed (`561c6aca`), l'epic del recupero (`d078074e` con M2/M3/M5),
+   il rilascio-con-migrazione senza procedura (`1e96c7aa`), la suite senza
+   guardia sul database bersaglio (`7637f893`).
+3. Leggi il task intero con `get_task` PRIMA di decidere: il criterio di fine sta
+   nella descrizione, e quasi sempre chiede una misura, non un'opinione.
+
+### Trappole degli strumenti, gia' pagate
+
+- `get_task` vuole lo UUID INTERO. Un prefisso di 8 cifre da' "badly formed
+  hexadecimal UUID string": si risolve prima con `list_tasks(q=...)` o con una
+  `search` sul codice entita'.
+- `list_tasks` prende `tag_id` e `state_id`, non `tag_ids` / `state` /
+  `state_name`. Gli errori sono chiari ma costano un giro l'uno.
+- `set_task_state` vuole `expected_version`, e il workflow **rifiuta
+  todo -> verify**: si passa da `in_progress`. Stati:
+  todo `181c039a-8536-43a0-9281-ce3fcba83f00`,
+  in_progress `7cb9de9f-eb3b-4195-bbfd-e67a39debecf`,
+  verify `4185cb12-3462-4dd7-92dd-870e1ecf1bee`,
+  done `f44a26b1-609a-4f71-b8a8-79d4f990847c`
+  (workflow `7ef2c2ec-9b0b-4125-b0f1-008e5255191b`).
+- Il lavoro fatto si scrive come commento sul task (`add_comment`), non solo nel
+  commit: e' li' che la prossima sessione lo trova.
+
+## Come si chiude un task
+
+`verify` quando e' fatto, `done` solo dopo una verifica AVVERSARIALE, perche'
+`done` e' terminale. Avversariale vuol dire una MISURA, non una rilettura:
+
+- un test nuovo va visto ROSSO senza il fix (togliendo il solo comportamento,
+  non il campo o la firma, altrimenti misura la compilazione);
+- un metodo ricostruito offline va confrontato con quello vero prima di
+  fidarsene;
+- vale anche contro la propria decisione appena presa. Il 2026-09-14 la regola
+  "una nota prende uno slot" e' passata, e il test scritto per smentirla ha
+  trovato il difetto speculare (una nota da cinque parti si mangiava la pagina).
+  Scrivi cosa hai attaccato e cosa e' sopravvissuto, non solo la conclusione.
+
+## Stato del repo al 2026-09-14 sera
+
+- Branch `v2.3` a `4d38715`, tag **`v2.3.34`**, CI verde su 5 job, e
+  **produzione e' a 2.3.34**: rollout fatto il 2026-09-14 sera, quattro pod
+  Running, log puliti, `VERSION` committato e pushato nel repo di deploy
+  (`9b91e15`). Non c'e' niente in sospeso da rilasciare.
+- La sequenza, per la prossima volta (il deploy e' operator-local: fallo solo se
+  Angelo lo dice esplicitamente):
+
+      cd ~/data/WORK/mycelium-deploy/mycelium-production-k8s-deploy
+      MYCELIUM_IMAGE_TAG=<tag senza v> ./redeploy.sh migrate
+      kubectl -n mycelium-production logs job/mycelium-migrate   # VERIFICA QUI
+      ./redeploy.sh deploy <tag senza v>
+      curl https://mycelium.xeno.garden/api/buildinfo
+      # poi commit+push di VERSION nel repo di deploy
+
+- **Trappola del migrate, incontrata due volte su tre il 2026-09-14.**
+  `env.py` avvolge le migrazioni in `owner_sees_all_tenants` senza prima
+  guardare se c'e' qualcosa da applicare, quindi anche un rilascio SENZA
+  migrazioni esegue 174 `ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY` su 87
+  tabelle, ognuno un ACCESS EXCLUSIVE con `lock_timeout` a 5s. Basta una query
+  viva e il Job muore con `LockNotAvailable ... ALTER TABLE public."memberships"`.
+  Non e' uno schema rotto: si ripete e passa. Il criterio di successo sta nei
+  log (`FORCE ripristinato su N tabelle`, `db_harden: applied`, e se c'e'
+  davvero da migrare, `Running upgrade`), MAI nella condizione del Job.
+  Analisi completa nel commento sul task `1e96c7aa`, che e' la scheda che deve
+  scrivere questa procedura.
+- Chiusi in questa sessione: `859ad2d3` (una nota prende uno slot nella ricerca
+  unificata, con l'A/B sulle venti domande dell'insieme aureo) e `03cdf674` (il
+  costo del reranker misurato sul nodo vero). Le misure sono nei commenti dei
+  task e in `docs/eval/reranker-quality-2026-09.md`.
+
+## Gate locali (== CI)
+
+    export MYCELIUM_DATABASE_URL='postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5433/mycelium' \
+           MYCELIUM_DATABASE_URL_SYNC='postgresql+psycopg://mycelium:mycelium@localhost:5433/mycelium' \
+           MYCELIUM_DB_APP_PASSWORD=mycelium_app
+    uv run python -m pytest api/tests core/tests -q
+    uv run mypy core/src api/src mcp/src worker/src sdi-inbound/src
+    uv run ruff check . && uv run ruff format --check .
+    uv run python scripts/gen_mcp_coverage.py --check
+    cd web && pnpm check:api-types && pnpm exec vitest run && pnpm exec eslint . --no-cache
+
+Note: il ruolo async DEVE essere `mycelium_app`, altrimenti i test girano da
+superuser, le RLS non si applicano e sembra una falla di multi-tenancy che non
+c'e'. La suite intera in locale supera l'ora e non conviene: un push del branch
+NON fa scattare CI, si lancia a mano ed e' la risposta autorevole:
+
+    git push origin v2.3 && gh workflow run ci.yml --ref v2.3
+    gh run list --workflow=ci.yml --limit 1 --json databaseId,status
+
+Se tocchi la PRIMA RIGA del docstring di un tool MCP, rigenera
+`docs/mcp-coverage.md`. Se cambi uno schema dell'API, `cd web && pnpm gen:api`.
+
+## Misurare qualcosa che il portatile non puo' dire
+
+Un Job usa-e-getta sul pool di produzione, con lo script consegnato da una
+ConfigMap generata dal repo, misura sul nodo vero senza ricostruire immagini e
+senza toccare i pod in esercizio. Modello gia' scritto e funzionante:
+`scripts/perf/reranker_pod_probe.py` piu'
+`mycelium-production-k8s-deploy/reranker-probe-job.yaml` nel repo di deploy.
+`kubectl` e' gia' sul contesto giusto. Chiedi prima di applicarlo: e' scrittura
+sul cluster di produzione.
+
+## Come lavorare
+
+Sta in `~/.claude/CLAUDE.md` e vale su tutto. Le tre che contano di piu' qui:
+la soluzione architetturale migliore come UNICA opzione, mai un tampone in coda
+alla lista; il trailer `Co-Authored-By` NON va mai nei messaggi di commit; e
+italiano, senza trattini lunghi e senza enfasi.

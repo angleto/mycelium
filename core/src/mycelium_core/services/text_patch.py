@@ -22,6 +22,8 @@ Public surface:
 - :func:`body_sha256` -- the single digest function shared by the
   ``GET .../body/raw`` header and the gate, so client and server hash
   byte-identical input.
+- :func:`assert_body_within_cap` -- the byte cap on a stored body,
+  stated once for every writer, incremental or whole-body.
 - :func:`apply_unified_diff` -- pure applier, raises :class:`PatchError`.
 - :func:`assert_base` -- the sha256 half of the gate, raises
   :class:`PatchBaseMismatch`.
@@ -116,6 +118,33 @@ class PatchTooLarge(PatchError):
     full-replace stream path."""
 
     CODE = MessageCode.BODY_LIMIT_EXCEEDED
+
+
+def assert_body_within_cap(body: str, *, max_bytes: int) -> None:
+    """Refuse a body whose UTF-8 encoding exceeds ``max_bytes``.
+
+    The domain's byte cap on a stored text body, stated once. It lives
+    here beside :class:`PatchTooLarge`, which is the same rule for the
+    patch path and already answers with the same message code, so a
+    caller meets one error whichever way its body arrived.
+
+    Strictly greater, so a body exactly at the cap is accepted: that is
+    the comparison every call site already used, and moving it would
+    silently reject bodies that are conforming today.
+
+    ``max_bytes`` is a parameter and not a settings read, for the same
+    reason ``max_result_bytes`` already is: this module is DB-free and
+    config-free, and the cap is policy its callers own.
+
+    The measure is encoded bytes, not characters. A body of accented
+    text or CJK is two or three times its character count, and a cap
+    checked on ``len(body)`` would let through several times what the
+    column is sized for.
+    """
+    from mycelium_core.errors import DomainError
+
+    if len(body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
 
 
 def body_sha256(body: str) -> str:

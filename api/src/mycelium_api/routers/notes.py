@@ -767,7 +767,11 @@ async def create_note_part(
 ) -> NotePartOut:
     """Append (default) or insert a part. Pass ``ord`` to insert at
     a specific position; every part at or after that ord is shifted
-    forward by one in the same transaction."""
+    forward by one in the same transaction.
+
+    The body is capped at ``note_body_max_bytes`` by the domain, not by
+    this route: 400 ``body.limit_exceeded``, the same answer the stream
+    twin and every other writer give."""
     part = await parts_svc.create_part(
         ctx.session,
         org_id=ctx.org_id,
@@ -933,7 +937,12 @@ async def patch_note_part(
     ``X-Edit-Session-Id``: when supplied the note-level recovery
     revision coalesces with other edits in the same session window
     (same UX as PATCH /notes/{id}). Without the header the channel
-    falls back to ``api`` and each save seals its own revision."""
+    falls back to ``api`` and each save seals its own revision.
+
+    The body is capped at ``note_body_max_bytes`` by the domain: 400
+    ``body.limit_exceeded``. Re-sending an unchanged over-cap legacy
+    body stays a no-op, so a read / write-back round trip still
+    works."""
     # Distinguish 'omit' from 'explicit null'. We need the FastAPI
     # body's model_fields_set, not just the value. Same pattern for
     # both omittable fields (``title``, ``lang``).

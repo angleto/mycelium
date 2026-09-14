@@ -283,11 +283,26 @@ class Settings(BaseSettings):
     # MYCELIUM_ATTACHMENT_STREAM_MAX_BYTES.
     attachment_stream_max_bytes: int = 512 * 1024 * 1024
 
-    # Cap on the post-append byte size of note.transcript / note.summary /
-    # task.description (task 4ac39ecf). The append helpers refuse a
-    # write whose resulting body would exceed this. Override via
-    # MYCELIUM_NOTE_BODY_MAX_BYTES (legacy update_note / SPA editors are
-    # NOT gated by this -- they replace, not extend).
+    # Cap on the stored byte size of a note part / note body /
+    # task.description (task 4ac39ecf). Every writer is under it:
+    # the incremental helpers check the body they would PRODUCE, the
+    # whole-body writers (create/update of a part, a note or a task
+    # description) check the body they are handed, and the patch applier
+    # checks its result. One predicate,
+    # ``text_patch.assert_body_within_cap``, so they cannot disagree.
+    # Override via MYCELIUM_NOTE_BODY_MAX_BYTES.
+    #
+    # This comment used to say the whole-body writers were deliberately
+    # NOT gated ("they replace, not extend"). They were not gated, and it
+    # was not deliberate: four surfaces wrote an over-cap body and
+    # succeeded, including the first chunk of ``append_note_part``, the
+    # tool that exists to stay under this very ceiling.
+    #
+    # Two writers stay exempt, by name and for a reason:
+    # ``notes.transcribe`` writes the result of work already done and
+    # already billed, so refusing there wastes it instead of preventing
+    # it; and ``_collapse_parts_to_body`` restores a pre-parts snapshot,
+    # where a refusal would make a legitimate revision unrecoverable.
     note_body_max_bytes: int = 1 * 1024 * 1024
 
     # Cap on a POSTed unified-diff patch body (services/text_patch.py).

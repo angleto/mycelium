@@ -2755,7 +2755,13 @@ class NotePartTrashOut(BaseModel):
 class NotePartCreateIn(BaseModel):
     """Body for POST /notes/{id}/parts. ``ord`` is optional; when
     omitted the new part lands at the end. When supplied every part
-    with ord ≥ value is shifted forward by one."""
+    with ord ≥ value is shifted forward by one.
+
+    ``body`` carries no ``max_length`` on purpose: the ceiling is
+    ``note_body_max_bytes``, it is measured in UTF-8 BYTES and not in
+    characters, and it is enforced once in the domain so every surface
+    answers ``body.limit_exceeded`` at the same threshold. A length here
+    would be a second, character-counting cap that disagreed with it."""
 
     body: str = Field(default="")
     title: str | None = Field(default=None, max_length=300)
@@ -2766,7 +2772,13 @@ class NotePartCreateIn(BaseModel):
 class NotePartPatchIn(BaseModel):
     """Body for PATCH /notes/{id}/parts/{pid}. Each field may be
     omitted to leave it unchanged. Passing ``lang=null`` (or
-    ``title=null``) explicitly clears the value."""
+    ``title=null``) explicitly clears the value.
+
+    ``body`` is under ``note_body_max_bytes`` like every other writer
+    (see :class:`NotePartCreateIn`), with one deliberate exception:
+    re-sending an unchanged over-cap legacy body is a no-op and stays
+    one, so a read / write-back round trip is not broken by a cap it
+    cannot help with."""
 
     expected_version: int
     body: str | None = None

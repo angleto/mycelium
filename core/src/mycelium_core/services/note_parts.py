@@ -346,10 +346,14 @@ async def create_part(
     part lands at the end (max(existing ord) + 1, or 0 if empty);
     when supplied it inserts at that position, pushing every part
     with ord >= ``ord`` forward by one. The push is a single UPDATE
-    against the deferred-unique constraint."""
+    against the deferred-unique constraint.
+
+    ``body`` is capped at ``note_body_max_bytes``, like every other
+    writer of a part."""
     await require_role(session, org_id, actor_id, Role.member)
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
     await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+    text_patch.assert_body_within_cap(body, max_bytes=get_settings().note_body_max_bytes)
     if ord is None:
         max_ord = (
             await session.execute(select(func.max(NotePart.ord)).where(NotePart.note_id == note_id))
@@ -514,6 +518,15 @@ async def update_part(
     # genuinely idempotent case of a caller that is up to date.
     if all(getattr(part, field) == value for field, value in values.items()):
         return int(part.version)
+    # The cap is checked AFTER the short circuit, deliberately. A client
+    # that re-sends a legacy over-cap body unchanged asks for nothing and
+    # must keep getting nothing: turning that into a 400 would break the
+    # read / write-back round trip without shrinking a single row. The
+    # consequence, shared with every other call site: the predicate looks
+    # at the RESULT, so a partial reduction (3 MiB down to 1.5) is still
+    # refused, and a clean-up has to land under the cap in one write.
+    if body is not None:
+        text_patch.assert_body_within_cap(body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await optimistic_update(
         session,
         NotePart,
@@ -611,9 +624,7 @@ async def append_to_part(
     if part.version == expected_version + 1 and chunk and body.endswith(chunk):
         return part.version, 0
     new_body = body + chunk
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await optimistic_update(
         session,
         NotePart,
@@ -681,9 +692,7 @@ async def prepend_to_part(
     await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     new_body = text + body
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await optimistic_update(
         session,
         NotePart,
@@ -757,9 +766,7 @@ async def replace_in_part(
         return part.version, 0
     n = occurrences if count <= 0 else min(count, occurrences)
     new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
-    max_bytes = get_settings().note_body_max_bytes
-    if len(new_body.encode("utf-8")) > max_bytes:
-        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
     new_version = await optimistic_update(
         session,
         NotePart,
