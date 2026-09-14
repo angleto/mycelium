@@ -616,3 +616,50 @@ async def test_two_parts_of_one_note_take_one_slot(_fake_embedder: None) -> None
         assert not [x for x in hits if x["kind"] == "blob"], (
             f"the collapsed part re-surfaced as an opaque blob: {hits}"
         )
+
+
+async def test_a_note_with_many_parts_does_not_starve_the_page(_fake_embedder: None) -> None:
+    """The attack on the rule above: if one document takes one slot, a
+    document with many matching sections could eat the branch's whole
+    retrieve window and leave the page holding a single row.
+
+    The note branch asks for twice the limit and then collapses, so the
+    headroom is what pays for the repeats. This pins the case that matters:
+    a five-part note and a one-part note both matching, at limit=2, and BOTH
+    are on the page."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        fat = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": "Nota lunga", "text": "sezione uno su vrtqzz"},
+            )
+        ).json()
+        for i in range(2, 6):
+            await c.post(
+                f"/notes/{fat['id']}/parts",
+                headers=h,
+                json={"body": f"sezione {i} su vrtqzz"},
+            )
+        thin = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": "Nota corta", "text": "una riga su vrtqzz"},
+            )
+        ).json()
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "vrtqzz", "kinds": ["note"], "limit": 2},
+            )
+        ).json()
+        seen = {x["note_id"] for x in hits}
+        assert seen == {fat["id"], thin["id"]}, (
+            f"the five-part note must not take the page with it: {hits}"
+        )

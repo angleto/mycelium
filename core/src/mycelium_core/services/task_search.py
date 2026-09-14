@@ -828,22 +828,34 @@ async def search_unified_with_meta(
         # of twenty questions on 2026-09-07 scored 3 of 6 on tasks and
         # **0 of 14 on notes**: the same one-line predicate, read twice.
         note_scope = memory_svc.ANY_PROJECT if project_id is None else project_id
-        note_hits, note_rmeta = await memory_svc.retrieve_with_meta(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            project_id=note_scope,
-            query=query,
-            operation_id=operation_id,
-            limit=max(limit * 2, limit),
-            tag_ids=tag_ids,
-            channel_key="note",
-            rerank=rerank,
-            include_deleted_sources=include_deleted,
-            exact_only=code_query,
-        )
-        metas.append(note_rmeta)
-        if note_hits:
+
+        async def _note_page(
+            depth: int,
+        ) -> tuple[list[UnifiedHit], memory_svc.RetrievalMeta, set[uuid.UUID], int]:
+            """``depth`` note blobs, collapsed to one hit per NOTE.
+
+            Returns the rows, the branch meta, the blobs the collapse removed
+            (the caller owes them to the blob-branch dedup) and how many blobs
+            the retrieve actually produced -- which is how the caller tells a
+            window eaten by repeats from a corpus with nothing more in it."""
+            rows: list[UnifiedHit] = []
+            collapsed: set[uuid.UUID] = set()
+            note_hits, note_rmeta = await memory_svc.retrieve_with_meta(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                project_id=note_scope,
+                query=query,
+                operation_id=operation_id,
+                limit=depth,
+                tag_ids=tag_ids,
+                channel_key="note",
+                rerank=rerank,
+                include_deleted_sources=include_deleted,
+                exact_only=code_query,
+            )
+            if not note_hits:
+                return rows, note_rmeta, collapsed, 0
             blob_ids = [h.blob.id for h in note_hits]
             blob_to_ref = await _resolve_note_refs(session, blob_ids)
             note_meta = await _note_filter_meta(
@@ -896,7 +908,7 @@ async def search_unified_with_meta(
                     # id travels with the winner so a caller can offer the
                     # other sections without paying for them.
                     winner.other_part_ids.append(part_id)
-                    collapsed_note_blobs.add(h.blob.id)
+                    collapsed.add(h.blob.id)
                     continue
                 hit = UnifiedHit(
                     kind="note",
@@ -912,7 +924,30 @@ async def search_unified_with_meta(
                     model_id=h.blob.model_id,
                 )
                 by_note[note_id] = hit
-                hits.append(hit)
+                rows.append(hit)
+            return rows, note_rmeta, collapsed, len(note_hits)
+
+        # The retrieve is asked for blobs and the branch now hands back
+        # DOCUMENTS, so the window it was given can be eaten by repeats: a
+        # note with five matching sections used to fill five of them. The 2x
+        # headroom covers the repeats actually seen on the gold set (every
+        # one was a single extra section), and when it does not, going once
+        # deeper is cheaper than handing back a page one document long --
+        # which is the same defect as before, wearing the opposite coat.
+        #
+        # The second retrieve is conditional on both halves: fewer distinct
+        # notes than asked for, AND a window the retrieve filled, which means
+        # there was more to see. On a corpus with nothing more it never runs,
+        # and with no repeats it never runs either.
+        depth = max(limit * 2, limit)
+        note_rows, note_rmeta, collapsed, produced = await _note_page(depth)
+        if len(note_rows) < limit and produced >= depth:
+            deeper_rows, deeper_meta, deeper_collapsed, _ = await _note_page(depth * 4)
+            if len(deeper_rows) > len(note_rows):
+                note_rows, note_rmeta, collapsed = deeper_rows, deeper_meta, deeper_collapsed
+        metas.append(note_rmeta)
+        collapsed_note_blobs |= collapsed
+        hits.extend(note_rows)
 
     if want_blob:
         # Channel filter for blob search: if the caller asked for a
