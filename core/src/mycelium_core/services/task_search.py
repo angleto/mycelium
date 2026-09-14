@@ -631,6 +631,14 @@ class UnifiedHit:
     # the logit rather than the fused RRF (see ``stages/rerank.py``).
     # Empty when no ranked retrieval ran at all, as on the entity-code path.
     scores_by_stage: dict[str, float] = field(default_factory=dict)
+    # The OTHER parts of the same note that also matched, best-first, when
+    # this hit is the survivor of the per-note collapse below. The slot
+    # budget is counted in documents, so the sibling sections do not get
+    # slots of their own -- but they are still an answer to the question,
+    # and dropping their ids would throw away the only thing the collapse
+    # actually destroys. Empty for a task/blob hit and for a note that
+    # matched with one part.
+    other_part_ids: list[uuid.UUID] = field(default_factory=list)
 
 
 def _aggregate_unified_meta(metas: list[RetrievalMeta], final: list[UnifiedHit]) -> RetrievalMeta:
@@ -691,6 +699,12 @@ async def search_unified_with_meta(
     score descending (RRF already applied inside each branch), then dedup
     so a blob that resolved to a task/note isn't also surfaced as an opaque
     ``blob`` row.
+
+    A NOTE TAKES ONE SLOT, however many of its parts matched: the best part
+    wins the row and the others ride on it as ``other_part_ids`` (task
+    859ad2d3). The retrieve underneath collapses on the blob's recorded
+    source, which for a note is the PART, so before this two sections of one
+    document could take two slots out of five.
     """
     # Local imports break a static cycle: memory imports nothing from
     # task_search, but task_search imports memory only at call time.
@@ -725,6 +739,11 @@ async def search_unified_with_meta(
         return [], _aggregate([])
 
     hits: list[UnifiedHit] = []
+    # Blobs the per-note collapse in the note branch removed from the page.
+    # They are not merely absent: the catch-all 'blob' branch spans every
+    # channel, so without this they would come back as opaque rows and take
+    # the slot the collapse just freed, through the other door.
+    collapsed_note_blobs: set[uuid.UUID] = set()
 
     if want_task:
         # Task blobs carry project_id=NULL (org-wide memory channel), so
@@ -834,6 +853,31 @@ async def search_unified_with_meta(
                 include_deleted=include_deleted,
             )
             snippets = await _ts_headlines(session, blob_ids=blob_ids, query=query)
+            # One slot per NOTE, not per part (task 859ad2d3). The retrieve
+            # below deals in blobs and its dedupe collapses on the blob's
+            # recorded source, which for a note is the PART: two sections of
+            # the same document are two sources, so both survived and both
+            # took a slot. On a window of five that is 40% of the budget for
+            # one document, and it happened on 4 of the 20 questions of the
+            # frozen gold set.
+            #
+            # The A/B on those twenty questions (2026-09-14, prod 2.3.33):
+            # recall@5 6/20 and MRR@5 unchanged whether the collapse is on
+            # the part or on the note, lists carrying two parts of one note
+            # 4/20 -> 0/20, distinct notes shown 56 -> 59. A cap of two per
+            # note (the other candidate) is a measured no-op here: every
+            # repeat was exactly two, so the cap would have to be one to do
+            # anything, which is this rule.
+            #
+            # The collapse is here and not in the retrieve because the
+            # retrieve has no notion of a note: it ranks blobs and knows
+            # their provenance, while the unit a reader spends a slot on is
+            # the document, and this is the layer that resolves one to the
+            # other. What the measure cannot see is the case the gold set
+            # has no question for, a second section that was itself the
+            # answer; that is why the losing parts are kept on the hit as
+            # ``other_part_ids`` instead of being dropped.
+            by_note: dict[uuid.UUID, UnifiedHit] = {}
             for h in note_hits:
                 ref = blob_to_ref.get(h.blob.id)
                 if ref is None:
@@ -846,21 +890,29 @@ async def search_unified_with_meta(
                 if note_m is None:
                     # Note gone or filtered out (soft-deleted/archived).
                     continue
-                hits.append(
-                    UnifiedHit(
-                        kind="note",
-                        blob_id=h.blob.id,
-                        task_id=None,
-                        note_id=note_id,
-                        part_id=part_id,
-                        title=note_m.title,
-                        snippet=snippets.get(h.blob.id),
-                        score=h.rrf,
-                        scores_by_stage=dict(h.scores_by_stage),
-                        scope="project" if project_id is not None else "org",
-                        model_id=h.blob.model_id,
-                    )
+                winner = by_note.get(note_id)
+                if winner is not None:
+                    # Same document, lower-ranked section: no slot, but the
+                    # id travels with the winner so a caller can offer the
+                    # other sections without paying for them.
+                    winner.other_part_ids.append(part_id)
+                    collapsed_note_blobs.add(h.blob.id)
+                    continue
+                hit = UnifiedHit(
+                    kind="note",
+                    blob_id=h.blob.id,
+                    task_id=None,
+                    note_id=note_id,
+                    part_id=part_id,
+                    title=note_m.title,
+                    snippet=snippets.get(h.blob.id),
+                    score=h.rrf,
+                    scores_by_stage=dict(h.scores_by_stage),
+                    scope="project" if project_id is not None else "org",
+                    model_id=h.blob.model_id,
                 )
+                by_note[note_id] = hit
+                hits.append(hit)
 
     if want_blob:
         # Channel filter for blob search: if the caller asked for a
@@ -917,7 +969,7 @@ async def search_unified_with_meta(
     # every channel, so a task/note blob also surfaces there as an opaque
     # row. When the same blob was already emitted as a titled kind
     # (task/note), drop the 'blob' duplicate -- keep the row that routes.
-    typed_blob_ids = {h.blob_id for h in hits if h.kind in ("task", "note")}
+    typed_blob_ids = {h.blob_id for h in hits if h.kind in ("task", "note")} | collapsed_note_blobs
     if typed_blob_ids:
         hits = [h for h in hits if not (h.kind == "blob" and h.blob_id in typed_blob_ids)]
 

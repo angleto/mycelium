@@ -561,3 +561,58 @@ async def test_the_branch_with_the_real_match_leads_even_when_the_other_pads(
             "the only real match for 'zqxwvu' must lead the page, whatever the "
             f"other branch contributed behind it; got {hits}"
         )
+
+
+async def test_two_parts_of_one_note_take_one_slot(_fake_embedder: None) -> None:
+    """Task 859ad2d3: a note takes ONE slot however many of its sections
+    matched, and the sections that lost the row are named in
+    ``other_part_ids`` instead of being dropped.
+
+    Before this, the retrieve's dedupe collapsed on the blob's recorded
+    source, which for a note is the PART: two sections of one document
+    were two sources, so both survived and both took a slot. On the frozen
+    gold set that happened on 4 of 20 questions, i.e. 40% of a five-slot
+    window spent on one document."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        note = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={
+                    "kind": "text",
+                    "title": "Un documento in due sezioni",
+                    "text": "prima sezione, parla di qwzzlefrob",
+                },
+            )
+        ).json()
+        nid = note["id"]
+        second = (
+            await c.post(
+                f"/notes/{nid}/parts",
+                headers=h,
+                json={"body": "seconda sezione, parla ancora di qwzzlefrob"},
+            )
+        ).json()
+        assert second["id"]
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "qwzzlefrob", "kinds": ["note", "blob"], "limit": 10},
+            )
+        ).json()
+        rows = [x for x in hits if x["kind"] == "note" and x["note_id"] == nid]
+        assert len(rows) == 1, f"one note, one slot: {hits}"
+        row = rows[0]
+        parts = {row["part_id"], *row["other_part_ids"]}
+        assert len(parts) == 2, f"the losing section must still be named: {row}"
+        # And it must not come back through the catch-all blob branch,
+        # which spans every channel: that would return the freed slot to
+        # the same document by the other door.
+        assert not [x for x in hits if x["kind"] == "blob"], (
+            f"the collapsed part re-surfaced as an opaque blob: {hits}"
+        )

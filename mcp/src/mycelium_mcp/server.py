@@ -4817,8 +4817,11 @@ async def search(
     ``assignee_handles``, ``state_id`` narrow the task branch, so "tasks due
     today assigned to X" is answerable here too. ``note`` hits carry
     ``note_id`` + ``part_id`` + a title; results carry an ``ts_headline``
-    snippet. Use this over ``memory_search`` for "everything that mentions
-    X". ``rerank=True`` opts into the cross-encoder top-K pass.
+    snippet, and a note takes ONE slot however many of its parts matched:
+    the best part wins the row and the others are listed in
+    ``other_part_ids`` (task 859ad2d3). Use this over ``memory_search`` for
+    "everything that mentions X". ``rerank=True`` opts into the
+    cross-encoder top-K pass.
 
     An ENTITY CODE (8+ hex digits, e.g. ``f62ff51d`` or a full UUID) is
     answered as an exact LOOKUP, not a similarity question: the entity whose
@@ -4878,6 +4881,11 @@ async def search(
                     # cosine was. Empty on the entity-code path, where
                     # nothing was ranked.
                     "scores_by_stage": h.scores_by_stage,
+                    # The other sections of the SAME note that matched. A
+                    # note takes ONE slot however many of its parts answered
+                    # (task 859ad2d3), so these are the sections that did not
+                    # get a row; read them when one answer spans a document.
+                    "other_part_ids": [str(p) for p in h.other_part_ids],
                 }
                 for h in page
             ],

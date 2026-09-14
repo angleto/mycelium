@@ -91,6 +91,7 @@ async def search(
             scores_by_stage=h.scores_by_stage,
             scope=h.scope,
             model_id=h.model_id,
+            other_part_ids=h.other_part_ids,
         )
         for h in hits
     ]

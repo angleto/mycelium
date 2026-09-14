@@ -13679,6 +13679,8 @@ export interface components {
             scope?: string;
             /** Model Id */
             model_id?: string | null;
+            /** Other Part Ids */
+            other_part_ids?: string[];
         };
         /**
          * SearchIn

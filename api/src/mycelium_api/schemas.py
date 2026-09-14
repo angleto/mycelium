@@ -3995,6 +3995,11 @@ class SearchHit(BaseModel):
     scores_by_stage: dict[str, float] = Field(default_factory=dict)
     scope: str = "org"
     model_id: str | None = None
+    # The other parts of the SAME note that also matched, best-first. A note
+    # takes one slot however many of its sections answered, so these are the
+    # sections that did not get the row; empty for a task or blob hit, and
+    # for a note that matched with a single part.
+    other_part_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class SearchClickIn(BaseModel):
