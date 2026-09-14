@@ -549,7 +549,13 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                 )
                 tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
                 memory_recall = [
-                    {"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits
+                    {
+                        "blob": _blob(
+                            h.blob, tagmap.get(h.blob.id), snippet_chars=_WHOAMI_SNIPPET_CHARS
+                        ),
+                        "rrf": h.rrf,
+                    }
+                    for h in hits
                 ]
             except Exception:
                 memory_recall = []
@@ -4447,13 +4453,39 @@ async def list_usage(token: str, org_id: str, limit: int = 100) -> list[dict[str
 # --- F6: hierarchical memory (FR-8) ---
 
 
-def _blob(b: MemoryBlob, tags: list[Tag] | None = None) -> dict[str, Any]:
-    return {
+#: What a recall hit shows of a blob when nobody asked for the whole thing.
+#: A search result is an index: enough to decide which document to open,
+#: not the document. ``memory_get_blob`` is the way to open one, and it is
+#: never capped -- capping the escape hatch would turn a cap into data loss.
+_RECALL_SNIPPET_CHARS = 500
+
+#: Tighter still on the session-bootstrap recall, which is the one path a
+#: caller cannot ask for less on: ``whoami`` hard-wires ``limit=5`` and
+#: takes no arguments. A bootstrap wants an index, not five documents.
+_WHOAMI_SNIPPET_CHARS = 200
+
+
+def _blob(
+    b: MemoryBlob,
+    tags: list[Tag] | None = None,
+    snippet_chars: int | None = None,
+) -> dict[str, Any]:
+    """Project a memory blob.
+
+    ``snippet_chars`` caps ``text`` and is None for the whole thing. When
+    it bites, the payload SAYS SO -- ``text_truncated`` plus the full
+    ``text_chars`` -- because a silently shortened body is worse than an
+    absent one: a caller cannot tell a memory that ends there from one
+    that was cut, and will summarise the cut as if it were the whole.
+    """
+    text = b.text or ""
+    truncated = snippet_chars is not None and len(text) > snippet_chars
+    out: dict[str, Any] = {
         "id": str(b.id),
         "project_id": str(b.project_id) if b.project_id else None,
         "namespace": b.namespace,
         "tier": b.tier,
-        "text": b.text,
+        "text": text[:snippet_chars] if truncated else text,
         "model_id": b.model_id,
         "cluster_id": str(b.cluster_id) if b.cluster_id else None,
         # Provenance (migration 0085): the authoring identity (a user or an
@@ -4466,6 +4498,13 @@ def _blob(b: MemoryBlob, tags: list[Tag] | None = None) -> dict[str, Any]:
             for g in (tags or [])
         ],
     }
+    if truncated:
+        # Only when it bites: two fields on every uncapped read would be
+        # the same waste this cap exists to remove.
+        out["text_truncated"] = True
+        out["text_chars"] = len(text)
+        out["read_whole"] = "memory_get_blob"
+    return out
 
 
 def _retrieval_meta(m: memory_svc.RetrievalMeta) -> dict[str, Any]:
@@ -4549,6 +4588,7 @@ async def memory_search(
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
     created_by: str | None = None,
+    snippet_chars: int | None = _RECALL_SNIPPET_CHARS,
 ) -> dict[str, Any]:
     """Hybrid RRF retrieval within the (org, project) boundary.
     Degrades to keyword-only without embedder. ``tag_ids``,
@@ -4564,7 +4604,15 @@ async def memory_search(
     empty ``hits`` with ``meta.query_embedded=false`` or
     ``meta.dense_rejected_by_floor>0`` means recall silently degraded to
     keyword-only, not that nothing was relevant (per-hit ``blob.model_id``
-    ='none' also flags a keyword-only row)."""
+    ='none' also flags a keyword-only row).
+
+    ``blob.text`` is a SNIPPET: the first 500 characters, because a result
+    list is an index -- enough to pick which memory to open, not the
+    memory. When it bites the hit says so (``text_truncated``,
+    ``text_chars``) and names the way to the whole: ``memory_get_blob``,
+    which is never capped. Pass ``snippet_chars=null`` for full text on
+    every hit, or a number to trade differently; ``limit`` reduces how
+    MANY hits come back, never how big each one is."""
     async with _tenant(token, org_id) as (s, org, user):
         hits, meta = await memory_svc.retrieve_with_meta(
             s,
@@ -4584,7 +4632,7 @@ async def memory_search(
         return {
             "hits": [
                 {
-                    "blob": _blob(h.blob, tagmap.get(h.blob.id)),
+                    "blob": _blob(h.blob, tagmap.get(h.blob.id), snippet_chars=snippet_chars),
                     "rrf": h.rrf,
                     # Why this hit ranked here (WS-B2 / R8): the per-stage RRF
                     # branch scores + rerank logit, the winning chunk, its
@@ -5335,11 +5383,23 @@ def _note(
         out["summary"] = n.summary
     if n.deleted_at is not None:
         out["deleted_at"] = n.deleted_at.isoformat()
-    if include_transcript and part_bodies:
-        if parts:
-            out["transcript"] = "\n\n".join((p.body or "") for p in parts)
-        else:
-            out["transcript"] = transcript
+    # ``transcript`` is emitted ONLY when the caller supplied no parts, i.e.
+    # when it is the only channel the body has. It used to be emitted
+    # alongside them, and since it is DERIVED by joining those same part
+    # bodies the payload carried the note twice: the design note of this
+    # workstream has a 30,314-byte part, so one ``get_note`` returned 60,628
+    # bytes where 30,314 say everything. Both defaults were on, so the
+    # double echo was the ordinary case and not an edge.
+    #
+    # In the builder rather than at the call sites, which is what covers
+    # ``merge_notes`` without touching it. ``list_notes`` is unaffected: it
+    # passes no parts and an explicit transcript, so it still gets one.
+    #
+    # A caller that wants the flat join of a note it asked the parts for can
+    # build it -- it holds every piece -- and one that wants only the flat
+    # body asks for it by not requesting parts.
+    if include_transcript and parts is None:
+        out["transcript"] = transcript
     if parts is not None:
         out["parts"] = [(_note_part(p) if part_bodies else _note_part_outline(p)) for p in parts]
     return out

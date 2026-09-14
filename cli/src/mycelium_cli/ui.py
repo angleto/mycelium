@@ -114,9 +114,21 @@ def body_or_none(raw: str | None) -> str | None:
     return raw if raw.strip() else None
 
 
-def edit_in_editor(initial: str = "", *, suffix: str = ".md") -> str:
+def edit_in_editor(initial: str = "", *, suffix: str = ".md") -> str | None:
     """Open ``$EDITOR`` on a tempfile preloaded with ``initial`` and
-    return the saved buffer. An empty buffer signals "abort" upstream.
+    return the saved buffer, or ``None`` when the editor FAILED.
+
+    The two used to be the same answer: a failed editor returned ``""``,
+    which is also what a user who empties the buffer and saves returns.
+    Nothing could tell them apart, and the three callers that edit
+    EXISTING text -- a note body, a task description, a note part --
+    wrote that empty string straight back, so a crashed editor silently
+    blanked the thing being edited (and, for a note, re-derived its
+    title from nothing). The docstring claimed an abort convention that
+    no caller had ever implemented.
+
+    ``None`` means "do not write". ``""`` still means "the user really
+    did empty it", which stays a legal edit through the explicit route.
     """
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nvim"
     with tempfile.NamedTemporaryFile("w+", suffix=suffix, delete=False) as fh:
@@ -125,7 +137,7 @@ def edit_in_editor(initial: str = "", *, suffix: str = ".md") -> str:
     try:
         proc = run([editor, path], check=False)  # noqa: S603
         if proc.returncode != 0:
-            return ""
+            return None
         with open(path, encoding="utf-8") as fh:
             return fh.read()
     finally:

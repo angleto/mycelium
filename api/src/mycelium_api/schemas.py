@@ -2444,11 +2444,25 @@ class MemoryStatusOut(BaseModel):
 
 
 class MemoryBlobOut(BaseModel):
+    """A memory blob.
+
+    On a SEARCH response ``text`` is a snippet, because a result list is
+    an index and not the documents: ``text_truncated`` then says so and
+    ``text_chars`` gives the real length, so a reader can tell a memory
+    that ends there from one that was cut. ``GET /memory/blobs/{id}``
+    is never capped -- it is the way to read the whole, and capping the
+    escape hatch would turn a cap into data loss.
+
+    Both fields are additive and optional: a client that ignores them
+    sees exactly what it saw before."""
+
     id: uuid.UUID
     project_id: uuid.UUID | None
     namespace: str
     tier: str
     text: str | None
+    text_truncated: bool = False
+    text_chars: int | None = None
     summary: str | None
     model_id: str | None
     dim: int

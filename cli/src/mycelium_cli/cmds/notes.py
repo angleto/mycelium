@@ -250,7 +250,13 @@ def show(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) ->
     """Print a note's title and full body."""
     with client() as c:
         full = _resolve_note(c, note_id)
-        note = get_json(c.get(f"/notes/{full}"))
+        # The human branch below READS ``transcript`` and never touches
+        # ``parts``, so it asks for the flat body and pays for it once.
+        # ``--json`` emits the raw payload, where transcript and the part
+        # bodies would be the same text twice, so that branch drops the
+        # derived copy and hands over the structured one.
+        want_transcript = not json_mode()
+        note = get_json(c.get(f"/notes/{full}?include_transcript={str(want_transcript).lower()}"))
     if json_mode():
         emit_json(note)
         return
@@ -295,7 +301,14 @@ def edit(
         if text == "-":
             payload["text"] = sys.stdin.read()
         elif text == "@":
-            payload["text"] = edit_in_editor(current.get("transcript") or "")
+            edited = edit_in_editor(current.get("transcript") or "")
+            # A failed editor is not an instruction to empty the note. It
+            # used to be: the helper returned "" for both, and that ""
+            # went straight into the PATCH, blanking part 0 and letting
+            # the title be re-derived from nothing.
+            if edited is None:
+                raise CLIError("editor failed; nothing was changed.")
+            payload["text"] = edited
         elif text is not None:
             payload["text"] = text
         if task == "-":
@@ -483,6 +496,8 @@ def parts_add(
             body = file.read_text()
     else:
         body = edit_in_editor("")
+        if body is None:
+            raise CLIError("editor failed; no part was added.")
     with client() as c:
         full = _resolve_note(c, note_id)
         payload: dict[str, Any] = {"body": body}
@@ -785,6 +800,8 @@ def parts_edit(
         # into an opportunity to save an accidental edit.
         if title is None:
             new_body = edit_in_editor(part.get("body") or "")
+            if new_body is None:
+                raise CLIError("editor failed; nothing was changed.")
             if new_body != (part.get("body") or ""):
                 payload["body"] = new_body
         # "Nothing to send" is now two fields, not one: a rename must not

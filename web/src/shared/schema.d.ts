@@ -4362,7 +4362,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Note */
+        /**
+         * Get Note
+         * @description Read one note with its ordered ``parts``.
+         *
+         *     ``include_transcript=false`` drops the derived flat body, which is
+         *     the join of those same part bodies: a client that reads ``parts``
+         *     otherwise receives the note twice. Default true, because the SPA
+         *     reads the field.
+         */
         get: operations["get_note_notes__note_id__get"];
         put?: never;
         post?: never;
@@ -4939,6 +4947,10 @@ export interface paths {
          *     ``merged_from_note_id``, and records a ``supersedes`` link
          *     (target → source) so the graph keeps the lineage. Returns the
          *     target as it now stands, parts included.
+         *
+         *     ``include_transcript=false`` drops the derived flat body, as on
+         *     ``GET /notes/{id}``: this response is the one most worth trimming,
+         *     since a merge returns a note that just grew by another note.
          */
         post: operations["merge_notes_notes_merge_post"];
         delete?: never;
@@ -11333,7 +11345,20 @@ export interface components {
             /** Role */
             role: string;
         };
-        /** MemoryBlobOut */
+        /**
+         * MemoryBlobOut
+         * @description A memory blob.
+         *
+         *     On a SEARCH response ``text`` is a snippet, because a result list is
+         *     an index and not the documents: ``text_truncated`` then says so and
+         *     ``text_chars`` gives the real length, so a reader can tell a memory
+         *     that ends there from one that was cut. ``GET /memory/blobs/{id}``
+         *     is never capped -- it is the way to read the whole, and capping the
+         *     escape hatch would turn a cap into data loss.
+         *
+         *     Both fields are additive and optional: a client that ignores them
+         *     sees exactly what it saw before.
+         */
         MemoryBlobOut: {
             /**
              * Id
@@ -11348,6 +11373,13 @@ export interface components {
             tier: string;
             /** Text */
             text: string | null;
+            /**
+             * Text Truncated
+             * @default false
+             */
+            text_truncated?: boolean;
+            /** Text Chars */
+            text_chars?: number | null;
             /** Summary */
             summary: string | null;
             /** Model Id */
@@ -25189,7 +25221,9 @@ export interface operations {
     };
     get_note_notes__note_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_transcript?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
@@ -26347,7 +26381,9 @@ export interface operations {
     };
     merge_notes_notes_merge_post: {
         parameters: {
-            query?: never;
+            query?: {
+                include_transcript?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;

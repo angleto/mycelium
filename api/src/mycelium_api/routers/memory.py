@@ -33,13 +33,31 @@ from mycelium_core.services import memory as svc
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
-def _blob_out(b: MemoryBlob, tags: list[Tag] | None = None) -> MemoryBlobOut:
+#: The twin of the MCP surface's recall snippet, and the same number on
+#: purpose: the two run one pipeline, and a hit that is 500 characters on
+#: one surface and the whole document on the other is a difference a
+#: caller has to discover by measuring.
+_RECALL_SNIPPET_CHARS = 500
+
+
+def _blob_out(
+    b: MemoryBlob,
+    tags: list[Tag] | None = None,
+    snippet_chars: int | None = None,
+) -> MemoryBlobOut:
+    """Project a memory blob; ``snippet_chars`` caps ``text``, None means
+    whole. A cut body SAYS it was cut (``text_truncated`` + ``text_chars``)
+    so a reader never mistakes a snippet for a memory that ends there."""
+    text = b.text or ""
+    truncated = snippet_chars is not None and len(text) > snippet_chars
     return MemoryBlobOut(
         id=b.id,
         project_id=b.project_id,
         namespace=b.namespace,
         tier=b.tier,
-        text=b.text,
+        text=text[:snippet_chars] if truncated else text,
+        text_truncated=truncated,
+        text_chars=len(text) if truncated else None,
         summary=b.summary,
         model_id=b.model_id,
         dim=b.dim,
@@ -96,7 +114,7 @@ async def search(
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[h.blob.id for h in hits])
     return [
         MemoryHitOut(
-            blob=_blob_out(h.blob, tagmap.get(h.blob.id)),
+            blob=_blob_out(h.blob, tagmap.get(h.blob.id), snippet_chars=_RECALL_SNIPPET_CHARS),
             rrf=h.rrf,
             chunk_index=h.chunk_index,
             chunk_snippet=h.chunk_snippet,

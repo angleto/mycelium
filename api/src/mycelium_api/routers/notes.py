@@ -198,6 +198,7 @@ def _out(
     linked_task_count: int = 0,
     parts: list[NotePartOut] | None = None,
     transcript: str | None = None,
+    include_transcript: bool = True,
 ) -> NoteOut:
     """The single-note projection: the shared fields plus the body.
 
@@ -205,6 +206,17 @@ def _out(
     mapping for the fields the two projections share. Adding a column
     to ``_NoteCommon`` then has a single place to fill it, instead of
     two that silently drift.
+
+    ``transcript`` is the join of the part bodies, so a response that
+    carries ``parts`` carries the note twice. Unlike the MCP twin this
+    one cannot simply stop emitting it: the field has live consumers
+    that seed the editor, label the derive-task control and feed the
+    revisions panel. So it is the CALLER's choice, default on, and a
+    machine client already reading ``parts`` asks for one copy with
+    ``include_transcript=false``. Rewriting the SPA onto ``parts`` and
+    dropping the field is a different piece of work -- structural
+    editing, five TypeScript consumers -- and does not belong to an
+    item about payload size.
     """
     base = _list_out(
         n,
@@ -220,7 +232,7 @@ def _out(
         # when the caller has it loaded; otherwise the caller can pass
         # an explicit value (single-row paths that skipped the parts
         # join). The legacy column is gone in migration 0012.
-        transcript=_derived_transcript(parts, transcript),
+        transcript=_derived_transcript(parts, transcript) if include_transcript else None,
         parts=list(parts or []),
     )
 
@@ -403,7 +415,14 @@ async def list_notes(
 async def get_note(
     note_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_transcript: bool = True,
 ) -> NoteOut:
+    """Read one note with its ordered ``parts``.
+
+    ``include_transcript=false`` drops the derived flat body, which is
+    the join of those same part bodies: a client that reads ``parts``
+    otherwise receives the note twice. Default true, because the SPA
+    reads the field."""
     n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
     pid = await note_links_svc.primary_task_id_for_note(
@@ -433,6 +452,7 @@ async def get_note(
         derived_task_ids=derived.get(n.id, []),
         linked_task_count=counts.get(n.id, 0),
         parts=parts,
+        include_transcript=include_transcript,
     )
 
 
@@ -1268,12 +1288,17 @@ async def set_note_part_ui_state(
 async def merge_notes(
     body: NoteMergeIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_transcript: bool = True,
 ) -> NoteOut:
     """Fold the source note's parts into the target (task 71c9d670
     Phase 2b). Soft-deletes the source, stamps every moved part with
     ``merged_from_note_id``, and records a ``supersedes`` link
     (target → source) so the graph keeps the lineage. Returns the
-    target as it now stands, parts included."""
+    target as it now stands, parts included.
+
+    ``include_transcript=false`` drops the derived flat body, as on
+    ``GET /notes/{id}``: this response is the one most worth trimming,
+    since a merge returns a note that just grew by another note."""
     target = await parts_svc.merge_notes(
         ctx.session,
         org_id=ctx.org_id,
@@ -1301,6 +1326,7 @@ async def merge_notes(
         derived_task_ids=derived.get(target.id, []),
         linked_task_count=counts.get(target.id, 0),
         parts=[_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in parts_rows],
+        include_transcript=include_transcript,
     )
 
 

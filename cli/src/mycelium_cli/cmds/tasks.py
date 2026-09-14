@@ -341,7 +341,11 @@ def edit(
 
             payload["description"] = _sys.stdin.read()
         elif description == "@":
-            payload["description"] = edit_in_editor(current.get("description") or "")
+            edited = edit_in_editor(current.get("description") or "")
+            # Same rule as the note body: a failed editor changes nothing.
+            if edited is None:
+                raise CLIError("editor failed; nothing was changed.")
+            payload["description"] = edited
         elif description is not None:
             payload["description"] = description
         if due == "-":
