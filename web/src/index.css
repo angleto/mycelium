@@ -1848,6 +1848,22 @@ button.btn--danger:hover {
    has a heading cell whether or not it has a visible title, and an empty <th>
    leaves the column unnamed for anyone navigating the table by header. Clipped
    rather than ``display:none``, which would remove it from the tree too. */
+/* Visually hidden, and hidden from the LAYOUT too.
+
+   `position: absolute` takes it out of flow, but with no positioned ancestor
+   its containing block is the initial one: the box is then laid out against
+   the page, so a scroller between it and the root does not clip it and its
+   bottom edge extends the DOCUMENT's scrollable height. Measured on the
+   kanban, 2026-09-14: 96 of these live inside cards in a column that scrolls
+   internally, the lowest sitting at y≈7000, and the page scrolled 7669px
+   through empty background to reach a board that is 485px tall. Hiding them
+   collapsed the document from 8418px to 1424px, which is the proof.
+
+   So whatever holds one becomes its containing block. The rule is on the
+   PARENT, via :has(), rather than on the call sites, because the call site
+   that forgets is exactly how this arrived: three components use the utility
+   and none of them could know that using it obliged them to position
+   themselves. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1858,6 +1874,9 @@ button.btn--danger:hover {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+*:has(> .sr-only) {
+  position: relative;
 }
 
 .codes {
