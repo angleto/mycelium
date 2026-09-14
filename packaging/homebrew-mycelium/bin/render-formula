@@ -43,12 +43,41 @@ fi
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
+# GitHub builds a tag's tarball ON DEMAND, so the first request after a tag
+# push can time out while it is being produced: v2.3.31 failed here with a
+# 504 on 2026-09-14, and the same URL served 5.7 MB a minute later. The old
+# message blamed the tag ("may not be pushed yet"), which sends whoever reads
+# it to look at the one thing that was fine.
+#
+# So the two cases are told apart and only one of them is worth waiting for:
+# a 404 is an answer (the tag is not there) and fails immediately; a 5xx or a
+# transport error is GitHub not being ready and is retried, backing off, for
+# about a minute in total.
 echo "Fetching $TARBALL_URL ..." >&2
-if ! curl -fSL "$TARBALL_URL" -o "$tmp"; then
-  echo "error: tarball not available at $TARBALL_URL" >&2
-  echo "       (tag may not be pushed yet, or GitHub release missing)" >&2
-  exit 1
-fi
+attempt=0
+delay=2
+while :; do
+  attempt=$((attempt + 1))
+  code=$(curl -sSL -w '%{http_code}' "$TARBALL_URL" -o "$tmp" 2>/dev/null || echo 000)
+  if [[ "$code" == "200" ]]; then
+    break
+  fi
+  if [[ "$code" == "404" ]]; then
+    echo "error: no tarball at $TARBALL_URL (HTTP 404)" >&2
+    echo "       the tag does not exist on the remote -- push it first" >&2
+    exit 1
+  fi
+  if [[ $attempt -ge 5 ]]; then
+    echo "error: tarball still unavailable after $attempt attempts (last HTTP $code)" >&2
+    echo "       $TARBALL_URL" >&2
+    echo "       000 means the request never completed; a 5xx means GitHub is" >&2
+    echo "       still generating the archive. The tag itself is fine: re-run." >&2
+    exit 1
+  fi
+  echo "  HTTP $code, GitHub is not ready; retrying in ${delay}s (attempt $attempt/5)" >&2
+  sleep "$delay"
+  delay=$((delay * 2))
+done
 
 SHA=$(shasum -a 256 "$tmp" | awk '{print $1}')
 
