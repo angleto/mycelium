@@ -27,6 +27,17 @@ const fetchMock = vi.hoisted(() => {
   return fn
 })
 
+// This file mounts the REAL detail screen, which is the point of the
+// dialog and also what it costs: eleven requests answered by the double,
+// the markdown editor, the properties column and the tab strip, all under
+// jsdom. Measured on 2026-09-14 inside the full suite: 13.3s for the first
+// test (it pays the module init too), 4.5s and 3.7s for the next two, and
+// 108ms for the one that short-circuits on a 404. The default 5s budget
+// therefore fails whenever the machine is loaded, and passed in isolation,
+// which is the shape of a flake rather than of a defect. The budget is
+// raised here, in the one file that needs it, instead of globally.
+vi.setConfig({ testTimeout: 30_000 })
+
 let host: HTMLDivElement
 let root: Root
 
