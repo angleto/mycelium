@@ -14,7 +14,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-from mycelium_core.migration_rls import owner_sees_all_tenants
+from mycelium_core.migration_rls import MigrationRlsBracket
 from mycelium_core.models import Base
 
 config = context.config
@@ -50,18 +50,25 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     engine = create_engine(_url(), poolclass=pool.NullPool, future=True)
     with engine.connect() as connection:
+        # Without the bracket, on a deployment where the owner role is not a
+        # superuser (managed PostgreSQL), every backfill on an org-scoped table
+        # touches zero rows and does not say so. See mycelium_core.migration_rls:
+        # it is the central fix for the problem 0037 worked around by hand for
+        # `tasks` alone.
+        #
+        # The bracket is asked for, not entered unconditionally: lifting FORCE
+        # takes an ACCESS EXCLUSIVE per forced table, and a release with no
+        # migration in it used to take 174 of them for nothing. on_version_apply
+        # is what makes the condition safe rather than merely cheap.
+        bracket = MigrationRlsBracket(connection)
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            on_version_apply=bracket.on_version_apply,
         )
         with context.begin_transaction():
-            # Senza questo, su un deployment dove il ruolo proprietario non
-            # e' superuser (PostgreSQL gestito), ogni backfill su una
-            # tabella org-scoped tocca zero righe e non lo dice. Vedi
-            # mycelium_core.migration_rls: e' la correzione centrale del
-            # problema che la 0037 aveva aggirato a mano per le sole `tasks`.
-            with owner_sees_all_tenants(connection):
+            with bracket.around(context.get_context()):
                 context.run_migrations()
     engine.dispose()
 

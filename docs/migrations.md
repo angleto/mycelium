@@ -208,11 +208,24 @@ the backfill was supposed to have copied, and prod note bodies came
 back empty (incident 2026-05-27, task `1cd8bc0a`, recovered by `0013`).
 
 **Since 2026-08-22 the runner handles this centrally** and the manual
-bracket below is no longer required. `core/migrations/env.py` wraps the
-whole run in `mycelium_core.migration_rls.owner_sees_all_tenants`, which
+bracket below is no longer required. `core/migrations/env.py` asks
+`mycelium_core.migration_rls.MigrationRlsBracket` to wrap the run: it
 lifts `FORCE` for the duration of the migration transaction and restores
-it on the way out — and does nothing at all where the role already
+it on the way out, and does nothing at all where the role already
 bypasses RLS (dev, CI), so no locks are taken there.
+
+**Since 2026-09-14 it lifts `FORCE` only when there is a revision to
+apply.** Lifting it takes an `ACCESS EXCLUSIVE` per forced table, and an
+upgrade with nothing to apply used to take 174 of them (out of 183
+statements) under a 5s `lock_timeout`: release 2.3.34 carried no
+migration at all and its migrate Job still failed twice out of three,
+each time on `ALTER TABLE public."memberships" NO FORCE ROW LEVEL
+SECURITY`. What makes the condition safe rather than merely cheap is the
+`on_version_apply` guard: if the prediction is ever wrong, the migration
+that ran unprepared fails its own transaction instead of silently
+committing a no-op backfill. So a migrate Job that says `no revision to
+apply; FORCE ROW LEVEL SECURITY left alone` has done exactly nothing to
+the catalog, on purpose.
 
 That fix exists because documenting the trap was not enough. This
 section has described it since the 0011/0013 incident, and `0016`,

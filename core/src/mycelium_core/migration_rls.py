@@ -47,9 +47,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
+
+if TYPE_CHECKING:  # alembic is a migration-time dependency, not a runtime one
+    from alembic.runtime.migration import MigrationContext
 
 # Gli ALTER sono modifiche di solo catalogo (istantanee), ma prendono un
 # ACCESS EXCLUSIVE: se una query lunga tiene la tabella, meglio fallire
@@ -141,3 +145,107 @@ def owner_sees_all_tenants(
             f"{len(missing)} tabelle: {', '.join(missing)}"
         )
     log(f"rls: FORCE ripristinato su {len(restored)} tabelle")
+
+
+def migration_steps_pending(migration_context: MigrationContext) -> bool | None:
+    """Whether this alembic run is going to apply anything at all.
+
+    ``None`` means "could not tell", and a caller must read it as a yes:
+    being wrong that way costs locks, being wrong the other way costs a
+    backfill that touches zero rows in silence, which is the very defect
+    this module exists to close.
+
+    It asks the same function ``run_migrations()`` will iterate over
+    (``_migrations_fn``, the work function ``alembic.command`` installs)
+    instead of comparing the database revision against the script head.
+    That public comparison is equivalent only for ``upgrade head``: it
+    answers wrong for ``upgrade <intermediate>``, for ``downgrade`` and
+    for ``stamp``. Measured: ``_upgrade_revs`` returns a plain list built
+    from the revision map, so asking here and letting ``run_migrations``
+    ask again costs nothing and touches no database.
+
+    What it does not cover: the attribute is private, so an alembic
+    upgrade can take it away. Hence ``None`` rather than an exception (an
+    upgrade must not break a release, only bring back the locks it used
+    to take), and hence the ``on_version_apply`` guard that catches a
+    wrong answer.
+    """
+    fn = getattr(migration_context, "_migrations_fn", None)
+    if fn is None:
+        return None
+    try:
+        steps = list(fn(migration_context.get_current_heads(), migration_context))
+    except Exception:
+        # Deliberately wide: any surprise here must degrade to the old
+        # behaviour (prepare anyway), never fail a release. A target alembic
+        # itself rejects raises the same error a moment later, from
+        # run_migrations, where it belongs.
+        return None
+    return bool(steps)
+
+
+class MigrationRlsBracket:
+    """The RLS preparation, and the guard that checks it was not skipped.
+
+    Two points that have to agree. ``around`` decides whether to lift
+    FORCE, and lifts it only when there is at least one revision to
+    apply. ``on_version_apply`` checks afterwards that no migration ran
+    outside that bracket.
+
+    Why the decision is not enough on its own: if ``migration_steps_pending``
+    answers "nothing to do" and is wrong, the migration runs without the
+    owner seeing the tenants, which is the original defect back and just
+    as mute. The guard makes it loud and harmless instead. It arrives
+    after the migration has run (alembic calls the callbacks AFTER
+    ``step.migration_fn``, checked in the 1.18.4 source), too late to
+    prepare but in time to fail the transaction, which rolls back the
+    migration that ran against nothing.
+
+    The measurement that decided the cut: on a database already at head,
+    ``upgrade head`` emitted 174 ``ALTER ... ROW LEVEL SECURITY`` out of
+    183 statements. Release 2.3.34, which carried no migration at all,
+    failed two attempts out of three on ``lock_timeout`` on one of them.
+
+    What it does not cover: a release that does carry a migration still
+    lifts FORCE on every forced table, because a migration does not
+    declare which tables its backfills touch. That is a wider change than
+    this one.
+    """
+
+    def __init__(self, conn: Connection, *, log: Callable[[str], None] = print) -> None:
+        self._conn = conn
+        self._log = log
+        self._prepared = False
+
+    @contextmanager
+    def around(self, migration_context: MigrationContext) -> Iterator[None]:
+        pending = migration_steps_pending(migration_context)
+        if pending is False:
+            self._log("rls: no revision to apply; FORCE ROW LEVEL SECURITY left alone")
+            yield
+            return
+        if pending is None:
+            self._log(
+                "rls: could not tell whether there is anything to migrate, preparing "
+                "anyway (alembic changed its work function: see migration_steps_pending)"
+            )
+        with owner_sees_all_tenants(self._conn, log=self._log):
+            self._prepared = True
+            try:
+                yield
+            finally:
+                self._prepared = False
+
+    def on_version_apply(self, **kw: object) -> None:
+        """Refuse a migration that ran outside the preparation bracket."""
+        if self._prepared:
+            return
+        step = kw.get("step")
+        raise RuntimeError(
+            f"rls: migration {step} ran WITHOUT the bracket that lifts FORCE ROW "
+            "LEVEL SECURITY, so its backfills may have touched zero rows in every "
+            "tenant without saying so. The transaction is being rolled back, so "
+            "nothing was applied. Cause: migration_steps_pending() answered "
+            "'nothing to apply' and was wrong; recheck it against the installed "
+            "alembic version."
+        )

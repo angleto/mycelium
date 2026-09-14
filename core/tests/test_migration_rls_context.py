@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -142,3 +143,183 @@ def test_un_errore_non_lascia_force_spento(monkeypatch: pytest.MonkeyPatch) -> N
 # Che un ruolo non privilegiato veda zero righe senza il GUC e' gia'
 # asserito da test_rls.py::test_fail_closed_without_guc, sul ruolo
 # runtime e con il setup a due ruoli: non lo si duplica qui.
+
+
+# --- Lifting FORCE only when a migration actually runs -----------------------
+#
+# The tests below are in English while the ones above are not: the rule is that
+# new code is written in English, and it binds what is added, not what is here.
+
+
+def _count_rls_alters() -> tuple[dict[str, int], object]:
+    """Count ALTER ... ROW LEVEL SECURITY on every engine, until removed.
+
+    env.py builds its own engine, so the listener goes on the Engine class:
+    there is no other handle on the connection alembic will use.
+    """
+    seen = {"alters": 0, "statements": 0}
+
+    def spy(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        seen["statements"] += 1
+        if "ROW LEVEL SECURITY" in statement.upper():
+            seen["alters"] += 1
+
+    sa.event.listen(sa.engine.Engine, "before_cursor_execute", spy)
+    return seen, spy
+
+
+def test_a_release_with_no_migration_does_not_touch_the_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one that was red before the fix, and it is the release that failed.
+
+    2.3.34 carried no migration at all, and its migrate Job still emitted 174
+    ALTER ... ROW LEVEL SECURITY (out of 183 statements), each an ACCESS
+    EXCLUSIVE under a 5s lock_timeout. Two attempts out of three died on one of
+    them. An upgrade that applies nothing must leave the catalog alone.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    import mycelium_core.migration_rls as m
+
+    url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
+    if not url:
+        pytest.skip("MYCELIUM_DATABASE_URL_SYNC non impostata")
+
+    # Production's condition: managed PostgreSQL, owner role is not superuser.
+    # Without this the bracket short-circuits and the test measures nothing.
+    monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+
+    root = Path(__file__).resolve().parents[2]
+    seen, spy = _count_rls_alters()
+    try:
+        command.upgrade(Config(str(root / "core" / "alembic.ini")), "head")
+    finally:
+        sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
+
+    assert seen["alters"] == 0, (
+        f"an upgrade with nothing to apply emitted {seen['alters']} "
+        "ALTER ... ROW LEVEL SECURITY; each one is an ACCESS EXCLUSIVE on a "
+        "production table"
+    )
+
+
+def _context_with_steps(conn: sa.Connection, steps: list[object]) -> object:
+    """A real MigrationContext whose work function returns ``steps``.
+
+    Same shape alembic.command installs: a callable taking (heads, context).
+    """
+    from alembic.runtime.migration import MigrationContext
+
+    return MigrationContext.configure(connection=conn, opts={"fn": lambda _h, _c: steps})
+
+
+def test_pending_steps_answers_both_ways() -> None:
+    from mycelium_core.migration_rls import migration_steps_pending
+
+    with _conn() as conn:
+        assert migration_steps_pending(_context_with_steps(conn, [])) is False
+        assert migration_steps_pending(_context_with_steps(conn, ["a step"])) is True
+
+
+def test_pending_steps_says_unknown_rather_than_raising() -> None:
+    """An alembic upgrade that renames the work function must cost locks, not
+    a broken release: the answer degrades to None, which reads as a yes."""
+    from mycelium_core.migration_rls import migration_steps_pending
+
+    class _NoWorkFunction:
+        pass
+
+    assert migration_steps_pending(_NoWorkFunction()) is None  # type: ignore[arg-type]
+
+
+def test_the_bracket_still_lifts_when_there_is_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half: the condition must not break the case the module exists
+    for. With a step to apply, FORCE is lifted on every forced table and put
+    back exactly as it was."""
+    import mycelium_core.migration_rls as m
+
+    with _conn(transaction=True) as conn:
+        before = forced_tables(conn)
+        assert before, "lo schema dovrebbe avere tabelle con FORCE"
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        bracket = m.MigrationRlsBracket(conn, log=lambda _msg: None)
+        with bracket.around(_context_with_steps(conn, ["a step"])):
+            assert forced_tables(conn) == [], "inside the bracket the owner sees every tenant"
+        assert forced_tables(conn) == before
+
+
+def test_the_bracket_skips_when_there_is_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import mycelium_core.migration_rls as m
+
+    with _conn(transaction=True) as conn:
+        before = forced_tables(conn)
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        bracket = m.MigrationRlsBracket(conn, log=lambda _msg: None)
+        with bracket.around(_context_with_steps(conn, [])):
+            assert forced_tables(conn) == before, "nothing to apply: no ALTER at all"
+        assert forced_tables(conn) == before
+
+
+def test_a_migration_outside_the_bracket_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What makes the condition safe rather than merely cheap.
+
+    If the prediction is wrong, the migration runs unprepared and its backfills
+    touch zero rows in silence, which is the original defect. The guard turns
+    that into a loud failure inside the migration transaction, so nothing is
+    left applied."""
+    import mycelium_core.migration_rls as m
+
+    with _conn(transaction=True) as conn:
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        bracket = m.MigrationRlsBracket(conn, log=lambda _msg: None)
+
+        with pytest.raises(RuntimeError, match="WITHOUT the bracket"):
+            bracket.on_version_apply(ctx=None, step="0099_something", heads=set(), run_args={})
+
+        # And it stays quiet for a migration that did run inside the bracket.
+        with bracket.around(_context_with_steps(conn, ["a step"])):
+            bracket.on_version_apply(ctx=None, step="0099_something", heads=set(), run_args={})
+
+
+def test_the_guard_is_wired_into_env_py(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard is only worth what its wiring is worth.
+
+    Every other test here calls the bracket directly, so none of them would
+    notice ``on_version_apply=`` being dropped from ``context.configure`` in
+    env.py, which is precisely the mistake that would leave a wrong prediction
+    silent again. So: make the prediction lie, run a real migration step
+    through the real env.py, and require that it is refused and rolled back.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    import mycelium_core.migration_rls as m
+
+    url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
+    if not url:
+        pytest.skip("MYCELIUM_DATABASE_URL_SYNC non impostata")
+
+    root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(root / "core" / "alembic.ini"))
+
+    def _revision() -> str | None:
+        with _conn() as conn:
+            return conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+
+    before = _revision()
+    # The lie: "nothing to apply" while a downgrade step is about to run.
+    monkeypatch.setattr(m, "migration_steps_pending", lambda _ctx: False)
+    try:
+        with pytest.raises(RuntimeError, match="WITHOUT the bracket"):
+            command.downgrade(cfg, "-1")
+        assert _revision() == before, (
+            "the guard fired but the transaction was not rolled back: the schema moved"
+        )
+    finally:
+        monkeypatch.undo()
+        # Belt and braces: if the rollback above ever fails, the shared test
+        # database must not be left one revision behind for every later test.
+        if _revision() != before:
+            command.upgrade(cfg, "head")
