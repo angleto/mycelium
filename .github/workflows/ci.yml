@@ -75,6 +75,13 @@ jobs:
         run: |
           PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
             -v ON_ERROR_STOP=1 -f deploy/local/harden_function_acls.sql
+      # The suite refuses to start against a database that has not been
+      # declared disposable. CI is not an exception to that check: a guard
+      # with an exception only protects the people who already knew.
+      - name: Mark this database as disposable
+        run: |
+          PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
+            -v ON_ERROR_STOP=1 -f deploy/local/mark_test_database.sql
       - name: Tests
         run: uv run pytest -q
 

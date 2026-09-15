@@ -29,7 +29,25 @@ _HARDEN_ACLS_SQL = pathlib.Path(__file__).parent / "deploy" / "local" / "harden_
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _reproduce_prod_function_acls() -> None:
+def _refuse_a_database_that_is_not_for_tests() -> None:
+    """Stop before the first write if the target has not been declared
+    disposable. See ``_test_db_guard`` for why the check is a marker table
+    and not a name or an environment variable.
+
+    Everything below that touches the database takes this fixture as an
+    argument. Declaration order between two autouse fixtures of the same
+    scope is not a contract worth resting a destructive operation on; a
+    parameter is an edge in the dependency graph, and pytest honours it."""
+    from _test_db_guard import assert_test_database
+
+    from mycelium_core.config import get_settings
+
+    settings = get_settings()
+    assert_test_database(sync_url=settings.database_url_sync, async_url=settings.database_url)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _reproduce_prod_function_acls(_refuse_a_database_that_is_not_for_tests: None) -> None:
     """Make the test DB execute-posture match production (ADR-0015).
 
     Production grants the runtime role ``mycelium_app`` only what is

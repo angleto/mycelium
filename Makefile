@@ -1,4 +1,5 @@
-.PHONY: sync lint fmt type test web-check eval eval-humus eval-bench mcp-coverage mcp-coverage-check up down \
+.PHONY: sync lint fmt type test test-db-up test-db-down web-check eval eval-humus eval-bench \
+        mcp-coverage mcp-coverage-check up down \
         db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
@@ -23,6 +24,56 @@ type:
 
 test:
 	uv run pytest
+
+# --- the throwaway test database -------------------------------------------
+#
+# The suite refuses to start against a database that has not been marked
+# disposable (see _test_db_guard.py). This is the recipe that produces one,
+# and it is the CI job's, run end-to-end.
+#
+# Do NOT point the suite at the local development stack (`make up`, host
+# port 5433). Its data is real enough to miss, and the ACL hardening the
+# suite applies is not something anybody undoes.
+#
+# TWO THINGS MEASURED, both of which cost an hour the first time:
+#
+#  * `pg_isready` turns true DURING initdb, against the entrypoint's
+#    temporary server, so it is not a readiness signal here. The loop below
+#    waits for a real query instead.
+#  * the suite takes about 31 minutes on a VIRGIN database, and the rows
+#    accumulate: the same suite on the same container a second time took
+#    51 minutes, and on a development database after eight runs it had not
+#    finished in 90. Recreate the container per run rather than reusing it.
+TEST_DB_CONTAINER ?= mycelium-test-fresh
+TEST_DB_PORT ?= 5439
+TEST_DB_SYNC := postgresql+psycopg://mycelium:mycelium@localhost:$(TEST_DB_PORT)/mycelium
+TEST_DB_ASYNC := postgresql+asyncpg://mycelium_app:mycelium_app@localhost:$(TEST_DB_PORT)/mycelium
+
+test-db-up:
+	@docker rm -f $(TEST_DB_CONTAINER) >/dev/null 2>&1 || true
+	docker run -d --name $(TEST_DB_CONTAINER) --tmpfs /var/lib/postgresql/data \
+	  -e POSTGRES_USER=mycelium -e POSTGRES_PASSWORD=mycelium -e POSTGRES_DB=mycelium \
+	  -p $(TEST_DB_PORT):5432 pgvector/pgvector:pg16
+	@echo "waiting for a real query (pg_isready is true during initdb)..."
+	@until PGPASSWORD=mycelium psql -h localhost -p $(TEST_DB_PORT) -U mycelium \
+	  -d mycelium -tAc "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+	PGPASSWORD=mycelium psql -h localhost -p $(TEST_DB_PORT) -U mycelium -d mycelium \
+	  -q -v ON_ERROR_STOP=1 -v app_pw=mycelium_app -f deploy/local/bootstrap_roles.sql
+	MYCELIUM_DATABASE_URL_SYNC="$(TEST_DB_SYNC)" MYCELIUM_DATABASE_URL="$(TEST_DB_ASYNC)" \
+	  MYCELIUM_DB_APP_PASSWORD=mycelium_app uv run alembic -c core/alembic.ini upgrade head
+	PGPASSWORD=mycelium psql -h localhost -p $(TEST_DB_PORT) -U mycelium -d mycelium \
+	  -q -v ON_ERROR_STOP=1 -f deploy/local/harden_function_acls.sql
+	PGPASSWORD=mycelium psql -h localhost -p $(TEST_DB_PORT) -U mycelium -d mycelium \
+	  -q -v ON_ERROR_STOP=1 -f deploy/local/mark_test_database.sql
+	@echo
+	@echo "Ready. Export these, then run the suite (about 31 minutes):"
+	@echo "    export MYCELIUM_DATABASE_URL='$(TEST_DB_ASYNC)'"
+	@echo "    export MYCELIUM_DATABASE_URL_SYNC='$(TEST_DB_SYNC)'"
+	@echo "    export MYCELIUM_DB_APP_PASSWORD=mycelium_app"
+
+test-db-down:
+	docker rm -f $(TEST_DB_CONTAINER)
+
 
 # The SPA gate, matching what CI's `web` job runs. Worth a target of its
 # own: `tsc --noEmit` from the repo root silently checks NOTHING (the root

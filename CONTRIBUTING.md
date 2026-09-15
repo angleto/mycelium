@@ -28,6 +28,37 @@ the same sequences CI's `web` and `extension` jobs do, in the same order, so
 a green local run means the same thing a green job does; the browser suite
 (`pnpm e2e` in `web/`) needs the stack up and is not part of either.
 
+### The database `make test` runs against
+
+`make test` needs one, and the suite **refuses to start** against a database
+that has not been declared disposable. That is not ceremony: the fixtures
+create organizations, and one of them rewrites the target's function ACLs to
+reproduce the production execute posture. Neither is undone.
+
+```
+make test-db-up     # throwaway container, roles, migrations, ACLs, marker
+make test           # about 31 minutes on a clean database
+make test-db-down
+```
+
+`test-db-up` prints the three variables to export. **Do not point the suite
+at the local stack below**: `make up` is a database whose contents you would
+miss, and the refusal exists because the natural way to recover from "nothing
+listening on 5432" is to look for the Postgres that is running and find that
+one.
+
+Two things worth knowing before the first run, both measured. The suite takes
+about 31 minutes on a virgin database, so it is not hung. And the rows
+accumulate: the same suite on the same container a second time took 51
+minutes, and on a development database after eight runs it had not finished in
+90. Recreate the container per run rather than reusing it.
+
+To mark a different throwaway database by hand:
+
+```
+psql "$MYCELIUM_DATABASE_URL_SYNC" -f deploy/local/mark_test_database.sql
+```
+
 ## Local stack
 
 ```
