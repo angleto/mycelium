@@ -92,8 +92,25 @@ async def enforce_route_scope(
         return
     token = credentials.credentials
     if capability_tokens.is_capability_token(token):
-        # A capability token carries its own action/resource authorization,
-        # validated where it is redeemed. It is not an assistant credential.
+        # A capability carries its own ACTION and RESOURCE, checked where it
+        # is redeemed. It does not carry the AUTHORITY behind them, and this
+        # gate used to return here on the strength of a comment that said it
+        # did.
+        #
+        # What that left: a scoped assistant mints a capability, and the
+        # credential it hands on authenticates on a branch where
+        # ``assistant_scope`` is absent, so ``require_agent_scope`` returns
+        # at its first line and every per-route check passes. The grant was
+        # decided once, at mint, and frozen -- which is the ambient
+        # authority SEC-09 forbids, not a narrow delegation.
+        #
+        # So the gate resolves the credential that MINTED it and applies
+        # that credential's scope to this route. The capability becomes a
+        # delegation of a LIVE authority: revoke the agent token and every
+        # capability it minted stops working; narrow the assistant's scope
+        # and they narrow with it. A capability a person minted records no
+        # agent token and is unaffected.
+        await _gate_minted_capability(request, token)
         return
     if not agent_tokens_svc.is_agent_token(token):
         return  # human session JWT
@@ -111,6 +128,58 @@ async def enforce_route_scope(
     path = getattr(route, "path", None)
     if path is None:
         return  # unmatched -> 404 handling; nothing to gate
+    if not route_scopes.scope_permits(request.method, path, scope):
+        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
+
+
+async def _gate_minted_capability(request: Request, token: str) -> None:
+    """Apply the MINTING credential's scope to a capability redemption.
+
+    Costs one extra hash lookup on a path that already does one at
+    redemption. Paid deliberately: the alternative is to carry the
+    verdict on ``request.state`` between two dependencies that do not
+    otherwise speak, and a security check that depends on two things
+    running in the right order is the kind that stops running.
+
+    Silent on every failure to resolve, because this gate must not be the
+    thing that turns a bad capability into a new error shape: an unknown,
+    expired, consumed or revoked token is refused by the redemption
+    dependency, with the message that path already has.
+    """
+    princ = await capability_tokens.authenticate(token)
+    if princ is None:
+        return
+    # Inside a TENANT session for the capability's own org. ``authenticate``
+    # crossed the boundary through the SECURITY DEFINER lookup and told us
+    # which org this grant belongs to; everything after is ordinary,
+    # RLS-checked reading. A no-tenant session is fail-closed on these
+    # tables, so doing it there would find nothing and read as "no
+    # restriction" -- a check that fails open because of where it ran.
+    async with tenant_session(str(princ.org_id), str(princ.user_id)) as s:
+        minted_by = (
+            await s.execute(
+                text("SELECT minted_by_agent_token_id FROM capability_tokens WHERE id = :i"),
+                {"i": princ.token_id},
+            )
+        ).scalar()
+        if minted_by is None:
+            return  # minted by a person's own bearer: nothing to inherit
+        authority = await agent_tokens_svc.minter_authority(s, minted_by)
+    if authority is None:
+        # The credential behind this grant is revoked, expired or gone.
+        # Refused, and the distinction from the branch above is the whole
+        # point: "no minter recorded" means a person made it and there is
+        # nothing to inherit; "minter gone" means the authority this grant
+        # delegates no longer exists. Reading them the same way is how a
+        # revoked agent token would keep acting through what it handed out.
+        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
+    scope = authority.scope
+    if scope is None:
+        return  # a bare token: no per-route restriction to inherit
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return
     if not route_scopes.scope_permits(request.method, path, scope):
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
 

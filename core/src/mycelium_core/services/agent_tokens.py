@@ -36,6 +36,7 @@ from mycelium_core.db import admin_session
 from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_token import AgentToken, WorkspaceBinding
+from mycelium_core.models.ai_assistant import AiAssistant
 from mycelium_core.models.membership import Role
 from mycelium_core.services import audit
 from mycelium_core.services.rbac import require_role
@@ -307,6 +308,66 @@ async def _call_authenticate_fn(
 _ASSISTANT_ACTOR_KINDS = frozenset({"agent_run", "mcp_token"})
 
 
+@dataclass(frozen=True, slots=True)
+class MinterAuthority:
+    """What a minting credential may still do.
+
+    ``scope is None`` means a bare token: bound to no assistant, so no
+    per-route restriction. A LIST is the assistant's scope, possibly
+    empty (deny-all, the fail-closed reading of a malformed column).
+
+    Returned inside an object rather than as a bare ``list | None``
+    because the CALLER has a third case to tell apart -- the credential
+    is gone -- and the bare shape invites conflating "gone" with "bare".
+    Those two must not agree: one means no restriction, the other means
+    the authority behind this grant no longer exists.
+    """
+
+    scope: list[str] | None
+
+
+async def minter_authority(session: AsyncSession, token_id: uuid.UUID) -> MinterAuthority | None:
+    """The live authority of the agent token that minted a grant, or None
+    when that credential no longer authorises anything -- revoked,
+    expired, or bound to a deactivated assistant.
+
+    Used to apply a MINTING credential's authority to a capability it
+    handed on (task 1428a184), where the raw token is not available:
+    only the id recorded on the grant.
+
+    Takes the caller's TENANT session on purpose. These tables are
+    org-scoped and a no-tenant session is fail-closed on them, so the
+    same lookup run there would find nothing and -- if None meant "no
+    restriction" -- read as full access. A security check that fails open
+    because of WHERE it ran is the worst kind, because it passes review.
+
+    Fails CLOSED on a malformed scope column, the same reading
+    ``authenticate`` uses: a second normalisation of one column is how
+    two answers to one question come to disagree.
+    """
+    row = (
+        await session.execute(
+            select(AiAssistant.scope, AgentToken.assistant_id)
+            .outerjoin(AiAssistant, AgentToken.assistant_id == AiAssistant.id)
+            .where(
+                AgentToken.id == token_id,
+                AgentToken.revoked_at.is_(None),
+                AgentToken.expires_at > datetime.datetime.now(tz=datetime.UTC),
+            )
+        )
+    ).first()
+    if row is None:
+        return None  # revoked, expired, or gone: authorises nothing
+    raw_scope, assistant_id = row
+    if assistant_id is None:
+        return MinterAuthority(scope=None)  # bare token
+    if raw_scope is None:
+        return MinterAuthority(scope=None)
+    if isinstance(raw_scope, list):
+        return MinterAuthority(scope=[str(x) for x in raw_scope])
+    return MinterAuthority(scope=[])
+
+
 async def session_writes_as_assistant(session: AsyncSession) -> bool:
     """Whether this session must be treated as an assistant writing.
 
@@ -380,10 +441,12 @@ __all__ = [
     "RAW_PREFIX",
     "AuthenticatedAgent",
     "MintResult",
+    "MinterAuthority",
     "authenticate",
     "is_agent_token",
     "list_tokens",
     "mint",
+    "minter_authority",
     "revoke",
     "session_bound_assistant_id",
     "session_writes_as_assistant",

@@ -314,6 +314,12 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("PUT", "/users/{user_id}/calendar"): "calendar:write",
     # --- capabilities ---
     ("POST", "/capability/text-block"): HUMAN_ONLY,
+    # Revoking is the mirror of minting and gets the mint's own gate: the
+    # right to take a grant away is the right to make one. HUMAN_ONLY for
+    # the same reason the mint is -- a capability authenticates on a
+    # branch carrying no assistant scope, so the credential family is
+    # fenced off from scoped assistants at both ends.
+    ("POST", "/capability/{token_id}/revoke"): HUMAN_ONLY,
     # --- dependencies ---
     ("GET", "/dependencies"): "dependencies:read",
     ("POST", "/dependencies"): "dependencies:write",

@@ -21,10 +21,11 @@ import secrets
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.db import admin_session
+from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.capability_token import CapabilityToken
 from mycelium_core.models.membership import Role
 from mycelium_core.services import audit
@@ -38,6 +39,13 @@ _PREFIX_CHARS: int = 16
 # Short by design: a capability token is handed out for one imminent
 # operation, not stored. Five minutes covers a stream + a retry.
 DEFAULT_TTL_SECONDS: int = 300
+
+#: The ceiling on a capability's lifetime, in seconds. One hour, the number
+#: the REST request schema already bounded to; stated here so both surfaces
+#: share it instead of one enforcing it and the other not (task 1428a184).
+#: A capability authenticates on a branch carrying no assistant scope, so its
+#: lifetime is the only thing limiting what a leaked one can still do.
+MAX_TTL_SECONDS: int = 3600
 
 # Capability kinds. Named constants so the minting tool, the verifier
 # scope-check, and the tests all agree on the exact strings.
@@ -186,10 +194,27 @@ async def mint(
     caller's tenant session, so the INSERT is RLS-checked against the
     current org."""
     await require_role(session, org_id, actor_id, Role.member)
+    # The ceiling lives HERE, not on one surface's request schema. It used
+    # to live only on the REST body (``ge=1, le=3600``), so the MCP twins
+    # -- which call this function directly -- could mint a credential with
+    # an arbitrary lifetime: a year, a decade. The two surfaces mint the
+    # same kind of token, so they get the same bound, and a bound written
+    # once cannot be the two different numbers two schemas drift into.
+    #
+    # Clamped rather than refused, deliberately: a caller asking for more
+    # than the ceiling wants a long-lived grant and is told, by the
+    # ``expires_at`` it gets back, that it did not get one. Refusing would
+    # add an error path to a call whose result already carries the answer.
     if ttl_seconds <= 0:
         ttl_seconds = DEFAULT_TTL_SECONDS
+    ttl_seconds = min(ttl_seconds, MAX_TTL_SECONDS)
     raw = _generate_raw()
     expires_at = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(seconds=ttl_seconds)
+    # Which CREDENTIAL is minting, read from the session rather than passed
+    # by the caller: every mint site already runs inside the tenant session
+    # that published it, so there is nothing to thread through eleven call
+    # sites and nothing a call site can forget to pass.
+    minted_by = await _session_agent_token_id(session)
     row = CapabilityToken(
         org_id=org_id,
         user_id=actor_id,
@@ -199,6 +224,7 @@ async def mint(
         resource_kind=resource_kind,
         resource_id=resource_id,
         expires_at=expires_at,
+        minted_by_agent_token_id=minted_by,
     )
     session.add(row)
     await session.flush()
@@ -212,6 +238,29 @@ async def mint(
         diff={"action": action, "resource_kind": resource_kind, "resource_id": str(resource_id)},
     )
     return MintResult(token_id=row.id, raw=raw, expires_at=expires_at)
+
+
+async def _session_agent_token_id(session: AsyncSession) -> uuid.UUID | None:
+    """The agent-token row id this session is acting under, or None.
+
+    ``app.current_actor_subject`` carries a capability-token id on the
+    redemption path and an ``agent_runs`` id inside the dispatch runtime,
+    so a value that resolves to no agent token means "not minted by an
+    agent credential" and is recorded as NULL. The join is what makes that
+    a fact rather than a guess.
+    """
+    raw = (
+        await session.execute(text("SELECT current_setting('app.current_actor_subject', true)"))
+    ).scalar()
+    if not raw:
+        return None
+    try:
+        candidate = uuid.UUID(str(raw))
+    except ValueError:
+        return None
+    return (
+        await session.execute(select(AgentToken.id).where(AgentToken.id == candidate))
+    ).scalar_one_or_none()
 
 
 async def authenticate(
@@ -276,6 +325,34 @@ async def consume(session: AsyncSession, *, token_id: uuid.UUID) -> bool:
     return int(getattr(result, "rowcount", 0) or 0) == 1
 
 
+async def revoke(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, token_id: uuid.UUID
+) -> bool:
+    """Withdraw a capability before it expires. True if this call revoked
+    it, False if it was already revoked, consumed or gone.
+
+    Member-gated, like the mint: the floor to take a grant away is the
+    floor to make one. RLS scopes the UPDATE to the caller's workspace,
+    so a token id from another tenant simply matches no row and comes
+    back False -- absent rather than forbidden, which is what a caller
+    holding an id it should not know must be told.
+
+    The revocation BITES because the SECURITY DEFINER authenticator reads
+    ``revoked_at`` (migration 0015). A column the gate did not check
+    would have been a revoke button that revokes nothing, which is worse
+    than none: somebody would press it and stop worrying.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    result = await session.execute(
+        text(
+            "UPDATE capability_tokens SET revoked_at = now(), updated_at = now() "
+            "WHERE id = :id AND revoked_at IS NULL AND consumed_at IS NULL"
+        ),
+        {"id": token_id},
+    )
+    return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
 __all__ = [
     "ACTION_ANNOTATION_BODY_PATCH",
     "ACTION_ANNOTATION_BODY_READ",
@@ -303,6 +380,7 @@ __all__ = [
     "consume",
     "is_capability_token",
     "mint",
+    "revoke",
     "text_block_action",
     "text_block_resource_kind",
 ]

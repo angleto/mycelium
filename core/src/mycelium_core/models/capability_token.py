@@ -64,6 +64,34 @@ class CapabilityToken(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     consumed_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Revocation, which the table had no way to express (task 1428a184):
+    # a minted capability could only be waited out. That is tolerable at
+    # five minutes and not at the ceiling, and it is no answer at all for
+    # one that leaked -- the raw value is handed back once, and whoever
+    # minted it could not take it away again.
+    #
+    # A column rather than a DELETE, for the reason ``consumed_at`` is one:
+    # the row is the audit trail of a grant that existed, and a grant
+    # somebody revoked is exactly the one worth being able to see later.
+    revoked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The CREDENTIAL that minted this grant, or NULL when a person's own
+    # bearer did. Without it the grant was a snapshot of an authority
+    # nobody could re-check: the scope gate returns early for a capability
+    # because "it carries its own action/resource authorization", which is
+    # true of the action and false of the AUTHORITY behind it.
+    #
+    # With it the capability is a DELEGATION of a live authority: the gate
+    # resolves this token and applies ITS scope to the route, so revoking
+    # the agent token revokes every capability it minted and narrowing an
+    # assistant's scope narrows them too. That is what SEC-09 asks for --
+    # authorization re-evaluated per request, never frozen into a grant.
+    minted_by_agent_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 __all__ = ["CapabilityToken"]

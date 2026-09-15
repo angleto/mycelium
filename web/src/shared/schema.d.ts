@@ -6067,6 +6067,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/capability/{token_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Capability
+         * @description Withdraw a capability before it expires (task 1428a184).
+         *
+         *     Until this existed a minted grant could only be waited out, which is
+         *     tolerable at the five-minute default and no answer at all for one
+         *     that leaked: the raw value is handed back exactly once, so whoever
+         *     minted it could not take it away again.
+         *
+         *     ``revoked`` is "did THIS call do it": false means the grant was
+         *     already revoked, already consumed, expired, or belongs to another
+         *     workspace. Absent rather than forbidden on that last one -- a caller
+         *     holding an id it should not know learns nothing about whether the id
+         *     exists. Member-gated, the same floor as the mint: the right to take a
+         *     grant away is the right to make one.
+         */
+        post: operations["revoke_capability_capability__token_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/issuer-profiles": {
         parameters: {
             query?: never;
@@ -8535,6 +8567,18 @@ export interface components {
             timezone: string;
             /** Version */
             version: number;
+        };
+        /**
+         * CapabilityRevokeOut
+         * @description ``revoked`` is "did THIS call do it", the same shape ``consume``
+         *     reports: false means already revoked, already consumed, expired, or
+         *     in another workspace. A caller retrying after a timeout can tell its
+         *     own retry from a race it lost, and one holding an id it should not
+         *     know learns nothing about whether that id exists.
+         */
+        CapabilityRevokeOut: {
+            /** Revoked */
+            revoked: boolean;
         };
         /** ClientCreateIn */
         ClientCreateIn: {
@@ -28422,6 +28466,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TextBlockCapabilityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_capability_capability__token_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityRevokeOut"];
                 };
             };
             /** @description Validation Error */

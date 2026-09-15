@@ -3146,6 +3146,16 @@ class TextBlockCapabilityIn(BaseModel):
     ttl_seconds: int = Field(default=300, ge=1, le=3600)
 
 
+class CapabilityRevokeOut(BaseModel):
+    """``revoked`` is "did THIS call do it", the same shape ``consume``
+    reports: false means already revoked, already consumed, expired, or
+    in another workspace. A caller retrying after a timeout can tell its
+    own retry from a race it lost, and one holding an id it should not
+    know learns nothing about whether that id exists."""
+
+    revoked: bool
+
+
 class TextBlockCapabilityOut(BaseModel):
     # ``token`` is the raw ``mycelium_cap_`` value, returned exactly once. The
     # caller hits the matching raw / stream / patch route with
