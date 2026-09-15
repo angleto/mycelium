@@ -283,23 +283,46 @@ async def _log_parts_revision(
     )
 
 
-async def _assert_not_promoted(
+async def _assert_part_writable(
     session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
 ) -> None:
-    """Enforce the read-only invariant of a transplanted note (docs/adr/0029
-    D2): a note promoted to a task (``promoted_at IS NOT NULL``) is read-only
-    at the service layer, so every CONTENT mutation (note title/body + any
-    part create/update/append/prepend/replace/delete/reorder/merge) is
-    refused with ``NOTE_PROMOTED_READONLY`` -- mirroring the existing
-    ``set_maturity`` / link guards in ``note_links``. A missing note resolves
-    to ``None`` here and is left to the mutator's own ``NOT_FOUND`` path."""
-    promoted_at = (
+    """Whether this note's parts may be written AT ALL, for any reason.
+
+    Two clauses, one query, and the name says what it enforces rather
+    than which single condition it started as.
+
+    ``promoted_at IS NOT NULL`` -- a note transplanted to a task is
+    read-only at the service layer (docs/adr/0029 D2), so every CONTENT
+    mutation (create / update / append / prepend / replace / delete /
+    reorder / merge) is refused.
+
+    ``protected`` -- a protected note refuses a bound assistant's
+    credential (task d60bb089). The same rule ``_note_set`` applies to
+    the note row; here because the part mutators do not go through it.
+    Enumerating the sites by hand does not work: ``append_to_part``,
+    ``prepend_to_part`` and ``replace_in_part`` call ``optimistic_update``
+    directly and never delegate to ``update_part``, so a guard placed
+    there would have missed three of them.
+
+    A missing note resolves to nothing here and is left to the mutator's
+    own NOT_FOUND path."""
+    row = (
         await session.execute(
-            select(Note.promoted_at).where(Note.id == note_id, Note.org_id == org_id)
+            select(Note.promoted_at, Note.protected).where(
+                Note.id == note_id, Note.org_id == org_id
+            )
         )
-    ).scalar_one_or_none()
+    ).first()
+    if row is None:
+        return
+    promoted_at, protected = row
     if promoted_at is not None:
         raise DomainError(MessageCode.NOTE_PROMOTED_READONLY)
+    if protected:
+        from mycelium_core.services.agent_tokens import session_writes_as_assistant
+
+        if await session_writes_as_assistant(session):
+            raise DomainError(MessageCode.NOTE_PROTECTED_AGENT_WRITE)
 
 
 async def _actor_identity_id(
@@ -352,7 +375,7 @@ async def create_part(
     writer of a part."""
     await require_role(session, org_id, actor_id, Role.member)
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=note_id)
     text_patch.assert_body_within_cap(body, max_bytes=get_settings().note_body_max_bytes)
     if ord is None:
         max_ord = (
@@ -475,7 +498,7 @@ async def update_part(
     revision row coalesces."""
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     values: dict[str, Any] = {}
     if body is not None:
         values["body"] = body
@@ -617,7 +640,7 @@ async def append_to_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     # Idempotent replay: cursor advanced by exactly one and the tail is
     # already this chunk -> the previous attempt landed; treat as no-op.
@@ -689,7 +712,7 @@ async def prepend_to_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     new_body = text + body
     text_patch.assert_body_within_cap(new_body, max_bytes=get_settings().note_body_max_bytes)
@@ -759,7 +782,7 @@ async def replace_in_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     occurrences = body.count(find) if find else 0
     if occurrences == 0:
@@ -837,7 +860,7 @@ async def trash_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     if expected_version is not None and part.version != expected_version:
         raise ConflictError(MessageCode.CONFLICT_STALE_VERSION, current_version=int(part.version))
     session.add(
@@ -903,7 +926,7 @@ async def restore_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     entry = await _get_trashed(session, org_id=org_id, part_id=part_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=entry.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=entry.note_id)
     # The note itself may have been deleted (and its trash rows cascade
     # with it), but a note can also have been emptied of parts; validate
     # it is still there so the re-INSERT cannot violate the FK.
@@ -1050,7 +1073,7 @@ async def delete_part(
             diff={"note_id": str(entry.note_id), "ord": str(entry.ord), "from": "trash"},
         )
         return
-    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=part.note_id)
     # Drop the part's search blob inline first: the index pointer cascades
     # with the part row (FK ON DELETE CASCADE), so a deferred flush would
     # no longer resolve the blob to delete. Deleting the blob now cascades
@@ -1099,7 +1122,7 @@ async def reorder_parts(
     """
     await require_role(session, org_id, actor_id, Role.member)
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=note_id)
     existing = await list_parts(session, org_id=org_id, note_id=note_id)
     if {p.id for p in existing} != set(part_ids):
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -1283,8 +1306,8 @@ async def merge_notes(
     # A transplanted note is read-only (docs/adr/0029 D2): block a merge that
     # would mutate a promoted source (its parts move out + soft-delete) or a
     # promoted target (it gains the source's parts).
-    await _assert_not_promoted(session, org_id=org_id, note_id=source_note_id)
-    await _assert_not_promoted(session, org_id=org_id, note_id=target_note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=source_note_id)
+    await _assert_part_writable(session, org_id=org_id, note_id=target_note_id)
 
     source_parts = await list_parts(session, org_id=org_id, note_id=source_note_id)
     target_parts = await list_parts(session, org_id=org_id, note_id=target_note_id)

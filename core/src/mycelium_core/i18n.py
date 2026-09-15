@@ -250,6 +250,7 @@ class MessageCode(enum.StrEnum):
     NOTE_MATURITY_INVALID = "note.maturity_invalid"
     NOTE_PROMOTED_READONLY = "note.promoted_readonly"
     NOTE_PROTECTED = "note.protected"
+    NOTE_PROTECTED_AGENT_WRITE = "note.protected.agent_write"
     NOTE_LINK_KIND_INVALID = "note.link.kind_invalid"
     NOTE_LINK_SELF = "note.link.self"
     NOTE_TASK_LINK_KIND_INVALID = "note.task_link.kind_invalid"
@@ -750,6 +751,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.NOTE_PROTECTED: (
             "This note is protected prose: the distiller never compacts it."
+        ),
+        # A DIFFERENT statement from the one above, and it needs its own
+        # code: that one is the distiller's semantics (nothing compacts
+        # this note), this one is a refusal addressed to whoever is
+        # writing. Reusing it would have told an agent that its write
+        # failed because of a compaction policy.
+        MessageCode.NOTE_PROTECTED_AGENT_WRITE: (
+            "This note is protected: an assistant's credential may not write it. "
+            "A person can, from the app or the CLI."
         ),
         MessageCode.NOTE_PART_NOT_TRASHED: (
             "No trashed note part with this id: it was never trashed, was already "

@@ -176,9 +176,24 @@ def _mock_note(**over: Any) -> Any:
         review_state=None,
         summary=None,
         deleted_at=None,
+        # The double carries every column the serializer reads, including
+        # the ones it only emits when set: a mock that omits one turns a
+        # projection change into an AttributeError instead of the
+        # assertion the test is for.
+        protected=False,
     )
     base.update(over)
     return SimpleNamespace(**base)
+
+
+def test_a_protected_note_says_so_and_an_ordinary_one_costs_nothing() -> None:
+    """The flag is the one thing that decides whether an assistant's write
+    will be refused (task d60bb089), so a caller must be able to read it
+    instead of discovering it by taking the refusal. Emitted only when
+    TRUE, like the other _compact fields: an ordinary note pays nothing
+    for a flag that is false on almost every row."""
+    assert "protected" not in _note(_mock_note(), [])
+    assert _note(_mock_note(protected=True), [])["protected"] is True
 
 
 def test_note_states_its_index_scope_at_either_value() -> None:

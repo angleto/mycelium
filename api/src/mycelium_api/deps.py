@@ -316,17 +316,28 @@ async def _tenant_scope(
     *,
     x_workspace_role: str | None,
     x_admin_mode: str | None,
+    actor_subject_id: str | None = None,
 ) -> AsyncIterator[TenantCtx]:
     """RLS-scoped tenant session shared by ``tenant_ctx`` and the
     part-body-stream dep: open the session as the human/api caller,
     resolve the sudo-clamped effective role, publish it for the
-    service-layer RBAC choke point, and yield the ctx. Behaviour is
-    identical to the original inline ``tenant_ctx`` body."""
+    service-layer RBAC choke point, and yield the ctx.
+
+    ``actor_subject_id`` is the agent-token row id when the bearer is an
+    agent token, and None for a human's JWT. It rides the same
+    ``set_config`` as ``actor_kind``, which is how a CORE guard can ask
+    what KIND OF CREDENTIAL is writing -- the services never see HTTP
+    claims. Without it the bearer branch published nothing, so a guard
+    written on the credential would have fenced MCP and left this, the
+    other door into the same services, open: exactly the asymmetry the
+    scope maps exist to prevent. The issuer-key and capability branches
+    already published theirs."""
     async with tenant_session(
         str(org_id),
         str(user.id),
         str(project_id) if project_id else None,
         actor_kind="human_api",
+        actor_subject_id=actor_subject_id,
     ) as session:
         try:
             membership: Role | None = await get_role(session, org_id, user.id)
@@ -359,6 +370,17 @@ async def _tenant_scope(
             project_id=project_id,
             role=role,
         )
+
+
+def _agent_token_id(claims: dict[str, Any]) -> str | None:
+    """The agent-token row id from a decoded bearer, or None for a human.
+
+    ``tid`` is present only on agent-token claims, so its absence IS the
+    answer for a JWT: a human's session publishes no subject and every
+    credential-shaped guard downstream sees None.
+    """
+    tid = claims.get("tid")
+    return tid if isinstance(tid, str) else None
 
 
 def _confine_agent_token(claims: dict[str, Any], org_id: uuid.UUID) -> None:
@@ -433,6 +455,7 @@ async def tenant_ctx(
         project_id,
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
+        actor_subject_id=_agent_token_id(claims),
     ) as ctx:
         yield ctx
 
@@ -624,6 +647,7 @@ async def _capability_or_bearer(
         project_id,
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
+        actor_subject_id=_agent_token_id(claims),
     ) as ctx:
         yield ctx, None
 

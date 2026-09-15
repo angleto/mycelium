@@ -640,6 +640,37 @@ async def _upsert_part_zero(
     await session.flush()
 
 
+async def _assert_writable_by_this_credential(session: AsyncSession, note: Note) -> None:
+    """A protected note refuses a bound assistant's credential.
+
+    MCP scopes are per-TOOL, not per-object: any credential holding
+    ``notes:write`` holds it on every note in the workspace, including
+    the ones that carry the procedures an agent is supposed to follow.
+    ``Note.protected`` existed and no write path had ever read it -- the
+    distiller was its only reader -- so the flag said something true
+    about compaction and nothing about writing.
+
+    The population this blocks is stated rather than discovered: a
+    person working THROUGH an assistant is inside it, because that
+    credential is a bound assistant's. That is the item's intent. The
+    ways left open to a person are the SPA and the CLI, both of which
+    authenticate with a human's own bearer and publish no agent-token
+    subject.
+
+    The flag guards ITSELF: the condition is "the note is protected NOW",
+    so an assistant can still mark a note protected and cannot unmark
+    one afterwards. Clearing it costs the same ``notes:write`` as the
+    writes it protects against, and a gate that does not cover its own
+    switch is not a gate.
+    """
+    if not note.protected:
+        return
+    from mycelium_core.services.agent_tokens import session_writes_as_assistant
+
+    if await session_writes_as_assistant(session):
+        raise DomainError(MessageCode.NOTE_PROTECTED_AGENT_WRITE)
+
+
 async def _note_set(
     session: AsyncSession,
     *,
@@ -663,13 +694,14 @@ async def _note_set(
     # restore has to reach into the bin, and re-deleting an already
     # trashed note has to stay reachable, everything else works on a live
     # note. Flag flip + audit shared with tasks via lifecycle.transition.
-    await get_note(
+    note = await get_note(
         session,
         org_id=org_id,
         note_id=note_id,
         include_deleted=include_deleted,
         include_proposed=include_proposed,
     )
+    await _assert_writable_by_this_credential(session, note)
     new_version = await lifecycle.transition(
         session,
         model_cls=Note,
@@ -958,7 +990,7 @@ async def update_note(
     # A transplanted note is read-only (docs/adr/0029 D2): reject title/body
     # edits with the same guard the part mutators use. Lazy import avoids the
     # notes <-> note_parts cycle (note_parts already imports notes lazily).
-    from mycelium_core.services.note_parts import _assert_not_promoted
+    from mycelium_core.services.note_parts import _assert_part_writable
 
     # ...but only when the patch touches content. That guard's own contract is
     # "every CONTENT mutation"; ``index_scope`` is an indexing class, not
@@ -973,7 +1005,7 @@ async def update_note(
         and isinstance(audio_ref, _Unset)
     )
     if not scope_only:
-        await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
+        await _assert_part_writable(session, org_id=org_id, note_id=note_id)
     # ``text`` is the FLAT body: the very string ``get_body`` returns, which
     # is the ``\n\n`` join of EVERY part. The join is not invertible -- a
     # blank line inside a part reads the same as a part boundary -- so this
@@ -1718,6 +1750,10 @@ async def transcribe(
     """
     await require_role(session, org_id, actor_id, Role.member)
     note = await get_note(session, org_id=org_id, note_id=note_id)
+    # The STT result is a content write on this note, and this path
+    # reaches neither choke point: guard it where the row is already in
+    # hand.
+    await _assert_writable_by_this_credential(session, note)
     if note.audio_ref is None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     note.status = NoteStatus.transcribing
@@ -1801,6 +1837,11 @@ async def append_message(
     saved on the conversation note (ADR-0020)."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await get_note(session, org_id=org_id, note_id=note_id)
+    # A conversation turn is content on the note, and this writer goes
+    # through neither ``_note_set`` nor the part guard. Not named in the
+    # task: found by reading every writer that binds the row, which is
+    # what the two it DID name have in common.
+    await _assert_writable_by_this_credential(session, note)
     if note.kind is not NoteKind.conversation:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     turns = list(
@@ -1942,6 +1983,10 @@ async def gdpr_erase_note(
 
     await require_role(session, org_id, actor_id, Role.member)
     note = await get_note(session, org_id=org_id, note_id=note_id)
+    # Erasure is the most irreversible write there is, so it gets the
+    # same rule rather than an exemption: a danger-scoped tool must not
+    # be a way around a gate that the ordinary ones respect.
+    await _assert_writable_by_this_credential(session, note)
     audio_ref = note.audio_ref
     part_ids = (
         (await session.execute(select(NotePart.id).where(NotePart.note_id == note_id)))

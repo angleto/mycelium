@@ -29,7 +29,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.db import admin_session
@@ -297,6 +297,84 @@ async def _call_authenticate_fn(
     )
 
 
+#: Actor kinds that are an assistant acting, whatever subject they carry.
+#: ``agent_run`` is the dispatch runtime driving a task, whose subject is
+#: an ``agent_runs`` id and therefore resolves to no agent token at all;
+#: ``mcp_token`` is a redeemed capability, whose subject is the
+#: capability-token id and whose MINTING credential is not reconstructible
+#: (``capability_tokens`` records only ``user_id``, and every agent token
+#: in this workspace resolves to one user).
+_ASSISTANT_ACTOR_KINDS = frozenset({"agent_run", "mcp_token"})
+
+
+async def session_writes_as_assistant(session: AsyncSession) -> bool:
+    """Whether this session must be treated as an assistant writing.
+
+    Three shapes, and the last two are the ones a narrower predicate
+    would have let through -- which is why this answers the question the
+    GUARD asks rather than the one the credential answers:
+
+    1. a bound agent token (``agent_tokens.assistant_id`` NOT NULL);
+    2. the dispatch runtime (``actor_kind='agent_run'``), the most
+       autonomous writer there is;
+    3. a redeemed capability (``actor_kind='mcp_token'``). It refuses
+       because the minting credential cannot be recovered, so the
+       alternative is to fail OPEN on a path an assistant can reach: the
+       two mint tools ride ordinary ``notes:write`` over MCP. Opening it
+       honestly would cost a column on the capability recording who
+       minted it; until then a person's way through is the bearer.
+
+    Open BY CONSTRUCTION, and these are decisions too: ``admin_session``
+    publishes no subject and kind ``system``, so the indexer, the
+    migrations, the backfills and the distiller pass, and must. A human's
+    SPA or CLI bearer is ``human_api`` with no subject, and passes.
+    """
+    if await session_bound_assistant_id(session) is not None:
+        return True
+    kind = (
+        await session.execute(text("SELECT current_setting('app.current_actor_kind', true)"))
+    ).scalar()
+    return str(kind or "") in _ASSISTANT_ACTOR_KINDS
+
+
+async def session_bound_assistant_id(session: AsyncSession) -> uuid.UUID | None:
+    """The AI assistant this SESSION's credential is bound to, or None.
+
+    The question a write guard has to ask is "what kind of credential is
+    writing", and the only honest answer is the one on the credential
+    itself: ``agent_tokens.assistant_id``, NOT NULL exactly when the
+    token belongs to a bound assistant.
+
+    NOT ``actor_kind``, which cannot answer it. Its ``human_api`` bucket
+    holds every agent token that speaks HTTP -- the REST adapter opens
+    EVERY bearer request as ``human_api``, and an agent token resolves
+    to JWT-shaped claims that take that same branch -- so a guard
+    written on it would fence MCP and leave the REST twin wide open,
+    which is the cross-surface asymmetry the scope maps exist to
+    prevent. It also defaults to ``human`` on an empty GUC, so it fails
+    OPEN, which is the wrong direction for a guard.
+
+    Reads ``app.current_actor_subject``, which ``tenant_session`` sets
+    in the same statement as ``actor_kind``. A subject that is not a
+    uuid, or not an agent-token id (the capability path publishes a
+    capability-token id, the agent runtime an ``agent_runs`` id),
+    resolves to None here: this function answers ONE question and its
+    callers must not read a None as "not an agent".
+    """
+    raw = (
+        await session.execute(text("SELECT current_setting('app.current_actor_subject', true)"))
+    ).scalar()
+    if not raw:
+        return None
+    try:
+        token_id = uuid.UUID(str(raw))
+    except ValueError:
+        return None
+    return (
+        await session.execute(select(AgentToken.assistant_id).where(AgentToken.id == token_id))
+    ).scalar_one_or_none()
+
+
 __all__ = [
     "DEFAULT_TTL_DAYS",
     "RAW_PREFIX",
@@ -307,4 +385,6 @@ __all__ = [
     "list_tokens",
     "mint",
     "revoke",
+    "session_bound_assistant_id",
+    "session_writes_as_assistant",
 ]

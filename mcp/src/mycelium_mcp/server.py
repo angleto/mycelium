@@ -5377,6 +5377,14 @@ def _note(
         "created_at": n.created_at.isoformat(),
         "updated_at": n.updated_at.isoformat(),
     }
+    if n.protected:
+        # Emitted only when TRUE, like the other _compact fields: zero
+        # cost on an ordinary note. Without it the constraint is
+        # discoverable only by taking the refusal, which is the shape
+        # SEC-08 exists to prevent -- a capability that will be refused
+        # must not be advertised, and one that will be refused must not
+        # be hidden either. The REST twin has projected it all along.
+        out["protected"] = True
     if n.review_state is not None:
         out["review_state"] = n.review_state
     if n.summary is not None:
