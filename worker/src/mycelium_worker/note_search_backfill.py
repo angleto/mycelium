@@ -33,9 +33,10 @@ import logging
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
-from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.db import admin_session, tenant_checkpoint, tenant_session
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import note_search
@@ -68,32 +69,100 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
     return ordered[0].user_id
 
 
-async def run_once(pointer_batch_size: int = 50) -> int:
+# How many parts one sweep will touch in a workspace before leaving the
+# rest to the next tick. A ceiling on the WORK, not on the transaction:
+# the transaction is one part wide (see _drain), so this only decides how
+# long a single tick runs, and both passes end on their own once the
+# back-catalogue is drained.
+_PARTS_PER_TICK = 200
+
+
+async def _drain(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    parts_per_tick: int = _PARTS_PER_TICK,
+) -> tuple[int, int]:
+    """Both passes, ONE PART PER TRANSACTION, committing in between.
+
+    The transaction boundary is the whole point of this function, and it
+    is here rather than inside the services because the caller owns the
+    transaction and a service that commits cannot be composed into one.
+
+    What it is for, measured on 2026-09-15: the first tick after the
+    2.3.36 rollout rechunked 171 parts inside a SINGLE transaction and
+    held it for about thirteen minutes. In the same hour the migration of
+    that release lost its lock race twice, and the cause was a worker
+    holding long transactions on the same table -- the migration lifts
+    FORCE ROW LEVEL SECURITY with an ACCESS EXCLUSIVE per table under a 5
+    second lock_timeout, so anything long on ``memory_blobs`` beats it.
+    The sweep was about to become a second permanent source of exactly
+    that, on every worker restart for as long as there was a
+    back-catalogue.
+
+    One part is the right unit and not an arbitrary small number: the
+    embed budget in ``note_search`` is granted PER PART and is 2 seconds,
+    so a one-part transaction cannot outlive the 5 second lock_timeout,
+    while a five-part one could.
+
+    ``tenant_checkpoint`` and not a new session per part: it commits and
+    re-arms the tenant GUCs on the same session, which is the primitive
+    the two-phase transmit already uses for the same reason (release the
+    locks, keep working). It also runs the search-dirty flush hooks
+    first, exactly as the end of ``tenant_session`` does.
+
+    A second property comes free and matters as much: progress is durable
+    per part. Before this, a worker restart in the middle of a sweep lost
+    every part it had done.
+    """
+    indexed = 0
+    rechunked = 0
+    after: uuid.UUID | None = None
+
+    while indexed + rechunked < parts_per_tick:
+        did = await note_search.run_pointer_backfill(session, batch_size=1)
+        if not did:
+            break
+        indexed += did
+        await tenant_checkpoint(session)
+
+    while indexed + rechunked < parts_per_tick:
+        sweep = await note_search.run_rechunk_backfill(session, batch_size=1, after_id=after)
+        if sweep.last_examined is None:
+            break
+        # The cursor moves on what was EXAMINED, not on what was
+        # rechunked, so a part the word count declines is stepped over
+        # rather than being the only part this tick ever sees.
+        after = sweep.last_examined
+        rechunked += sweep.rechunked
+        if sweep.rechunked:
+            await tenant_checkpoint(session)
+
+    _log.debug("note-search drain org=%s indexed=%d rechunked=%d", org_id, indexed, rechunked)
+    return indexed, rechunked
+
+
+async def run_once(parts_per_tick: int = _PARTS_PER_TICK) -> int:
     """One sweep across all workspaces, both passes.
 
     Returns the parts touched: those that pre-date the per-part index
-    deploy (no pointer yet) via ``run_pointer_backfill``, plus those
-    indexed as a single whole-doc blob while long enough to chunk, via
-    ``run_rechunk_backfill``. Per-workspace exceptions isolated/logged.
-
-    The two run in the same tenant session, in this order: a part the
-    first pass has just indexed is already chunked, so the second sees
-    nothing to do for it and the order costs nothing.
+    deploy (no pointer yet), plus those indexed as a single whole-doc
+    blob while long enough to chunk. Per-workspace exceptions
+    isolated/logged.
     """
     try:
         org_ids = await _all_workspaces()
     except Exception:
         _log.exception("note-search backfill: failed to list workspaces")
         return 0
-    total_indexed = 0
+    total = 0
     for org_id in org_ids:
         try:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
-                indexed = await note_search.run_pointer_backfill(s, batch_size=pointer_batch_size)
-                rechunked = await note_search.run_rechunk_backfill(s, batch_size=pointer_batch_size)
+                indexed, rechunked = await _drain(s, org_id=org_id, parts_per_tick=parts_per_tick)
             if indexed or rechunked:
                 _log.info(
                     "note-search backfill org=%s indexed=%d rechunked=%d",
@@ -101,23 +170,23 @@ async def run_once(pointer_batch_size: int = 50) -> int:
                     indexed,
                     rechunked,
                 )
-            total_indexed += indexed + rechunked
+            total += indexed + rechunked
         except Exception:
             _log.exception("note-search backfill failed for org=%s", org_id)
-    return total_indexed
+    return total
 
 
 async def run_forever() -> None:
     interval = max(5, get_settings().note_search_backfill_interval_seconds)
     _log.info("note-search backfill worker started (interval=%ds)", interval)
-    # Boost the first sweep: workspaces that pre-date the per-part index
-    # can carry hundreds of unindexed note parts; the default
-    # ``pointer_batch_size`` of 50 would take many ticks to drain. The
-    # boost tick finishes the migration in a couple of minutes, then the
-    # loop settles back to the small steady-state batch which is enough
-    # for the rare part that slips past the listener.
-    boost_pointer_batch = 500
-    await run_once(pointer_batch_size=boost_pointer_batch)
+    # No boost tick any more, and its absence is the fix rather than a
+    # simplification. The boost was a batch of 500 handed to BOTH passes,
+    # and the second costs up to sixteen embeds a part against the
+    # first's one; it is what made the 2026-09-15 sweep a thirteen-minute
+    # transaction. The drain above replaces it and is strictly better: it
+    # keeps going until the back-catalogue is empty instead of stopping
+    # at a number, and it commits after every part, so the ceiling it
+    # respects is on work done and never on locks held.
     while True:
-        await asyncio.sleep(interval)
         await run_once()
+        await asyncio.sleep(interval)

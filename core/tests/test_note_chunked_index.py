@@ -37,7 +37,7 @@ from mycelium_core.services import note_parts as np
 from mycelium_core.services import note_search, task_search, taxonomy
 from mycelium_core.services import notes as nt
 from mycelium_core.services.auth import signup
-from mycelium_core.services.chunker import get_chunk_threshold_tokens
+from mycelium_core.services.chunker import approx_tokens, get_chunk_threshold_tokens
 
 HEAD_TOKEN = "zulqarnain"
 TAIL_TOKEN = "xyzzyplugh"
@@ -396,7 +396,7 @@ async def test_the_rechunk_backfill_is_idempotent(_embedder: None) -> None:
         assert len(await _pointers(s, part_id)) == 1
 
     async with tenant_session(str(org), str(user)) as s:
-        first = await note_search.run_rechunk_backfill(s, batch_size=50)
+        first = (await note_search.run_rechunk_backfill(s, batch_size=50)).rechunked
     assert first == 1
 
     async with tenant_session(str(org), str(user)) as s:
@@ -422,7 +422,7 @@ async def test_the_rechunk_backfill_is_idempotent(_embedder: None) -> None:
         assert indices == list(range(len(texts)))
 
     async with tenant_session(str(org), str(user)) as s:
-        second = await note_search.run_rechunk_backfill(s, batch_size=50)
+        second = (await note_search.run_rechunk_backfill(s, batch_size=50)).rechunked
     assert second == 0
 
     async with tenant_session(str(org), str(user)) as s:
@@ -442,7 +442,7 @@ async def test_a_short_part_is_not_a_rechunk_candidate(_embedder: None) -> None:
     async with tenant_session(str(org), str(user)) as s:
         parts = await np.list_parts(s, org_id=org, note_id=note_id)
         assert len(await _pointers(s, parts[0].id)) == 1
-        assert await note_search.run_rechunk_backfill(s, batch_size=50) == 0
+        assert (await note_search.run_rechunk_backfill(s, batch_size=50)).rechunked == 0
     assert get_chunk_threshold_tokens() == 800
 
 
@@ -495,3 +495,78 @@ async def test_every_chunk_of_a_rewritten_part_carries_the_same_facets(
             .all()
         )
     assert set(tagged) == {p.blob_id for p in pointers}
+
+
+async def test_a_part_below_the_word_count_is_not_a_candidate_at_all(
+    _embedder: None,
+) -> None:
+    """The threshold is 800 WORDS and the pre-filter was 1600 CHARACTERS,
+    a bound derived from the degenerate case of one-letter words. Ordinary
+    prose is five or six characters a word, so a whole band was admitted
+    by the query and declined by the word count afterwards: measured here,
+    4399 characters and 200 words. Nothing about such a part ever changes,
+    so it came back on every tick for ever.
+
+    Asserted on the CANDIDATE SET and not on the sweep's return value,
+    because the return value cannot tell these apart: it counts what was
+    rechunked, and zero reads the same whether the back-catalogue is
+    drained or full of parts that will never qualify.
+
+    Why it had to be fixed before the transaction was split rather than
+    after: with the batch at 500 a permanent candidate wasted a slot, and
+    with a batch of one it is the only candidate the sweep will ever see.
+    """
+    org, user = await _org()
+    filler = " ".join("abbastanzalungaparola" for _ in range(200))
+    assert len(filler) >= get_chunk_threshold_tokens() * 2, "deve superare il vecchio bound"
+    assert approx_tokens(filler) < get_chunk_threshold_tokens(), "e stare sotto la soglia vera"
+
+    async with tenant_session(str(org), str(user)) as s:
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, text="intestazione"
+        )
+        decoy = (
+            await np.create_part(s, org_id=org, actor_id=user, note_id=note.id, body=filler)
+        ).id
+    _real_note, real_part = await _long_part(org, user, _long_body())
+    async with tenant_session(str(org), str(user)) as s:
+        pointers = await _pointers(s, real_part)
+        await s.execute(
+            delete(MemoryBlob).where(MemoryBlob.id.in_([p.blob_id for p in pointers[1:]]))
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        candidates = await note_search.rechunk_candidate_ids(s, limit=50)
+    assert real_part in candidates, "il candidato vero deve esserci"
+    assert decoy not in candidates, (
+        "una parte sotto la soglia in PAROLE non deve essere candidata: "
+        "e' un candidato permanente, e con un batch piccolo e' l'unico che la sweep vede"
+    )
+
+
+async def test_the_sweep_reaches_a_true_candidate_one_part_at_a_time(
+    _embedder: None,
+) -> None:
+    """Behavioural half: with many permanent candidates present and a
+    batch of ONE, which is what a sweep that must not hold a lock across
+    items uses, the true candidate is still reached."""
+    org, user = await _org()
+    filler = " ".join("abbastanzalungaparola" for _ in range(200))
+    async with tenant_session(str(org), str(user)) as s:
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, text="intestazione"
+        )
+        for _ in range(12):
+            await np.create_part(s, org_id=org, actor_id=user, note_id=note.id, body=filler)
+    _real_note, real_part = await _long_part(org, user, _long_body())
+    async with tenant_session(str(org), str(user)) as s:
+        pointers = await _pointers(s, real_part)
+        await s.execute(
+            delete(MemoryBlob).where(MemoryBlob.id.in_([p.blob_id for p in pointers[1:]]))
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await note_search.run_rechunk_backfill(s, batch_size=1)).rechunked == 1
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert len(await _pointers(s, real_part)) > 1

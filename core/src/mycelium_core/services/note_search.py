@@ -67,6 +67,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from sqlalchemy import delete, event, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -935,7 +936,86 @@ async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -
     return indexed
 
 
-async def run_rechunk_backfill(session: AsyncSession, *, batch_size: int = 50) -> int:
+async def rechunk_candidate_ids(
+    session: AsyncSession, *, limit: int, after_id: uuid.UUID | None = None
+) -> list[uuid.UUID]:
+    r"""The parts that still hold one whole-doc blob while being long
+    enough to chunk, oldest id first.
+
+    THE WORD COUNT IS DONE IN SQL, with the same pattern
+    ``chunker.approx_tokens`` uses, and that is the whole point of this
+    being its own function. The predicate used to be a CHARACTER bound
+    derived from the degenerate case of one-letter words (800 words
+    occupy at least 1600 characters), with the real count confirmed in
+    Python afterwards. That bound is correct and far too loose: ordinary
+    prose is five or six characters a word, so every part between 1600
+    and about 4800 characters was admitted here and declined there, on
+    every tick, for ever -- measured, a part of 4399 characters and 200
+    words. Nothing about it ever changes, so it is a permanent candidate.
+
+    It did not starve anything while the batch was 500, because the batch
+    took everything. It would once the caller drains in small committed
+    pieces, which is what a sweep that must not hold a lock across items
+    has to do: with a batch of one, the first permanent candidate is the
+    only candidate. So the class had to stop existing before the
+    transaction could be split, not after.
+
+    ``regexp_count`` (PostgreSQL 15+) and ``re.findall(r"\w+", ...)``
+    were checked against each other on eight realistic shapes -- Italian
+    prose, markdown with newlines, code, URLs with paths, accents and
+    apostrophes, snake_case with underscores, mixed unicode including
+    Japanese, and dates with numbers -- and agreed on all eight. The
+    Python check in the caller stays anyway: it reads the RENDERED text,
+    which is what the chunker will actually see, and it now declines
+    nothing rather than declining a whole band.
+
+    ``after_id`` is for a caller walking the set across transactions, so
+    a part that IS declined (a unicode edge the two counters read
+    differently) is stepped over instead of being met again.
+    """
+    stmt = (
+        select(NotePart.id)
+        .join(Note, Note.id == NotePart.note_id)
+        .join(NotePartIndexPointer, NotePartIndexPointer.part_id == NotePart.id)
+        .where(
+            Note.index_scope != IndexScope.none,
+            func.regexp_count(
+                func.coalesce(NotePart.title, "") + " " + func.coalesce(NotePart.body, ""),
+                r"\w+",
+            )
+            >= get_chunk_threshold_tokens(),
+        )
+        .group_by(NotePart.id)
+        .having(func.count() == 1)
+        .order_by(NotePart.id)
+        .limit(limit)
+    )
+    if after_id is not None:
+        stmt = stmt.where(NotePart.id > after_id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+class RechunkSweep(NamedTuple):
+    """What one pass of the rechunk sweep did, and where it got to.
+
+    ``last_examined`` is the highest part id the pass looked at, whether
+    or not it rechunked it. A caller draining the set across transactions
+    passes it back as ``after_id`` so a part that WAS declined -- the
+    word counters in SQL and in Python agreeing is evidence from eight
+    shapes, not a proof -- is stepped over instead of being the only
+    thing the sweep ever sees again.
+    """
+
+    rechunked: int
+    last_examined: uuid.UUID | None
+
+
+async def run_rechunk_backfill(
+    session: AsyncSession,
+    *,
+    batch_size: int = 50,
+    after_id: uuid.UUID | None = None,
+) -> RechunkSweep:
     """Re-index parts that are long enough to chunk but hold one blob.
 
     The back-catalogue of the single-blob indexer: every part written
@@ -958,31 +1038,13 @@ async def run_rechunk_backfill(session: AsyncSession, *, batch_size: int = 50) -
     the threshold (the cap is 400 words against a floor of 800), so the
     predicate cannot re-admit what it just processed.
     """
-    # The threshold is counted in words on the RENDERED text, which needs
-    # the part; SQL pre-filters on a bound that cannot exclude a
-    # candidate (800 words occupy at least 1600 characters, one per word
-    # plus one separator) and the exact count is confirmed below.
-    min_chars = get_chunk_threshold_tokens() * 2
-    rows = (
-        await session.execute(
-            select(NotePart.id)
-            .join(Note, Note.id == NotePart.note_id)
-            .join(NotePartIndexPointer, NotePartIndexPointer.part_id == NotePart.id)
-            .where(
-                Note.index_scope != IndexScope.none,
-                func.char_length(func.coalesce(NotePart.body, ""))
-                + func.char_length(func.coalesce(NotePart.title, ""))
-                >= min_chars,
-            )
-            .group_by(NotePart.id)
-            .having(func.count() == 1)
-            .limit(batch_size)
-        )
-    ).all()
+    rows = await rechunk_candidate_ids(session, limit=batch_size, after_id=after_id)
     if not rows:
-        return 0
+        return RechunkSweep(0, None)
     rechunked = 0
-    for (part_id,) in rows:
+    last: uuid.UUID | None = None
+    for part_id in rows:
+        last = part_id
         try:
             loaded = await _load_part(session, part_id)
             if loaded is None:
@@ -994,4 +1056,4 @@ async def run_rechunk_backfill(session: AsyncSession, *, batch_size: int = 50) -
             rechunked += 1
         except Exception:
             logger.exception("note-search rechunk backfill failed for part_id=%s", part_id)
-    return rechunked
+    return RechunkSweep(rechunked, last)
