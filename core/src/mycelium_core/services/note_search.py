@@ -1,16 +1,29 @@
-"""Note search: keep one memory blob per note PART in sync with its body.
+"""Note search: keep a note PART's memory blobs in sync with its body.
 
 The note-part analogue of ``services.task_search``. Decision 2026-06-09
 (task 9fc94327): notes become first-class hits in the existing memory
 pipeline (``memory_blobs``: FTS generated + pgvector + RRF) without a
 parallel index, indexed PER PART so each part re-embeds independently.
-The binding is 1:1 via ``note_part_index_pointer``; the blob text is the
-part's ``title || body``.
+The binding is held by ``note_part_index_pointer``; the indexed text is
+the part's ``title || body``.
 
 Why per-part (not per-note): a long note is several parts; editing one
 part should not re-embed the whole note, and the chunked-append path
-(``note_parts.append_to_part``) targets a single part. One blob per part
+(``note_parts.append_to_part``) targets a single part. Indexing per part
 keeps the re-embed unit aligned with the edit unit.
+
+Why a SET of blobs per part (task 11154e32, migration 0016): the
+embedder's window is 2048 tokens, so one vector for a whole part
+represents its head and nothing else once the part is longer than about
+7600 characters -- while the part reads as fully indexed, because nothing
+declared the loss. A part above the chunker's threshold is split by
+``chunker.pick_chunker(namespace="note")`` and each piece is its own
+blob, its own pointer row and its own vector. Below the threshold the
+part is one chunk and every path here degenerates to what it did before.
+
+The cardinality had to move in the schema and not only in this file: the
+pointer's primary key was ``(part_id)``, so chunks 1..N-1 had nowhere to
+be recorded and would have existed as blobs no maintenance path reaches.
 
 Mutation tracking
 -----------------
@@ -26,10 +39,11 @@ those choke points call :func:`mark_note_part_dirty` /
 the blobs; it is called from ``db.tenant_session`` just before commit
 (same chokepoint as the task index).
 
-content_hash, embedder timeout, keyword-only fallback: identical
-contract to ``task_search`` (a 2 s embed cap degrades to keyword-only;
-the generic ``embedding_migration`` worker re-embeds NULL-vector blobs
-later, off the write path).
+content_hash, embedder timeout, keyword-only fallback: same contract as
+``task_search``, with the cap granted to the PART rather than to each of
+its chunks (a 2 s budget and a ceiling on calls; whatever it does not
+pay for is written keyword-only and the generic ``embedding_migration``
+worker re-embeds NULL-vector blobs later, off the write path).
 
 Project scoping: a part blob inherits the note's project (via
 ``notes.project_tag_for_note``), matching the existing note-blob scoping
@@ -51,9 +65,10 @@ import datetime as dt
 import hashlib
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, event, select, update
+from sqlalchemy import delete, event, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, object_session
@@ -65,6 +80,12 @@ from mycelium_core.models.memory_blob import BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.services.chunker import (
+    Chunk,
+    approx_tokens,
+    get_chunk_threshold_tokens,
+    pick_chunker,
+)
 from mycelium_core.services.fts_language import detect_fts_language
 from mycelium_core.services.memory import erase_blobs_for_sources
 
@@ -72,7 +93,14 @@ logger = logging.getLogger(__name__)
 
 _DIRTY_KEY = "note_search_dirty"
 _DELETED_KEY = "note_search_deleted"
+# Budget for the WHOLE part, shared across its chunks: see _embed_chunks.
 _EMBED_TIMEOUT_S = 2.0
+# Ceiling on embed CALLS per part per commit. The deadline alone does not
+# bound them: with a fast embedder it lets through as many as the document
+# has chunks, and that count follows the text rather than the budget.
+# Sixteen chunks is ~6400 words, past any note written by hand; what is
+# longer is an import, and an import's tail belongs to the sweep.
+_EMBED_MAX_CHUNKS = 16
 _NO_EMBED_MODEL = "none"
 
 
@@ -220,7 +248,7 @@ async def flush_note_search_dirty(session: AsyncSession) -> None:
         # emits no SQL.
         async with index_maintenance_scope(session):
             for part_id in deleted_ids:
-                await _delete_part_blob(session, part_id)
+                await _drop_part_blobs(session, part_id)
             for part_id in dirty_ids:
                 await _resync_part_blob(session, part_id)
     except InvalidRequestError as exc:
@@ -234,55 +262,43 @@ async def flush_note_search_dirty(session: AsyncSession) -> None:
 
 
 async def delete_part_index_now(session: AsyncSession, part_id: uuid.UUID) -> None:
-    """Drop a part's search blob immediately (inline, not deferred).
+    """Drop a part's search blobs immediately (inline, not deferred).
 
     Call this BEFORE a hard ``DELETE`` of the part row: the pointer's
     ``part_id`` FK is ``ON DELETE CASCADE``, so once the part row goes the
-    pointer is gone and a deferred :func:`flush_note_search_dirty` can no
-    longer resolve the blob to delete (it would orphan the blob).
-    Deleting the blob here cascades the pointer (blob->pointer FK), so the
-    subsequent part delete finds nothing left to cascade."""
-    await _delete_part_blob(session, part_id)
+    pointer set is gone and a deferred :func:`flush_note_search_dirty` can
+    no longer resolve the blobs to delete (it would orphan them)."""
+    await _drop_part_blobs(session, part_id)
 
 
 async def _drop_part_blobs(session: AsyncSession, part_id: uuid.UUID) -> None:
     """Erase every blob this part is the source of, by provenance.
 
-    Not ``_delete_part_blob``: that one resolves through the pointer,
-    whose primary key is ``part_id``, so it names exactly one blob. A
-    part owns N blobs as soon as the indexer chunks a long one, and this
-    branch has to keep holding then without being rewritten -- and it
-    does, because provenance is the relation that is already 1:N.
+    Not "resolve the pointer and delete the blob it names": a part owns N
+    blobs as soon as the indexer chunks a long one, and provenance is the
+    relation that is already 1:N. It is also the primitive the other two
+    hard-delete paths use for ``note_part`` (``trash.empty_trash``,
+    ``entity_revisions.hard_delete_soft_deleted``), so the three converge
+    on one erase instead of diverging, which is what the rule written in
+    the humus predicate asks for ("every hard-delete path must erase the
+    index blobs itself").
 
-    What it does not cover: a blob claimed by a second source survives,
-    since ``erase_blobs_for_sources`` drops a blob only once nothing
-    else points at it. Consolidation copies each member's provenance
-    onto the merged concept, so the concept IS reached here -- this
-    part's provenance row on it goes -- but the concept survives on the
+    The pointer rows are not deleted here and do not need to be: deleting
+    the blob cascades them through the composite FK. That is sufficient
+    rather than incidental, because a pointer's blob has exactly one
+    provenance row -- this module is the only writer of these blobs, and
+    consolidation copies a member's provenance onto the MERGED concept,
+    which has no pointer row of its own.
+
+    What it does not cover, and deliberately: a blob claimed by a second
+    source survives, since ``erase_blobs_for_sources`` drops a blob only
+    once nothing else points at it. The merged concept above IS reached
+    here -- this part's provenance row on it goes -- but survives on the
     other members' rows, still carrying the merged text. ``index_scope``
-    is an opt-out from indexing a row, not a retraction of everything
-    ever derived from it.
+    is an opt-out from indexing a row, not a retraction of everything ever
+    derived from it.
     """
     await erase_blobs_for_sources(session, sources=[("note_part", str(part_id))])
-
-
-async def _delete_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
-    """Remove the blob owned by this part (pointer cascades). Org-blind
-    on purpose: the pointer carries ``org_id`` and RLS scopes the SELECT
-    to the current tenant."""
-    row = (
-        await session.execute(
-            select(NotePartIndexPointer.blob_id, NotePartIndexPointer.org_id).where(
-                NotePartIndexPointer.part_id == part_id
-            )
-        )
-    ).one_or_none()
-    if row is None:
-        return
-    blob_id, org_id = row
-    await session.execute(
-        delete(MemoryBlob).where(MemoryBlob.id == blob_id, MemoryBlob.org_id == org_id)
-    )
 
 
 # ---------------------------------------------------------------- resync
@@ -321,19 +337,95 @@ async def _load_part(
     return part, IndexScope(scope) if scope is not None else IndexScope.org
 
 
-async def _resync_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
-    """UPSERT one blob for the part + maintain the pointer.
+async def _load_pointers(session: AsyncSession, part_id: uuid.UUID) -> list[NotePartIndexPointer]:
+    """The part's pointer set, in chunk order. Empty when never indexed."""
+    return list(
+        (
+            await session.execute(
+                select(NotePartIndexPointer)
+                .where(NotePartIndexPointer.part_id == part_id)
+                .order_by(NotePartIndexPointer.chunk_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    Three paths, gated on (a) pointer existence and (b) content hash:
-      - no pointer: INSERT blob (channel='note', source=note_part) + pointer
-      - pointer + same hash: skip (cheap path, no embed)
-      - pointer + new hash: UPDATE blob text+embedding, UPDATE hash
+
+@dataclass(frozen=True)
+class _EmbeddedChunk:
+    """One chunk of the part with whatever vector the budget could pay
+    for. ``vector is None`` means keyword-only: the FTS branch still
+    covers the blob and the ``embedding_migration`` worker fills the
+    vector in later, off the write path."""
+
+    index: int
+    text: str
+    vector: list[float] | None
+    model_id: str
+
+
+async def _embed_chunks(chunks: Sequence[Chunk]) -> list[_EmbeddedChunk]:
+    """Embed the part's chunks under ONE budget for the part.
+
+    Two bounds, and both are needed. The 2 s deadline is shared across
+    the whole set rather than granted per chunk, because it exists to cap
+    the latency a commit pays and a per-chunk cap scales with N (the
+    longest part in the reference workspace is ~25k words, of the order
+    of 70 chunks). The call cap is the other half: with a fast embedder
+    the deadline alone would let N calls through, and N follows the
+    document, not the budget.
+
+    Chunks past either bound are written keyword-only, in document order,
+    so what gets the vectors is the head of the part. That is the
+    contract the module docstring already states for a slow embedder; a
+    long part now reaches it by length as well as by latency.
+
+    Not the embedder's batch API: a batch is one call but it is
+    all-or-nothing, so a slow tail would cost the whole set its vectors,
+    and an unbounded batch inside the pre-commit hook is the shape that
+    OOM-killed the worker on 2026-07-24.
+    """
+    embedder = get_embedder()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _EMBED_TIMEOUT_S
+    out: list[_EmbeddedChunk] = []
+    for chunk in chunks:
+        remaining = deadline - loop.time()
+        if chunk.index >= _EMBED_MAX_CHUNKS or remaining <= 0.0:
+            out.append(_EmbeddedChunk(chunk.index, chunk.text, None, _NO_EMBED_MODEL))
+            continue
+        vector, model_id, _tokens = await _safe_embed(
+            _TimeoutEmbedder(embedder, remaining), chunk.text
+        )
+        out.append(_EmbeddedChunk(chunk.index, chunk.text, vector, model_id))
+    return out
+
+
+async def _resync_part_blob(
+    session: AsyncSession, part_id: uuid.UUID, *, rechunk: bool = False
+) -> None:
+    """Bring the part's SET of index blobs in line with its text.
+
+    Four paths, gated on (a) whether the part has a pointer set and (b)
+    the content hash, which is a property of the part and is carried on
+    every row of the set (so the cheap path reads it off chunk 0, a
+    lookup on a primary-key prefix):
+      - part gone, or ``index_scope='none'``: erase the set by provenance
+      - no pointers: chunk, embed, INSERT the set
+      - pointers + same hash: skip (cheap path, no embed)
+      - pointers + new hash: reconcile the set against the new chunking
+
+    ``rechunk=True`` skips the hash short circuit. The hash answers "has
+    the text changed", and the backfill pass below exists for the case
+    where it has not but the CHUNKING has: a part indexed as one whole
+    blob before this indexer chunked anything.
     """
     loaded = await _load_part(session, part_id)
     if loaded is None:
         # Part is gone (hard delete that didn't go through after_delete,
-        # e.g. a note-cascade DELETE). Clean the pointer/blob too.
-        await _delete_part_blob(session, part_id)
+        # e.g. a note-cascade DELETE). Clean the blobs/pointers too.
+        await _drop_part_blobs(session, part_id)
         return
     part, index_scope = loaded
     if index_scope == IndexScope.none:
@@ -341,163 +433,310 @@ async def _resync_part_blob(session: AsyncSession, part_id: uuid.UUID) -> None:
         # flip leaves the rendered text identical, so the hash is unchanged
         # and a guard placed after the short-circuit would never run on a
         # part that is already indexed -- which is the whole remedy case.
-        # Delete rather than skip, or the stale blob stays retrievable.
+        # Delete rather than skip, or the stale blobs stay retrievable; by
+        # provenance rather than through the pointer, or a long part would
+        # lose its head and keep chunks 1..N-1 indexed.
         await _drop_part_blobs(session, part_id)
         return
     text_body = render_part_for_search(part)
     new_hash = content_hash(text_body)
 
-    pointer = (
-        await session.execute(
-            select(NotePartIndexPointer).where(NotePartIndexPointer.part_id == part_id)
-        )
-    ).scalar_one_or_none()
+    pointers = await _load_pointers(session, part_id)
 
-    if pointer is not None and pointer.content_hash == new_hash:
+    if pointers and pointers[0].content_hash == new_hash and not rechunk:
         # Text unchanged. ``merge_notes`` reparents a part (new note_id)
-        # without touching its body; refresh the pointer/blob ownership so
-        # the hit still resolves to -- and is project-scoped to -- the new
+        # without touching its body; refresh the set's ownership so the
+        # hits still resolve to -- and are project-scoped to -- the new
         # note, without a needless re-embed.
-        if pointer.note_id != part.note_id:
-            await _refresh_pointer_note(session=session, pointer=pointer, part=part)
+        if pointers[0].note_id != part.note_id:
+            await _refresh_pointers_note(session=session, pointers=pointers, part=part)
         return
 
-    embedder = _TimeoutEmbedder(get_embedder(), _EMBED_TIMEOUT_S)
-    vector, model_id, _tokens = await _safe_embed(embedder, text_body)
+    chunks = pick_chunker(namespace="note", text=text_body).chunks(text_body)
+    embedded = await _embed_chunks(chunks)
+    project_id = await _project_of_note(session, note_id=part.note_id)
+    tag_ids = await _index_tag_ids(session, org_id=part.org_id, note_id=part.note_id)
 
-    if pointer is None:
-        await _create_blob_and_pointer(
+    if pointers:
+        await _reconcile_blob_set(
             session=session,
             part=part,
-            text_body=text_body,
+            pointers=pointers,
+            embedded=embedded,
+            project_id=project_id,
+            tag_ids=tag_ids,
             content_hash_value=new_hash,
-            vector=vector,
-            model_id=model_id,
         )
     else:
-        await _update_blob_and_pointer(
+        await _create_blob_set(
             session=session,
-            pointer=pointer,
             part=part,
-            text_body=text_body,
+            embedded=embedded,
+            project_id=project_id,
+            tag_ids=tag_ids,
             content_hash_value=new_hash,
-            vector=vector,
-            model_id=model_id,
         )
 
 
-async def _create_blob_and_pointer(
-    *,
-    session: AsyncSession,
-    part: NotePart,
-    text_body: str,
-    content_hash_value: str,
-    vector: list[float] | None,
-    model_id: str,
-) -> None:
-    """Insert path. The blob carries channel_key='note' via the
-    ``memory_channel`` tag attached below; ``project_id`` is the note's
-    project (per-project scoping, see module docstring)."""
+async def _project_of_note(session: AsyncSession, *, note_id: uuid.UUID) -> uuid.UUID | None:
     from mycelium_core.services.notes import project_tag_for_note
 
-    project_id = await project_tag_for_note(session, note_id=part.note_id)
-    now = dt.datetime.now(tz=dt.UTC)
-    blob = MemoryBlob(
-        org_id=part.org_id,
-        project_id=project_id,
-        namespace="note",
-        tier="hot",
-        text=text_body,
-        fts_language=detect_fts_language(text_body),
-        embedding=vector,
-        model_id=model_id,
-        dim=EMBED_DIM,
-        access_count=1,
-        last_accessed_at=now,
+    return await project_tag_for_note(session, note_id=note_id)
+
+
+def _new_chunk_blob(
+    session: AsyncSession,
+    *,
+    part: NotePart,
+    project_id: uuid.UUID | None,
+    chunk: _EmbeddedChunk,
+) -> uuid.UUID:
+    """Stage one blob for one chunk and return its id.
+
+    The id is chosen here rather than read back from a flush, so a whole
+    set is written by one flush instead of one round trip per chunk. This
+    runs inside the pre-commit hook and a long part is dozens of chunks.
+
+    Only the blob: its provenance and its facets are staged by
+    :func:`_stage_chunk_satellites` after the blobs are flushed. That
+    order is explicit and not left to the unit of work, which sorts
+    mappers by relationship and there is no relationship configured
+    between these tables -- it inserted ``blob_sources`` first and the
+    composite foreign key rejected the batch.
+    """
+    session.add(
+        MemoryBlob(
+            id=(blob_id := uuid.uuid4()),
+            org_id=part.org_id,
+            project_id=project_id,
+            namespace="note",
+            tier="hot",
+            text=chunk.text,
+            fts_language=detect_fts_language(chunk.text),
+            embedding=chunk.vector,
+            model_id=chunk.model_id,
+            dim=EMBED_DIM,
+            access_count=1,
+            last_accessed_at=dt.datetime.now(tz=dt.UTC),
+        )
     )
-    session.add(blob)
-    await session.flush()
+    return blob_id
+
+
+def _stage_chunk_satellites(
+    session: AsyncSession,
+    *,
+    part: NotePart,
+    blob_id: uuid.UUID,
+    chunk_index: int,
+    tag_ids: Sequence[uuid.UUID],
+) -> None:
+    """The provenance row and the facets of one chunk blob.
+
+    ``blob_sources.chunk_index`` carries the chunk position. Writing it
+    (the single-blob indexer left it to the server default, so every note
+    part read as chunk 0) is what keeps a chunked part out of the
+    ``rechunk_legacy_sources`` candidate predicate, which is
+    ``bool_and(chunk_index = 0)``: that admin path deletes the blob and
+    rewrites it through ``write_blob``, which does not recreate the
+    pointer row, and the note-search sweep would then index the part a
+    second time on top of the orphans. The trap closes in the data rather
+    than in a recommendation not to press the button.
+    """
+    from mycelium_core.models.memory_blob import MemoryBlobTag
+
     session.add(
         BlobSource(
-            blob_id=blob.id,
+            blob_id=blob_id,
             org_id=part.org_id,
             source_kind="note_part",
             source_id=str(part.id),
+            chunk_index=chunk_index,
         )
     )
-    await _attach_inherited_tags(session, org_id=part.org_id, blob_id=blob.id, note_id=part.note_id)
-    await _attach_channel_tag(session, org_id=part.org_id, blob_id=blob.id)
+    for tid in tag_ids:
+        session.add(MemoryBlobTag(blob_id=blob_id, org_id=part.org_id, tag_id=tid))
+
+
+async def _write_chunk_blobs(
+    session: AsyncSession,
+    *,
+    part: NotePart,
+    project_id: uuid.UUID | None,
+    chunks: Sequence[_EmbeddedChunk],
+    tag_ids: Sequence[uuid.UUID],
+) -> dict[int, uuid.UUID]:
+    """Blobs first, then everything that points at them. Two flushes for
+    the whole set, whatever its size."""
+    if not chunks:
+        return {}
+    ids = {
+        chunk.index: _new_chunk_blob(session, part=part, project_id=project_id, chunk=chunk)
+        for chunk in chunks
+    }
+    await session.flush()
+    for chunk in chunks:
+        _stage_chunk_satellites(
+            session,
+            part=part,
+            blob_id=ids[chunk.index],
+            chunk_index=chunk.index,
+            tag_ids=tag_ids,
+        )
+    await session.flush()
+    return ids
+
+
+async def _insert_pointer_set(
+    session: AsyncSession,
+    *,
+    part: NotePart,
+    blob_ids: dict[int, uuid.UUID],
+    content_hash_value: str,
+) -> None:
+    """The pointer rows of a freshly written set, in ONE savepoint.
+
+    Per row it would be worse than no guard at all: a conflict on chunk k
+    would leave 0..k-1 pointed at and k..N-1 as blobs no maintenance path
+    can reach, which is the state the 1:N pointer exists to make
+    impossible. On conflict a concurrent resync has written the set and
+    its blobs are canonical, so ours go.
+    """
+    if not blob_ids:
+        return
     try:
         async with session.begin_nested():
-            session.add(
-                NotePartIndexPointer(
-                    part_id=part.id,
-                    note_id=part.note_id,
-                    org_id=part.org_id,
-                    blob_id=blob.id,
-                    content_hash=content_hash_value,
+            for chunk_index, blob_id in sorted(blob_ids.items()):
+                session.add(
+                    NotePartIndexPointer(
+                        part_id=part.id,
+                        note_id=part.note_id,
+                        org_id=part.org_id,
+                        blob_id=blob_id,
+                        chunk_index=chunk_index,
+                        content_hash=content_hash_value,
+                    )
                 )
-            )
             await session.flush()
     except IntegrityError:
-        # Concurrent resync just inserted the pointer. Drop the blob we
-        # just made (the other transaction's blob is canonical).
         await session.execute(
-            delete(MemoryBlob).where(MemoryBlob.id == blob.id, MemoryBlob.org_id == part.org_id)
+            delete(MemoryBlob).where(
+                MemoryBlob.id.in_(list(blob_ids.values())),
+                MemoryBlob.org_id == part.org_id,
+            )
         )
 
 
-async def _update_blob_and_pointer(
+async def _create_blob_set(
     *,
     session: AsyncSession,
-    pointer: NotePartIndexPointer,
     part: NotePart,
-    text_body: str,
+    embedded: Sequence[_EmbeddedChunk],
+    project_id: uuid.UUID | None,
+    tag_ids: Sequence[uuid.UUID],
     content_hash_value: str,
-    vector: list[float] | None,
-    model_id: str,
 ) -> None:
-    """Update path. Direct SQL UPDATE on the blob (preserves
-    cluster/access counters); the FTS generated column follows ``text``
-    automatically. If the part was reparented (merge), also refresh the
-    blob's project and the pointer's note_id."""
-    values: dict[str, object] = {
-        "text": text_body,
-        "fts_language": detect_fts_language(text_body),
-        "embedding": vector,
-        "model_id": model_id,
-        "dim": EMBED_DIM,
-    }
-    if pointer.note_id != part.note_id:
-        from mycelium_core.services.notes import project_tag_for_note
-
-        values["project_id"] = await project_tag_for_note(session, note_id=part.note_id)
-        pointer.note_id = part.note_id
-    await session.execute(
-        update(MemoryBlob)
-        .where(MemoryBlob.id == pointer.blob_id, MemoryBlob.org_id == pointer.org_id)
-        .values(**values)
+    """Insert path: N blobs and the N pointer rows that own them."""
+    blob_ids = await _write_chunk_blobs(
+        session, part=part, project_id=project_id, chunks=embedded, tag_ids=tag_ids
     )
-    pointer.content_hash = content_hash_value
+    await _insert_pointer_set(
+        session, part=part, blob_ids=blob_ids, content_hash_value=content_hash_value
+    )
 
 
-async def _refresh_pointer_note(
+async def _reconcile_blob_set(
     *,
     session: AsyncSession,
-    pointer: NotePartIndexPointer,
+    part: NotePart,
+    pointers: Sequence[NotePartIndexPointer],
+    embedded: Sequence[_EmbeddedChunk],
+    project_id: uuid.UUID | None,
+    tag_ids: Sequence[uuid.UUID],
+    content_hash_value: str,
+) -> None:
+    """Match an existing set to the new chunking, slot by slot.
+
+    Not erase-then-rewrite. Below the chunk threshold a part is a single
+    chunk and this degenerates to exactly the in-place UPDATE the
+    single-blob indexer did, which is what keeps an ordinary note edit
+    from resetting the blob's access counters and cluster membership --
+    the property the update path was written to protect, and the reason
+    ``write_blob`` is the wrong seam here (it re-inserts, so it resets
+    them on every write).
+
+    Above the threshold, chunk boundaries move with the text, so a slot
+    is a position and not an identity: slots present on both sides are
+    rewritten, slots the new text no longer has are deleted, slots it
+    gained are inserted. What that guarantees, and what the previous
+    shape could not, is that no blob of the part carries pre-edit text
+    once this returns.
+    """
+    by_index = {p.chunk_index: p for p in pointers}
+    kept = [c for c in embedded if c.index in by_index]
+    gained = [c for c in embedded if c.index not in by_index]
+
+    created = await _write_chunk_blobs(
+        session, part=part, project_id=project_id, chunks=gained, tag_ids=tag_ids
+    )
+
+    for chunk in kept:
+        existing = by_index[chunk.index]
+        await session.execute(
+            update(MemoryBlob)
+            .where(MemoryBlob.id == existing.blob_id, MemoryBlob.org_id == existing.org_id)
+            .values(
+                text=chunk.text,
+                fts_language=detect_fts_language(chunk.text),
+                embedding=chunk.vector,
+                model_id=chunk.model_id,
+                dim=EMBED_DIM,
+                project_id=project_id,
+            )
+        )
+        existing.note_id = part.note_id
+        existing.content_hash = content_hash_value
+
+    await _add_missing_blob_tags(
+        session,
+        org_id=part.org_id,
+        blob_ids=[by_index[c.index].blob_id for c in kept],
+        tag_ids=tag_ids,
+    )
+
+    # Slots the new text does not have. Deleting the blob cascades both
+    # its pointer row and its provenance row, so the set shrinks whole.
+    live = {c.index for c in embedded}
+    stale = [p.blob_id for p in pointers if p.chunk_index not in live]
+    if stale:
+        await session.execute(
+            delete(MemoryBlob).where(MemoryBlob.id.in_(stale), MemoryBlob.org_id == part.org_id)
+        )
+
+    await _insert_pointer_set(
+        session, part=part, blob_ids=created, content_hash_value=content_hash_value
+    )
+
+
+async def _refresh_pointers_note(
+    *,
+    session: AsyncSession,
+    pointers: Sequence[NotePartIndexPointer],
     part: NotePart,
 ) -> None:
     """A part moved to another note (merge) but its body is unchanged:
-    re-point the pointer + re-scope the blob's project, no re-embed."""
-    from mycelium_core.services.notes import project_tag_for_note
-
-    project_id = await project_tag_for_note(session, note_id=part.note_id)
+    re-point the whole set + re-scope every chunk's project, no re-embed."""
+    project_id = await _project_of_note(session, note_id=part.note_id)
     await session.execute(
         update(MemoryBlob)
-        .where(MemoryBlob.id == pointer.blob_id, MemoryBlob.org_id == pointer.org_id)
+        .where(
+            MemoryBlob.id.in_([p.blob_id for p in pointers]),
+            MemoryBlob.org_id == part.org_id,
+        )
         .values(project_id=project_id)
     )
-    pointer.note_id = part.note_id
+    for pointer in pointers:
+        pointer.note_id = part.note_id
 
 
 async def _part_ids_of_note(session: AsyncSession, note_id: uuid.UUID) -> list[uuid.UUID]:
@@ -541,10 +780,11 @@ async def rescope_note_blobs(
     no re-embed -- so a peer's search sees the new perimeter immediately
     instead of only after the note's next content edit re-indexes it (task
     1d152747). A note not yet flushed to the index has no pointers here and
-    is scoped correctly by the deferred index at commit."""
-    from mycelium_core.services.notes import project_tag_for_note
+    is scoped correctly by the deferred index at commit.
 
-    project_id = await project_tag_for_note(session, note_id=note_id)
+    Set-shaped already: the subquery selects the note's pointer rows, which
+    is every chunk of every part, so a long part is rescoped whole."""
+    project_id = await _project_of_note(session, note_id=note_id)
     await session.execute(
         update(MemoryBlob)
         .where(
@@ -563,56 +803,94 @@ async def rescope_note_blobs(
 # ---------------------------------------------------------------- tag wiring
 
 
-async def _attach_inherited_tags(
+async def _index_tag_ids(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    blob_id: uuid.UUID,
     note_id: uuid.UUID,
-) -> None:
-    """Copy the note's tags onto the part blob (faceted-search parity with
-    task blobs, which inherit the task's tags)."""
-    from mycelium_core.models.memory_blob import MemoryBlobTag
-    from mycelium_core.models.note_tag import NoteTag
+) -> list[uuid.UUID]:
+    """Every tag a part blob carries: the note's own tags (faceted-search
+    parity with task blobs, which inherit the task's) plus the
+    ``memory_channel`` tag with system_key='note', without which the blob
+    is off the channel the note search queries.
 
+    Resolved ONCE per part rather than once per blob: a long part is
+    dozens of chunks and the facets are the same on all of them. The union
+    is deduplicated, which is also what makes the channel tag safe to
+    append unconditionally -- a note tagged with the channel tag itself
+    would otherwise collide on the blob's tag primary key.
+    """
+    from mycelium_core.models.note_tag import NoteTag
+    from mycelium_core.models.tag import Tag, TagKind
+    from mycelium_core.services import taxonomy
+
+    out: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
     rows = (
         (await session.execute(select(NoteTag.tag_id).where(NoteTag.note_id == note_id)))
         .scalars()
         .all()
     )
-    for tid in set(rows):
-        session.add(MemoryBlobTag(blob_id=blob_id, org_id=org_id, tag_id=tid))
-    if rows:
-        await session.flush()
-
-
-async def _attach_channel_tag(
-    session: AsyncSession,
-    *,
-    org_id: uuid.UUID,
-    blob_id: uuid.UUID,
-) -> None:
-    """Pin the blob to the ``memory_channel`` tag with system_key='note'
-    (seeded by ``taxonomy.ensure_default_memory_channels``). Ensure-seed
-    here to keep the resync self-contained."""
-    from mycelium_core.models.memory_blob import MemoryBlobTag
-    from mycelium_core.models.tag import Tag, TagKind
-    from mycelium_core.services import taxonomy
-
+    for tid in rows:
+        if tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    # Ensure-seed here to keep the resync self-contained.
     await taxonomy.ensure_default_memory_channels(session, org_id=org_id)
     channel_id = (
         await session.execute(
             select(Tag.id).where(Tag.kind == TagKind.memory_channel, Tag.system_key == "note")
         )
     ).scalar_one_or_none()
-    if channel_id is None:
+    if channel_id is not None and channel_id not in seen:
+        out.append(channel_id)
+    return out
+
+
+async def _add_missing_blob_tags(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    blob_ids: Sequence[uuid.UUID],
+    tag_ids: Sequence[uuid.UUID],
+) -> None:
+    """Give blobs that already exist the facets a fresh chunk would get.
+
+    Needed because a rewrite keeps the slots that survive: without this, a
+    part that grew past a boundary would carry the note's current tags on
+    its new chunks and the tags of its last full re-index on the old ones,
+    which is one document answering two different facet queries.
+
+    ADDITIVE, and that is the decision rather than an omission. A blob's
+    tags are not only inherited: ``memory.attach_blob_tag`` is a curation
+    door open to a person and to an assistant, and a resync that made the
+    set match the note exactly would delete by hand what was added by
+    hand, on the next edit of the part.
+    """
+    if not blob_ids or not tag_ids:
         return
-    try:
-        async with session.begin_nested():
-            session.add(MemoryBlobTag(blob_id=blob_id, org_id=org_id, tag_id=channel_id))
-            await session.flush()
-    except IntegrityError:
-        return
+    from mycelium_core.models.memory_blob import MemoryBlobTag
+
+    have = {
+        (bid, tid)
+        for bid, tid in (
+            await session.execute(
+                select(MemoryBlobTag.blob_id, MemoryBlobTag.tag_id).where(
+                    MemoryBlobTag.blob_id.in_(list(blob_ids)),
+                    MemoryBlobTag.org_id == org_id,
+                )
+            )
+        ).all()
+    }
+    missing = [
+        MemoryBlobTag(blob_id=bid, org_id=org_id, tag_id=tid)
+        for bid in blob_ids
+        for tid in tag_ids
+        if (bid, tid) not in have
+    ]
+    if missing:
+        session.add_all(missing)
+        await session.flush()
 
 
 # ---------------------------------------------------------------- backfill
@@ -655,3 +933,65 @@ async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -
         except Exception:
             logger.exception("note-search pointer backfill failed for part_id=%s", part_id)
     return indexed
+
+
+async def run_rechunk_backfill(session: AsyncSession, *, batch_size: int = 50) -> int:
+    """Re-index parts that are long enough to chunk but hold one blob.
+
+    The back-catalogue of the single-blob indexer: every part written
+    before this module chunked anything has exactly one pointer row, and
+    for a part above the threshold that one blob is the head of the text
+    presented as the whole of it.
+
+    Note-native on purpose. ``memory.rechunk_legacy_sources`` looks like
+    the tool for this and is not: it deletes the legacy blob, which
+    cascades the pointer row away, and rewrites through ``write_blob``,
+    which does not recreate it -- so the chunks land orphaned and
+    ``run_pointer_backfill`` above, seeing a part with no pointer, writes
+    an (N+1)-th whole-doc blob on top of them within a tick. This pass
+    goes through the same resync as every other write instead, which is
+    what keeps the pointer set and the blob set one thing.
+
+    Idempotent by construction: a rechunked part has N>1 pointer rows and
+    stops matching the candidate predicate, so a second pass writes
+    nothing. ``ParagraphChunker`` always yields at least two chunks above
+    the threshold (the cap is 400 words against a floor of 800), so the
+    predicate cannot re-admit what it just processed.
+    """
+    # The threshold is counted in words on the RENDERED text, which needs
+    # the part; SQL pre-filters on a bound that cannot exclude a
+    # candidate (800 words occupy at least 1600 characters, one per word
+    # plus one separator) and the exact count is confirmed below.
+    min_chars = get_chunk_threshold_tokens() * 2
+    rows = (
+        await session.execute(
+            select(NotePart.id)
+            .join(Note, Note.id == NotePart.note_id)
+            .join(NotePartIndexPointer, NotePartIndexPointer.part_id == NotePart.id)
+            .where(
+                Note.index_scope != IndexScope.none,
+                func.char_length(func.coalesce(NotePart.body, ""))
+                + func.char_length(func.coalesce(NotePart.title, ""))
+                >= min_chars,
+            )
+            .group_by(NotePart.id)
+            .having(func.count() == 1)
+            .limit(batch_size)
+        )
+    ).all()
+    if not rows:
+        return 0
+    rechunked = 0
+    for (part_id,) in rows:
+        try:
+            loaded = await _load_part(session, part_id)
+            if loaded is None:
+                continue
+            part, _scope = loaded
+            if approx_tokens(render_part_for_search(part)) < get_chunk_threshold_tokens():
+                continue
+            await _resync_part_blob(session, part_id, rechunk=True)
+            rechunked += 1
+        except Exception:
+            logger.exception("note-search rechunk backfill failed for part_id=%s", part_id)
+    return rechunked

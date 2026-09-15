@@ -46,8 +46,17 @@ async def _org() -> tuple[uuid.UUID, uuid.UUID]:
 
 
 async def _pointer(s, part_id: uuid.UUID) -> NotePartIndexPointer | None:
+    """The HEAD pointer of the part. A part owns one row per chunk since
+    migration 0016; every body in this file is short enough to be a single
+    chunk, so this is still the whole set, and naming chunk 0 keeps it that
+    way if one of them ever grows."""
     return (
-        await s.execute(select(NotePartIndexPointer).where(NotePartIndexPointer.part_id == part_id))
+        await s.execute(
+            select(NotePartIndexPointer).where(
+                NotePartIndexPointer.part_id == part_id,
+                NotePartIndexPointer.chunk_index == 0,
+            )
+        )
     ).scalar_one_or_none()
 
 

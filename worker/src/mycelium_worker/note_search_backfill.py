@@ -1,4 +1,4 @@
-"""Note-search pointer backfill loop.
+"""Note-search backfill loop: two passes over the back-catalogue.
 
 Indexes note parts that pre-date the per-part index deploy (migration
 0040): the listener-driven resync catches every new mutation, but parts
@@ -6,6 +6,14 @@ created before the deploy never went through it, so an old note stays
 invisible to semantic retrieval until it is edited. This sweep walks
 those parts and runs the same ``_resync_part_blob`` the listener would
 have, so the back-catalogue becomes searchable on its own.
+
+The second pass (migration 0016) is the same repair one deploy later: a
+part indexed before the indexer chunked anything holds ONE blob, and
+above the chunker threshold that blob is the head of the part presented
+as the whole of it. It re-indexes those through the same resync, which is
+the only path that keeps the pointer set and the blob set one thing.
+Both passes are idempotent and neither re-embeds a part it has already
+finished with.
 
 Unlike ``task_search_backfill`` there is no separate embedding-backfill
 call here: keyword-only blobs (embedder timed out) are re-embedded
@@ -61,11 +69,16 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
 
 
 async def run_once(pointer_batch_size: int = 50) -> int:
-    """One sweep across all workspaces.
+    """One sweep across all workspaces, both passes.
 
-    Returns ``indexed``: note parts that pre-date the per-part index
-    deploy (no pointer yet) and that we just indexed via
-    ``run_pointer_backfill``. Per-workspace exceptions isolated/logged.
+    Returns the parts touched: those that pre-date the per-part index
+    deploy (no pointer yet) via ``run_pointer_backfill``, plus those
+    indexed as a single whole-doc blob while long enough to chunk, via
+    ``run_rechunk_backfill``. Per-workspace exceptions isolated/logged.
+
+    The two run in the same tenant session, in this order: a part the
+    first pass has just indexed is already chunked, so the second sees
+    nothing to do for it and the order costs nothing.
     """
     try:
         org_ids = await _all_workspaces()
@@ -80,9 +93,15 @@ async def run_once(pointer_batch_size: int = 50) -> int:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 indexed = await note_search.run_pointer_backfill(s, batch_size=pointer_batch_size)
-            if indexed:
-                _log.info("note-search backfill org=%s indexed=%d", org_id, indexed)
-            total_indexed += indexed
+                rechunked = await note_search.run_rechunk_backfill(s, batch_size=pointer_batch_size)
+            if indexed or rechunked:
+                _log.info(
+                    "note-search backfill org=%s indexed=%d rechunked=%d",
+                    org_id,
+                    indexed,
+                    rechunked,
+                )
+            total_indexed += indexed + rechunked
         except Exception:
             _log.exception("note-search backfill failed for org=%s", org_id)
     return total_indexed

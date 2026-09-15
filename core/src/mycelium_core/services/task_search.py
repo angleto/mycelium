@@ -1115,8 +1115,12 @@ async def _entity_code_matches(
         task_blob = {tid: bid for tid, bid in task_rows}
     note_blob: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
     if note_ids:
-        # Route to the note's FIRST part: the top of the document is where a
-        # reader who followed an id wants to land.
+        # Route to the head of the note's FIRST part: the top of the document
+        # is where a reader who followed an id wants to land. Both keys are
+        # needed since a part is a SET of chunk blobs: ``ord`` picks the part,
+        # ``chunk_index`` picks its head, and without the second the
+        # ``setdefault`` below would keep whichever chunk the planner
+        # happened to return first.
         note_rows = (
             await session.execute(
                 select(
@@ -1126,7 +1130,11 @@ async def _entity_code_matches(
                 )
                 .join(NotePart, NotePart.id == NotePartIndexPointer.part_id)
                 .where(NotePartIndexPointer.note_id.in_(note_ids))
-                .order_by(NotePartIndexPointer.note_id, NotePart.ord)
+                .order_by(
+                    NotePartIndexPointer.note_id,
+                    NotePart.ord,
+                    NotePartIndexPointer.chunk_index,
+                )
             )
         ).all()
         for nid, bid, pid in note_rows:

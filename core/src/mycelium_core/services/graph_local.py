@@ -273,8 +273,17 @@ class BoundedNeighborhood:
 
 
 async def _note_chars(session: AsyncSession, note_id: uuid.UUID) -> int:
-    """Indexed text size of a note (sum over its part blobs) -- the same
-    text a distiller would assemble; notes with no indexed part count 0."""
+    """Indexed text size of a note, summed over its part blobs.
+
+    The sum is over the CHUNKS, overlap included, so a multi-chunk part is
+    counted about 12% heavy (50 overlap words on 400). Kept rather than
+    computed from ``note_part.body``, and the difference is what the number
+    is for: this is a budget for a traversal that will assemble the indexed
+    text, and the indexed text is the chunks. Measuring the source would
+    make the budget optimistic exactly where the assembly costs most, which
+    is the failure the budget exists to prevent.
+
+    Notes with no indexed part count 0."""
     total = (
         await session.execute(
             select(func.coalesce(func.sum(func.length(func.coalesce(MemoryBlob.text, ""))), 0))

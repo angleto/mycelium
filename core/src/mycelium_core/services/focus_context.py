@@ -321,7 +321,12 @@ async def _snippets(
 ) -> dict[uuid.UUID, str | None]:
     """One head-of-text snippet per note from its indexed part blobs (the
     same text the search uses: title || body). Deterministic pick (lowest
-    part id) when a note has several parts."""
+    part id) when a note has several parts.
+
+    ``chunk_index == 0`` because a long part is indexed as a SET of chunk
+    blobs and only the first carries the head of it; without the term a
+    snippet could be drawn from the middle of a document, which reads as
+    truncation from both ends."""
     if not note_ids:
         return {}
     rows = (
@@ -332,7 +337,10 @@ async def _snippets(
                 MemoryBlob.text,
             )
             .join(MemoryBlob, MemoryBlob.id == NotePartIndexPointer.blob_id)
-            .where(NotePartIndexPointer.note_id.in_(note_ids))
+            .where(
+                NotePartIndexPointer.note_id.in_(note_ids),
+                NotePartIndexPointer.chunk_index == 0,
+            )
         )
     ).all()
     best: dict[uuid.UUID, tuple[uuid.UUID, str | None]] = {}
