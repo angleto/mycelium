@@ -62,3 +62,8 @@ web/.vite/
 
 # Credenziali DB locali (mai committare)
 credenzialidb*.txt
+
+# Il passaggio di consegne fra sessioni: stato di lavoro, non parte del
+# progetto. Era tracciato e non doveva esserlo (due commit, 47fe9ee e
+# 69cbc29). Resta sul disco, fuori dall'indice.
+p.txt
