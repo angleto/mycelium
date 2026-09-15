@@ -133,11 +133,30 @@ No accept/reject can reach the learning loop except as a bus event.
 
 ### Agent registry & quotas
 
-- The executor registry (ADR-0025) already lists authorised agents.
-  Each row gets two new columns: `event_quota_per_min` and
-  `event_quota_per_day`. The gateway counts events at insert time
-  and 429s past quota.
-- Human actors share the org's default quota.
+- The gateway counts events at insert time and 429s past quota. The
+  ceiling is one pair of settings, `MYCELIUM_AGENT_EVENT_QUOTA_PER_MIN`
+  and `..._PER_DAY`, applying to every agent actor.
+- Human actors are not capped here at all, and system batch jobs are
+  governed by the autonomous budget, which counts credits rather than
+  events.
+
+**Amendment 2026-09-15 (task e0738a4f).** This section used to say the
+executor registry carried the quota: two columns per row,
+`event_quota_per_min` and `event_quota_per_day`, overriding the default.
+They exist and are DEAD. The override could not fire: the lookup matched
+`Executor.user_id == actor_id`, and `create_executor` forces
+`user_id=None` for every kind but human, so no `llm_agent` row was ever
+reachable and the only row that could match was the caller's own human
+executor -- the actor class the cap explicitly exempts. Filling those
+columns in would have capped the human and left the agent free.
+
+Executor is a dispatch-side entity and is not in scope at emit time:
+`emit_event` receives a `users.id`, and its callers have no notion of an
+executor. A genuine per-agent quota would key on the identity the bus
+already has on the session (`agent_tokens.assistant_id`), not on a table
+with no foreign key to either an agent token or an assistant. That is a
+separate change, with its own migration and a signature change on
+`emit_event`.
 
 ### Inert-gate on autonomous commits (amendment 2026-06-19, task c19b5489)
 

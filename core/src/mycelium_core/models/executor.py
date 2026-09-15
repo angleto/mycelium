@@ -86,9 +86,21 @@ class Executor(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     capability_tags: Mapped[list[str]] = mapped_column(
         ARRAY(Text()), nullable=False, server_default=text("'{}'")
     )
-    # ADR-0036 event-bus quotas (anti-runaway, task c19b5489). Max bus
-    # events this executor may emit per minute / per day; 0 = unlimited
-    # (opt-in cap, same convention as autonomous_daily_credit_cap, so
-    # nothing is silently throttled). Enforced at emit time (429 past cap).
+    # ADR-0036 event-bus quotas (task c19b5489). NO WRITER AND NO READER:
+    # nothing in the tree sets these and nothing reads them (task e0738a4f).
+    #
+    # They were meant as a per-executor override on the emit-time cap, and
+    # that override could never fire: the lookup matched
+    # ``Executor.user_id == actor_id`` while ``create_executor`` forces
+    # ``user_id=None`` for every kind but human, which the comment below
+    # states in writing. So no llm_agent row was reachable, and the only
+    # row that could match was the caller's HUMAN executor -- the actor
+    # class the cap explicitly does not apply to.
+    #
+    # The cap now lives in Settings (``agent_event_quota_per_*``) and is
+    # one ceiling for every agent actor. These columns are left in place
+    # because dropping them would cost a migration for nothing; they are
+    # dead, and this comment is here so the next reader does not take them
+    # for a feature and wire something to them.
     event_quota_per_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     event_quota_per_day: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

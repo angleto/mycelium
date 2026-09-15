@@ -325,6 +325,20 @@ class Settings(BaseSettings):
     # Override via MYCELIUM_TOOL_ARG_BODY_HINT_CHARS.
     tool_arg_body_hint_chars: int = 32 * 1024
 
+    # Anti-runaway ceilings on the write events an autonomous AGENT actor
+    # may emit (ADR-0036). Generous enough not to throttle a legitimate
+    # agent, low enough to stop a runaway loop. Humans and system batch
+    # jobs are not capped here: the latter are governed by the autonomous
+    # budget, which counts credits rather than events.
+    #
+    # Here rather than as constants in the service because a ceiling that
+    # can only be changed by editing code is one nobody tunes; and here
+    # rather than per-executor because that override was unreachable by
+    # construction and would have capped the wrong actor (task e0738a4f).
+    # Zero disables a window.
+    agent_event_quota_per_min: int = 120
+    agent_event_quota_per_day: int = 20_000
+
     # Cap on a POSTed unified-diff patch body (services/text_patch.py).
     # A full-replace diff carries both the old and the new body, so it can
     # legitimately exceed note_body_max_bytes; ~2x + headroom. The applier

@@ -15,6 +15,7 @@ import uuid
 import pytest
 from sqlalchemy import func, select, update
 
+from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import ConflictError, QuotaExceededError
 from mycelium_core.i18n import MessageCode
@@ -97,20 +98,24 @@ async def test_emit_idempotent_within_window() -> None:
 # --- anti-runaway quota ---------------------------------------------------
 
 
-async def test_quota_caps_agent_writes() -> None:
+async def test_the_default_ceiling_caps_agent_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap, exercised against the ceiling that actually applies.
+
+    This test used to build an ``Executor(kind=llm_agent, user_id=user,
+    event_quota_per_min=2)`` and assert the per-executor override fired.
+    That row cannot exist: ``create_executor`` forces ``user_id=None`` for
+    every kind but human, so the service layer can never produce the shape
+    the test constructed by hand. It was green on an unreproducible
+    configuration, which is exactly why the defect survived -- the override
+    it proved was unreachable in production (task e0738a4f).
+
+    Now the ceiling is lowered where the code reads it, so what passes here
+    is what runs there."""
     org, user = await _workspace()
+    monkeypatch.setattr(get_settings(), "agent_event_quota_per_min", 2)
     async with tenant_session(str(org), str(user)) as s:
-        # A per-executor cap of 2/min, bound to this actor.
-        s.add(
-            Executor(
-                org_id=org,
-                kind=ExecutorKind.llm_agent,
-                name="bot",
-                user_id=user,
-                event_quota_per_min=2,
-            )
-        )
-        await s.flush()
         for _ in range(2):
             await event_bus.emit_event(
                 s, org_id=org, actor_id=user, actor_kind="agent", kind="commit", payload={}
@@ -122,20 +127,47 @@ async def test_quota_caps_agent_writes() -> None:
     assert err.value.code == MessageCode.EVENT_QUOTA_EXCEEDED
 
 
-async def test_quota_does_not_cap_human_or_system() -> None:
+async def test_no_executor_row_is_needed_or_consulted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression that keeps the coupling from coming back.
+
+    There is no Executor row in this workspace at all, and the cap still
+    bites. An implementation that reintroduced a per-executor lookup and
+    fell back to the default would also pass -- so the second half is the
+    one that bites: an Executor carrying a GENEROUS quota must not raise
+    the ceiling, because nothing reads that column any more."""
     org, user = await _workspace()
+    monkeypatch.setattr(get_settings(), "agent_event_quota_per_min", 1)
     async with tenant_session(str(org), str(user)) as s:
-        # Even with a tight executor cap, only agent writes are throttled.
         s.add(
             Executor(
                 org_id=org,
                 kind=ExecutorKind.human,
                 name="me",
                 user_id=user,
-                event_quota_per_min=1,
+                event_quota_per_min=9_999,
             )
         )
         await s.flush()
+        await event_bus.emit_event(
+            s, org_id=org, actor_id=user, actor_kind="agent", kind="commit", payload={}
+        )
+        with pytest.raises(QuotaExceededError):
+            await event_bus.emit_event(
+                s, org_id=org, actor_id=user, actor_kind="agent", kind="commit", payload={}
+            )
+
+
+async def test_quota_does_not_cap_human_or_system(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the agent class is capped, and the assertion rests on the early
+    return rather than on any Executor row: the tight ceiling below would
+    stop a third write if the actor kind were read wrongly."""
+    org, user = await _workspace()
+    monkeypatch.setattr(get_settings(), "agent_event_quota_per_min", 1)
+    async with tenant_session(str(org), str(user)) as s:
         for kind in ("human", "system"):
             for _ in range(3):
                 await event_bus.emit_event(

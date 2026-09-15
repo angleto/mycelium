@@ -28,10 +28,10 @@ from typing import Any, Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.config import get_settings
 from mycelium_core.errors import QuotaExceededError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.event_outbox import EventOutbox
-from mycelium_core.models.executor import Executor
 
 ActorKind = Literal["human", "agent", "system"]
 EventKind = Literal["read", "propose", "commit", "reject", "snapshot"]
@@ -40,12 +40,25 @@ _IDEMPOTENCY_WINDOW = datetime.timedelta(hours=24)
 # Write events that count against an agent's anti-runaway quota.
 _WRITE_KINDS: frozenset[str] = frozenset({"propose", "commit"})
 
-# Default anti-runaway ceilings for autonomous AGENT actors (c19b5489):
-# generous enough not to throttle a legitimate agent, low enough to stop a
-# runaway loop. A per-executor positive cap overrides these; humans (UI)
-# and system batch jobs (governed by autonomous_budget) are uncapped here.
-_AGENT_DEFAULT_PER_MIN = 120
-_AGENT_DEFAULT_PER_DAY = 20_000
+# The anti-runaway ceilings on autonomous AGENT actors (c19b5489) live in
+# Settings, beside the other rate limits. They used to be constants here
+# with a per-EXECUTOR override on top, and that override was unreachable
+# by construction: the lookup matched ``Executor.user_id == actor_id``,
+# while ``create_executor`` forces ``user_id=None`` for every kind other
+# than human and the model says so in writing ("NULL for llm_agent"). No
+# llm_agent row could ever be found. The only row that COULD match was
+# the caller's HUMAN executor -- exactly the actor class this function
+# declares it does not cap -- so the day somebody filled those columns in
+# by hand, the cap would have bitten the human and left the agent free
+# (task e0738a4f).
+#
+# Removed rather than repaired, because Executor is a DISPATCH-side entity
+# and is not in scope at emit time: ``emit_event`` is handed
+# (actor_id, actor_kind) where actor_id is a users.id, and its callers --
+# garden_review, garden_classify -- have no notion of an executor. If a
+# genuine per-agent quota is wanted later, the key is the identity the bus
+# already has on the session (``agent_tokens.assistant_id``, readable as
+# ``app.current_actor_subject``), not a table with no FK to either.
 
 # Map the fine-grained session ``app.current_actor_kind`` GUC (the same
 # one audit.log reads) to the coarse bus actor class.
@@ -105,22 +118,16 @@ async def _enforce_quota(
     now: datetime.datetime,
 ) -> None:
     """Anti-runaway cap on autonomous AGENT write events. Humans (UI) and
-    system jobs (autonomous_budget governs them) are not capped here."""
+    system jobs (autonomous_budget governs them) are not capped here.
+
+    One ceiling per window, from Settings, the same for every agent actor.
+    There is no per-actor override: the one that used to be here could not
+    be reached, and the note above says why."""
     if actor_kind != "agent":
         return
-    per_min, per_day = _AGENT_DEFAULT_PER_MIN, _AGENT_DEFAULT_PER_DAY
-    row = (
-        await session.execute(
-            select(Executor.event_quota_per_min, Executor.event_quota_per_day)
-            .where(Executor.org_id == org_id, Executor.user_id == actor_id)
-            .limit(1)
-        )
-    ).first()
-    if row is not None:
-        if int(row[0] or 0) > 0:
-            per_min = int(row[0])
-        if int(row[1] or 0) > 0:
-            per_day = int(row[1])
+    settings = get_settings()
+    per_min = settings.agent_event_quota_per_min
+    per_day = settings.agent_event_quota_per_day
     if per_min > 0:
         n = await _count_events_since(
             session, org_id=org_id, actor_id=actor_id, since=now - datetime.timedelta(minutes=1)
