@@ -9,6 +9,7 @@
 // came back with nothing to say so.
 
 import { describe, expect, it } from 'vitest'
+import { hitsOf } from '../src/bg/find'
 import { IS_VALUES, SCOPE_SIGILS, parseQuery } from '../src/shared/query'
 
 describe('free text', () => {
@@ -119,5 +120,30 @@ describe('the declared surface', () => {
 
   it('gives is: a closed vocabulary', () => {
     expect([...IS_VALUES]).toEqual(['task', 'note', 'archived'])
+  })
+})
+
+describe('POST /search: the answer shape this build must survive', () => {
+  // The endpoint returns a bare array today and discards the recall meta the
+  // same server function gives the MCP surface. Wrapping it is the fix, and
+  // this extension is why the server cannot just do it: it ships to browsers
+  // and updates on their schedule, not the server's. So tolerance lands
+  // first, here, and the server wraps once this build is the one in the
+  // field. Both shapes are asserted because only testing the new one would
+  // let a change that broke TODAY's server pass.
+  it('reads hits from a bare array, which is what the server sends now', () => {
+    expect(hitsOf([{ kind: 'task' }, { kind: 'note' }] as never)).toHaveLength(2)
+  })
+
+  it('reads hits from an envelope, which is what it will send', () => {
+    expect(hitsOf({ hits: [{ kind: 'task' }] } as never)).toHaveLength(1)
+  })
+
+  it('reads an empty page out of anything it does not recognise', () => {
+    // A shape from neither contract is a server this build cannot read.
+    // Zero rows is a bad answer; a thrown TypeError in the worker is a
+    // broken panel, and that difference is the whole point of the change.
+    expect(hitsOf({} as never)).toEqual([])
+    expect(hitsOf({ hits: 'not-a-list' } as never)).toEqual([])
   })
 })

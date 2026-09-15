@@ -43,6 +43,28 @@ interface SearchHit {
   tags?: { id: string; kind: string; name: string }[]
 }
 
+/** What POST /search may answer, now or after it grows an envelope.
+ *
+ *  The endpoint returns a bare array and discards the recall meta that the
+ *  same server function hands the MCP surface, so a REST caller cannot tell
+ *  "nothing was relevant" from "recall degraded in silence". Fixing that
+ *  means wrapping the array in an object, and this extension is the reason
+ *  the server cannot simply do it: it is installed in a browser and updates
+ *  when the store and the user's browser get round to it, not when the
+ *  server deploys. `for (const hit of ranked.data)` on an object throws.
+ *
+ *  So the order is the other way round. This build accepts both shapes; once
+ *  it is the one in the field, the server can wrap and this branch becomes
+ *  the only one taken. Nothing here reads the meta yet: tolerating the shape
+ *  and using it are separate changes, and only the first has to ship first.
+ */
+type SearchAnswer = SearchHit[] | { hits: SearchHit[] }
+
+export function hitsOf(answer: SearchAnswer): SearchHit[] {
+  if (Array.isArray(answer)) return answer
+  return Array.isArray(answer?.hits) ? answer.hits : []
+}
+
 /** A stored recents row carries only what the shared contract defines;
  *  the code is derived rather than stored, so a change to how a code is
  *  formed does not leave old rows showing the old shape. */
@@ -173,7 +195,7 @@ export async function query(
   const focusTag = effective?.tagId
   const tagIds = [...(focusTag ? [focusTag] : []), ...(await resolveTags(conn, parsed.tags))]
 
-  const ranked = await call<SearchHit[]>(conn, '/search', {
+  const ranked = await call<SearchAnswer>(conn, '/search', {
     method: 'POST',
     body: {
       // The focus contributes ONE tag id. See scope.ts: the server's tag
@@ -202,8 +224,9 @@ export async function query(
     return ranked
   }
 
+  const hits = hitsOf(ranked.data)
   let rank = 0
-  for (const hit of ranked.data) {
+  for (const hit of hits) {
     rank += 1
     const row = rowFromHit(hit, rank)
     if (!row || seen.has(row.route)) continue
@@ -215,7 +238,7 @@ export async function query(
     ok: true,
     data: {
       rows,
-      rankedCount: ranked.data.length,
+      rankedCount: hits.length,
       degraded: false,
       // Atoms the panel could not honour. Shown rather than dropped in
       // silence: the query that ran is not the query that was typed, and

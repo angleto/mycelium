@@ -30,12 +30,25 @@ async def search(
     body: SearchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[SearchHit]:
-    # `_meta` is still discarded here, and that is a decision rather than an oversight. The
-    # response model is a bare array, so carrying the recall meta means wrapping it in an
-    # object, and the browser extension is a shipped artifact that consumes `SearchHit[]` and
-    # is not redeployed with the server. Breaking it to add a field is not a trade this
-    # endpoint gets to make on its own; the MCP surface carries the meta today, and the REST
-    # envelope is its own decision with its own compatibility plan.
+    # `_meta` is still discarded here, and that is a decision rather than an oversight, with
+    # a plan and a date it can happen on.
+    #
+    # The response model is a bare array, so carrying the recall meta means wrapping it in an
+    # object. This endpoint has exactly two callers, counted rather than assumed: the SPA
+    # (web/src/api/client.ts), which is redeployed with this server, and the browser
+    # extension (extension/src/bg/find.ts), which is installed in a browser and updates when
+    # the store and the user get round to it. The extension iterated the response directly,
+    # so an envelope would not have degraded it, it would have thrown.
+    #
+    # So the order is inverted, which is the only shape of this change that is correct at
+    # every point in between: the extension learned BOTH shapes first (`hitsOf`, and the
+    # reasoning is on the type there). When a build carrying that is the one in the field,
+    # this returns `{hits, meta}`, the SPA regenerates its types, and there is one shape on
+    # both surfaces instead of two. The gate is a released extension, not a code review.
+    #
+    # Until then a REST caller cannot tell "nothing was relevant" from "recall degraded in
+    # silence", which is what the meta exists to say and what the MCP surface has had all
+    # along.
     hits, _meta = await svc.search_unified_with_meta(
         ctx.session,
         org_id=ctx.org_id,
