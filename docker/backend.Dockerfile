@@ -110,6 +110,13 @@ COPY --from=builder /app/api /app/api
 COPY --from=builder /app/mcp /app/mcp
 COPY --from=builder /app/worker /app/worker
 COPY --from=builder /app/sdi-inbound /app/sdi-inbound
+# The maintained docs, which the BUILDER stage has copied since 2026-07-02 and
+# the runtime stage never carried forward: ``/app/docs`` did not exist in a
+# running pod, so the MCP ``help`` tool served an empty ``doc_topics`` and its
+# own overview promised a ``help('<topic>')`` drill-down that could not work.
+# The final stage is an allowlist, which is the right shape and has this cost:
+# a thing not named does not ship, and this one was not named (task 677ea7c4).
+COPY --from=builder /app/docs /app/docs
 # The migrate Job re-asserts the prod function-execute posture after Alembic
 # (`python -m mycelium_core.db_harden`, ADR-0015). Bundle the SQL it runs.
 # Copied from the build context (the repo root), not the builder stage, and

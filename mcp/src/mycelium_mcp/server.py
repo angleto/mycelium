@@ -313,11 +313,26 @@ _OVERVIEW = (
     "scheduling, time tracking and billing, notes with a knowledge graph, a "
     "client/project taxonomy, workflows, email and calendar, and Italian "
     "electronic invoicing (FatturaPA / SdI). The MCP surface is co-equal to the "
-    "web GUI over one service layer (ADR-0001). Configuration is via MYCELIUM_* "
-    "environment variables (see the 'configuration' field). Design and feature "
-    "docs are listed under 'doc_topics' -- call help('<topic>') for a document's "
-    "full text; use search_tools(query) to find a tool for a task; the REST API "
-    "reference is at /apidocs."
+    "web GUI over one service layer (ADR-0001). Use search_tools(query) to find "
+    "a tool for a task; the REST API reference is at /apidocs."
+)
+
+#: Appended only when there is a drill-down to point at. The overview used to
+#: promise one unconditionally -- "docs are listed under 'doc_topics' -- call
+#: help('<topic>')" -- while ``doc_topics`` was EMPTY in production, because the
+#: runtime image never carried ``docs/`` forward from its builder stage. A
+#: pointer at an empty list is worse than no pointer: it spends a call to
+#: discover that the thing does not exist.
+_DOCS_POINTER = (
+    " Design and feature docs are listed under 'doc_topics' -- call "
+    "help('<topic>') for a document's full text."
+)
+
+#: Said instead when the docs are not on this deployment, so the absence is a
+#: STATED fact rather than an empty field the reader has to interpret.
+_NO_DOCS_POINTER = (
+    " The document set is not installed on this deployment, so 'doc_topics' is "
+    "empty; call help('configuration') for the environment reference."
 )
 
 
@@ -426,12 +441,20 @@ def help(topic: str | None = None) -> dict[str, Any]:
             "hint": "call help() with no topic for the index, or help('configuration')",
         }
 
+    # The default answer is an INDEX, not the manual. It used to carry the
+    # whole derived environment reference -- ~160 entries, most with a null
+    # description -- and the server's own instructions tell every client to
+    # call this at bootstrap, so that was the single largest fixed cost of a
+    # session, paid per agent per machine per session, for a reader that
+    # cannot set an environment variable anyway. It is one call away for the
+    # operator who does want it: help('configuration'), which already worked
+    # and is now the advertised way in.
     return {
-        "overview": _OVERVIEW,
-        "configuration": _config_reference(),
+        "overview": _OVERVIEW + (_DOCS_POINTER if topics else _NO_DOCS_POINTER),
         "doc_topics": topics,
         "pointers": {
             "tools": "use search_tools(query) to find an MCP tool for a task",
+            "configuration": "call help('configuration') for the MYCELIUM_* reference",
             "rest_api": "the REST API reference (OpenAPI) is served at /apidocs",
         },
     }
