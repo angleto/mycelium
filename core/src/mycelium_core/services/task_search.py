@@ -615,6 +615,14 @@ class UnifiedHit:
     # keyword-only (no dense vector) -- surfaced so a caller can see when a
     # result rode FTS alone (audit #8, task 4f3c2207).
     model_id: str | None = None
+    # The backing blob's vector was produced from the HEAD of its text only
+    # (task ef3f477b): the text is longer than the local embedder's window,
+    # so the rest of the document is semantically invisible while the row
+    # reads as fully indexed. Carried per hit, not only aggregated, for the
+    # same reason ``model_id`` is: the unified meta recomputes over the
+    # FINAL list, after the per-note collapse and the cross-kind dedup have
+    # changed which hits the caller actually gets.
+    embedding_truncated: bool = False
     note_id: uuid.UUID | None = None
     part_id: uuid.UUID | None = None
     # Why this hit ranked here, carried through from ``memory.Hit``: the
@@ -641,6 +649,25 @@ class UnifiedHit:
     other_part_ids: list[uuid.UUID] = field(default_factory=list)
 
 
+def _covers_head_only(blob: MemoryBlob) -> bool:
+    """Whether this blob's vector was made from the head of its text only.
+
+    A row with no vector has nothing to truncate and is already declared by
+    ``keyword_only_hits``, so the two signals stay disjoint and neither can
+    absorb the other. The reasoning behind the predicate, and what it does
+    not claim, is in ``memory.embedding_covers_head_only``.
+    """
+    from mycelium_core.config import get_settings
+
+    if blob.embedding is None:
+        return False
+    from mycelium_core.services import memory as memory_svc
+
+    return memory_svc.embedding_covers_head_only(
+        blob.text, window=get_settings().embedder_max_seq_tokens
+    )
+
+
 def _aggregate_unified_meta(metas: list[RetrievalMeta], final: list[UnifiedHit]) -> RetrievalMeta:
     """Fold the per-branch recall metas into one unified meta. ``abstained`` is
     True ONLY when abstention shaped an EMPTY result -- a thin-but-nonempty
@@ -659,6 +686,7 @@ def _aggregate_unified_meta(metas: list[RetrievalMeta], final: list[UnifiedHit])
         abstained=abstained,
         abstain_reason=abstained_metas[0].abstain_reason if abstained else None,
         rerank_failed=any(m.rerank_failed for m in metas),
+        embedding_truncated_hits=sum(1 for h in final if h.embedding_truncated),
     )
 
 
@@ -809,6 +837,7 @@ async def search_unified_with_meta(
                         scores_by_stage=dict(h.scores_by_stage),
                         scope=task_hit_scope,
                         model_id=h.blob.model_id,
+                        embedding_truncated=_covers_head_only(h.blob),
                     )
                 )
 
@@ -922,6 +951,7 @@ async def search_unified_with_meta(
                     scores_by_stage=dict(h.scores_by_stage),
                     scope="project" if project_id is not None else "org",
                     model_id=h.blob.model_id,
+                    embedding_truncated=_covers_head_only(h.blob),
                 )
                 by_note[note_id] = hit
                 rows.append(hit)
@@ -997,6 +1027,7 @@ async def search_unified_with_meta(
                         scores_by_stage=dict(h.scores_by_stage),
                         scope="project" if project_id is not None else "org",
                         model_id=h.blob.model_id,
+                        embedding_truncated=_covers_head_only(h.blob),
                     )
                 )
 

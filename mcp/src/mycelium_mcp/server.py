@@ -4558,6 +4558,11 @@ def _retrieval_meta(m: memory_svc.RetrievalMeta) -> dict[str, Any]:
         "abstained": m.abstained,
         "abstain_reason": m.abstain_reason,
         "rerank_failed": m.rerank_failed,
+        # Hits whose vector was made from the HEAD of their text: the row is
+        # indexed, but only its beginning is semantically reachable. Notes
+        # are chunked and so are not affected; a long task description or a
+        # long agent memory still is.
+        "embedding_truncated_hits": m.embedding_truncated_hits,
     }
 
 
@@ -4973,6 +4978,11 @@ async def search(
                     # (task 859ad2d3), so these are the sections that did not
                     # get a row; read them when one answer spans a document.
                     "other_part_ids": [str(p) for p in h.other_part_ids],
+                    # Present only when it bites, like the blob payload cap
+                    # above: this hit's vector covers the head of its text,
+                    # so a query about the rest of the document may have
+                    # missed it and reading the whole row is worth it.
+                    **({"embedding_truncated": True} if h.embedding_truncated else {}),
                 }
                 for h in page
             ],

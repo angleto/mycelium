@@ -131,6 +131,10 @@ async def test_mcp_tools_return_the_meta_envelope(_fake_embedder: None) -> None:
         "abstained",
         "abstain_reason",
         "rerank_failed",
+        # Hits whose vector covers only the head of their text (task
+        # ef3f477b). The set is asserted WHOLE, so a field added to the
+        # meta and never surfaced fails here instead of shipping invisible.
+        "embedding_truncated_hits",
     }
     ms = await memory_search(
         token=token, org_id=org, query="kilo", operation_id="q4", project_id=proj

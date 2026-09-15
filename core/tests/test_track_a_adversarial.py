@@ -162,6 +162,11 @@ def _meta(*, abstained: bool) -> memory.RetrievalMeta:
 class _FakeUnifiedHit:
     kind = "task"
     model_id = "BAAI/bge-m3"
+    # The aggregator counts this per FINAL hit, so the double carries it
+    # like the real row does. Added to the double rather than read
+    # defensively in the aggregator: a getattr there would let a real hit
+    # that forgot the field count as "not truncated" for ever.
+    embedding_truncated = False
 
 
 def test_unified_abstained_only_when_result_is_empty() -> None:

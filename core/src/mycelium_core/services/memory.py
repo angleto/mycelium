@@ -24,7 +24,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.embed_dims import EMBED_DIM, EMBED_DIM_HOSTED
-from mycelium_core.embedder import Embedder, EmbedResult, EmbedSide, get_embedder
+from mycelium_core.embedder import (
+    Embedder,
+    EmbedResult,
+    EmbedSide,
+    estimate_tokens,
+    get_embedder,
+)
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
@@ -189,6 +195,40 @@ async def grader_min_rerank_score_floor(session: AsyncSession, org_id: uuid.UUID
     return await _org_setting_float(session, org_id, GRADER_MIN_RERANK_SCORE_KEY)
 
 
+def embedding_covers_head_only(text: str | None, *, window: int) -> bool:
+    """Was this row's vector produced from the HEAD of its text?
+
+    The local embedder's sequence window is capped at
+    ``embedder_max_seq_tokens`` (2048, after the 2026-07-24 worker OOM);
+    anything longer is truncated by the encoder, so the vector represents
+    the beginning of the document and the rest of it is semantically
+    invisible while the row reads as fully indexed. Task 11154e32 removed
+    this for notes by chunking them, and only for notes: ``pick_chunker``
+    returns ``WholeChunker`` for every other namespace, and ``task_search``
+    does not call it at all, so a long task description or a long agent
+    memory is still one vector at any length. This is the declaration of
+    what is left.
+
+    WHAT THE NUMBER IS WORTH. The comparison uses ``estimate_tokens``, the
+    chars/4 heuristic the embedder's own batching already trusts with
+    memory safety, because nothing in the system holds the real count: the
+    local embedder reports ``tokens`` as a WORD count, so even the writer
+    does not know. The estimate runs about 10-30% off in either direction,
+    so near the window it can be wrong, and it is wrong in the direction of
+    over-declaring (chars/4 reads above the true count on ordinary prose).
+    Declaring a risk that was not taken costs a caller a read it did not
+    need; hiding one costs it the answer.
+
+    WHAT IT DOES NOT COVER: the HOSTED tier. The cap is applied to the
+    local model at load (``LocalEmbedder._model_ready``); a hosted provider
+    truncates at its own window, which this process does not know and
+    therefore does not claim.
+    """
+    if not text or window <= 0:
+        return False
+    return estimate_tokens(text, window=window) >= window
+
+
 # Sentinel model id recorded on a blob written while the embedder is
 # unavailable (missing optional extra / load failure): the row is kept
 # valid and FTS-searchable, just without a semantic vector. The SPA
@@ -251,6 +291,10 @@ class RetrievalMeta:
       (model missing / OOM) and the pipeline degraded to RRF order. Results are
       still returned, but the precision uplift is absent -- surface it so the
       degradation is not silent (the same failure mode A1 exists to expose).
+    - ``embedding_truncated_hits``: returned hits whose vector was produced
+      from the HEAD of their text, because the text was longer than the local
+      embedder's sequence window. See :func:`embedding_covers_head_only` for
+      what the number is worth and what it does not cover.
     """
 
     query_embedded: bool
@@ -266,6 +310,10 @@ class RetrievalMeta:
     # report can attribute a recall delta to the source.
     graph_ran: bool = False
     graph_contributed: int = 0
+    # Task ef3f477b (C8). Disjoint from ``keyword_only_hits`` by
+    # construction: that one counts hits with NO vector, this one hits whose
+    # vector covers only part of the text. Neither can absorb the other.
+    embedding_truncated_hits: int = 0
 
 
 async def _safe_embed(emb: Embedder, text: str, *, side: EmbedSide) -> EmbedResult | None:
@@ -932,6 +980,14 @@ async def retrieve_with_meta(
             dense_rejected_by_floor=int(diag.get("floor_rejected", 0)),
             keyword_only_hits=sum(
                 1 for h in hits if (h.blob.model_id or _KEYWORD_ONLY_MODEL) == _KEYWORD_ONLY_MODEL
+            ),
+            embedding_truncated_hits=sum(
+                1
+                for h in hits
+                # A row with no vector has nothing to truncate; it is
+                # already declared by keyword_only_hits above.
+                if h.blob.embedding is not None
+                and embedding_covers_head_only(h.blob.text, window=settings.embedder_max_seq_tokens)
             ),
             abstained=abstained,
             abstain_reason=reason if abstained else None,
