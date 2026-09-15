@@ -91,10 +91,17 @@ re-litigated per route):
 
 from __future__ import annotations
 
+from mycelium_core.mcp_scopes import HUMAN_ONLY
+
 # Sentinels. Distinct objects rather than strings so they can never collide
 # with a real scope key.
+#
+# ``HUMAN_ONLY`` comes from core and is NOT declared here, because the MCP
+# map needs the same value: the cross-surface drift guard compares the two
+# maps with ``==``, and two independent ``object()`` sentinels are never
+# equal -- a route and its MCP twin could both be fenced while the test
+# that exists to notice they agree reported that they do not.
 PUBLIC: object = object()
-HUMAN_ONLY: object = object()
 
 # META: authenticated and callable under ANY scope -- including the empty
 # one. Two routes hold it, ``GET /agent/self`` and ``GET
@@ -210,7 +217,12 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/annotations/{annotation_id}"): "annotations:read",
     ("PATCH", "/annotations/{annotation_id}"): ANNOTATION_WRITE_ANY,
     ("DELETE", "/annotations/{annotation_id}"): ANNOTATION_WRITE_ANY,
-    ("POST", "/annotations/{annotation_id}/accept"): "comments:write",
+    # Disposing of a suggestion is not proposing one. See the MCP twin in
+    # tool_scopes.py: accepting splices the proposed text into the document,
+    # so it is the one whole-document decision primitive, and the server's
+    # own instructions tell every client that agents "PROPOSE, never
+    # impose". Both surfaces fence it or neither does (task ce3b244b).
+    ("POST", "/annotations/{annotation_id}/accept"): HUMAN_ONLY,
     ("POST", "/annotations/{annotation_id}/assign"): "annotations:write",
     ("POST", "/annotations/{annotation_id}/body/append"): ANNOTATION_WRITE_ANY,
     ("POST", "/annotations/{annotation_id}/body/patch"): ANNOTATION_WRITE_ANY,
@@ -218,7 +230,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/annotations/{annotation_id}/body/raw"): "annotations:read",
     ("POST", "/annotations/{annotation_id}/body/replace"): ANNOTATION_WRITE_ANY,
     ("PATCH", "/annotations/{annotation_id}/body/stream"): ANNOTATION_WRITE_ANY,
-    ("POST", "/annotations/{annotation_id}/reject"): "comments:write",
+    ("POST", "/annotations/{annotation_id}/reject"): HUMAN_ONLY,
     ("POST", "/annotations/{annotation_id}/reopen"): "annotations:write",
     ("POST", "/annotations/{annotation_id}/purge"): "delete:comments",
     ("POST", "/annotations/{annotation_id}/resolve"): "comments:write",

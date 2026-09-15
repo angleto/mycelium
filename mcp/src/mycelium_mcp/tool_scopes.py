@@ -1,10 +1,17 @@
 """Per-tool scope map for MCP scope enforcement (task c19f2f63, enabler B).
 
 Every concrete MCP tool (the ~250 dispatched behind the gateway's
-``execute_tool``) maps to exactly ONE required scope key from
+``execute_tool``) maps to a required scope key from
 ``core.mcp_scopes.SCOPE_CATALOG``, or to ``None`` for a META tool
 (self-identity / liveness / discovery) that must always be callable so an
 agent can bootstrap and find out what it may do.
+
+Two values are not a key. A ``frozenset`` means ANY ONE of those keys is
+enough, the shape ``route_scopes`` already uses. ``HUMAN_ONLY`` means no
+scope reaches it: authenticated, and never callable by a caller carrying a
+scope list. The REST map has had that value since enabler B; this one did
+not, so the property "an agent may propose and may not dispose" was not
+expressible on this surface at all.
 
 The exception is a handful of tools whose required key depends on a call
 ARGUMENT (a ``kind`` discriminator): those live in ``DYNAMIC_TOOL_SCOPES``
@@ -27,6 +34,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+
+from mycelium_core.mcp_scopes import HUMAN_ONLY, SurfaceGate
 
 # Sentinel distinct from ``None``: ``None`` = META (allowed), a missing key
 # = UNMAPPED (denied, fail-closed).
@@ -60,7 +69,7 @@ TAG_ASSIGN_ANY: frozenset[str] = frozenset({"tags:assign", "tags:write"})
 # same shape deliberately: an operation that costs an any-of on one surface
 # and a single key on the other is the drift this pair of files exists to
 # prevent.
-TOOL_SCOPES: dict[str, str | frozenset[str] | None] = {
+TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "help": None,
     "ping": None,
     "whoami": None,
@@ -113,7 +122,19 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | None] = {
     "list_comment_revisions": "comments:read",
     "list_comments": "comments:read",
     "list_trashed_comments": "comments:read",
-    "accept_suggestion": "comments:write",
+    # Disposing of a suggestion -- accepting or rejecting it -- is the one
+    # act the server's own instructions tell every client it does not have:
+    # "agents execute and PROPOSE, never impose". It was costing the same
+    # key as proposing, on both surfaces, so whoever proposed disposed.
+    #
+    # Accepting SPLICES the proposed text into the note part's body or the
+    # task description, which makes it the only whole-document decision
+    # primitive there is. Rejecting is the disposal of somebody else's
+    # decision, not the withdrawal of one's own: an agent still retracts
+    # its own pending proposal with ``delete_comment``, which stays on
+    # ``comments:write``. So the pair goes behind the fence without taking
+    # away an agent's ability to undo its own mistake (task ce3b244b).
+    "accept_suggestion": HUMAN_ONLY,
     "add_comment": "comments:write",
     "add_comment_instructions": "comments:write",
     # The comment quintet is one family, so it is one key: creating and
@@ -127,7 +148,7 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | None] = {
     "prepend_to_comment": "comments:write",
     "propose_suggestion": "comments:write",
     "propose_suggestion_instructions": "comments:write",
-    "reject_suggestion": "comments:write",
+    "reject_suggestion": HUMAN_ONLY,
     "replace_in_comment": "comments:write",
     "resolve_annotation": "comments:write",
     "restore_comment": "comments:write",
@@ -458,16 +479,24 @@ def required_scope_for_call(
 
 
 def required_keys(tool_name: str) -> frozenset[str] | None:
-    """The scope keys that satisfy ``tool_name``, or None for META.
+    """The scope keys that satisfy ``tool_name``, or None when no key does.
 
-    One place normalises the three value shapes, so a reader -- the gate, a
-    drift guard, the coverage doc generator -- never has to know whether an
-    entry is a bare key or an any-of set. A tool absent from the map raises
+    One place normalises the value shapes, so a reader -- the gate, a drift
+    guard, the coverage doc generator -- never has to know whether an entry
+    is a bare key or an any-of set. A tool absent from the map raises
     KeyError rather than answering "no keys": absent means UNMAPPED, and the
     fail-closed decision belongs to the caller that can also see
-    DYNAMIC_TOOL_SCOPES."""
+    DYNAMIC_TOOL_SCOPES.
+
+    ``None`` now carries TWO meanings and the caller must not read them as
+    one: a META tool every scope reaches, and a HUMAN_ONLY tool no scope
+    reaches. They agree on the question this function answers -- "which keys
+    satisfy it" is "none" either way -- and disagree on everything a caller
+    does next, so a caller that decides access, or that tells a user which
+    key to ask for, reads ``TOOL_SCOPES`` directly instead. Only the
+    readers that merely enumerate keys use this."""
     required = TOOL_SCOPES[tool_name]
-    if required is None:
+    if required is None or required is HUMAN_ONLY:
         return None
     if isinstance(required, frozenset):
         return required

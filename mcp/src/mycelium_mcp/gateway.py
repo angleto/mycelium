@@ -49,11 +49,12 @@ from mycelium_core.embedder import (
 )
 from mycelium_core.errors import DomainError, jsonable_params
 from mycelium_core.i18n import MessageCode
+from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
 from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL, _scope_permits
 from mycelium_mcp.server import mcp as _registry
-from mycelium_mcp.tool_scopes import UNMAPPED, required_scope_for_call
+from mycelium_mcp.tool_scopes import TOOL_SCOPES, UNMAPPED, required_scope_for_call
 
 _log = logging.getLogger("mycelium.mcp.gateway")
 
@@ -485,9 +486,18 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
             continue
         if not _scope_permits(name):
             # Don't hand out the schema of a tool this assistant can't call
-            # (task c19f2f63, enabler B).
+            # (task c19f2f63, enabler B). Same two readings as the execute
+            # envelope: "scope denied" invites a request for a bigger scope,
+            # which for a HUMAN_ONLY tool is a request nobody can grant.
             out.append(
-                {"name": name, "error": "scope denied; not permitted by this assistant's scope"}
+                {
+                    "name": name,
+                    "error": (
+                        "not callable by an assistant credential; a person can do it"
+                        if TOOL_SCOPES.get(name) is HUMAN_ONLY
+                        else "scope denied; not permitted by this assistant's scope"
+                    ),
+                }
             )
             continue
         schema = _strip_auth(tool.parameters)
@@ -538,6 +548,29 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     args = dict(arguments or {})
     if not _scope_permits(name, args):
         req = required_scope_for_call(name, args)
+        # Two refusals that must not read the same, because they imply
+        # opposite next actions. "your scope is too small" tells an agent to
+        # ask for a key; HUMAN_ONLY means no key exists, so the same wording
+        # would send it to ask for something nobody can grant, and it would
+        # ask again.
+        #
+        # ``req`` is also not JSON-serialisable here: it is a sentinel, so a
+        # branch that only handled UNMAPPED would put an enum member in the
+        # envelope. That is the failure mode of a refusal path -- it is the
+        # path nobody exercises until it matters.
+        if req is HUMAN_ONLY:
+            return {
+                "error": {
+                    "code": MessageCode.MCP_SCOPE_DENIED.value,
+                    "detail": (
+                        "this tool is not callable by an assistant credential; "
+                        "a person can do it from the app"
+                    ),
+                    "tool": name,
+                    "required_scope": None,
+                    "scope_would_not_help": True,
+                }
+            }
         return {
             "error": {
                 "code": MessageCode.MCP_SCOPE_DENIED.value,

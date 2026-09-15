@@ -21,6 +21,7 @@ access — the filter only bites a bound assistant that carries a scope list.
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 from typing import Literal
 
@@ -458,13 +459,42 @@ EXTENSION_SCOPES: tuple[str, ...] = (
 EXTENSION_PROVIDER = "mycelium-extension"
 
 
+class SurfaceGate(enum.Enum):
+    """Values a surface's scope map can hold that are NOT a scope key.
+
+    One member so far. It lives in core, shared by both surface maps,
+    because the cross-surface drift guard compares their values with
+    ``==``: two independent ``object()`` sentinels are never equal, so a
+    REST route and its MCP twin could both be fenced and the test that
+    exists to notice they agree would say they do not.
+
+    An enum rather than ``object()`` for a typing reason with teeth:
+    mypy does not narrow identity against ``object``, so after
+    ``if value is HUMAN_ONLY`` the value would stay ``object`` and every
+    use below would need a cast. It DOES narrow against an enum member,
+    so the remaining branch types cleanly as ``str | frozenset | None``.
+    """
+
+    #: Authenticated, and never callable by a caller that carries a scope
+    #: LIST. Not "needs a bigger scope": no scope reaches it, which is why
+    #: the refusal must say so rather than name a key to go and ask for.
+    HUMAN_ONLY = "human_only"
+
+
+#: Re-exported at module level so both maps read ``HUMAN_ONLY`` the way
+#: they always did.
+HUMAN_ONLY = SurfaceGate.HUMAN_ONLY
+
+
 __all__ = [
     "DEFAULT_SCOPES",
     "EXTENSION_PROVIDER",
     "EXTENSION_SCOPES",
+    "HUMAN_ONLY",
     "SCOPE_CATALOG",
     "SELF_SERVICE_SCOPES",
     "VALID_SCOPE_KEYS",
     "Category",
     "ScopeDef",
+    "SurfaceGate",
 ]

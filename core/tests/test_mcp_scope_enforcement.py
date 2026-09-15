@@ -21,7 +21,7 @@ from _fake_embedder import FakeEmbedder
 
 import mycelium_mcp.gateway as gw
 from mycelium_core.embedder import set_embedder_override
-from mycelium_core.mcp_scopes import DEFAULT_SCOPES, SCOPE_CATALOG, VALID_SCOPE_KEYS
+from mycelium_core.mcp_scopes import DEFAULT_SCOPES, HUMAN_ONLY, SCOPE_CATALOG, VALID_SCOPE_KEYS
 from mycelium_mcp.gateway import describe_tools, execute_tool, search_tools
 from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits
 from mycelium_mcp.server import mcp as _registry
@@ -72,11 +72,19 @@ def test_tool_scopes_reference_only_catalog_keys() -> None:
     an any-of entry has EVERY member checked. Comparing the value itself
     to the catalogue would have passed a set containing a typo, because a
     frozenset is never a key: the check would have gone quiet exactly
-    where it was needed most."""
+    where it was needed most.
+
+    ``HUMAN_ONLY`` is skipped alongside ``None``, and for the same reason
+    rather than as a second exception: neither names a key, so neither can
+    name one that is not in the catalogue. The two differ in what they mean
+    to the GATE -- everything reaches a META tool, nothing reaches a
+    HUMAN_ONLY one -- and that difference is asserted where it belongs, in
+    the gate's own tests, not here."""
+    skip = (None, HUMAN_ONLY)
     bad = {
         n: sorted(required_keys(n) - VALID_SCOPE_KEYS)  # type: ignore[operator]
         for n, s in TOOL_SCOPES.items()
-        if s is not None and required_keys(n) - VALID_SCOPE_KEYS  # type: ignore[operator]
+        if s not in skip and required_keys(n) - VALID_SCOPE_KEYS  # type: ignore[operator]
     }
     assert not bad, f"TOOL_SCOPES references keys absent from SCOPE_CATALOG: {bad}"
     bad_dyn = {
@@ -544,3 +552,81 @@ async def test_whoami_withholds_scoped_payloads_from_a_narrow_assistant() -> Non
     assert me["memory_lane"]["recall"] == []
     assert any("open_tasks" in w for w in me["withheld"])
     assert any("memory_lane" in w for w in me["withheld"])
+
+
+async def test_disposing_of_a_suggestion_is_not_an_assistant_act() -> None:
+    """The property this fence exists for, and it is the server's own words.
+
+    ``_INSTRUCTIONS`` tells every client that agents "execute and PROPOSE,
+    never impose", while the map priced proposing, accepting and rejecting
+    at the same key: whoever proposed disposed. Accepting SPLICES the
+    proposed text into the note part's body or the task description, which
+    makes it the only whole-document decision primitive there is.
+
+    The assistant here holds both keys that used to be enough. Rejecting is
+    fenced with accepting because it disposes of somebody ELSE's decision;
+    retracting one's own pending proposal is ``delete_comment`` and stays
+    on ``comments:write``, so an agent can still undo its own mistake."""
+    tok = _PRINCIPAL_SCOPE.set(["comments:write", "notes:write", "tasks:write"])
+    try:
+        assert not _scope_permits("accept_suggestion")
+        assert not _scope_permits("reject_suggestion")
+        # ... and proposing is still its own.
+        assert _scope_permits("propose_suggestion")
+        assert _scope_permits("delete_comment")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+async def test_a_fenced_tool_leaves_the_catalogue_too() -> None:
+    """Never advertise a capability that will be refused. The listing
+    surfaces filter through the same predicate, so the fence reaches
+    discovery without a second rule to keep in step."""
+    tok = _PRINCIPAL_SCOPE.set(["comments:write", "notes:write"])
+    try:
+        hits = await search_tools(query="accept a suggestion", limit=50)
+        found = {h["name"] for h in hits}
+        assert "accept_suggestion" not in found
+        assert "reject_suggestion" not in found
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+async def test_the_refusal_says_no_scope_would_help_and_serialises() -> None:
+    """The refusal path, which is the one nobody exercises until it matters.
+
+    Two things at once. ``required_scope`` used to be filled from a value
+    that is now a SENTINEL, so a branch handling only UNMAPPED would put an
+    enum member in the envelope and break the JSON on the denial path. And
+    the wording has to differ: "your scope does not permit this" tells an
+    agent to go and ask for a key, which here does not exist -- it would
+    ask, be refused, and ask again."""
+    import json
+
+    tok = _PRINCIPAL_SCOPE.set(["comments:write", "notes:write"])
+    try:
+        res = await execute_tool("accept_suggestion", {"annotation_id": "x", "expected_version": 1})
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+    err = res["error"]
+    assert err["required_scope"] is None
+    assert err["scope_would_not_help"] is True
+    assert "a person can do it" in err["detail"]
+    # The envelope is JSON, not a repr of one.
+    json.dumps(res)
+
+
+async def test_a_caller_without_a_scope_list_still_reaches_it() -> None:
+    """The stated limit, asserted so it is a decision and not a surprise.
+
+    HUMAN_ONLY binds a credential that CARRIES a scope list. A bare agent
+    token and the stdio surface publish none, so they pass -- the same
+    property the 84 REST routes already marked HUMAN_ONLY have had in
+    production, not a hole opened here. Closing it is a separate question
+    about what an unscoped credential means."""
+    tok = _PRINCIPAL_SCOPE.set(None)
+    try:
+        assert _scope_permits("accept_suggestion")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)

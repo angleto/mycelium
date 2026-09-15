@@ -29,6 +29,7 @@ from mycelium_core.embedder import embedder_available
 from mycelium_core.errors import AuthError, DomainError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.markdown_inline import md_link, md_link_label
+from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.agent_run import AgentRun
 from mycelium_core.models.billing import CostBasis, RateCard, UsageRecord
 from mycelium_core.models.budget import Budget, BudgetPeriod
@@ -268,6 +269,9 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
       path: legacy full access, everything allowed.
     - the tool maps to ``None`` in ``TOOL_SCOPES`` -> META (whoami/help/ping):
       always allowed so an agent can bootstrap and discover its own scope.
+    - the tool maps to ``HUMAN_ONLY`` -> denied, and NOT because the scope is
+      too small: no scope reaches it. It leaves discovery with the same
+      call, since the listing surfaces filter through here.
     - the tool is absent from both maps -> FAIL-CLOSED, denied (a drift-guard
       test keeps them jointly total so this never bites a real tool).
     - otherwise the granted list must contain the tool's required key, or
@@ -293,6 +297,18 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
         return req_dyn is not None and req_dyn in scope
     if tool_name not in TOOL_SCOPES:
         return False  # UNMAPPED, and not dynamic either: fail closed
+    if TOOL_SCOPES[tool_name] is HUMAN_ONLY:
+        # No scope reaches it. Checked against TOOL_SCOPES and not against
+        # ``required_keys``, which answers None for this AND for META: the
+        # two are the same answer to "which keys satisfy it" and opposite
+        # answers to "may this caller call it".
+        #
+        # Consequence, deliberate and visible: the tool leaves DISCOVERY
+        # too, because ``search_tools`` and ``describe_tools`` filter with
+        # this same function. A scoped assistant stops seeing it in the
+        # catalogue, which is the right way round -- never advertise a
+        # capability that will be refused.
+        return False
     req = required_keys(tool_name)
     if req is None:
         return True  # META

@@ -357,8 +357,7 @@ async def test_accepting_a_suggestion_needs_the_target_family_write_scope() -> N
             )
         ).json()
 
-        # comments:write reaches the accept route (the gate lets it through) but
-        # the service fence denies: accepting would rewrite the note body.
+        # ``comments:write`` alone is refused, as it always was.
         commenter = await _assistant_headers(c, owner, ["comments:write"])
         r = await c.post(
             f"/annotations/{sug['id']}/accept",
@@ -371,11 +370,30 @@ async def test_accepting_a_suggestion_needs_the_target_family_write_scope() -> N
         body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
         assert body == "The quick brown fox jumps."
 
-        # comments:write + notes:write: the accept goes through and splices.
+        # And so is the assistant that holds BOTH keys, which used to be the
+        # combination that let it through. That is the change (task ce3b244b):
+        # disposing of a suggestion is no longer a matter of holding enough
+        # scope, it is not an assistant's act at all. The server's own
+        # instructions have said so to every client all along -- agents
+        # "PROPOSE, never impose" -- while the map let whoever proposed
+        # dispose.
         editor = await _assistant_headers(c, owner, ["comments:write", "notes:write"])
         r = await c.post(
             f"/annotations/{sug['id']}/accept",
             headers=editor,
+            json={"expected_version": sug["version"]},
+        )
+        assert r.status_code == 403, r.text
+        body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
+        assert body == "The quick brown fox jumps."
+
+        # A PERSON accepts, and the splice happens. Kept from the previous
+        # shape of this test on purpose: fencing a verb must not cost the
+        # coverage that the verb still works, or the fence and a breakage
+        # look the same.
+        r = await c.post(
+            f"/annotations/{sug['id']}/accept",
+            headers=owner,
             json={"expected_version": sug["version"]},
         )
         assert r.status_code == 200, r.text
