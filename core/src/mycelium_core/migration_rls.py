@@ -138,13 +138,31 @@ def owner_sees_all_tenants(
         _set_force(conn, lifted, on=True)
 
     restored = forced_tables(conn)
-    if restored != lifted:
-        missing = sorted(set(lifted) - set(restored))
+    # L'invariante e' "tutto cio' che ho sollevato e' tornato", non "l'insieme
+    # e' identico". Una migrazione che CREA una tabella con FORCE la aggiunge a
+    # ``restored`` senza che sia mai stata in ``lifted``, ed e' la migrazione
+    # che fa il suo lavoro, non una violazione.
+    #
+    # Il confronto era su disuguaglianza e sollevava proprio li'. Il messaggio
+    # lo diceva e nessuno poteva leggerlo: calcolava ``lifted - restored``, che
+    # in quel caso e' vuoto, quindi la Job moriva su "non ripristinato su 0
+    # tabelle:" con la lista vuota. Non e' mai scattato prima perche' dalla
+    # baseline nessuna migrazione aveva ancora creato una tabella con FORCE;
+    # la prima che lo ha fatto ha trovato un guard che rifiuta per costruzione
+    # ogni tabella org-scoped futura.
+    missing = sorted(set(lifted) - set(restored))
+    if missing:
         raise RuntimeError(
             "rls: FORCE ROW LEVEL SECURITY non ripristinato su "
             f"{len(missing)} tabelle: {', '.join(missing)}"
         )
-    log(f"rls: FORCE ripristinato su {len(restored)} tabelle")
+    added = sorted(set(restored) - set(lifted))
+    if added:
+        # Detto invece che ignorato: una tabella con FORCE che compare durante
+        # una migrazione e' un cambio di schema che vale la pena leggere nel
+        # log della Job, ed e' l'unico posto dove qualcuno lo guarda.
+        log(f"rls: FORCE anche su {len(added)} tabelle nuove: {', '.join(added)}")
+    log(f"rls: FORCE ripristinato su {len(lifted)} tabelle")
 
 
 def migration_steps_pending(migration_context: MigrationContext) -> bool | None:

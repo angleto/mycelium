@@ -123,6 +123,94 @@ def test_percorso_produzione_solleva_force_e_lo_rimette(monkeypatch: pytest.Monk
         assert forced_tables(conn) == prima, "FORCE va rimesso esattamente com'era"
 
 
+def test_una_tabella_nuova_con_force_non_e_una_violazione(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Il caso che ha fermato un rilascio in produzione.
+
+    Il bracket solleva FORCE dalle tabelle che ce l'hanno e lo rimette
+    all'uscita. Una migrazione che CREA una tabella con FORCE la aggiunge
+    all'insieme di uscita senza che sia mai stata in quello di ingresso, e il
+    controllo confrontava i due per disuguaglianza: sollevava, e calcolava le
+    mancanti come ingresso meno uscita, che li' e' vuoto. La Job moriva con
+    "non ripristinato su 0 tabelle:" e la lista vuota, cioe' un messaggio che
+    non si puo' nemmeno leggere.
+
+    Non era mai scattato perche' dalla baseline nessuna migrazione aveva
+    ancora creato una tabella con FORCE. La prima che lo ha fatto ha trovato
+    un guard che rifiuta per costruzione ogni tabella org-scoped futura.
+
+    Qui la creazione e' simulata dentro il blocco, che e' esattamente dove una
+    migrazione la farebbe.
+    """
+    import mycelium_core.migration_rls as m
+
+    # Tolta INCONDIZIONATAMENTE, e con una connessione sua: ``_conn`` apre con
+    # ``begin()``, quindi su uscita pulita COMMITTA, e una tabella creata qui
+    # sopravvive al test. La prima stesura non lo faceva e ha lasciato la
+    # tabella nel database, dove ha fatto fallire la corsa successiva con
+    # "relation already exists" -- un test che sporca lo schema che sta
+    # verificando.
+    def _drop() -> None:
+        with _conn(transaction=True) as c:
+            c.execute(sa.text("DROP TABLE IF EXISTS public.rls_nuova_probe"))
+
+    _drop()
+    try:
+        with _conn(transaction=True) as conn:
+            prima = forced_tables(conn)
+            assert prima, "lo schema dovrebbe avere tabelle con FORCE"
+            monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+            detto: list[str] = []
+            with m.owner_sees_all_tenants(conn, log=detto.append):
+                conn.execute(sa.text("CREATE TABLE public.rls_nuova_probe (id int primary key)"))
+                conn.execute(
+                    sa.text("ALTER TABLE public.rls_nuova_probe ENABLE ROW LEVEL SECURITY")
+                )
+                conn.execute(sa.text("ALTER TABLE public.rls_nuova_probe FORCE ROW LEVEL SECURITY"))
+
+            dopo = forced_tables(conn)
+            assert "rls_nuova_probe" in dopo, "la tabella nuova deve restare forzata"
+            assert set(prima) <= set(dopo), "e tutto cio' che era forzato prima deve esserlo ancora"
+            # Detta, non ingoiata: e' l'unico posto dove qualcuno la legge.
+            assert any("rls_nuova_probe" in riga for riga in detto)
+    finally:
+        _drop()
+
+
+def test_una_tabella_che_perde_force_resta_un_errore(monkeypatch: pytest.MonkeyPatch) -> None:
+    """L'altra direzione, che il fix non deve avere allentato.
+
+    Il controllo esiste per una tabella che il bracket ha sollevato e non ha
+    rimesso: li' la tenancy resta allentata dopo la migrazione, ed e' il caso
+    che deve continuare a fermare tutto. Simulato togliendo FORCE a una
+    tabella dentro il blocco, cosi' il ripristino la rimette e qualcosa gliela
+    toglie di nuovo -- che e' la forma di una migrazione che la disabilita
+    senza accorgersene.
+    """
+    import mycelium_core.migration_rls as m
+
+    with _conn(transaction=True) as conn:
+        prima = forced_tables(conn)
+        assert prima, "lo schema dovrebbe avere tabelle con FORCE"
+        vittima = prima[0]
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+
+        def _sabota(c: sa.Connection, tables: object, on: bool) -> None:
+            if on:
+                # Il ripristino rimette tutte tranne una.
+                _set_force(c, [t for t in prima if t != vittima], on=True)
+            else:
+                _set_force(c, prima, on=False)
+
+        monkeypatch.setattr(m, "_set_force", _sabota)
+        with pytest.raises(RuntimeError) as err:
+            with m.owner_sees_all_tenants(conn, log=lambda _m: None):
+                pass
+        assert vittima in str(err.value)
+        assert "0 tabelle" not in str(err.value)
+
+
 def test_un_errore_non_lascia_force_spento(monkeypatch: pytest.MonkeyPatch) -> None:
     """Se la migrazione esplode, l'RLS non deve restare allentata.
 
