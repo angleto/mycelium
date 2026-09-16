@@ -174,6 +174,30 @@ class Settings(BaseSettings):
     # per-request work; the rate limit charges one "write" per element.
     issuer_batch_max_items: int = 200
 
+    # Possession of a task by a worker (migration 0017). A fourth lease
+    # in a codebase that already has three, and the bound it needs is
+    # unlike theirs: those bound a machine's own in-flight call, this one
+    # bounds how long an agent session may hold work before it is assumed
+    # dead. The default is deliberately generous -- reclaiming a live
+    # agent's task costs two workers colliding on it, while leaving a dead
+    # agent's task held costs only the wait -- and it is a guess, because
+    # nobody has measured how long a task takes on this workspace. It is
+    # the first number to revisit once the sweep has run for a week and
+    # ``release_reason='expired'`` can be counted against what the sweep
+    # actually interrupted.
+    task_lease_ttl_seconds: int = 3600
+    # The clamp exists so a caller cannot ask for a lease that outlives
+    # the sweep's usefulness, in either direction: one second would make
+    # every acquire a race, and a week would make the backstop a
+    # formality.
+    task_lease_min_ttl_seconds: int = 60
+    task_lease_max_ttl_seconds: int = 86400
+    # How often the reclaim sweep looks, and how many it takes per pass.
+    # Frequent and small: a pass that reclaims hundreds is a symptom, not
+    # a workload.
+    task_lease_sweep_interval_seconds: int = 60
+    task_lease_sweep_batch: int = 200
+
     # Two-phase transmit (ADR-0046). The dispatch wall time is bounded
     # explicitly (httpx's 30 s timeout is PER PHASE -- connect/write/read --
     # so it does not bound the total); the lease must comfortably exceed

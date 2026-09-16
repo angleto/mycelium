@@ -206,6 +206,14 @@ class MessageCode(enum.StrEnum):
     TASK_ALREADY_CLAIMED = "task.already_claimed"
     TASK_OFFER_NO_RECIPIENTS = "task.offer_no_recipients"
     TASK_OWNER_NOT_MEMBER = "task.owner_not_member"
+    # Possession (migration 0017). Four codes, and they are four because
+    # they imply four different next actions for an agent that reads
+    # them: take it, wait, re-read, or pick a different task.
+    LEASE_HELD_BY_OTHER = "task.lease.held_by_other"
+    LEASE_NOT_HELD = "task.lease.not_held"
+    LEASE_FENCE_STALE = "task.lease.fence_stale"
+    LEASE_QUEUE_EMPTY = "task.lease.queue_empty"
+    LEASE_SELF_VERIFICATION = "task.lease.self_verification"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -652,6 +660,25 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The owner of a task must be an active member of this workspace."
         ),
         MessageCode.TASK_ALREADY_CLAIMED: ("Task has already been claimed by a member"),
+        # Each of these names what the caller should do next, because an
+        # agent acts on the prose when the code is new to it (AGT-04 is
+        # about preserving this text, not about inventing it).
+        MessageCode.LEASE_HELD_BY_OTHER: (
+            "Task is held by another worker until {expires_at}; pick a different task "
+            "or wait for the lease to expire"
+        ),
+        MessageCode.LEASE_NOT_HELD: (
+            "You do not hold this task. Acquire it first; moving a task to another state "
+            "releases your lease, and work after that point needs a new one"
+        ),
+        MessageCode.LEASE_FENCE_STALE: (
+            "Your lease on this task was reclaimed and the task has since been taken by "
+            "someone else; re-read the task before acting on it"
+        ),
+        MessageCode.LEASE_QUEUE_EMPTY: ("No unheld task matches in that state"),
+        MessageCode.LEASE_SELF_VERIFICATION: (
+            "You handed this task off yourself; the check is done by someone else"
+        ),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
         ),

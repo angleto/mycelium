@@ -324,6 +324,7 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "list_tasks": "tasks:read",
     "resolve_prefix": "tasks:read",
     "task_handoffs_list": "tasks:read",
+    "task_leases_list": "tasks:read",
     "what_can_i_do_now": "tasks:read",
     "add_checklist_item": "tasks:write",
     "add_task_participant": "tasks:write",
@@ -351,6 +352,14 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "set_task_owner": "tasks:write",
     "spawn_due_recurrences": "tasks:write",
     "task_claim": "tasks:write",
+    # Possession. Read-only on the surface only in the sense that it
+    # does not change a task's fields: taking work off a shared queue
+    # is a write, and gating it on tasks:read would let a read-only
+    # credential remove work from everybody else's view.
+    "task_lease_acquire": "tasks:write",
+    "task_lease_release": "tasks:write",
+    "task_lease_renew": "tasks:write",
+    "task_pull": "tasks:write",
     "task_decline": "tasks:write",
     "task_offer": "tasks:write",
     "unassign_task": "tasks:write",

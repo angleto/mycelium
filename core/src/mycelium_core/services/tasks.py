@@ -1290,8 +1290,41 @@ async def set_state(
     task_id: uuid.UUID,
     expected_version: int,
     state_id: uuid.UUID,
+    worker_id: str | None = None,
+    _lease_checked: bool = False,
 ) -> int:
+    """Move a task between workflow states, and end any possession of it.
+
+    Possession (migration 0017) constrains this call in two ways, and
+    both are about the same thing: a lease is held for the duration of
+    ONE state.
+
+    - A task somebody else holds cannot be moved by a third party. A task
+      nobody holds can be moved by anyone, which keeps every path that
+      predates possession working -- the UI, the CLI, the scheduler, an
+      agent that never took a lease.
+    - Moving a held task to a DIFFERENT state releases the lease, in this
+      transaction. That is what makes "moved it to the checking station
+      and carried on working" a refused write rather than a habit to be
+      discouraged in prose: after the move the caller holds nothing, and
+      its next write to the task says so.
+
+    Neither rule names a state. The workflow is configuration and a
+    project can override it, which is the same reason the terminal check
+    below reads ``is_terminal`` instead of a state name.
+
+    ``_lease_checked`` is set by ``task_leases.pull``, which transitions a
+    task in the same breath as taking it: the lease does not exist yet at
+    that point, so checking for one would be checking the state of the
+    world before the call the caller is inside.
+    """
     await require_role(session, org_id, actor_id, Role.member)
+    from mycelium_core.services import task_leases as _leases
+
+    if not _lease_checked:
+        await _leases.assert_may_move(
+            session, org_id=org_id, actor_id=actor_id, task_id=task_id, worker_id=worker_id
+        )
     task = await get_task(session, org_id=org_id, task_id=task_id)
     workflow = await wf.effective_workflow_for_task(session, org_id, task_id)
     if not await wf.state_in_workflow(session, workflow.id, state_id):
@@ -1347,6 +1380,18 @@ async def set_state(
     # swallowed inside the hook; the state transition above is the
     # source of truth and is never rolled back by it. Imported lazily
     # to avoid a tasks<->notifications<->coordination import cycle.
+    # End the possession before the completion fan-out below, so a
+    # handoff notification never describes a task that still reads as
+    # held by the worker who just passed it on.
+    if old_state_id != state_id:
+        await _leases.release_on_transition(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            task_id=task_id,
+            new_state_id=state_id,
+            now_terminal=now_terminal,
+        )
     if now_terminal and not was_terminal:
         from mycelium_core.services import coordination as _coord
         from mycelium_core.services import recurrence as _rec

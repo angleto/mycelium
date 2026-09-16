@@ -59,6 +59,7 @@ from mycelium_core.models.task import (
     Task,
 )
 from mycelium_core.models.task_handoff import TaskHandoff
+from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.time_entry import TimeEntry
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
@@ -95,6 +96,7 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import notifications as notif_svc
 from mycelium_core.services import participants as part_svc
 from mycelium_core.services import task_checklist as checklist_svc
+from mycelium_core.services import task_leases as task_leases_svc
 from mycelium_core.services import task_relations as task_relations_svc
 from mycelium_core.services import task_search as task_search_svc
 from mycelium_core.services import time_tracking as time_svc
@@ -3289,6 +3291,197 @@ async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
         tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
         state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
         return _task_full(task, tagmap.get(task.id, []), state=state)
+
+
+# --- Possession of a task (migration 0017) -------------------------
+# State says where a task is; possession says who is on it and until
+# when. Fifteen sessions pulling from one deterministic ranking collide
+# because nothing said "taken"; a session that moved a task on and kept
+# working had nothing to hand back. These five verbs are that missing
+# object. ``task_pull`` is the one that removes the pile-up: choosing and
+# taking are one round trip, so there is no window between them.
+#
+# ``worker_id`` is how a session names ITSELF, and passing it matters
+# more than it looks: several sessions can share one token, and two
+# callers that both omit it are one holder as far as the server can tell.
+# Pass a stable per-session string.
+
+
+def _lease(x: TaskLease) -> dict[str, Any]:
+    return _compact(
+        {
+            "lease_id": str(x.id),
+            "task_id": str(x.task_id),
+            "state_id": str(x.state_id),
+            "worker_id": x.holder_worker_id,
+            "holder_identity_id": (str(x.holder_identity_id) if x.holder_identity_id else None),
+            "acquired_at": x.acquired_at.isoformat(),
+            "expires_at": x.expires_at.isoformat(),
+            "renewed_at": x.renewed_at.isoformat() if x.renewed_at else None,
+            "released_at": x.released_at.isoformat() if x.released_at else None,
+            "release_reason": x.release_reason,
+            # The caller passes this back to ``task_lease_renew`` so a
+            # holder that was reclaimed and came back is refused instead
+            # of extending somebody else's possession.
+            "fence": int(x.fence),
+        }
+    )
+
+
+@mcp.tool()
+async def task_pull(
+    token: str,
+    org_id: str,
+    state_id: str,
+    worker_id: str,
+    ttl_seconds: int | None = None,
+    transition_to: str | None = None,
+    tag_id: str | None = None,
+    exclude_own_handoffs: bool = True,
+) -> dict[str, Any]:
+    """Take the next unheld task in a workflow state, atomically.
+
+    THE call for an agent working a queue. List-then-transition is two
+    round trips over a deterministic ranking, so every session that asks
+    gets the same answer and they collide in the gap; here choosing and
+    taking are one statement and only one caller can win.
+
+    ``worker_id`` names this session. It is required, and it is not
+    decoration: sessions can share one credential, so two callers that
+    do not name themselves are indistinguishable to the server and would
+    hold each other's leases. Use a stable per-session string.
+
+    ``transition_to`` moves the task as it is taken (todo -> in_progress
+    in one call). ``exclude_own_handoffs`` (ON by default) skips tasks
+    this worker handed off itself, which is the checking station's rule:
+    the check is done by somebody other than whoever did the work. It
+    keys on ``worker_id``, so pass a distinct one per session or every
+    checker reads as the author and every check is refused. Turn it off
+    to re-check your own work deliberately.
+
+    Raises ``task.lease.queue_empty`` when nothing matches. Moving the
+    task to a different state later RELEASES this lease: work after that
+    point needs a new one."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task, lease = await task_leases_svc.pull(
+            s,
+            org_id=org,
+            actor_id=user,
+            state_id=uuid.UUID(state_id),
+            worker_id=worker_id,
+            ttl_seconds=ttl_seconds,
+            transition_to=(uuid.UUID(transition_to) if transition_to else None),
+            tag_id=(uuid.UUID(tag_id) if tag_id else None),
+            exclude_own_handoffs=exclude_own_handoffs,
+        )
+        tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
+        state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
+        return {
+            "task": _task_full(task, tagmap.get(task.id, []), state=state),
+            "lease": _lease(lease),
+        }
+
+
+@mcp.tool()
+async def task_lease_acquire(
+    token: str,
+    org_id: str,
+    task_id: str,
+    worker_id: str,
+    ttl_seconds: int | None = None,
+    preempt: bool = False,
+) -> dict[str, Any]:
+    """Take possession of one named task.
+
+    Idempotent for the same ``worker_id``: re-acquiring what you already
+    hold extends it, so a call whose reply was lost can be retried
+    safely. ``task.lease.held_by_other`` names the deadline, so a caller
+    can decide between waiting and picking something else.
+
+    ``preempt`` (owner only) takes a task back from its holder."""
+    async with _tenant(token, org_id) as (s, org, user):
+        lease = await task_leases_svc.acquire(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            worker_id=worker_id,
+            ttl_seconds=ttl_seconds,
+            preempt=preempt,
+        )
+        return _lease(lease)
+
+
+@mcp.tool()
+async def task_lease_renew(
+    token: str,
+    org_id: str,
+    task_id: str,
+    worker_id: str,
+    ttl_seconds: int | None = None,
+    fence: int | None = None,
+) -> dict[str, Any]:
+    """Push the deadline out on a lease you hold, for work that outlasts
+    it. Pass the ``fence`` you were given and a holder that was reclaimed
+    meanwhile gets ``task.lease.fence_stale`` rather than silently
+    extending what is now somebody else's."""
+    async with _tenant(token, org_id) as (s, org, user):
+        lease = await task_leases_svc.renew(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            worker_id=worker_id,
+            ttl_seconds=ttl_seconds,
+            fence=fence,
+        )
+        return _lease(lease)
+
+
+@mcp.tool()
+async def task_lease_release(
+    token: str, org_id: str, task_id: str, worker_id: str
+) -> dict[str, Any]:
+    """Hand a task back without moving it: you are stopping work on
+    something you are not finishing. Moving it to another state releases
+    the lease on its own, so this is for giving up, not for handing on."""
+    async with _tenant(token, org_id) as (s, org, user):
+        lease = await task_leases_svc.release(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            reason=LeaseRelease.explicit,
+            worker_id=worker_id,
+        )
+        if lease is None:
+            return {"task_id": task_id, "released": False}
+        return _lease(lease)
+
+
+@mcp.tool()
+async def task_leases_list(
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+    worker_id: str | None = None,
+    include_released: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Who holds what, and until when. This is how a session sees its
+    collaborators instead of discovering them at a conflict, and how it
+    finds out what it was holding when it resumes. ``include_released``
+    adds the history, which is what says who handed a task off."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await task_leases_svc.list_leases(
+            s,
+            org_id=org,
+            task_id=(uuid.UUID(task_id) if task_id else None),
+            worker_id=worker_id,
+            include_released=include_released,
+            limit=limit,
+        )
+        return [_lease(x) for x in rows]
 
 
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---

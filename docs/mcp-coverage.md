@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**275 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**280 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -303,7 +303,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (46)
+### tasks (51)
 
 | Tool | Summary |
 |---|---|
@@ -346,6 +346,11 @@ over-fetch the org table and filter in its head.
 | `set_task_assignee` | Set or clear who should work on the task (docs/adr/0028 D2). |
 | `set_task_owner` | Reassign accountability for a task (docs/adr/0028 D2). The owner |
 | `task_decline` | Member: decline an offered task (lightweight: notify the offerer |
+| `task_lease_acquire` | Take possession of one named task. |
+| `task_lease_release` | Hand a task back without moving it: you are stopping work on |
+| `task_lease_renew` | Push the deadline out on a lease you hold, for work that outlasts |
+| `task_leases_list` | Who holds what, and until when. This is how a session sees its |
+| `task_pull` | Take the next unheld task in a workflow state, atomically. |
 | `unassign_task` | Unassign a user from a task. |
 | `uncheck_item` | Un-tick a checklist item (clears ``done_at`` / ``done_by``). |
 | `update_comment` | EDIT a comment: replace its whole body. Completes the |

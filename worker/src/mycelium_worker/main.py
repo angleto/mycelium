@@ -36,6 +36,7 @@ from mycelium_worker import (
     revisions,
     revisions_retention,
     revisions_summary,
+    task_leases,
     task_search_backfill,
     telegram_assistant,
     webhooks,
@@ -54,6 +55,8 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
      - WS-4 autonomous email responder queue drain (no-op when
        MYCELIUM_EMAIL_RESPONDER_ENABLED is false);
      - reminders + notification-dispatch tick (FR-12);
+     - task-lease sweep: reclaims the possession of agent sessions that
+       died mid-task, which before it existed left a task held forever;
      - task-search embedding backfill (timed-out re-embed safety net);
      - note-search pointer backfill (back-catalogue indexing);
      - revisions snapshot/retention/summary sweeps;
@@ -75,6 +78,7 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
         telegram_assistant.run_forever,
         email_responder.run_forever,
         reminders.run_forever,
+        task_leases.run_forever,
         task_search_backfill.run_forever,
         note_search_backfill.run_forever,
         revisions.run_forever,

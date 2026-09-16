@@ -34,6 +34,12 @@ from mycelium_api.schemas import (
     EditSessionSealOut,
     ExpectedVersionIn,
     HandoffOut,
+    LeaseAcquireIn,
+    LeaseOut,
+    LeasePullIn,
+    LeasePullOut,
+    LeaseReleaseIn,
+    LeaseRenewIn,
     NoteOut,
     NoteTaskLinkOut,
     ParticipantIn,
@@ -67,7 +73,7 @@ from mycelium_api.schemas import (
 )
 from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.identity import IdentityKind
 from mycelium_core.models.note import Note
@@ -75,6 +81,7 @@ from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_handoff import TaskHandoff
+from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import attachments as att_svc
 from mycelium_core.services import capability_tokens as capability_tokens_svc
@@ -85,6 +92,7 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import notifications as notif_svc
 from mycelium_core.services import participants as part_svc
 from mycelium_core.services import task_checklist as checklist_svc
+from mycelium_core.services import task_leases as lease_svc
 from mycelium_core.services import tasks as svc
 from mycelium_core.services import workflow as wf
 from mycelium_core.timewindow import split_due
@@ -1429,6 +1437,166 @@ async def decline_task(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
     )
     return await _task_out(ctx, task)
+
+
+# ---------------------------------------------------------------------------
+# Possession (migration 0017). State says where a task is; possession
+# says who is on it and until when, and the two were conflated: anyone
+# could write ``in_progress``, it named no holder, it did not expire, and
+# it could not be handed back because it was never taken.
+#
+# The SPA needs these as much as an agent does. Without the read, a
+# person editing a task an agent is holding meets a 409 with no
+# explanation anywhere in the interface; with it, the interface can say
+# who has it and until when. The collection route is deliberately
+# workspace-wide (``/tasks/leases``) as well as per task: "what is
+# everybody holding" is the question a board view asks, and answering it
+# per task is N requests.
+# ---------------------------------------------------------------------------
+
+
+def _lease_out(x: TaskLease) -> LeaseOut:
+    return LeaseOut(
+        id=x.id,
+        task_id=x.task_id,
+        state_id=x.state_id,
+        holder_worker_id=x.holder_worker_id,
+        holder_identity_id=x.holder_identity_id,
+        acquired_at=x.acquired_at,
+        expires_at=x.expires_at,
+        renewed_at=x.renewed_at,
+        released_at=x.released_at,
+        release_reason=x.release_reason,
+        fence=x.fence,
+        version=x.version,
+    )
+
+
+@router.get("/leases", response_model=list[LeaseOut])
+async def list_leases(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    worker_id: str | None = None,
+    include_released: bool = False,
+    limit: int = 50,
+) -> list[LeaseOut]:
+    """Member: who holds what across the workspace, and until when.
+
+    A possession nobody can see is an invisible lock, which is worse than
+    no lock: the caller that cannot proceed also cannot say why."""
+    rows = await lease_svc.list_leases(
+        ctx.session,
+        org_id=ctx.org_id,
+        worker_id=worker_id,
+        include_released=include_released,
+        limit=limit,
+    )
+    return [_lease_out(x) for x in rows]
+
+
+@router.post("/leases/pull", response_model=LeasePullOut)
+async def pull_task(
+    body: LeasePullIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> LeasePullOut:
+    """Member: take the next unheld task in a state, atomically.
+
+    Choosing and taking are one statement, which is the whole point:
+    list-then-transition is two round trips over a deterministic ranking,
+    so every caller that asks gets the same answer and they collide in
+    the gap. 404 (``task.lease.queue_empty``) when nothing matches."""
+    task, lease = await lease_svc.pull(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        state_id=body.state_id,
+        worker_id=body.worker_id,
+        ttl_seconds=body.ttl_seconds,
+        transition_to=body.transition_to,
+        tag_id=body.tag_id,
+        exclude_own_handoffs=body.exclude_own_handoffs,
+    )
+    return LeasePullOut(task=await _task_out(ctx, task), lease=_lease_out(lease))
+
+
+@router.get("/{task_id}/leases", response_model=list[LeaseOut])
+async def list_task_leases(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_released: bool = False,
+) -> list[LeaseOut]:
+    """Member: this task's possession, and with ``include_released`` its
+    history -- which is what says who handed it off for checking."""
+    rows = await lease_svc.list_leases(
+        ctx.session, org_id=ctx.org_id, task_id=task_id, include_released=include_released
+    )
+    return [_lease_out(x) for x in rows]
+
+
+@router.post("/{task_id}/leases", response_model=LeaseOut)
+async def acquire_lease(
+    task_id: uuid.UUID,
+    body: LeaseAcquireIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> LeaseOut:
+    """Member: take possession of this task.
+
+    Idempotent for the same ``worker_id`` (re-acquiring extends), so a
+    call whose reply was lost can be retried. 409 when somebody else
+    holds it, naming the deadline so the caller can choose between
+    waiting and moving on. ``preempt`` is owner-only."""
+    lease = await lease_svc.acquire(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        worker_id=body.worker_id,
+        ttl_seconds=body.ttl_seconds,
+        preempt=body.preempt,
+    )
+    return _lease_out(lease)
+
+
+@router.post("/{task_id}/leases/renew", response_model=LeaseOut)
+async def renew_lease(
+    task_id: uuid.UUID,
+    body: LeaseRenewIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> LeaseOut:
+    """Member: push the deadline out on a lease you hold, for work that
+    outlasts it."""
+    lease = await lease_svc.renew(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        worker_id=body.worker_id,
+        ttl_seconds=body.ttl_seconds,
+        fence=body.fence,
+    )
+    return _lease_out(lease)
+
+
+@router.post("/{task_id}/leases/release", response_model=LeaseOut)
+async def release_lease(
+    task_id: uuid.UUID,
+    body: LeaseReleaseIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> LeaseOut:
+    """Member: hand a task back without moving it -- you are stopping
+    work on something you are not finishing. Moving it to another state
+    releases the lease on its own, so this is for giving up, not for
+    handing on. 404 when nothing was held."""
+    lease = await lease_svc.release(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        reason=LeaseRelease.explicit,
+        worker_id=body.worker_id,
+    )
+    if lease is None:
+        raise NotFoundError(MessageCode.LEASE_NOT_HELD)
+    return _lease_out(lease)
 
 
 # ---------------------------------------------------------------------------

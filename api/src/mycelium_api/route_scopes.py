@@ -607,6 +607,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/tasks/{task_id}/assignees"): "tasks:write",
     ("DELETE", "/tasks/{task_id}/assignees/{user_id}"): "tasks:write",
     ("GET", "/tasks/{task_id}/attachments"): "tasks:read",
+    ("GET", "/tasks/leases"): "tasks:read",
+    ("POST", "/tasks/leases/pull"): "tasks:write",
     ("POST", "/tasks/{task_id}/attachments"): "attachments:write",
     ("GET", "/tasks/{task_id}/checklist"): "tasks:read",
     ("POST", "/tasks/{task_id}/checklist"): "tasks:write",
@@ -627,6 +629,14 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("PUT", "/tasks/{task_id}/description/stream"): "tasks:write",
     ("POST", "/tasks/{task_id}/edit-session/seal"): "tasks:write",
     ("GET", "/tasks/{task_id}/handoffs"): "tasks:read",
+    # Possession (migration 0017). The two reads are tasks:read; every
+    # write is tasks:write, including the pull -- taking work off a
+    # shared queue is a write, and gating it on read would let a
+    # read-only credential remove work from everybody else's view.
+    ("GET", "/tasks/{task_id}/leases"): "tasks:read",
+    ("POST", "/tasks/{task_id}/leases"): "tasks:write",
+    ("POST", "/tasks/{task_id}/leases/release"): "tasks:write",
+    ("POST", "/tasks/{task_id}/leases/renew"): "tasks:write",
     ("POST", "/tasks/{task_id}/note"): "notes:write",
     ("GET", "/tasks/{task_id}/note-links"): "notes:read",
     ("POST", "/tasks/{task_id}/note-links"): LINK_WRITE_ANY,

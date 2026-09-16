@@ -71,3 +71,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0060 The fleet embedding dim is schema, and truncation is declared](0060-the-fleet-dim-is-schema-not-configuration.md)
 - [0061 The embedder seam has a side, and the prefix comes from the checkpoint](0061-the-embedder-seam-has-a-side.md)
 - [0062 The reranker's number has a scale, and the pipeline stops guessing it](0062-the-reranker-number-has-a-scale.md)
+- [0063 Possession of a task is an object, not a column](0063-possession-is-not-state.md) — answers the shareable working-set object left open by [0049](0049-working-memory-delegated-to-the-caller.md)

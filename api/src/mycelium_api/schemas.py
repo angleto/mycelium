@@ -1808,6 +1808,69 @@ class HandoffOut(BaseModel):
     version: int
 
 
+# --- Possession of a task (migration 0017) -------------------------
+# State says where a task is; possession says who is on it and until
+# when. ``worker_id`` is how a caller names ITSELF and is required on
+# every write here: several sessions can share one credential, so two
+# callers that do not name themselves are one holder as far as the
+# server can tell.
+
+
+class LeaseAcquireIn(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=128)
+    ttl_seconds: int | None = None
+    # Owner only: take a task back from whoever is holding it.
+    preempt: bool = False
+
+
+class LeaseRenewIn(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=128)
+    ttl_seconds: int | None = None
+    # Pass back the fence you were given: a holder that was reclaimed
+    # meanwhile is refused instead of extending what is now somebody
+    # else's possession.
+    fence: int | None = None
+
+
+class LeaseReleaseIn(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=128)
+
+
+class LeasePullIn(BaseModel):
+    state_id: uuid.UUID
+    worker_id: str = Field(min_length=1, max_length=128)
+    ttl_seconds: int | None = None
+    transition_to: uuid.UUID | None = None
+    tag_id: uuid.UUID | None = None
+    # The checking station's rule: skip what this worker handed off
+    # itself. ON by default. It keys on the worker id, so distinct
+    # workers are enough; what would break it is callers that omit
+    # ``worker_id`` and fall back to the credential, and one credential
+    # per agent closes that. Turn it off deliberately to re-check your
+    # own work.
+    exclude_own_handoffs: bool = True
+
+
+class LeaseOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    state_id: uuid.UUID
+    holder_worker_id: str
+    holder_identity_id: uuid.UUID | None
+    acquired_at: datetime.datetime
+    expires_at: datetime.datetime
+    renewed_at: datetime.datetime | None
+    released_at: datetime.datetime | None
+    release_reason: str | None
+    fence: int
+    version: int
+
+
+class LeasePullOut(BaseModel):
+    task: TaskOut
+    lease: LeaseOut
+
+
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---
 # Reads are member-level (the queue is visible to the team); approve /
 # deny / tick / policy-set are owner-gated in the service (a tick can
