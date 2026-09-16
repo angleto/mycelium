@@ -1,5 +1,5 @@
 .PHONY: sync lint fmt type test test-db-up test-db-down web-check eval eval-humus eval-bench \
-        mcp-coverage mcp-coverage-check up down \
+        mcp-coverage mcp-coverage-check lint-optional-uuid up down \
         db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
@@ -7,6 +7,7 @@ sync:
 
 lint:
 	uv run ruff check .
+	uv run python scripts/lint_optional_uuid.py
 
 fmt:
 	uv run ruff format .
@@ -162,6 +163,13 @@ mcp-coverage:
 # embedder-free (importing the server only registers tool callables).
 mcp-coverage-check:
 	uv run python scripts/gen_mcp_coverage.py --check
+
+# An optional argument parsed as a required one: the adapter converts ids
+# by hand, and uuid.UUID(None) raises TypeError before any domain rule
+# runs. Well-typed (typeshed says hex: str | None), so neither mypy nor
+# ruff sees it, and it broke twice in one release.
+lint-optional-uuid:
+	uv run python scripts/lint_optional_uuid.py
 
 up:
 	docker compose -f deploy/local/docker-compose.yml up -d

@@ -1816,7 +1816,13 @@ async def set_task_state(
             task_id=uuid.UUID(task_id),
             expected_version=expected_version,
             state_id=uuid.UUID(state_id),
-            worker_id=uuid.UUID(worker_id),
+            # Optional, and absent is the ordinary case rather than an
+            # edge one: the UI, the CLI, the scheduler and every agent
+            # that never took a lease pass nothing here, and a task
+            # nobody holds is movable by anybody. Converting it
+            # unconditionally made uuid.UUID(None) raise before any of
+            # that ran, so no MCP caller could move a task at all.
+            worker_id=(uuid.UUID(worker_id) if worker_id else None),
         )
         return {"task_id": task_id, "version": version}
 
@@ -3604,7 +3610,9 @@ async def task_leases_list(
             s,
             org_id=org,
             task_id=(uuid.UUID(task_id) if task_id else None),
-            worker_id=uuid.UUID(worker_id),
+            # Narrows to one holder; absent means every holder, which is
+            # the call this tool exists for.
+            worker_id=(uuid.UUID(worker_id) if worker_id else None),
             include_released=include_released,
             limit=limit,
         )

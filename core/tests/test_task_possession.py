@@ -19,6 +19,12 @@ The others pin the two consequences that are easy to implement halfway:
 that moving a task to another state ENDS the possession (not merely
 records something), and that an expired holder does not get to come back
 and write over whoever holds the task now.
+
+The last section calls the MCP tools rather than the service. Everything
+before it passes a holder that is already a ``UUID``; the tools take it
+as an optional string, and that conversion is where a caller who never
+took a lease -- the UI, the CLI, every agent session today -- was being
+refused.
 """
 
 from __future__ import annotations
@@ -42,6 +48,8 @@ from mycelium_core.services import task_leases as leases_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import workflow as wf_svc
 from mycelium_core.services.auth import signup
+from mycelium_mcp.gateway import execute_tool
+from mycelium_mcp.server import _PRINCIPAL
 
 
 @pytest.fixture
@@ -741,3 +749,89 @@ async def test_a_person_can_free_a_held_task_without_taking_it(_embedder: None) 
     async with tenant_session(str(org), str(user)) as s:
         await leases_svc.preempt(s, org_id=org, actor_id=user, task_id=task_id)
         assert await leases_svc.preempt(s, org_id=org, actor_id=user, task_id=task_id) is None
+
+
+# --- through the MCP adapter -----------------------------------------------
+#
+# Everything above calls the service, where ``worker_id`` is already a
+# ``UUID | None``. The tool that agents actually call takes it as an
+# optional STRING, and the conversion between the two is a layer no test
+# reached: the first defect below made every transition through MCP fail,
+# and every test above passed while it did.
+
+
+async def test_moving_a_task_through_mcp_without_a_worker_is_the_ordinary_call(
+    _embedder: None,
+) -> None:
+    """The adapter, not the service, and that difference is the defect.
+
+    ``set_task_state`` converted its optional ``worker_id`` string with
+    an unguarded ``uuid.UUID(...)``, so omitting it -- which is what
+    every caller that never took a lease does, and today that is all of
+    them -- raised ``TypeError`` in the prologue, before any rule these
+    tests cover ran. Reported from a session closing two cards on
+    2026-09-16: three tasks in two projects, the same
+    ``one of the hex, bytes, bytes_le, fields, or int arguments must be
+    given``, and finished work left sitting in ``in_progress`` because no
+    client could move it.
+
+    The assertion is deliberately the whole reply rather than its absence
+    of an error: a guard that swallowed the argument and moved nothing
+    would satisfy the weaker one.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    async with tenant_session(str(org), str(user)) as s:
+        version = (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).version
+
+    principal = _PRINCIPAL.set((user, org, None))
+    try:
+        res = await execute_tool(
+            name="set_task_state",
+            arguments={
+                "task_id": str(task_id),
+                "expected_version": version,
+                "state_id": str(states["working"]),
+            },
+        )
+    finally:
+        _PRINCIPAL.reset(principal)
+
+    assert res == {"task_id": str(task_id), "version": version + 1}
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id == (
+            states["working"]
+        )
+
+
+async def test_reading_who_holds_what_through_mcp_without_naming_a_worker(
+    _embedder: None,
+) -> None:
+    """The same conversion, in the tool that exists to prevent conflicts.
+
+    ``task_leases_list`` is how a session sees its collaborators instead
+    of discovering them at a refused write, and ``worker_id`` NARROWS it
+    to one holder. The unfiltered call is the one ADR-0063 describes, and
+    it raised the same ``TypeError``: the only tool that answers "who
+    holds this" could not be called without already knowing the answer.
+    """
+    org, user = await _org()
+    await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    holder = await _worker(org, user, "holder-1")
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder)
+
+    principal = _PRINCIPAL.set((user, org, None))
+    try:
+        rows = await execute_tool(name="task_leases_list", arguments={})
+    finally:
+        _PRINCIPAL.reset(principal)
+
+    assert [r["task_id"] for r in rows] == [str(task_id)]
+    assert rows[0]["worker_id"] == str(holder)
+    # The NAME travels with it, because neither a person nor an agent can
+    # resolve a uuid, and a refusal that names nobody sends both round a
+    # loop that cannot terminate.
+    assert rows[0]["holder"] == "holder-1"
