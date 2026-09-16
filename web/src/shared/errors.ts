@@ -25,7 +25,7 @@
 // is a parameter here. The caller resolves it from its own catalogue, so
 // no user-facing text is written at the point of use.
 
-export type ApiError = { code?: string; detail?: unknown }
+export type ApiError = { code?: string; detail?: unknown; params?: Record<string, unknown> }
 
 /** The stable domain code, or undefined when the failure carried none
  *  (a transport error, or FastAPI's own validation envelope). */
@@ -44,6 +44,21 @@ function validationLine(x: unknown): string | null {
     return loc && msg ? `${loc}: ${msg}` : msg || null
   }
   return typeof x === 'string' ? x : null
+}
+
+/** One of the error's ``params``, as a string, or undefined.
+ *
+ *  The domain envelope carries the CONSTRAINT's context beside the code
+ *  (api/src/mycelium_api/app.py), and for some failures that context is
+ *  the only thing that makes the message actionable: a refused task
+ *  transition has to be able to say WHO holds it and until when, and a
+ *  refused write is exactly the moment a caller has no second round trip
+ *  to spend finding out. Read it from here rather than parsing the
+ *  prose, which is localized and changes on a copy edit.
+ */
+export function errParam(e: unknown, key: string): string | undefined {
+  const v = (e as ApiError | undefined)?.params?.[key]
+  return typeof v === 'string' && v ? v : undefined
 }
 
 /** Always a string: a non-string ``detail`` must never reach the DOM.

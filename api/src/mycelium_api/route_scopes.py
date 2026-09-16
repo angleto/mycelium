@@ -643,6 +643,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/tasks/{task_id}/leases"): "tasks:read",
     ("POST", "/tasks/{task_id}/leases"): "tasks:write",
     ("POST", "/tasks/{task_id}/leases/release"): "tasks:write",
+    ("POST", "/tasks/{task_id}/leases/preempt"): "tasks:write",
     ("POST", "/tasks/{task_id}/leases/renew"): "tasks:write",
     ("POST", "/tasks/{task_id}/note"): "notes:write",
     ("GET", "/tasks/{task_id}/note-links"): "notes:read",

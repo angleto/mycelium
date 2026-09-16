@@ -665,8 +665,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         # agent acts on the prose when the code is new to it (AGT-04 is
         # about preserving this text, not about inventing it).
         MessageCode.LEASE_HELD_BY_OTHER: (
-            "Task is held by another worker until {expires_at}; pick a different task "
-            "or wait for the lease to expire"
+            "Task is held by {holder} until {expires_at}. Pick a different task, wait for "
+            "the lease to expire, or ask its owner to take it back"
         ),
         MessageCode.LEASE_NOT_HELD: (
             "You do not hold this task. Acquire it first; moving a task to another state "

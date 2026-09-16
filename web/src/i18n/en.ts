@@ -1072,6 +1072,14 @@ export const en = {
     connNotes: 'Notes',
     properties: 'Properties',
     conflict: 'The task changed meanwhile; reloaded the current version.',
+    heldBy: 'Held by {{holder}} until {{until}}',
+    heldByShort: 'Held by {{holder}}',
+    heldConflict:
+      'This task is held by {{holder}} until {{until}}, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
+    heldConflictNoDetail:
+      'This task is held by another worker, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
+    heldTakeBack: 'Take it back',
+    heldTakenBack: 'Taken back. The task is free.',
     tagsTitle: 'Tags',
     workNote: 'Work note',
     addTag: 'Add tag',

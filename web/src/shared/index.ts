@@ -30,7 +30,7 @@
 export type { paths, components, operations } from './schema'
 
 export type { ApiError } from './errors'
-export { errCode, errMessage } from './errors'
+export { errCode, errMessage, errParam } from './errors'
 
 export type { LookupMatch, LookupOut, LookupOpts } from './prefix'
 export { RESOLVE_ID, isPrefixCandidate, isFullUuid, lookupCacheKey, lookupPath } from './prefix'

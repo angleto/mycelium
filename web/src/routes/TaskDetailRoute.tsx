@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errCode, errMessage, errParam, workspaceHeader } from '../api/client'
+import { fmtDateTime } from '../lib/tz'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RefreshHint } from '../components/RefreshHint'
 import { RichEditor, type AnnotationViewHandle } from '../components/RichEditor'
@@ -37,6 +38,7 @@ type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']
 type Dep = components['schemas']['DependencyOut']
+type Lease = components['schemas']['LeaseOut']
 type Rel = components['schemas']['TaskRelationOut']
 
 // Stable signature of an annotation set: id + version + status +
@@ -135,6 +137,9 @@ export function TaskDetailRoute({
   )
   const [task, setTask] = useState<Task | null>(null)
   const [states, setStates] = useState<State[]>([])
+  // The live possession, or null when nobody holds the task
+  // (ADR-0063). Null is the ordinary case and renders nothing.
+  const [lease, setLease] = useState<Lease | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
   // /projects, not the project tags: only ProjectOut carries
   // ``client_tag_id``, which couples the two structural selects.
@@ -372,7 +377,7 @@ export function TaskDetailRoute({
         : api.GET('/tasks/{task_id}', {
             params: { header: h, path: { task_id: id } },
           })
-      const [tk, st, tg, pj, all, dp, ws, rm, nt, rl] = await Promise.all([
+      const [tk, st, tg, pj, all, dp, ws, rm, nt, rl, ls] = await Promise.all([
         tkPromise,
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -391,6 +396,13 @@ export function TaskDetailRoute({
         }),
         api.GET('/notes', { params: { header: h } }),
         api.GET('/task-relations', { params: { header: h, query: { task_id: id } } }),
+        // Possession (ADR-0063). Fetched with the rest rather than on a
+        // failed transition, because the point is to say who holds the
+        // task BEFORE somebody tries to move it: a person who learns it
+        // from a refusal has already lost the edit they were making.
+        api.GET('/tasks/{task_id}/leases', {
+          params: { header: h, path: { task_id: id } },
+        }),
       ])
       if (!active) return
       if (tk) {
@@ -398,6 +410,7 @@ export function TaskDetailRoute({
         else setErr(errMessage(tk.error))
       }
       if (st.data) setStates(st.data)
+      if (ls.data) setLease(ls.data.find((l) => !l.released_at) ?? null)
       if (tg.data) setTags(tg.data)
       if (pj.data) setProjects(pj.data)
       if (all.data) setAllTasks(all.data)
@@ -898,6 +911,25 @@ export function TaskDetailRoute({
       params: { header: workspaceHeader(), path: { task_id: id } },
       body: { expected_version: task.version, state_id: sid },
     })
+    // Two different 409s reach here and they imply OPPOSITE next moves,
+    // so branching on the status alone is wrong (ADR-0063). A stale
+    // version means somebody else's edit landed first and reloading
+    // fixes it. Possession means a worker is holding the task, and
+    // reloading fixes nothing -- telling a person to reload and retry
+    // sends them round a loop that cannot terminate, which is what this
+    // screen did before the possession codes existed to tell apart.
+    if (errCode(error) === 'task.lease.held_by_other') {
+      const holder = errParam(error, 'holder')
+      const until = errParam(error, 'expires_at')
+      setErr(
+        holder && until
+          ? t('tasks.heldConflict', { holder, until: fmtDateTime(until) })
+          : t('tasks.heldConflictNoDetail'),
+      )
+      setStateId(task.state_id)
+      await reload()
+      return
+    }
     if (response.status === 409) {
       setErr(t('tasks.conflict'))
       await reload()
@@ -907,6 +939,31 @@ export function TaskDetailRoute({
       setErr(errMessage(error))
       return
     }
+    await reload()
+  }
+
+  /** The owner's lever, which the service already had and the interface
+   *  did not: free a task held by a session that is not coming back,
+   *  instead of waiting out its deadline.
+   *
+   *  It frees the task rather than taking it. Acquiring it here would
+   *  assign the task to a browser tab, and a tab holds nothing reliably
+   *  -- it closes without releasing -- so that would trade one stuck
+   *  task for another. Deliberately a separate, labelled action and not
+   *  something the state control retries into: it interrupts a worker
+   *  that may still be running, so it is pressed on purpose or not at
+   *  all. */
+  async function onTakeBack() {
+    if (!task) return
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/leases/preempt', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setErr(t('tasks.heldTakenBack'))
     await reload()
   }
 
@@ -1092,6 +1149,27 @@ export function TaskDetailRoute({
             archive, delete) sit here too, no longer buried at the bottom
             of the form. The "State" caption is dropped; the options name
             the control and the aria-label carries it for screen readers. */}
+        {/* Possession, said BEFORE anybody tries to move the task
+            (ADR-0063). Learning it from a refusal is learning it too
+            late: the edit is already lost, and the refusal used to be
+            the generic conflict message, which told the person to
+            reload -- round a loop that cannot terminate, because
+            reloading changes nothing about who holds it. Rendered only
+            when somebody actually holds it, which is the uncommon
+            case. */}
+        {lease && !lease.released_at && (
+          <div className="taskdetail__held" role="status">
+            <span>
+              {t('tasks.heldBy', {
+                holder: lease.holder_label,
+                until: fmtDateTime(lease.expires_at),
+              })}
+            </span>
+            <button type="button" className="btn--sm" onClick={() => void onTakeBack()}>
+              {t('tasks.heldTakeBack')}
+            </button>
+          </div>
+        )}
         <div className="taskdetail__headeractions">
           <span className="taskdetail__savestate hint" aria-live="polite">
             {dirty ? t('tasks.unsaved') : t('tasks.saved')}

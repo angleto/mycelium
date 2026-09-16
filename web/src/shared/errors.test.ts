@@ -7,7 +7,7 @@
 // the domain shape looks correct until someone submits a form.
 
 import { describe, expect, it } from 'vitest'
-import { errCode, errMessage } from './errors'
+import { errCode, errMessage, errParam } from './errors'
 
 const FALLBACK = 'fallback-sentence'
 
@@ -21,6 +21,38 @@ describe('errCode', () => {
     expect(errCode(null)).toBeUndefined()
     expect(errCode('boom')).toBeUndefined()
     expect(errCode({})).toBeUndefined()
+  })
+})
+
+describe('errParam', () => {
+  // The case this exists for: a refused task transition has to be able
+  // to say WHO holds it and until when, and a refusal is exactly the
+  // moment a caller has no second round trip to spend finding out. The
+  // context travels in ``params`` beside the code, so a caller reads it
+  // from there instead of parsing prose that is localized and changes on
+  // a copy edit.
+  const held = {
+    code: 'task.lease.held_by_other',
+    detail: 'Task is held by verify-3 until 2026-09-16T20:00:00+00:00.',
+    params: { holder: 'verify-3', expires_at: '2026-09-16T20:00:00+00:00' },
+  }
+
+  it('reads the constraint context beside the code', () => {
+    expect(errParam(held, 'holder')).toBe('verify-3')
+    expect(errParam(held, 'expires_at')).toBe('2026-09-16T20:00:00+00:00')
+  })
+
+  it('is undefined rather than throwing when there is nothing to read', () => {
+    expect(errParam(held, 'nope')).toBeUndefined()
+    expect(errParam({ code: 'x' }, 'holder')).toBeUndefined()
+    expect(errParam(undefined, 'holder')).toBeUndefined()
+    expect(errParam('boom', 'holder')).toBeUndefined()
+  })
+
+  it('refuses a non-string, which must never reach the DOM', () => {
+    expect(errParam({ params: { holder: 42 } }, 'holder')).toBeUndefined()
+    expect(errParam({ params: { holder: { a: 1 } } }, 'holder')).toBeUndefined()
+    expect(errParam({ params: { holder: '' } }, 'holder')).toBeUndefined()
   })
 })
 

@@ -1679,6 +1679,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/leases/preempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preempt Lease
+         * @description Owner: take a held task back, freeing it for anybody.
+         *
+         *     What a person looking at a stuck board actually wants. Distinct from
+         *     acquiring with ``preempt``, which would assign the task to the
+         *     caller's browser tab and leave it held by something that never
+         *     releases. 404 when nothing was held.
+         */
+        post: operations["preempt_lease_tasks__task_id__leases_preempt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/leases/renew": {
         parameters: {
             query?: never;
@@ -11444,6 +11469,8 @@ export interface components {
             state_id: string;
             /** Holder Worker Id */
             holder_worker_id: string | null;
+            /** Holder Label */
+            holder_label: string;
             /** Holder Identity Id */
             holder_identity_id: string | null;
             /**
@@ -19248,6 +19275,42 @@ export interface operations {
                 "application/json": components["schemas"]["LeaseAcquireIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preempt_lease_tasks__task_id__leases_preempt_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

@@ -149,6 +149,23 @@ it is — visible, pullable, honest.
 
 ## Consequences
 
+- **A possession nobody can see is worse than no possession, so it is said before
+  it is enforced.** The task screen loads the live lease with the task and names
+  the holder and the deadline above the state control; the refusal carries the
+  same two facts in the error's `params`, resolved server-side, because a
+  refused write is exactly the moment a caller has no second round trip to spend
+  finding out who blocked it — and that is as true of an agent as of a person.
+  The holder's NAME travels, not its id: neither a person nor an agent can
+  resolve a uuid. The first version of this shipped without any of it, and the
+  screen reported a possession conflict with the generic stale-version sentence,
+  which tells somebody to reload — round a loop that cannot terminate, because
+  reloading changes nothing about who holds it.
+- **Freeing a task is not the same operation as taking it**, and the interface
+  needed the first while the service only had the second. `preempt` releases the
+  lease and leaves the task available; acquiring with `preempt=True` assigns it
+  to the caller. A browser tab must never do the second: it holds nothing
+  reliably, closing without releasing, so it would trade one stuck task for
+  another.
 - **Recovery needs nobody, on both paths, and they differ only in speed.** A
   session that is shut down calls `worker_close`, which gives back every task
   it holds in the same call: free immediately, because that is the one case

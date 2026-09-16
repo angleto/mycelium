@@ -1880,6 +1880,12 @@ class LeaseOut(BaseModel):
     task_id: uuid.UUID
     state_id: uuid.UUID
     holder_worker_id: uuid.UUID | None
+    # The holder's NAME, resolved server-side: the worker's own label, or
+    # its id when it gave none, or the user's handle for a lease nobody
+    # took under a worker. Present because an id is not an answer to "who
+    # is holding this" -- a person reading a board cannot resolve a uuid,
+    # and the client would need a second request per row to try.
+    holder_label: str
     holder_identity_id: uuid.UUID | None
     acquired_at: datetime.datetime
     expires_at: datetime.datetime

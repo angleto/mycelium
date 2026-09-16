@@ -1069,6 +1069,14 @@ export const it: Catalog = {
     connNotes: 'Note',
     properties: 'Proprietà',
     conflict: 'Il task e cambiato nel frattempo; ricaricata la versione corrente.',
+    heldBy: 'Tenuto da {{holder}} fino alle {{until}}',
+    heldByShort: 'Tenuto da {{holder}}',
+    heldConflict:
+      'Questo task e tenuto da {{holder}} fino alle {{until}}, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
+    heldConflictNoDetail:
+      'Questo task e tenuto da un altro worker, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
+    heldTakeBack: 'Riprendilo',
+    heldTakenBack: 'Ripreso. Il task e libero.',
     tagsTitle: 'Tag',
     workNote: 'Nota di lavoro',
     addTag: 'Aggiungi tag',

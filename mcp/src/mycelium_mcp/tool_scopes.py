@@ -358,6 +358,7 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     # is a write, and gating it on tasks:read would let a read-only
     # credential remove work from everybody else's view.
     "task_lease_acquire": "tasks:write",
+    "task_lease_preempt": "tasks:write",
     "task_lease_release": "tasks:write",
     "task_lease_renew": "tasks:write",
     "task_pull": "tasks:write",

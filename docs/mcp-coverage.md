@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**283 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**284 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -303,7 +303,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (51)
+### tasks (52)
 
 | Tool | Summary |
 |---|---|
@@ -347,6 +347,7 @@ over-fetch the org table and filter in its head.
 | `set_task_owner` | Reassign accountability for a task (docs/adr/0028 D2). The owner |
 | `task_decline` | Member: decline an offered task (lightweight: notify the offerer |
 | `task_lease_acquire` | Take possession of one named task. |
+| `task_lease_preempt` | Owner: take a held task back, freeing it for anybody to pick up. |
 | `task_lease_release` | Hand a task back without moving it: you are stopping work on |
 | `task_lease_renew` | Push the deadline out on a lease you hold, for work that outlasts |
 | `task_leases_list` | Who holds what, and until when. This is how a session sees its |

@@ -161,7 +161,7 @@ export async function authFetch(
  * here so the SPA's ~60 call sites keep importing it from the client
  * they already import. */
 export type { ApiError } from '../shared'
-export { errCode } from '../shared'
+export { errCode, errParam } from '../shared'
 
 /** The SPA's binding of the shared reader: it supplies the catalogue
  * sentence for the case where the server said nothing usable and there

@@ -645,3 +645,99 @@ async def test_a_worker_that_dies_frees_its_tasks_without_anybody_asking(
             s, org_id=org, actor_id=user, state_id=states["working"], worker_id=successor
         )
     assert retaken.id == task_id
+
+
+async def test_the_refusal_names_who_is_holding_it_and_until_when(_embedder: None) -> None:
+    """The message a person actually meets, and the reason it carries
+    params.
+
+    A refused write is exactly the moment a caller has no second round
+    trip to spend finding out who blocked it. Before this the refusal
+    said "another worker" and the interface showed the generic conflict
+    sentence, which tells a person to reload -- round a loop that cannot
+    terminate, because reloading changes nothing about who holds it.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    holder_w = await _worker(org, user, "verify-3")
+    other_w = await _worker(org, user, "verify-4")
+
+    async with tenant_session(str(org), str(user)) as s:
+        lease = await leases_svc.acquire(
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder_w
+        )
+        deadline = lease.expires_at
+
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(ConflictError) as err:
+            await leases_svc.acquire(
+                s, org_id=org, actor_id=user, task_id=task_id, worker_id=other_w
+            )
+    # The worker's OWN label, not its uuid: a person reading a board
+    # cannot resolve an id, and neither can an agent reading the prose.
+    assert err.value.params["holder"] == "verify-3"
+    assert err.value.params["expires_at"] == deadline.isoformat()
+
+    # The same name the projection shows, so one holder reads as one
+    # holder wherever it is met.
+    async with tenant_session(str(org), str(user)) as s:
+        live = await leases_svc.live_lease(s, task_id=task_id)
+        assert live is not None
+        assert await leases_svc.held_by(s, live) == "verify-3"
+
+    # And the transition refusal carries it too, which is the path the
+    # web UI takes.
+    async with tenant_session(
+        str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
+    ) as s:
+        task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
+        with pytest.raises(ConflictError) as err2:
+            await tasks_svc.set_state(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                expected_version=task.version,
+                state_id=states["working"],
+                worker_id=other_w,
+            )
+    assert err2.value.params["holder"] == "verify-3"
+
+
+async def test_a_person_can_free_a_held_task_without_taking_it(_embedder: None) -> None:
+    """The lever the interface needed and the service did not have.
+
+    Freeing is not the same as acquiring, and the difference is what
+    somebody at a stuck board wants: the task AVAILABLE, not assigned to
+    their browser tab -- which would have to hold a lease it will never
+    release when the window closes, trading one stuck task for another.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    stuck = await _worker(org, user, "stuck")
+    next_up = await _worker(org, user, "next")
+
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=stuck)
+
+    async with tenant_session(str(org), str(user)) as s:
+        freed = await leases_svc.preempt(s, org_id=org, actor_id=user, task_id=task_id)
+    assert freed is not None
+    # Its own reason, so the sweep's count stays a measure of sessions
+    # that died rather than of decisions somebody took.
+    assert freed.release_reason == LeaseRelease.preempted.value
+
+    # Free means free, and free for ANYBODY rather than for the person
+    # who pressed it.
+    async with tenant_session(str(org), str(user)) as s:
+        taken, _ = await leases_svc.pull(
+            s, org_id=org, actor_id=user, state_id=states["queued"], worker_id=next_up
+        )
+    assert taken.id == task_id
+
+    # Nothing held: a second press says so instead of inventing a lease.
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.preempt(s, org_id=org, actor_id=user, task_id=task_id)
+        assert await leases_svc.preempt(s, org_id=org, actor_id=user, task_id=task_id) is None

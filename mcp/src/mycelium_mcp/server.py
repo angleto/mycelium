@@ -3414,13 +3414,17 @@ async def worker_close(token: str, org_id: str, worker_id: str) -> dict[str, Any
         return {**_worker(worker), "released_tasks": [str(t) for t in freed]}
 
 
-def _lease(x: TaskLease) -> dict[str, Any]:
+def _lease(x: TaskLease, holder_label: str | None = None) -> dict[str, Any]:
     return _compact(
         {
             "lease_id": str(x.id),
             "task_id": str(x.task_id),
             "state_id": str(x.state_id),
-            "worker_id": x.holder_worker_id,
+            "worker_id": str(x.holder_worker_id) if x.holder_worker_id else None,
+            # Who that is in words. An id is not an answer to "who holds
+            # this": an agent reading it cannot resolve a uuid either, and
+            # asking per row is a round trip for a column.
+            "holder": holder_label,
             "holder_identity_id": (str(x.holder_identity_id) if x.holder_identity_id else None),
             "acquired_at": x.acquired_at.isoformat(),
             "expires_at": x.expires_at.isoformat(),
@@ -3485,7 +3489,7 @@ async def task_pull(
         state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
         return {
             "task": _task_full(task, tagmap.get(task.id, []), state=state),
-            "lease": _lease(lease),
+            "lease": _lease(lease, await task_leases_svc.held_by(s, lease)),
         }
 
 
@@ -3516,7 +3520,7 @@ async def task_lease_acquire(
             ttl_seconds=ttl_seconds,
             preempt=preempt,
         )
-        return _lease(lease)
+        return _lease(lease, await task_leases_svc.held_by(s, lease))
 
 
 @mcp.tool()
@@ -3542,7 +3546,7 @@ async def task_lease_renew(
             ttl_seconds=ttl_seconds,
             fence=fence,
         )
-        return _lease(lease)
+        return _lease(lease, await task_leases_svc.held_by(s, lease))
 
 
 @mcp.tool()
@@ -3563,7 +3567,23 @@ async def task_lease_release(
         )
         if lease is None:
             return {"task_id": task_id, "released": False}
-        return _lease(lease)
+        return _lease(lease, await task_leases_svc.held_by(s, lease))
+
+
+@mcp.tool()
+async def task_lease_preempt(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Owner: take a held task back, freeing it for anybody to pick up.
+
+    For a task held by a session that is not coming back and whose
+    deadline is too far off to wait for. Distinct from acquiring it:
+    this leaves the task AVAILABLE rather than assigning it to you."""
+    async with _tenant(token, org_id) as (s, org, user):
+        lease = await task_leases_svc.preempt(
+            s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
+        )
+        if lease is None:
+            return {"task_id": task_id, "released": False}
+        return _lease(lease, await task_leases_svc.held_by(s, lease))
 
 
 @mcp.tool()
@@ -3588,7 +3608,8 @@ async def task_leases_list(
             include_released=include_released,
             limit=limit,
         )
-        return [_lease(x) for x in rows]
+        labels = await task_leases_svc.labels_for(s, rows)
+        return [_lease(x, labels[x.id]) for x in rows]
 
 
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---

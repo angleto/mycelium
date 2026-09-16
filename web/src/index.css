@@ -4711,6 +4711,22 @@ button.btn--danger:hover {
 .taskdetail__back {
   margin: 0;
 }
+/* Possession (ADR-0063): who is holding this task, said before anybody
+   tries to move it. Uses the accent-weak surface rather than a danger
+   colour on purpose -- a held task is the system working, not a fault,
+   and colouring it as an error would train people to dismiss it. */
+.taskdetail__held {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  padding: var(--sp-8) var(--sp-12);
+  margin-bottom: var(--sp-8);
+  background: var(--accent-weak);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
 .taskdetail__headeractions {
   display: flex;
   align-items: center;

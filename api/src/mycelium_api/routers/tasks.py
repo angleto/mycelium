@@ -1461,12 +1461,13 @@ async def decline_task(
 # ---------------------------------------------------------------------------
 
 
-def _lease_out(x: TaskLease) -> LeaseOut:
+def _lease_out(x: TaskLease, holder_label: str) -> LeaseOut:
     return LeaseOut(
         id=x.id,
         task_id=x.task_id,
         state_id=x.state_id,
         holder_worker_id=x.holder_worker_id,
+        holder_label=holder_label,
         holder_identity_id=x.holder_identity_id,
         acquired_at=x.acquired_at,
         expires_at=x.expires_at,
@@ -1558,7 +1559,8 @@ async def list_leases(
         include_released=include_released,
         limit=limit,
     )
-    return [_lease_out(x) for x in rows]
+    labels = await lease_svc.labels_for(ctx.session, rows)
+    return [_lease_out(x, labels[x.id]) for x in rows]
 
 
 @router.post("/leases/pull", response_model=LeasePullOut)
@@ -1583,7 +1585,10 @@ async def pull_task(
         tag_id=body.tag_id,
         exclude_own_handoffs=body.exclude_own_handoffs,
     )
-    return LeasePullOut(task=await _task_out(ctx, task), lease=_lease_out(lease))
+    return LeasePullOut(
+        task=await _task_out(ctx, task),
+        lease=_lease_out(lease, await lease_svc.held_by(ctx.session, lease)),
+    )
 
 
 @router.get("/{task_id}/leases", response_model=list[LeaseOut])
@@ -1597,7 +1602,8 @@ async def list_task_leases(
     rows = await lease_svc.list_leases(
         ctx.session, org_id=ctx.org_id, task_id=task_id, include_released=include_released
     )
-    return [_lease_out(x) for x in rows]
+    labels = await lease_svc.labels_for(ctx.session, rows)
+    return [_lease_out(x, labels[x.id]) for x in rows]
 
 
 @router.post("/{task_id}/leases", response_model=LeaseOut)
@@ -1621,7 +1627,26 @@ async def acquire_lease(
         ttl_seconds=body.ttl_seconds,
         preempt=body.preempt,
     )
-    return _lease_out(lease)
+    return _lease_out(lease, await lease_svc.held_by(ctx.session, lease))
+
+
+@router.post("/{task_id}/leases/preempt", response_model=LeaseOut)
+async def preempt_lease(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> LeaseOut:
+    """Owner: take a held task back, freeing it for anybody.
+
+    What a person looking at a stuck board actually wants. Distinct from
+    acquiring with ``preempt``, which would assign the task to the
+    caller's browser tab and leave it held by something that never
+    releases. 404 when nothing was held."""
+    lease = await lease_svc.preempt(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
+    )
+    if lease is None:
+        raise NotFoundError(MessageCode.LEASE_NOT_HELD)
+    return _lease_out(lease, await lease_svc.held_by(ctx.session, lease))
 
 
 @router.post("/{task_id}/leases/renew", response_model=LeaseOut)
@@ -1641,7 +1666,7 @@ async def renew_lease(
         ttl_seconds=body.ttl_seconds,
         fence=body.fence,
     )
-    return _lease_out(lease)
+    return _lease_out(lease, await lease_svc.held_by(ctx.session, lease))
 
 
 @router.post("/{task_id}/leases/release", response_model=LeaseOut)
@@ -1664,7 +1689,7 @@ async def release_lease(
     )
     if lease is None:
         raise NotFoundError(MessageCode.LEASE_NOT_HELD)
-    return _lease_out(lease)
+    return _lease_out(lease, await lease_svc.held_by(ctx.session, lease))
 
 
 # ---------------------------------------------------------------------------

@@ -51,10 +51,12 @@ from mycelium_core.config import get_settings
 from mycelium_core.errors import ConflictError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_token import AgentToken
+from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
+from mycelium_core.models.user import User
 from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import audit
 from mycelium_core.services.rbac import require_role
@@ -207,6 +209,33 @@ def _deadline(now: dt.datetime, ttl_seconds: int | None) -> dt.datetime:
     return now + dt.timedelta(seconds=ttl)
 
 
+async def held_by(session: AsyncSession, lease: TaskLease) -> str:
+    """A name for whoever is holding a task, for the refusal message.
+
+    Resolved server-side and put in the error's params rather than left
+    to the caller, because every surface needs it and none of them can
+    get it cheaply: a refused write is exactly the moment a caller has no
+    second round trip to spend, and an agent reading the prose has no
+    other way to learn it at all.
+
+    The worker's own label when it gave one, its id when it did not, and
+    the user's handle for a lease nobody took under a worker. Never
+    nothing: "held by another worker" with no name is the message this
+    exists to replace.
+    """
+    if lease.holder_worker_id is not None:
+        label = (
+            await session.execute(
+                select(AgentWorker.label).where(AgentWorker.id == lease.holder_worker_id)
+            )
+        ).scalar_one_or_none()
+        return label or str(lease.holder_worker_id)
+    handle = (
+        await session.execute(select(User.handle).where(User.id == lease.holder_user_id))
+    ).scalar_one_or_none()
+    return handle or str(lease.holder_user_id)
+
+
 async def live_lease(session: AsyncSession, *, task_id: uuid.UUID) -> TaskLease | None:
     """The unreleased lease row for a task, expired or not.
 
@@ -331,6 +360,7 @@ async def acquire(
             if not preempt:
                 raise ConflictError(
                     MessageCode.LEASE_HELD_BY_OTHER,
+                    holder=await held_by(session, existing),
                     expires_at=existing.expires_at.isoformat(),
                 )
             await require_role(session, org_id, actor_id, Role.owner)
@@ -677,6 +707,42 @@ async def release_all_for_worker(
     return [r[1] for r in rows]
 
 
+async def preempt(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> TaskLease | None:
+    """Owner: take a held task back, freeing it. Returns the lease that
+    was ended, or None when nothing was held.
+
+    Distinct from ``acquire(preempt=True)``, which takes the task FOR the
+    caller, and the difference is what somebody actually wants. A person
+    looking at a board and finding a task held by a session that is not
+    coming back wants it AVAILABLE, not assigned to their browser tab --
+    which would need the tab to hold a lease it will never release when
+    the window closes, trading one stuck task for another.
+
+    Owner-gated, like the other privileged task operations: interrupting
+    a worker that may still be running is a decision, and the release
+    reason records it as one so the sweep's numbers stay a count of
+    sessions that died.
+    """
+    await require_role(session, org_id, actor_id, Role.owner)
+    lease = await live_lease(session, task_id=task_id)
+    if lease is None:
+        return None
+    return await release(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        reason=LeaseRelease.preempted,
+        require_holder=False,
+    )
+
+
 async def assert_may_move(
     session: AsyncSession,
     *,
@@ -717,7 +783,11 @@ async def assert_may_move(
         ).scalar_one_or_none()
         if owner_id is not None and owner_id == actor_id:
             return lease
-    raise ConflictError(MessageCode.LEASE_HELD_BY_OTHER, expires_at=lease.expires_at.isoformat())
+    raise ConflictError(
+        MessageCode.LEASE_HELD_BY_OTHER,
+        holder=await held_by(session, lease),
+        expires_at=lease.expires_at.isoformat(),
+    )
 
 
 async def release_on_transition(
@@ -754,6 +824,18 @@ async def release_on_transition(
         reason=LeaseRelease.done if now_terminal else LeaseRelease.handoff,
         require_holder=False,
     )
+
+
+async def labels_for(session: AsyncSession, leases: Sequence[TaskLease]) -> dict[uuid.UUID, str]:
+    """Holder names for a page of leases, in one pass.
+
+    The projections need them and cannot each go and look: a list of
+    twenty leases resolved one at a time is twenty round trips for a
+    column, which is how a read that exists to be cheap stops being
+    cheap. Same resolution as the refusal message uses, so a person sees
+    one name for one holder wherever they meet it.
+    """
+    return {x.id: await held_by(session, x) for x in leases}
 
 
 async def list_leases(
