@@ -602,9 +602,18 @@ async def assert_may_move(
     an agent that never took a lease. Possession constrains only what it
     actually covers, and a lease nobody took covers nothing.
 
-    The owner may always move a task. Somebody has to be able to unstick
-    a workspace without waiting out a deadline, and that somebody is the
-    person whose workspace it is.
+    **The owner exemption is narrower than "the owner", and the first
+    version of it was useless.** Somebody has to be able to unstick a
+    workspace without waiting out a deadline, and that somebody is the
+    person whose workspace it is. But exempting `task.owner_id ==
+    actor_id` exempts the AGENTS too: they authenticate as that same
+    user, and in a workspace where one person owns every task the
+    exemption swallowed the whole rule. So it is narrowed by actor kind:
+    an agent credential never takes it, whoever it authenticates as. That
+    is a distinction the system already draws -- ``actor_kind`` is on the
+    session and the audit log has written it since it existed -- and it
+    is the one that separates the person from the sessions working for
+    them.
     """
     lease = await live_lease(session, task_id=task_id)
     if lease is None or not lease.is_live(_now()):
@@ -612,11 +621,12 @@ async def assert_may_move(
     holder = await resolve_holder(session, org_id=org_id, actor_id=actor_id, worker_id=worker_id)
     if holder.holds(lease):
         return lease
-    task = (
-        await session.execute(select(Task.owner_id).where(Task.id == task_id))
-    ).scalar_one_or_none()
-    if task is not None and task == actor_id:
-        return lease
+    if holder.token_id is None:
+        owner_id = (
+            await session.execute(select(Task.owner_id).where(Task.id == task_id))
+        ).scalar_one_or_none()
+        if owner_id is not None and owner_id == actor_id:
+            return lease
     raise ConflictError(MessageCode.LEASE_HELD_BY_OTHER, expires_at=lease.expires_at.isoformat())
 
 

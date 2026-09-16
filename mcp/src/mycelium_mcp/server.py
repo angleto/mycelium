@@ -1796,8 +1796,16 @@ async def set_task_state(
     task_id: str,
     expected_version: int,
     state_id: str,
+    worker_id: str | None = None,
 ) -> dict[str, Any]:
-    """Transition a task to a workflow state (validated)."""
+    """Transition a task to a workflow state (validated).
+
+    Pass the ``worker_id`` you took the task with. Two things follow from
+    it, and both are silent if you leave it out: a task somebody else
+    holds refuses the move, and moving a task you hold to a different
+    state RELEASES your lease -- ``handoff`` to a working state, ``done``
+    to a terminal one. After that you hold nothing, which is the point:
+    the station you moved it to is somebody else's to pick up."""
     async with _tenant(token, org_id) as (s, org, user):
         version = await tasks.set_state(
             s,
@@ -1806,6 +1814,7 @@ async def set_task_state(
             task_id=uuid.UUID(task_id),
             expected_version=expected_version,
             state_id=uuid.UUID(state_id),
+            worker_id=worker_id,
         )
         return {"task_id": task_id, "version": version}
 

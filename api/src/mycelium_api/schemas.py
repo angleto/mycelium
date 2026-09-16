@@ -789,6 +789,12 @@ class TaskPatchIn(BaseModel):
 class TaskStateIn(BaseModel):
     expected_version: int = Field(ge=1)
     state_id: uuid.UUID
+    # The worker id the caller took the task with (ADR-0063). Optional,
+    # because every caller that predates possession has none and a task
+    # nobody holds is movable by anyone. Passing it is what makes the two
+    # halves of the rule bite: a task somebody else holds refuses the
+    # move, and moving a task you hold releases your lease.
+    worker_id: str | None = Field(default=None, max_length=128)
 
 
 class StateOut(BaseModel):

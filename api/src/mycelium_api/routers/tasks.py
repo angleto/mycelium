@@ -864,6 +864,7 @@ async def set_state(
         task_id=task_id,
         expected_version=body.expected_version,
         state_id=body.state_id,
+        worker_id=body.worker_id,
     )
     return VersionOut(id=task_id, version=version)
 

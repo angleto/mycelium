@@ -443,17 +443,62 @@ async def test_a_task_nobody_holds_is_still_movable_by_anybody(_embedder: None) 
     assert await _lease_rows(org, user, task_id) == []
 
 
-async def test_a_third_party_cannot_move_a_task_somebody_else_is_holding(
+async def test_an_agent_credential_cannot_move_a_task_another_worker_holds(
     _embedder: None,
 ) -> None:
-    """The other half of the same rule. Held means held, and the refusal
-    carries the deadline so the caller knows what it is waiting for.
+    """The other half of the rule, and the half that was inert.
 
-    The owner is exempt on purpose (somebody has to be able to unstick a
-    workspace without waiting out a deadline), so this runs the refusal
-    against a task whose owner is not the caller's user -- which in this
-    workspace means checking the worker axis, since every session shares
-    one user.
+    The exemption that lets somebody unstick a workspace was written as
+    ``task.owner_id == actor_id``. In a workspace where one person owns
+    every task and every agent authenticates as that person, that
+    exempts the agents too, and the rule protected nothing. It is now
+    narrowed by actor kind: an agent credential never takes the
+    exemption, whoever it authenticates as.
+
+    Run under an ``mcp_token`` actor, which is what an agent session is,
+    against a task the same user owns. Before the narrowing this passed
+    the move through; it now refuses it and names the deadline.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id="holder")
+        task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
+        version = task.version
+
+    async with tenant_session(
+        str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
+    ) as s:
+        with pytest.raises(ConflictError) as err:
+            await tasks_svc.set_state(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                expected_version=version,
+                state_id=states["working"],
+                worker_id="intruder",
+            )
+    assert "expires_at" in err.value.params
+
+    # And the holder still holds it: a refused move changes nothing.
+    rows = await _lease_rows(org, user, task_id)
+    assert len(rows) == 1
+    assert rows[0].released_at is None
+
+
+async def test_the_person_can_still_unstick_a_task_an_agent_is_holding(
+    _embedder: None,
+) -> None:
+    """The exemption that survives the narrowing, and the reason it has
+    to: without it a workspace whose agent died waits out the deadline
+    before anybody can touch the task, and a human looking at a stuck
+    board has no lever.
+
+    Same task, same holder, same foreign worker id. The only difference
+    from the test above is the actor kind, which is the whole point.
     """
     org, user = await _org()
     states = await _states(org, user)
@@ -465,8 +510,6 @@ async def test_a_third_party_cannot_move_a_task_somebody_else_is_holding(
         version = task.version
 
     async with tenant_session(str(org), str(user)) as s:
-        # Same user (the owner) but a different worker: the owner
-        # exemption applies, so this is allowed and says so.
         await tasks_svc.set_state(
             s,
             org_id=org,
@@ -474,7 +517,7 @@ async def test_a_third_party_cannot_move_a_task_somebody_else_is_holding(
             task_id=task_id,
             expected_version=version,
             state_id=states["working"],
-            worker_id="intruder",
         )
+
     rows = await _lease_rows(org, user, task_id)
     assert rows[0].release_reason == LeaseRelease.handoff.value
