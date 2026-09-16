@@ -71,14 +71,29 @@ and carried on working" a refused write rather than a habit to discourage: the
 mover holds nothing afterwards and its next write to the task says so. The rule
 names no state, because the workflow is configuration a project can override.
 
-**A fourth holder slot, `holder_worker_id`, supplied by the caller.** The
-system already knows the caller's user, identity and token, and in this
-workspace the first two are the same value for every session and the third may
-be too. A lease keyed on any of them would exclude nobody: every caller would
-read as the same holder and fifteen acquires would all look idempotent. A
-worker is not a credential. It stays a plain label — never keyed on, never an
-authorization input, dead with the row — so it is provenance on a durable
-entity, not the server-side session state ADR-0049 forbids.
+**The holder is a working session the server mints: `agent_workers`, and
+`task_leases.holder_worker_id` is a nullable FK to it.**
+
+Nothing in a request distinguishes fifteen sessions from one, and that is by
+design twice over. One authorization on a machine yields one credential that
+every session launched there reuses, which is the point of the connector flow
+and is not going to change. And the MCP transport is stateless deliberately
+(`mcp/server_http.py`): in stateful mode the principal froze into the session
+task and `Mcp-Session-Id` became ambient authority that could be replayed, so
+the session id was removed rather than kept.
+
+So the holder cannot be the credential, and it must not be a name the client
+invents either — two sessions would collide by accident, the server would
+believe one worker held both leases, and a renewal from either would extend the
+other's possession. The server mints the id: a session asks once, gets an
+opaque id, passes it thereafter. Automatic, nothing created in advance, no
+second authorization, and it cannot collide because the caller does not choose
+it.
+
+Nullable, because a caller that never opened a worker — the UI, the CLI, the
+scheduler — is held by its user. Making it mandatory would oblige every one of
+those to open a worker, which is writing a contract for clients that do not
+exist.
 
 **`pull` is one round trip.** Choosing and taking are one statement under one
 lock, ordered exactly as `list_tasks` orders by default so the head of the
@@ -104,6 +119,22 @@ shared, it does not move the state, and it never expires. Four properties
 missing, and adding all four to it is this table with a worse name. It stays as
 what it is, the human contract-net announcement.
 
+**One credential per agent session.** Proposed first and wrong, and wrong in a
+way worth recording because it looked reasonable. It means minting fifteen
+`ai_assistants` by hand, distributing fifteen secrets, and an authorization per
+agent — against a connector flow whose whole value is one authorization for the
+machine. It is also a step backwards from what this codebase already built: the
+device grant (`routers/device.py`) exists precisely so a client is approved
+from a session "instead of being handed a secret by a web page". A credential
+identifies a client installation, not a session, however automatically it is
+obtained, so even done perfectly it answers a different question.
+
+**A caller-declared worker string.** The first thing built, and it works right
+up until two sessions pick the same string. Nothing notices: the server reads
+them as one holder, and a renewal from either extends the other's possession.
+Free and automatic, and the failure is silent, which is the combination this
+register treats as worse than an expensive mechanism.
+
 **A column on `tasks` (`held_by`, `held_until`).** Cheaper and loses the
 history, which is the part that answers the question the checking station asks:
 who handed this over. It also makes the row two things at once again, which is
@@ -118,6 +149,21 @@ it is — visible, pullable, honest.
 
 ## Consequences
 
+- **Recovery needs nobody, on both paths, and they differ only in speed.** A
+  session that is shut down calls `worker_close`, which gives back every task
+  it holds in the same call: free immediately, because that is the one case
+  where the system knows the work has stopped. A session that is killed calls
+  nothing, and its tasks are freed when the leases expire and the worker sweep
+  reclaims them. No person is on either path. What the sweep does NOT do is
+  move the task back a state, so a reclaimed task sits where the dead session
+  left it, which is the truth about how far it got.
+- **The deadline is the only thing that frees a crashed holder, so the default
+  is a real decision and it is not measured.** 3600s means a killed session can
+  hold a task for up to an hour. Shorter recovers faster and starts stealing
+  work from sessions that are alive but quiet, which is the collision this whole
+  mechanism exists to prevent; the cure would be for long work to renew, which
+  is discipline again. It stays long until somebody counts how long a task
+  actually takes here.
 - A task nobody holds is movable by anyone. Possession constrains only what it
   covers, which keeps the UI, the CLI, the scheduler and any agent that never
   took a lease working unchanged. The owner may always move a task: somebody

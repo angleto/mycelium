@@ -37,6 +37,7 @@ from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import task_leases as leases_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import workflow as wf_svc
@@ -104,6 +105,20 @@ async def _states(org: uuid.UUID, user: uuid.UUID) -> dict[str, uuid.UUID]:
     return {r.name: r.id for r in rows}
 
 
+async def _worker(org: uuid.UUID, user: uuid.UUID, label: str) -> uuid.UUID:
+    """A working session, minted by the server.
+
+    The tests call this instead of inventing a string, which is the
+    change the whole mechanism turns on: an id the caller chooses can
+    collide by accident, and two sessions that collide would each read as
+    the holder of the other's lease. The label is only for a human
+    reading a failure.
+    """
+    async with tenant_session(str(org), str(user)) as s:
+        w = await workers_svc.open_worker(s, org_id=org, actor_id=user, label=label)
+        return w.id
+
+
 async def _make_tasks(org: uuid.UUID, user: uuid.UUID, n: int) -> list[uuid.UUID]:
     out: list[uuid.UUID] = []
     async with tenant_session(str(org), str(user)) as s:
@@ -143,7 +158,7 @@ async def test_two_workers_pulling_at_once_get_two_different_tasks(_embedder: No
     queued, working = states["queued"], states["working"]
     await _make_tasks(org, user, 10)
 
-    async def worker(name: str) -> uuid.UUID | None:
+    async def worker(wid: uuid.UUID) -> uuid.UUID | None:
         async with tenant_session(str(org), str(user)) as s:
             try:
                 task, _lease = await leases_svc.pull(
@@ -151,14 +166,15 @@ async def test_two_workers_pulling_at_once_get_two_different_tasks(_embedder: No
                     org_id=org,
                     actor_id=user,
                     state_id=queued,
-                    worker_id=name,
+                    worker_id=wid,
                     transition_to=working,
                 )
             except NotFoundError:
                 return None
             return task.id
 
-    got = await asyncio.gather(*(worker(f"w{i}") for i in range(10)))
+    ids = [await _worker(org, user, f"w{i}") for i in range(10)]
+    got = await asyncio.gather(*(worker(w) for w in ids))
     taken = [t for t in got if t is not None]
 
     # Every worker got work: ten unheld tasks, ten pullers.
@@ -207,17 +223,18 @@ async def test_concurrent_pull_without_a_transition_still_hands_each_task_once(
                 state_id=states["checking"],
             )
 
-    async def checker(name: str) -> uuid.UUID | None:
+    async def checker(wid: uuid.UUID) -> uuid.UUID | None:
         async with tenant_session(str(org), str(user)) as s:
             try:
                 task, _ = await leases_svc.pull(
-                    s, org_id=org, actor_id=user, state_id=states["checking"], worker_id=name
+                    s, org_id=org, actor_id=user, state_id=states["checking"], worker_id=wid
                 )
             except NotFoundError:
                 return None
             return task.id
 
-    got = await asyncio.gather(*(checker(f"c{i}") for i in range(6)))
+    cids = [await _worker(org, user, f"c{i}") for i in range(6)]
+    got = await asyncio.gather(*(checker(w) for w in cids))
     taken = [t for t in got if t is not None]
     assert len(taken) == 6
     assert len(set(taken)) == len(taken)
@@ -228,16 +245,18 @@ async def test_a_second_worker_cannot_take_what_is_already_held(_embedder: None)
     between waiting and moving on rather than just retrying."""
     org, user = await _org()
     (task_id,) = await _make_tasks(org, user, 1)
+    w1_w = await _worker(org, user, "w1")
+    w2_w = await _worker(org, user, "w2")
 
     async with tenant_session(str(org), str(user)) as s:
         first = await leases_svc.acquire(
-            s, org_id=org, actor_id=user, task_id=task_id, worker_id="w1"
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=w1_w
         )
-    assert first.holder_worker_id == "w1"
+    assert first.holder_worker_id == w1_w
 
     async with tenant_session(str(org), str(user)) as s:
         with pytest.raises(ConflictError) as err:
-            await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id="w2")
+            await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=w2_w)
     assert "expires_at" in err.value.params
 
 
@@ -248,15 +267,16 @@ async def test_re_acquiring_your_own_lease_extends_it_instead_of_failing(
     retry without first finding out whether the call landed."""
     org, user = await _org()
     (task_id,) = await _make_tasks(org, user, 1)
+    w1_w = await _worker(org, user, "w1")
 
     async with tenant_session(str(org), str(user)) as s:
         first = await leases_svc.acquire(
-            s, org_id=org, actor_id=user, task_id=task_id, worker_id="w1", ttl_seconds=120
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=w1_w, ttl_seconds=120
         )
         first_id, first_deadline = first.id, first.expires_at
     async with tenant_session(str(org), str(user)) as s:
         again = await leases_svc.acquire(
-            s, org_id=org, actor_id=user, task_id=task_id, worker_id="w1", ttl_seconds=600
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=w1_w, ttl_seconds=600
         )
     assert again.id == first_id
     assert again.expires_at > first_deadline
@@ -277,6 +297,7 @@ async def test_moving_a_task_to_another_state_releases_the_possession(
     org, user = await _org()
     states = await _states(org, user)
     await _make_tasks(org, user, 1)
+    implementer_w = await _worker(org, user, "implementer")
 
     async with tenant_session(str(org), str(user)) as s:
         task, lease = await leases_svc.pull(
@@ -284,7 +305,7 @@ async def test_moving_a_task_to_another_state_releases_the_possession(
             org_id=org,
             actor_id=user,
             state_id=states["queued"],
-            worker_id="implementer",
+            worker_id=implementer_w,
             transition_to=states["working"],
         )
         task_id, version = task.id, task.version
@@ -298,7 +319,7 @@ async def test_moving_a_task_to_another_state_releases_the_possession(
             task_id=task_id,
             expected_version=version,
             state_id=states["checking"],
-            worker_id="implementer",
+            worker_id=implementer_w,
         )
 
     rows = await _lease_rows(org, user, task_id)
@@ -313,7 +334,7 @@ async def test_moving_a_task_to_another_state_releases_the_possession(
     async with tenant_session(str(org), str(user)) as s:
         with pytest.raises(ConflictError):
             await leases_svc.renew(
-                s, org_id=org, actor_id=user, task_id=task_id, worker_id="implementer"
+                s, org_id=org, actor_id=user, task_id=task_id, worker_id=implementer_w
             )
 
 
@@ -327,6 +348,8 @@ async def test_the_checker_is_not_the_worker_who_handed_the_task_over(
     org, user = await _org()
     states = await _states(org, user)
     await _make_tasks(org, user, 1)
+    implementer_w = await _worker(org, user, "implementer")
+    checker_w = await _worker(org, user, "checker")
 
     async with tenant_session(str(org), str(user)) as s:
         task, _ = await leases_svc.pull(
@@ -334,7 +357,7 @@ async def test_the_checker_is_not_the_worker_who_handed_the_task_over(
             org_id=org,
             actor_id=user,
             state_id=states["queued"],
-            worker_id="implementer",
+            worker_id=implementer_w,
             transition_to=states["working"],
         )
         task_id, version = task.id, task.version
@@ -346,7 +369,7 @@ async def test_the_checker_is_not_the_worker_who_handed_the_task_over(
             task_id=task_id,
             expected_version=version,
             state_id=states["checking"],
-            worker_id="implementer",
+            worker_id=implementer_w,
         )
 
     async with tenant_session(str(org), str(user)) as s:
@@ -356,7 +379,7 @@ async def test_the_checker_is_not_the_worker_who_handed_the_task_over(
                 org_id=org,
                 actor_id=user,
                 state_id=states["checking"],
-                worker_id="implementer",
+                worker_id=implementer_w,
                 exclude_own_handoffs=True,
             )
 
@@ -366,7 +389,7 @@ async def test_the_checker_is_not_the_worker_who_handed_the_task_over(
             org_id=org,
             actor_id=user,
             state_id=states["checking"],
-            worker_id="checker",
+            worker_id=checker_w,
             exclude_own_handoffs=True,
         )
     assert checked.id == task_id
@@ -381,10 +404,12 @@ async def test_an_expired_lease_is_reclaimed_and_the_old_holder_is_fenced_out(
     now somebody else's."""
     org, user = await _org()
     (task_id,) = await _make_tasks(org, user, 1)
+    dead_w = await _worker(org, user, "dead")
+    alive_w = await _worker(org, user, "alive")
 
     async with tenant_session(str(org), str(user)) as s:
         dead = await leases_svc.acquire(
-            s, org_id=org, actor_id=user, task_id=task_id, worker_id="dead", ttl_seconds=60
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=dead_w, ttl_seconds=60
         )
         dead_fence = int(dead.fence)
         # Reach past the TTL clamp by moving the deadline directly: the
@@ -398,7 +423,7 @@ async def test_an_expired_lease_is_reclaimed_and_the_old_holder_is_fenced_out(
 
     async with tenant_session(str(org), str(user)) as s:
         fresh = await leases_svc.acquire(
-            s, org_id=org, actor_id=user, task_id=task_id, worker_id="alive"
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=alive_w
         )
     assert int(fresh.fence) > dead_fence
 
@@ -409,7 +434,7 @@ async def test_an_expired_lease_is_reclaimed_and_the_old_holder_is_fenced_out(
                 org_id=org,
                 actor_id=user,
                 task_id=task_id,
-                worker_id="dead",
+                worker_id=dead_w,
                 fence=dead_fence,
             )
 
@@ -462,9 +487,11 @@ async def test_an_agent_credential_cannot_move_a_task_another_worker_holds(
     org, user = await _org()
     states = await _states(org, user)
     (task_id,) = await _make_tasks(org, user, 1)
+    holder_w = await _worker(org, user, "holder")
+    intruder_w = await _worker(org, user, "intruder")
 
     async with tenant_session(str(org), str(user)) as s:
-        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id="holder")
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder_w)
         task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
         version = task.version
 
@@ -479,7 +506,7 @@ async def test_an_agent_credential_cannot_move_a_task_another_worker_holds(
                 task_id=task_id,
                 expected_version=version,
                 state_id=states["working"],
-                worker_id="intruder",
+                worker_id=intruder_w,
             )
     assert "expires_at" in err.value.params
 
@@ -503,9 +530,10 @@ async def test_the_person_can_still_unstick_a_task_an_agent_is_holding(
     org, user = await _org()
     states = await _states(org, user)
     (task_id,) = await _make_tasks(org, user, 1)
+    holder_w = await _worker(org, user, "holder")
 
     async with tenant_session(str(org), str(user)) as s:
-        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id="holder")
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder_w)
         task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
         version = task.version
 
@@ -521,3 +549,99 @@ async def test_the_person_can_still_unstick_a_task_an_agent_is_holding(
 
     rows = await _lease_rows(org, user, task_id)
     assert rows[0].release_reason == LeaseRelease.handoff.value
+
+
+async def test_a_worker_that_is_shut_down_frees_its_tasks_at_once(_embedder: None) -> None:
+    """The first of the two recovery paths, and the fast one.
+
+    A session being stopped is the case where the system KNOWS the work
+    has ended, so making its tasks wait out a deadline would be holding a
+    lock for no reason. Closing gives them back in the same call, and
+    another worker can take them immediately.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    ids = await _make_tasks(org, user, 2)
+    leaving = await _worker(org, user, "leaving")
+    arriving = await _worker(org, user, "arriving")
+
+    async with tenant_session(str(org), str(user)) as s:
+        for tid in ids:
+            await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=tid, worker_id=leaving)
+
+    async with tenant_session(str(org), str(user)) as s:
+        worker, freed = await workers_svc.close_worker(
+            s, org_id=org, actor_id=user, worker_id=leaving
+        )
+    assert worker.closed_at is not None
+    assert sorted(freed) == sorted(ids)
+
+    # Free means free: somebody else takes one without waiting.
+    async with tenant_session(str(org), str(user)) as s:
+        taken, _ = await leases_svc.pull(
+            s, org_id=org, actor_id=user, state_id=states["queued"], worker_id=arriving
+        )
+    assert taken.id in ids
+
+    # And a closed worker cannot take anything more: it has announced it
+    # is gone, and a lease under it would have nobody to renew it.
+    async with tenant_session(str(org), str(user)) as s:
+        with pytest.raises(NotFoundError):
+            await leases_svc.acquire(
+                s, org_id=org, actor_id=user, task_id=ids[1], worker_id=leaving
+            )
+
+
+async def test_a_worker_that_dies_frees_its_tasks_without_anybody_asking(
+    _embedder: None,
+) -> None:
+    """The second recovery path, and the one that must need nobody.
+
+    A session that is killed calls nothing. What frees its work is the
+    deadline plus the sweep, and this runs the whole way through: the
+    task is held, the holder goes silent, the sweep reclaims, another
+    worker takes it. No human anywhere in it.
+
+    The deadline is moved directly rather than waited out. The TTL clamp
+    has a floor of a minute and a test that sleeps a minute is a test
+    nobody runs, so what is simulated is the passage of time and nothing
+    else.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    killed = await _worker(org, user, "killed")
+    successor = await _worker(org, user, "successor")
+
+    async with tenant_session(str(org), str(user)) as s:
+        task, lease = await leases_svc.pull(
+            s,
+            org_id=org,
+            actor_id=user,
+            state_id=states["queued"],
+            worker_id=killed,
+            transition_to=states["working"],
+        )
+        assert task.id == task_id
+        lease.expires_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+
+    # Nobody calls anything on behalf of the dead session. The worker row
+    # is still open -- it never got to say otherwise -- and that is
+    # exactly the state the sweep has to cope with.
+    async with tenant_session(str(org), str(user)) as s:
+        reclaimed = await leases_svc.sweep_expired(s)
+    assert reclaimed == [task_id]
+
+    async with tenant_session(str(org), str(user)) as s:
+        rows = await workers_svc.list_workers(s, org_id=org)
+    assert killed in [w.id for w in rows], "the sweep frees the work, not the session"
+
+    # The task stayed where the dead session left it, which is the truth
+    # about how far it got, and it is takeable again.
+    async with tenant_session(str(org), str(user)) as s:
+        again = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
+        assert again.state_id == states["working"]
+        retaken, _ = await leases_svc.pull(
+            s, org_id=org, actor_id=user, state_id=states["working"], worker_id=successor
+        )
+    assert retaken.id == task_id

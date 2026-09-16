@@ -325,6 +325,7 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "resolve_prefix": "tasks:read",
     "task_handoffs_list": "tasks:read",
     "task_leases_list": "tasks:read",
+    "workers_list": "tasks:read",
     "what_can_i_do_now": "tasks:read",
     "add_checklist_item": "tasks:write",
     "add_task_participant": "tasks:write",
@@ -360,6 +361,12 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "task_lease_release": "tasks:write",
     "task_lease_renew": "tasks:write",
     "task_pull": "tasks:write",
+    # Opening a working session is a write (it creates a row) and
+    # grants nothing: a worker is a label with provenance, never an
+    # authorization input. Closing one gives tasks back, which is a
+    # write to the leases.
+    "worker_open": "tasks:write",
+    "worker_close": "tasks:write",
     "task_decline": "tasks:write",
     "task_offer": "tasks:write",
     "unassign_task": "tasks:write",

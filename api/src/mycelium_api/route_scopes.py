@@ -608,6 +608,13 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("DELETE", "/tasks/{task_id}/assignees/{user_id}"): "tasks:write",
     ("GET", "/tasks/{task_id}/attachments"): "tasks:read",
     ("GET", "/tasks/leases"): "tasks:read",
+    # A working session. Opening one is a write (it creates a row) and
+    # grants nothing: a worker is a label with provenance, never an
+    # authorization input. Closing one gives tasks back, which writes to
+    # the leases.
+    ("GET", "/tasks/workers"): "tasks:read",
+    ("POST", "/tasks/workers"): "tasks:write",
+    ("POST", "/tasks/workers/{worker_id}/close"): "tasks:write",
     ("POST", "/tasks/leases/pull"): "tasks:write",
     ("POST", "/tasks/{task_id}/attachments"): "attachments:write",
     ("GET", "/tasks/{task_id}/checklist"): "tasks:read",

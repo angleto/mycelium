@@ -1290,7 +1290,7 @@ async def set_state(
     task_id: uuid.UUID,
     expected_version: int,
     state_id: uuid.UUID,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     _lease_checked: bool = False,
 ) -> int:
     """Move a task between workflow states, and end any possession of it.

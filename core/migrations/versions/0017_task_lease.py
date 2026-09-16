@@ -59,6 +59,25 @@ compares ``expires_at`` and the sweep reclaims, exactly as
 back carries an old fence and is refused instead of overwriting whoever
 holds it now.
 
+**Who the holder is, and why it is a second table.** One authorization on
+a machine yields one credential, and every session launched there reuses
+it; the MCP transport is stateless on purpose (``server_http.py``: a
+session id there was ambient authority that could be replayed), so no
+session identifier reaches the server either. Nothing in a request
+distinguishes fifteen sessions from one. So the holder cannot be the
+credential, and it must not be a string the client invents -- two
+sessions would collide by accident and nothing would notice.
+
+``agent_workers`` is the answer: the server mints a row when a session
+asks for one, hands back its id, and records which credential opened it.
+Automatic, nothing created in advance, no second authorization, and the
+id cannot collide because the caller does not choose it. It is the
+"first-class durable entity with provenance and RLS" ADR-0049
+pre-specifies for multi-agent coordination, and it is not the
+server-side session state that ADR forbids: it freezes no authority, it
+is never an authorization input, and it is a durable row rather than
+memory attached to a connection.
+
 Nothing is backfilled. Every task that exists right now is unheld, which
 is true: nobody took them, because there was nothing to take.
 
@@ -85,23 +104,112 @@ _ORG_PRED = "org_id = (NULLIF(current_setting('app.current_org'::text, true), ''
 
 def upgrade() -> None:
     op.create_table(
+        "agent_workers",
+        sa.Column("id", PG_UUID(as_uuid=True), nullable=False),
+        sa.Column("org_id", PG_UUID(as_uuid=True), nullable=False),
+        # Provenance: which credential opened this worker. Recorded, never
+        # read back as authority -- the bearer is re-authenticated on
+        # every request and this column changes nothing about what the
+        # caller may do. No FK on the token: tokens rotate and the record
+        # of who was working has to survive the rotation.
+        sa.Column("opened_by_user_id", PG_UUID(as_uuid=True), nullable=False),
+        sa.Column("opened_by_identity_id", PG_UUID(as_uuid=True), nullable=True),
+        sa.Column("opened_by_token_id", PG_UUID(as_uuid=True), nullable=True),
+        # What the session calls itself, for a human reading a board. Free
+        # text, never unique, never matched on: two sessions may both call
+        # themselves "verifier" and still be two workers, because the id
+        # is what separates them.
+        sa.Column("label", sa.String(length=128), nullable=True),
+        # Caller-supplied dedupe key, so a session whose reply was lost to
+        # a timeout can retry the open instead of ending up with two
+        # workers and no way to tell which one holds its leases. Same
+        # shape as the idempotency key ``memory_write`` and the meter
+        # already take.
+        sa.Column("operation_id", sa.String(length=128), nullable=True),
+        sa.Column(
+            "opened_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("version", sa.BigInteger(), nullable=False, server_default=sa.text("1")),
+        sa.PrimaryKeyConstraint("id", name="pk_agent_workers"),
+        sa.ForeignKeyConstraint(
+            ["org_id"],
+            ["organizations.id"],
+            name="fk_agent_workers_org_id_organizations",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["opened_by_user_id"],
+            ["users.id"],
+            name="fk_agent_workers_opened_by_user_id_users",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["opened_by_identity_id"],
+            ["identities.id"],
+            name="fk_agent_workers_opened_by_identity_id_identities",
+            ondelete="SET NULL",
+        ),
+    )
+    op.create_index("ix_agent_workers_org_id", "agent_workers", ["org_id"])
+    # The retry path: one open per (token, operation_id).
+    op.create_index(
+        "uq_agent_workers_operation",
+        "agent_workers",
+        ["opened_by_token_id", "operation_id"],
+        unique=True,
+        postgresql_where=sa.text("operation_id IS NOT NULL"),
+    )
+    # "What is still open under this credential" -- what a resumed session
+    # asks to find out what it was.
+    op.create_index(
+        "ix_agent_workers_open",
+        "agent_workers",
+        ["opened_by_token_id"],
+        postgresql_where=sa.text("closed_at IS NULL"),
+    )
+    op.execute("ALTER TABLE agent_workers ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE agent_workers FORCE ROW LEVEL SECURITY")
+    op.execute(
+        f"CREATE POLICY p_agent_workers ON agent_workers "
+        f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
+    )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE agent_workers TO mycelium_app")
+
+    op.create_table(
         "task_leases",
         sa.Column("id", PG_UUID(as_uuid=True), nullable=False),
         sa.Column("org_id", PG_UUID(as_uuid=True), nullable=False),
         sa.Column("task_id", PG_UUID(as_uuid=True), nullable=False),
-        # Four holder slots, because "who" has four answers and they are
-        # not interchangeable. ``holder_worker_id`` is the caller's own
-        # label for itself and is NOT NULL because it is the only one
-        # that discriminates in the configuration actually running here:
-        # fifteen sessions share one assistant and one token, so identity
-        # and token are constants across all of them and a lease keyed on
-        # either would exclude nobody -- every caller would read as the
-        # same holder and fifteen acquires would all look idempotent. A
-        # worker is not a credential. The other three record what the
-        # system already knows about the caller so attribution survives;
-        # when the workspace is provisioned with one assistant per agent
-        # they all agree, and until then they are the constants above.
-        sa.Column("holder_worker_id", sa.String(length=128), nullable=False),
+        # Who holds it. ``holder_worker_id`` is the discriminator and is
+        # NULLABLE, which is the whole of the compatibility story: a
+        # session that opened a worker is held by that worker, and a
+        # caller that never opened one -- the web UI, the CLI, the
+        # scheduler -- is held by its user. Making it NOT NULL would
+        # oblige every one of those to open a worker, which is writing a
+        # contract for clients that do not exist yet.
+        #
+        # It is a FK rather than a free string on purpose: the id is
+        # minted by the server, so two sessions cannot pick the same one
+        # by accident, and a reader can join through to the label and to
+        # which credential opened it.
+        sa.Column("holder_worker_id", PG_UUID(as_uuid=True), nullable=True),
         sa.Column("holder_user_id", PG_UUID(as_uuid=True), nullable=False),
         sa.Column("holder_identity_id", PG_UUID(as_uuid=True), nullable=True),
         sa.Column("holder_token_id", PG_UUID(as_uuid=True), nullable=True),
@@ -159,6 +267,12 @@ def upgrade() -> None:
         # ``note_part.created_by``. No FK on ``holder_token_id``: a token
         # is rotated routinely and the history of who held what must
         # survive the rotation.
+        sa.ForeignKeyConstraint(
+            ["holder_worker_id"],
+            ["agent_workers.id"],
+            name="fk_task_leases_holder_worker_id_agent_workers",
+            ondelete="SET NULL",
+        ),
         sa.ForeignKeyConstraint(
             ["holder_user_id"],
             ["users.id"],
@@ -241,3 +355,9 @@ def downgrade() -> None:
     op.drop_index("ix_task_leases_org_id", table_name="task_leases")
     op.drop_index("uq_task_leases_live", table_name="task_leases")
     op.drop_table("task_leases")
+    op.execute("REVOKE ALL ON TABLE agent_workers FROM mycelium_app")
+    op.execute("DROP POLICY IF EXISTS p_agent_workers ON agent_workers")
+    op.drop_index("ix_agent_workers_open", table_name="agent_workers")
+    op.drop_index("uq_agent_workers_operation", table_name="agent_workers")
+    op.drop_index("ix_agent_workers_org_id", table_name="agent_workers")
+    op.drop_table("agent_workers")

@@ -31,7 +31,7 @@ import datetime as dt
 import enum
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -77,29 +77,29 @@ class TaskLease(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
         PG_UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
     )
 
-    # Four holder slots, because "who" has four answers here and they
-    # are not interchangeable.
+    # Who holds it. ``holder_worker_id`` is the discriminator, and it is
+    # NULLABLE, which is the whole compatibility story: a session that
+    # opened a worker (``agent_workers``) is held by that worker, and a
+    # caller that never opened one -- the web UI, the CLI, the scheduler
+    # -- is held by its user. Making it NOT NULL would oblige every one
+    # of those to open a worker, which is writing a contract for clients
+    # that do not exist yet.
     #
-    # ``holder_worker_id`` is the caller's own label for itself (a
-    # session id) and it is the only one that works in the configuration
-    # actually running: fifteen sessions share one assistant row and one
-    # token, so identity and token are CONSTANTS across all of them, and
-    # a lease keyed on either would exclude nobody -- every caller would
-    # read as the same holder and fifteen acquires would all look
-    # idempotent. A worker is not a credential. It stays a plain label:
-    # nothing is keyed by it, it is never an authorization input, and it
-    # dies with the row, so it is provenance on a durable entity rather
-    # than the server-side session state ADR-0049 forbids.
+    # A FK to a server-minted row rather than a string the caller picks,
+    # because a name a client invents can collide by accident and nothing
+    # would notice: the server would believe one worker held both leases,
+    # and a renewal from either would extend the other's possession. The
+    # credential cannot do this job either -- one authorization covers
+    # every session on a machine, and the transport is stateless on
+    # purpose, so nothing in a request distinguishes them.
     #
-    # The other three are what the system already knows about the caller
-    # and are recorded so attribution survives: ``holder_user_id`` is
-    # what RBAC and every service signature carry, ``holder_identity_id``
-    # is what assignment and handles key on, ``holder_token_id`` is what
-    # MCP writes already stamp into audit and revision rows. When the
-    # workspace is provisioned with one assistant per agent they all
-    # agree with the worker id; until then they are the constants above,
-    # and recording them costs nothing.
-    holder_worker_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    # The other three record what the request already carried, so
+    # attribution survives without ever being consulted as authority.
+    holder_worker_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_workers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     holder_user_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

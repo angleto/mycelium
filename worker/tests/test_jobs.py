@@ -21,6 +21,7 @@ from mycelium_worker import (
     garden,
     main,
     reminders,
+    task_leases,
 )
 
 
@@ -55,6 +56,13 @@ def test_always_on_jobs_present_regardless_of_garden(monkeypatch: pytest.MonkeyP
         # garden loop (the historical hole: the only trace pruner rode
         # the default-off sweep).
         fuel_retention.run_forever,
+        # ADR-0063: the reclaim sweep is the ONLY thing that frees a task
+        # held by a session that died, and it needs nobody to ask. A
+        # lease that expires with no sweep running is a lock that never
+        # opens, which is the failure the whole mechanism exists to rule
+        # out -- and it would be invisible, because every lease test
+        # passes against a service call the worker never makes.
+        task_leases.run_forever,
     )
     for enabled in (False, True):
         jobs = _jobs_with(garden_loop_enabled=enabled, monkeypatch=monkeypatch)

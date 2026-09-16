@@ -44,7 +44,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, and_, exists, func, select, text, update
+from sqlalchemy import Select, and_, exists, func, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
@@ -55,6 +55,7 @@ from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
+from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import audit
 from mycelium_core.services.rbac import require_role
 
@@ -68,12 +69,15 @@ _PULL_ATTEMPTS = 4
 
 
 class Holder:
-    """Who is asking, at every granularity the system has.
+    """Who is asking.
 
-    Assembled once per call rather than threaded through signatures,
-    because three of the four slots travel on the session (the GUCs the
-    audit log already reads) and only the worker id comes from the
-    caller.
+    ``worker_id`` is the discriminator and the SERVER issued it
+    (``agent_workers``); the other three are what the request already
+    carried. Assembled once per call rather than threaded through
+    signatures, because three of the four travel on the session -- they
+    are the GUCs the audit log has always read -- and only the worker is
+    named by the caller, with an id it was given rather than one it
+    invented.
     """
 
     __slots__ = ("identity_id", "token_id", "user_id", "worker_id")
@@ -81,7 +85,7 @@ class Holder:
     def __init__(
         self,
         *,
-        worker_id: str,
+        worker_id: uuid.UUID | None,
         user_id: uuid.UUID,
         identity_id: uuid.UUID | None,
         token_id: uuid.UUID | None,
@@ -94,14 +98,24 @@ class Holder:
     def holds(self, lease: TaskLease) -> bool:
         """Is this lease mine?
 
-        The worker id alone answers it, and deliberately so. Adding "or
-        the same identity" would make every session in this workspace the
-        holder of every other session's lease, since they share one
-        identity -- which is the exact failure the worker id exists to
-        avoid. A session that loses its worker id has lost its lease and
-        must take it again; that is a lease working, not a lease failing.
+        Two rules, because a lease has two kinds of holder and conflating
+        them would be wrong in both directions.
+
+        A lease taken BY A WORKER is matched only by that worker. Falling
+        back to "or the same identity" would make every session in this
+        workspace the holder of every other session's lease, since they
+        share one credential, and that is the exact failure the worker
+        exists to prevent.
+
+        A lease taken with NO worker -- the UI, the CLI, anything that
+        predates this -- is matched by its user, because that is the only
+        identity such a caller has. A caller holding a worker never
+        matches one of those: it has a worker, so it is asked the first
+        question.
         """
-        return lease.holder_worker_id == self.worker_id
+        if lease.holder_worker_id is not None:
+            return self.worker_id is not None and lease.holder_worker_id == self.worker_id
+        return self.worker_id is None and lease.holder_user_id == self.user_id
 
 
 async def resolve_holder(
@@ -109,16 +123,24 @@ async def resolve_holder(
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
-    worker_id: str | None,
+    worker_id: uuid.UUID | None,
 ) -> Holder:
-    """Fill the four holder slots from the session and the caller.
+    """Fill the holder slots from the session and the caller's worker.
 
-    ``worker_id`` omitted is not an error and is not a shared bucket: it
-    falls back to a label derived from the credential, which is the
-    truthful thing to say about a caller that did not name itself (a
-    human on the web UI is one session; two agents on one token that both
-    omit it ARE indistinguishable, and the fallback makes them collide
-    loudly on the first acquire rather than quietly forever).
+    ``worker_id`` omitted is legitimate and is not a shared bucket: the
+    caller is held as its user, which is the truth about a client that
+    never opened a working session.
+
+    What it must NOT do is derive a fallback from the credential, which
+    is what an earlier version of this function did. Every agent session
+    here shares one credential, so that fallback quietly made fifteen
+    sessions one holder -- the very failure the mechanism exists to
+    prevent, reintroduced by its own default.
+
+    A worker id that does not resolve, or that has been closed, is
+    refused rather than ignored. A caller that believes it holds a
+    session and does not is about to take a lease under an identity it
+    cannot renew.
     """
     row = (
         await session.execute(
@@ -157,10 +179,17 @@ async def resolve_holder(
             )
         ).scalar_one_or_none()
 
-    if not worker_id:
-        worker_id = f"token:{token_id}" if token_id is not None else f"user:{actor_id}"
+    if worker_id is not None:
+        # Checked here, once, rather than in each caller. A closed worker
+        # has already given its work back; taking new work under it would
+        # put a lease on a session that has announced it is gone.
+        worker = await workers_svc.get_worker(session, org_id=org_id, worker_id=worker_id)
+        if worker.closed_at is not None:
+            raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
+        await workers_svc.touch(session, worker_id=worker_id)
+
     return Holder(
-        worker_id=worker_id[:128],
+        worker_id=worker_id,
         user_id=actor_id,
         identity_id=identity_id,
         token_id=token_id,
@@ -264,7 +293,7 @@ async def acquire(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     ttl_seconds: int | None = None,
     preempt: bool = False,
 ) -> TaskLease:
@@ -329,7 +358,7 @@ async def acquire(
         entity="task_lease",
         entity_id=lease.id,
         action="acquire",
-        diff={"task_id": str(task_id), "worker_id": holder.worker_id},
+        diff={"task_id": str(task_id), "worker_id": str(holder.worker_id)},
     )
     return lease
 
@@ -353,13 +382,20 @@ def _unheld(now: dt.datetime) -> Any:
 def _not_my_handoff(holder: Holder) -> Any:
     """Tasks this worker did not hand off itself.
 
-    The workflow's own description of the verification station says the
-    check is done by somebody other than whoever did the work. This is
-    that sentence as a predicate. It keys on the worker id and on
-    ``handoff`` specifically: a task the worker merely finished
-    (``done``) or gave up (``explicit``) is not excluded, because neither
-    of those is the author presenting their own work for checking.
+    The workflow's own description of the checking station says the check
+    is done by somebody other than whoever did the work. This is that
+    sentence as a predicate. It keys on the worker, and on ``handoff``
+    specifically: a task the worker merely finished (``done``) or gave up
+    (``explicit``) is not excluded, because neither is the author
+    presenting their own work to be checked.
+
+    A caller with no worker is excluded from nothing, which is correct
+    and is not a hole: it has never handed anything off under a worker,
+    so there is nothing of its own to skip. The rule constrains the
+    sessions it can actually tell apart.
     """
+    if holder.worker_id is None:
+        return true()
     return ~exists().where(
         and_(
             TaskLease.task_id == Task.id,
@@ -375,7 +411,7 @@ async def pull(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     state_id: uuid.UUID,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     ttl_seconds: int | None = None,
     transition_to: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
@@ -496,7 +532,7 @@ async def pull(
             entity="task_lease",
             entity_id=lease.id,
             action="pull",
-            diff={"task_id": str(task.id), "worker_id": holder.worker_id},
+            diff={"task_id": str(task.id), "worker_id": str(holder.worker_id)},
         )
         return task, lease
 
@@ -512,7 +548,7 @@ async def renew(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     ttl_seconds: int | None = None,
     fence: int | None = None,
 ) -> TaskLease:
@@ -550,7 +586,7 @@ async def release(
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
     reason: LeaseRelease,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     require_holder: bool = True,
 ) -> TaskLease | None:
     """Hand a task back. Returns None when nothing was held.
@@ -587,13 +623,67 @@ async def release(
     return lease
 
 
+async def release_all_for_worker(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    worker_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """Give back everything one worker holds. Returns the task ids.
+
+    The fast half of recovery. A session being shut down knows its work
+    has stopped, so its tasks are free immediately instead of waiting out
+    a deadline that exists for the case where nobody knows anything. The
+    slow half is the sweep, for a session that died without saying so;
+    the outcome is identical and neither needs a person.
+
+    ``explicit`` rather than ``expired``, so the sweep's count stays a
+    measure of sessions that died rather than of sessions that ended.
+    """
+    now = _now()
+    rows = (
+        await session.execute(
+            select(TaskLease.id, TaskLease.task_id).where(
+                TaskLease.org_id == org_id,
+                TaskLease.holder_worker_id == worker_id,
+                TaskLease.released_at.is_(None),
+            )
+        )
+    ).all()
+    if not rows:
+        return []
+    ids = [r[0] for r in rows]
+    await session.execute(
+        update(TaskLease)
+        .where(TaskLease.id.in_(ids), TaskLease.released_at.is_(None))
+        .values(
+            released_at=now,
+            release_reason=LeaseRelease.explicit.value,
+            version=TaskLease.version + 1,
+        )
+    )
+    await session.flush()
+    for _lease_id, task_id in rows:
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task_lease",
+            entity_id=_lease_id,
+            action="release",
+            diff={"task_id": str(task_id), "reason": LeaseRelease.explicit.value},
+        )
+    return [r[1] for r in rows]
+
+
 async def assert_may_move(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
 ) -> TaskLease | None:
     """Refuse a state transition by somebody who is not holding the task.
 
@@ -671,7 +761,7 @@ async def list_leases(
     *,
     org_id: uuid.UUID,
     task_id: uuid.UUID | None = None,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     include_released: bool = False,
     limit: int = 50,
 ) -> Sequence[TaskLease]:

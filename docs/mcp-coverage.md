@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**280 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**283 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -359,7 +359,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 
-### misc (35)
+### misc (38)
 
 | Tool | Summary |
 |---|---|
@@ -398,6 +398,9 @@ over-fetch the org table and filter in its head.
 | `spawn_due_recurrences` | Materialize due recurrences as independent task rows. |
 | `synthesize_season` | Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note |
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
+| `worker_close` | End a working session and GIVE BACK every task it still holds. |
+| `worker_open` | Open a working session and get the id that identifies YOU. |
+| `workers_list` | The working sessions that are open. ``mine_only`` narrows to the |
 <!-- END GENERATED -->
 
 ## Scope model

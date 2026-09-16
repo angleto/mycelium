@@ -11,6 +11,7 @@ from mycelium_core.models.adjudication import (
 )
 from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
 from mycelium_core.models.agent_token import AgentToken
+from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.annotation import (
     ANNOTATION_DOC_KINDS,
     ANNOTATION_KINDS,
@@ -198,6 +199,7 @@ __all__ = [
     "AgentRun",
     "AgentRunStatus",
     "AgentToken",
+    "AgentWorker",
     "Annotation",
     "AnnotationUIState",
     "ApiIdempotency",

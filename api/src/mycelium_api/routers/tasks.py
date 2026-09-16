@@ -70,11 +70,15 @@ from mycelium_api.schemas import (
     TaskPatchIn,
     TaskStateIn,
     VersionOut,
+    WorkerClosedOut,
+    WorkerOpenIn,
+    WorkerOut,
 )
 from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.identity import IdentityKind
 from mycelium_core.models.note import Note
 from mycelium_core.models.tag import Tag, TagKind
@@ -83,6 +87,7 @@ from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_handoff import TaskHandoff
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import attachments as att_svc
 from mycelium_core.services import capability_tokens as capability_tokens_svc
 from mycelium_core.services import coordination as coord_svc
@@ -1473,10 +1478,72 @@ def _lease_out(x: TaskLease) -> LeaseOut:
     )
 
 
+def _worker_out(w: AgentWorker) -> WorkerOut:
+    return WorkerOut(
+        id=w.id,
+        label=w.label,
+        opened_at=w.opened_at,
+        last_seen_at=w.last_seen_at,
+        closed_at=w.closed_at,
+    )
+
+
+@router.post("/workers", response_model=WorkerOut)
+async def open_worker(
+    body: WorkerOpenIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> WorkerOut:
+    """Member: open a working session and get the id that identifies it.
+
+    Nothing is created in advance and no authorization happens here: the
+    one already covering this connection is what lets the caller ask. The
+    row grants nothing and is never an authorization input; it exists so
+    several sessions on one credential can be told apart, which nothing
+    else can do -- the transport is stateless by design and the
+    credential is one for all of them."""
+    worker = await workers_svc.open_worker(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        label=body.label,
+        operation_id=body.operation_id,
+    )
+    return _worker_out(worker)
+
+
+@router.get("/workers", response_model=list[WorkerOut])
+async def list_workers(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    include_closed: bool = False,
+    limit: int = 50,
+) -> list[WorkerOut]:
+    """Member: the working sessions that are open in this workspace."""
+    rows = await workers_svc.list_workers(
+        ctx.session, org_id=ctx.org_id, include_closed=include_closed, limit=limit
+    )
+    return [_worker_out(w) for w in rows]
+
+
+@router.post("/workers/{worker_id}/close", response_model=WorkerClosedOut)
+async def close_worker(
+    worker_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> WorkerClosedOut:
+    """Member: end a working session and give back every task it holds.
+
+    The fast half of recovery: a session that is stopped frees its tasks
+    now instead of waiting out their deadlines. The slow half needs
+    nobody -- a session that dies is reclaimed when its leases expire."""
+    worker, freed = await workers_svc.close_worker(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, worker_id=worker_id
+    )
+    return WorkerClosedOut(worker=_worker_out(worker), released_tasks=list(freed))
+
+
 @router.get("/leases", response_model=list[LeaseOut])
 async def list_leases(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
     include_released: bool = False,
     limit: int = 50,
 ) -> list[LeaseOut]:

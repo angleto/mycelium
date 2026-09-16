@@ -794,7 +794,7 @@ class TaskStateIn(BaseModel):
     # nobody holds is movable by anyone. Passing it is what makes the two
     # halves of the rule bite: a task somebody else holds refuses the
     # move, and moving a task you hold releases your lease.
-    worker_id: str | None = Field(default=None, max_length=128)
+    worker_id: uuid.UUID | None = None
 
 
 class StateOut(BaseModel):
@@ -1822,15 +1822,33 @@ class HandoffOut(BaseModel):
 # server can tell.
 
 
+class WorkerOpenIn(BaseModel):
+    label: str | None = Field(default=None, max_length=128)
+    operation_id: str | None = Field(default=None, max_length=128)
+
+
+class WorkerOut(BaseModel):
+    id: uuid.UUID
+    label: str | None
+    opened_at: datetime.datetime
+    last_seen_at: datetime.datetime | None
+    closed_at: datetime.datetime | None
+
+
+class WorkerClosedOut(BaseModel):
+    worker: WorkerOut
+    released_tasks: list[uuid.UUID]
+
+
 class LeaseAcquireIn(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=128)
+    worker_id: uuid.UUID
     ttl_seconds: int | None = None
     # Owner only: take a task back from whoever is holding it.
     preempt: bool = False
 
 
 class LeaseRenewIn(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=128)
+    worker_id: uuid.UUID
     ttl_seconds: int | None = None
     # Pass back the fence you were given: a holder that was reclaimed
     # meanwhile is refused instead of extending what is now somebody
@@ -1839,12 +1857,12 @@ class LeaseRenewIn(BaseModel):
 
 
 class LeaseReleaseIn(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=128)
+    worker_id: uuid.UUID
 
 
 class LeasePullIn(BaseModel):
     state_id: uuid.UUID
-    worker_id: str = Field(min_length=1, max_length=128)
+    worker_id: uuid.UUID
     ttl_seconds: int | None = None
     transition_to: uuid.UUID | None = None
     tag_id: uuid.UUID | None = None
@@ -1861,7 +1879,7 @@ class LeaseOut(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
     state_id: uuid.UUID
-    holder_worker_id: str
+    holder_worker_id: uuid.UUID | None
     holder_identity_id: uuid.UUID | None
     acquired_at: datetime.datetime
     expires_at: datetime.datetime

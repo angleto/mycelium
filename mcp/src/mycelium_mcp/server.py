@@ -31,6 +31,7 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.markdown_inline import md_link, md_link_label
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.agent_run import AgentRun
+from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.billing import CostBasis, RateCard, UsageRecord
 from mycelium_core.models.budget import Budget, BudgetPeriod
 from mycelium_core.models.client_profile import ClientProfile
@@ -66,6 +67,7 @@ from mycelium_core.models.workflow import WorkflowDefinition, WorkflowState, Wor
 from mycelium_core.security import decode_token_async
 from mycelium_core.services import advisory as advisory_svc
 from mycelium_core.services import agent_runtime as agent_runtime_svc
+from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import annotations as annotations_svc
 from mycelium_core.services import attachments as attachments_svc
 from mycelium_core.services import billing as billing_svc
@@ -1814,7 +1816,7 @@ async def set_task_state(
             task_id=uuid.UUID(task_id),
             expected_version=expected_version,
             state_id=uuid.UUID(state_id),
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
         )
         return {"task_id": task_id, "version": version}
 
@@ -3310,10 +3312,106 @@ async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
 # object. ``task_pull`` is the one that removes the pile-up: choosing and
 # taking are one round trip, so there is no window between them.
 #
-# ``worker_id`` is how a session names ITSELF, and passing it matters
-# more than it looks: several sessions can share one token, and two
-# callers that both omit it are one holder as far as the server can tell.
-# Pass a stable per-session string.
+# ``worker_id`` is the SERVER-ISSUED id of your working session. Call
+# ``worker_open`` once at session start, keep the id, pass it here. It is
+# not a credential and grants nothing: one authorization on a machine
+# still covers every session launched there, and this only says which of
+# them is which -- which nothing else can, because the transport is
+# stateless by design and the credential is one for all of them.
+
+
+def _worker(w: AgentWorker) -> dict[str, Any]:
+    return _compact(
+        {
+            "worker_id": str(w.id),
+            "label": w.label,
+            "opened_at": w.opened_at.isoformat(),
+            "last_seen_at": w.last_seen_at.isoformat() if w.last_seen_at else None,
+            "closed_at": w.closed_at.isoformat() if w.closed_at else None,
+        }
+    )
+
+
+@mcp.tool()
+async def worker_open(
+    token: str,
+    org_id: str,
+    label: str | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
+    """Open a working session and get the id that identifies YOU.
+
+    Call this ONCE at session start, next to ``whoami``, and keep the
+    ``worker_id``: every possession verb takes it, and it is the only
+    thing that distinguishes you from the other sessions running on the
+    same credential. Nothing is created in advance and no new
+    authorization happens -- the one already covering this connection is
+    what lets you ask.
+
+    It grants nothing. A worker is a label with provenance, never an
+    authorization input, and you can do exactly what you could do
+    without one.
+
+    ``label`` is for a human reading a board ("verify-3", a pane name);
+    it is never matched on, so two sessions may share one and still be
+    two workers. Pass ``operation_id`` and a retry after a lost reply
+    returns the same worker instead of a second one.
+
+    Resuming after losing your context? Call ``workers_list`` to find
+    what you opened, then ``task_leases_list(worker_id=...)`` for what it
+    still holds."""
+    async with _tenant(token, org_id) as (s, org, user):
+        principal = _PRINCIPAL.get()
+        worker = await workers_svc.open_worker(
+            s,
+            org_id=org,
+            actor_id=user,
+            label=label,
+            operation_id=operation_id,
+            token_id=(principal[2] if principal is not None else None),
+        )
+        return _worker(worker)
+
+
+@mcp.tool()
+async def workers_list(
+    token: str,
+    org_id: str,
+    mine_only: bool = True,
+    include_closed: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """The working sessions that are open. ``mine_only`` narrows to the
+    ones opened on this credential, which is how a resumed session finds
+    what it was; turn it off to see what everybody is running."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        principal = _PRINCIPAL.get()
+        rows = await workers_svc.list_workers(
+            s,
+            org_id=org,
+            token_id=(principal[2] if (mine_only and principal is not None) else None),
+            include_closed=include_closed,
+            limit=limit,
+        )
+        return [_worker(w) for w in rows]
+
+
+@mcp.tool()
+async def worker_close(token: str, org_id: str, worker_id: str) -> dict[str, Any]:
+    """End a working session and GIVE BACK every task it still holds.
+
+    Call it when you are stopping. It is the fast half of recovery: the
+    tasks are free immediately instead of waiting out their deadlines.
+    The slow half needs nothing from you -- a session that dies without
+    calling this has its tasks reclaimed when the leases expire. Either
+    way no person has to intervene.
+
+    Returns the freed task ids."""
+    async with _tenant(token, org_id) as (s, org, user):
+        worker, freed = await workers_svc.close_worker(
+            s, org_id=org, actor_id=user, worker_id=uuid.UUID(worker_id)
+        )
+        return {**_worker(worker), "released_tasks": [str(t) for t in freed]}
 
 
 def _lease(x: TaskLease) -> dict[str, Any]:
@@ -3377,7 +3475,7 @@ async def task_pull(
             org_id=org,
             actor_id=user,
             state_id=uuid.UUID(state_id),
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
             ttl_seconds=ttl_seconds,
             transition_to=(uuid.UUID(transition_to) if transition_to else None),
             tag_id=(uuid.UUID(tag_id) if tag_id else None),
@@ -3414,7 +3512,7 @@ async def task_lease_acquire(
             org_id=org,
             actor_id=user,
             task_id=uuid.UUID(task_id),
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
             ttl_seconds=ttl_seconds,
             preempt=preempt,
         )
@@ -3440,7 +3538,7 @@ async def task_lease_renew(
             org_id=org,
             actor_id=user,
             task_id=uuid.UUID(task_id),
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
             ttl_seconds=ttl_seconds,
             fence=fence,
         )
@@ -3461,7 +3559,7 @@ async def task_lease_release(
             actor_id=user,
             task_id=uuid.UUID(task_id),
             reason=LeaseRelease.explicit,
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
         )
         if lease is None:
             return {"task_id": task_id, "released": False}
@@ -3486,7 +3584,7 @@ async def task_leases_list(
             s,
             org_id=org,
             task_id=(uuid.UUID(task_id) if task_id else None),
-            worker_id=worker_id,
+            worker_id=uuid.UUID(worker_id),
             include_released=include_released,
             limit=limit,
         )

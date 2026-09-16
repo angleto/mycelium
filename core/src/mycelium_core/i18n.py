@@ -214,6 +214,7 @@ class MessageCode(enum.StrEnum):
     LEASE_FENCE_STALE = "task.lease.fence_stale"
     LEASE_QUEUE_EMPTY = "task.lease.queue_empty"
     LEASE_SELF_VERIFICATION = "task.lease.self_verification"
+    WORKER_NOT_FOUND = "worker.not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -678,6 +679,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.LEASE_QUEUE_EMPTY: ("No unheld task matches in that state"),
         MessageCode.LEASE_SELF_VERIFICATION: (
             "You handed this task off yourself; the check is done by someone else"
+        ),
+        MessageCode.WORKER_NOT_FOUND: (
+            "No such worker in this workspace. Open one with worker_open and pass the id it returns"
         ),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
