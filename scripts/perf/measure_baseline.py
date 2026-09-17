@@ -361,12 +361,21 @@ async def main() -> int:
     out["serializers"] = collect_serializer_samples()
     out["corpus"] = collect_corpus()
 
-    # Aggregate cost summary (the "what does Claude pay" tldr).
+    # Aggregate cost summary (the "what does Claude pay" tldr). The bytes/token
+    # ratio comes from ``billing`` rather than being spelled here: it was the
+    # same rule-of-thumb 4 in three files until it was measured on 2026-09-17
+    # and turned out to be 2.87.
+    from mycelium_core.services.billing import BYTES_PER_TOKEN
+
     reg = out["registry"]
     out["summary"] = {
-        "tools_list_http_tokens_est": reg["tools_list_http_bytes"] // 4,
-        "tools_list_stdio_full_tokens_est": reg["tools_list_stdio_full_bytes"] // 4,
-        "tools_list_stdio_stripped_tokens_est": reg["tools_list_stdio_stripped_bytes"] // 4,
+        "tools_list_http_tokens_est": int(reg["tools_list_http_bytes"] / BYTES_PER_TOKEN),
+        "tools_list_stdio_full_tokens_est": int(
+            reg["tools_list_stdio_full_bytes"] / BYTES_PER_TOKEN
+        ),
+        "tools_list_stdio_stripped_tokens_est": int(
+            reg["tools_list_stdio_stripped_bytes"] / BYTES_PER_TOKEN
+        ),
         "stripping_savings_bytes": reg["tools_list_stdio_full_bytes"]
         - reg["tools_list_stdio_stripped_bytes"],
         "corpus_total_bytes": sum(

@@ -145,8 +145,14 @@ def test_task_lean_enriched_surfaces_set_fields() -> None:
     assert out["start_date"] == "2026-07-01"
     assert out["due_date"] == "2026-07-05T00:00:00+00:00"
     assert out["parent_task_id"] == "66666666-6666-6666-6666-666666666666"
-    assert out["assignee_id"] == "44444444-4444-4444-4444-444444444444"
     assert out["collaborators_count"] == 2
+    # ...but NOT the assignment uuids, set or unset. They were two unreadable
+    # ids on every row of every page and, measured over 32 recorded sessions,
+    # were never passed back to anything. The row carries the HANDLE instead,
+    # which the calling tool resolves in batch; this serializer is given it.
+    assert "assignee_id" not in out
+    assert "owner_id" not in out
+    assert _task(_mock_task(), [], assignee_handle="angelo")["assignee_handle"] == "angelo"
 
 
 def test_index_scope_costs_a_key_only_when_it_is_not_the_default() -> None:

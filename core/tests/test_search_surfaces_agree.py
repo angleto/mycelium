@@ -85,7 +85,15 @@ async def test_the_unified_surface_does_not_return_an_empty_breakdown(
     """The regression the field was added for: the unified surface used to
     hand back a flat ``score`` and nothing else, so a caller could not tell
     a hit the lexical branch found from one only the dense branch reached
-    and had to read the whole page to find out."""
+    and had to read the whole page to find out.
+
+    Since 2026-09-17 the breakdown answers that question under
+    ``explain=True`` instead of on every row of every search: the hits arrive
+    ranked, so the ordinary reader already has the answer the floats encode,
+    and they were measured at 43% of the tool's tokens across 83 recorded
+    searches. The property under test is unchanged -- present means
+    non-empty -- and the default is pinned below, because a breakdown that
+    comes back by default is the cost this moved."""
     org, user = await _seed()
     reset = _PRINCIPAL.set((user, org, None))
     try:
@@ -102,10 +110,21 @@ async def test_the_unified_surface_does_not_return_an_empty_breakdown(
             operation_id="agree-s2",
             kinds=["blob"],
             limit=10,
+            explain=True,
+        )
+        plain = await search(
+            token="",
+            org_id="",
+            q="collasso per nota",
+            operation_id="agree-s3",
+            kinds=["blob"],
+            limit=10,
         )
     finally:
         _PRINCIPAL.reset(reset)
 
+    assert plain["hits"], plain
+    assert all("score" not in h and "scores_by_stage" not in h for h in plain["hits"])
     assert uni["hits"], uni
     top = uni["hits"][0]
     assert top["scores_by_stage"], top

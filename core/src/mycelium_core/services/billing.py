@@ -11,6 +11,8 @@ gateway is out of v1.
 from __future__ import annotations
 
 import datetime
+import json
+import math
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -57,6 +59,33 @@ _RATE_UPDATABLE = frozenset(
         "tier",
     }
 )
+
+
+#: Bytes of compact JSON per model token, for the payload-denominated MCP
+#: gateway fee and for the usage report that reads the same telemetry.
+#:
+#: 4 until 2026-09-17, which was a rule of thumb nobody had checked. Measured
+#: that day with the cl100k tokenizer over 721 recorded gateway results
+#: (1,592,718 bytes, 553,547 tokens) the real ratio is 2.87, so the old
+#: constant under-counted by 28% -- and by more on a payload dense in uuids,
+#: where a 36-byte id costs ~23 tokens rather than the 9 the rule of thumb
+#: predicts.
+#:
+#: What it does not cover: it is still an estimate, and one taken over ONE
+#: corpus of largely Italian prose and JSON from this surface. It is used to
+#: size and to bill an estimate, never to reconstruct a provider's own count.
+BYTES_PER_TOKEN = 2.87
+
+
+def estimate_tokens(payload: Any) -> int:
+    """Coarse token count of a JSON payload: compact JSON bytes over
+    :data:`BYTES_PER_TOKEN`, rounded up. A serialization failure counts as 0,
+    because estimation must never break the call it is measuring."""
+    try:
+        n = len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+    return math.ceil(n / BYTES_PER_TOKEN)
 
 
 async def get_wallet(session: AsyncSession, org_id: uuid.UUID) -> Wallet:

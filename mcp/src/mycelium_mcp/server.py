@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import json
+import re
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
@@ -594,7 +595,20 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                     limit=10,
                 )
                 statemap = await workflow_svc.states_by_ids(s, [t.state_id for t in rows])
-                open_tasks = [_task(t, state=statemap.get(t.state_id)) for t in rows]
+                _amap, omap = await _row_handles(s, org_id=org, rows=rows)
+                # No ``assignee_handle`` on these rows: the query above filters
+                # on ``assignee_handles=[handle]``, so it is the caller's own
+                # handle on every row by construction. Same reasoning as
+                # hoisting ``model_id`` out of search hits, applied to the one
+                # payload that sits in context for the whole session.
+                open_tasks = [
+                    _task(
+                        t,
+                        state=statemap.get(t.state_id),
+                        owner_handle=omap.get(t.owner_id) if t.owner_id else None,
+                    )
+                    for t in rows
+                ]
             else:
                 withheld.append("open_tasks: needs the scope that list_tasks requires")
 
@@ -617,12 +631,15 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                     channel_key="agent",
                 )
                 tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
+                # No ``rrf``: the recall arrives ordered, so the float says
+                # nothing the position does not, and a bootstrap payload is the
+                # one a caller cannot ask for less of -- whoami takes no
+                # arguments and sits in context for the whole session.
                 memory_recall = [
                     {
                         "blob": _blob(
                             h.blob, tagmap.get(h.blob.id), snippet_chars=_WHOAMI_SNIPPET_CHARS
-                        ),
-                        "rrf": h.rrf,
+                        )
                     }
                     for h in hits
                 ]
@@ -712,12 +729,50 @@ def _compact(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
+#: ``ts_headline``'s default emphasis. Postgres wraps the matched lexemes for
+#: the SPA's inline preview; on this surface it is markup no agent acts on,
+#: charged once per snippet per hit.
+_HEADLINE_MARKUP = re.compile(r"</?b>")
+
+
+def _plain_snippet(snippet: str | None) -> str | None:
+    """Strip the search-highlight markup from a ts_headline snippet.
+
+    Done in this adapter rather than in the service because the SPA renders
+    the same snippet and does want the emphasis: the two surfaces differ in
+    what they can use, which is exactly what an adapter is for."""
+    return _HEADLINE_MARKUP.sub("", snippet) if snippet else snippet
+
+
+async def _row_handles(
+    session: AsyncSession, *, org_id: uuid.UUID, rows: Sequence[Task]
+) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str]]:
+    """Resolve the assignee and owner handles for a page of tasks, two queries
+    for the whole page rather than two per row.
+
+    The lean row carries handles instead of the stored uuids (see ``_task``),
+    which is only affordable in batch: this is the difference between a
+    readable page and an N+1."""
+    from mycelium_core.services import identities as identities_svc
+
+    return (
+        await identities_svc.handles_for_identities(
+            session, org_id=org_id, identity_ids=[t.assignee_id for t in rows if t.assignee_id]
+        ),
+        await identities_svc.handles_for_users(
+            session, user_ids=[t.owner_id for t in rows if t.owner_id]
+        ),
+    )
+
+
 def _task(
     t: Task,
     tags: list[Tag] | None = None,
     *,
     collaborators_count: int = 0,
     state: WorkflowState | None = None,
+    assignee_handle: str | None = None,
+    owner_handle: str | None = None,
 ) -> dict[str, Any]:
     # Lean index shape for ``list_tasks`` / ``create_task`` returns: just
     # the fields an LLM needs to pick a row, plus ``version`` for a
@@ -739,13 +794,20 @@ def _task(
             "id": str(t.id),
             "title": t.title,
             "state_id": str(t.state_id),
-            # Resolved state (name + its workflow), so an agent reads a task's
-            # state directly instead of a bare uuid or inferring the state set
-            # from other tasks. workflow_id lets it then call workflow_states /
-            # workflow_transitions to see the whole machine.
+            # Resolved state name, so an agent reads a task's state directly
+            # instead of a bare uuid or inferring the state set from other
+            # tasks. ``state_id`` stays because it is what ``set_task_state``
+            # takes (measured across 32 recorded sessions at 61% reuse, the
+            # highest of any id this surface returns).
+            #
+            # ``workflow_id`` does NOT stay on the lean row. It is how a caller
+            # reaches ``workflow_states`` / ``workflow_transitions``, which is
+            # a question about the page and not about the row, and on a page of
+            # 200 tasks in one workflow it was the same uuid 200 times, ~23
+            # tokens each. It is on ``get_task`` and on ``task_workflow``,
+            # which is the call to make before moving a task anyway.
             "state": state.name if state is not None else None,
             "state_is_terminal": state.is_terminal if state is not None else None,
-            "workflow_id": str(state.workflow_id) if state is not None else None,
             "priority": t.priority,
             "importance": t.importance,
             "urgency": t.urgency,
@@ -759,8 +821,16 @@ def _task(
             "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
             "version": t.version,
             "tags": [_tag_brief(g) for g in (tags or [])],
-            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
-            "owner_id": str(t.owner_id) if t.owner_id else None,
+            # Accountability travels as a HANDLE here, not as the stored uuid.
+            # The row used to carry ``assignee_id`` and ``owner_id`` raw: two
+            # full uuids on every row, ~46 tokens of a ~160-token row, which a
+            # reader could not read and which -- measured across 32 recorded
+            # sessions -- were never passed back to anything (8 returned, 0
+            # reused). The handle answers the same question ("whose is this"),
+            # costs a few tokens, and is what ``set_task_assignee`` takes.
+            # Resolved in batch by the calling tool, one query for the page.
+            "assignee_handle": assignee_handle,
+            "owner_handle": owner_handle,
             "collaborators_count": collaborators_count,
         }
     )
@@ -1157,7 +1227,13 @@ async def create_task(
             channel="mcp",
         )
         state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
-        return _task(task, state=state)
+        amap, omap = await _row_handles(s, org_id=org, rows=[task])
+        return _task(
+            task,
+            state=state,
+            assignee_handle=amap.get(task.assignee_id) if task.assignee_id else None,
+            owner_handle=omap.get(task.owner_id) if task.owner_id else None,
+        )
 
 
 async def _caller_tz(s: AsyncSession, user_id: uuid.UUID) -> dt.tzinfo:
@@ -1360,6 +1436,7 @@ async def list_tasks(
         tagmap = await tasks.tags_by_task(s, task_ids=ids)
         ccounts = await tasks.collaborator_counts(s, org_id=org, task_ids=ids)
         statemap = await workflow_svc.states_by_ids(s, [t.state_id for t in items])
+        amap, omap = await _row_handles(s, org_id=org, rows=items)
         return {
             "items": [
                 _project_fields(
@@ -1368,6 +1445,8 @@ async def list_tasks(
                         tagmap.get(t.id, []),
                         collaborators_count=ccounts.get(t.id, 0),
                         state=statemap.get(t.state_id),
+                        assignee_handle=amap.get(t.assignee_id) if t.assignee_id else None,
+                        owner_handle=omap.get(t.owner_id) if t.owner_id else None,
                     ),
                     fields,
                 )
@@ -1853,6 +1932,25 @@ async def set_task_state(
         return {"task_id": task_id, "version": version}
 
 
+#: What ``get_task`` shows of a description when nobody asked for the whole
+#: thing. Same reasoning as ``_RECALL_SNIPPET_CHARS`` and the same shape of
+#: escape hatch, applied to the field that turned out to dominate this
+#: surface: measured over 32 recorded sessions on 2026-09-17, descriptions
+#: were 29% of every token Mycelium put into a context window, and
+#: ``get_task`` alone was 31% of the server's context weight.
+#:
+#: 1200 is where the saving flattens on the recorded corpus (p50 description
+#: is 701 characters, p90 is 8081): at 1200 the head still orients a reader
+#: who is about to go and read the code, while the 85 descriptions above it
+#: stop being charged in full. Lower thresholds save little more and start
+#: cutting descriptions that were never the problem.
+#:
+#: What it does not cover: a caller that fetches the rest and reads it into
+#: context anyway saves nothing. The saving is real when the rest is fetched
+#: to a FILE with ``get_text_block_capability`` and worked there.
+_TASK_DESCRIPTION_CHARS = 1200
+
+
 def _task_full(
     t: Task,
     tags: list[Tag] | None = None,
@@ -1861,16 +1959,31 @@ def _task_full(
     owner_handle: str | None = None,
     collaborators: list[dict[str, str]] | None = None,
     state: WorkflowState | None = None,
+    snippet_chars: int | None = None,
 ) -> dict[str, Any]:
     # Full attribute set for editing one task. Unset nullable columns
     # (dates, estimate, cost, location, budget, parent, deleted_at) are
     # dropped via _compact: a typical task leaves most of these empty, so
     # emitting them as null is pure token overhead. Booleans/empties stay.
+    #
+    # ``snippet_chars`` defaults to UNCAPPED, and only ``get_task`` passes a
+    # cap. The other callers -- task_offer / task_claim / task_decline /
+    # task_pull -- are handing an agent the work it is about to start, and the
+    # description is the brief: capping it there would buy a few tokens by
+    # withholding the thing the call exists to deliver.
+    description = t.description or ""
+    # Says so when it bites, exactly as ``_blob`` does: a silently shortened
+    # body is worse than an absent one, because a caller cannot tell a
+    # description that ends there from one that was cut and will act on the
+    # cut as if it were the whole.
+    description_truncated = snippet_chars is not None and len(description) > snippet_chars
     return _compact(
         {
             "id": str(t.id),
             "title": t.title,
-            "description": t.description,
+            "description": description[:snippet_chars] if description_truncated else t.description,
+            "description_truncated": True if description_truncated else None,
+            "description_chars": len(description) if description_truncated else None,
             "state_id": str(t.state_id),
             # Resolved state name + its workflow (see _task): read the state
             # directly, and navigate to the machine via workflow_states.
@@ -1883,7 +1996,7 @@ def _task_full(
             "start_date": t.start_date.isoformat() if t.start_date else None,
             "due_date": t.due_date.isoformat() if t.due_date else None,
             "billable": t.billable,
-            "parent_task_id": (str(t.parent_task_id) if t.parent_task_id else None),
+            "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
             "estimate_effort_h": (
                 str(t.estimate_effort_h) if t.estimate_effort_h is not None else None
             ),
@@ -1898,15 +2011,23 @@ def _task_full(
             "is_archived": t.is_archived,
             "offered": t.offered,
             # Read-back of accountability/assignment (tasks 901f0f9f +
-            # 2d3abdc3): the write tools take a handle/id, but the stored
-            # values are opaque ids (``assignee_id`` -> identities,
-            # ``owner_id`` -> users). Emit the ids AND the resolved
-            # handles + the collaborator set so a caller can confirm what
-            # it set without a second lookup. Handles/collaborators are
-            # resolved by the get_task tool (it has the session).
-            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+            # 2d3abdc3): the stored values are opaque ids (``assignee_id`` ->
+            # identities, ``owner_id`` -> users), and this shape resolves them
+            # to handles, with the collaborator set, so a caller can confirm
+            # what it set without a second lookup. The get_task tool does the
+            # resolving; it has the session.
+            #
+            # The HANDLE is the read-back and the id is its fallback, which is
+            # a narrowing of the original decision to emit both. A handle names
+            # the same identity, is what ``set_task_assignee`` takes, and can
+            # be read by a person; the uuid beside it was measured over 32
+            # recorded sessions at zero reuse (8 returned, 0 ever passed back
+            # to anything) while costing ~23 tokens. So the id survives exactly
+            # where the handle did not resolve, which is the only case where
+            # dropping it would leave the assignment unaddressable.
+            "assignee_id": (str(t.assignee_id) if t.assignee_id and not assignee_handle else None),
             "assignee_handle": assignee_handle,
-            "owner_id": str(t.owner_id) if t.owner_id else None,
+            "owner_id": (str(t.owner_id) if t.owner_id and not owner_handle else None),
             "owner_handle": owner_handle,
             "collaborators": collaborators if collaborators else None,
             "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
@@ -1917,15 +2038,31 @@ def _task_full(
 
 
 @mcp.tool()
-async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+async def get_task(
+    token: str, org_id: str, task_id: str, full_description: bool = False
+) -> dict[str, Any]:
     """Read one task with its full attribute set (for editing). Includes
     the assignment read-back (task 2d3abdc3): the resolved
-    ``assignee_handle`` / ``owner_handle`` next to the stored ids, plus
-    the ``collaborators`` set (people involved beyond the assignee). Also
-    resolves the workflow ``state`` NAME (with ``state_is_terminal`` and the
-    ``workflow_id``) alongside the raw ``state_id``, so you read the state
-    directly and can call ``workflow_states`` / ``workflow_transitions`` for
-    the rest of the machine -- no inferring states from other tasks."""
+    ``assignee_handle`` / ``owner_handle`` (the stored uuid comes too only
+    when the handle did not resolve), plus the ``collaborators`` set (people
+    involved beyond the assignee). Also resolves the workflow ``state`` NAME
+    (with ``state_is_terminal`` and the ``workflow_id``) alongside the raw
+    ``state_id``, so you read the state directly and can call
+    ``workflow_states`` / ``workflow_transitions`` for the rest of the
+    machine -- no inferring states from other tasks.
+
+    The ``description`` is CAPPED at 1200 characters and says so when it
+    bites (``description_truncated`` + the full ``description_chars``). Two
+    ways to the whole, and they are not equivalent:
+
+    - ``get_text_block_capability(kind='task_description', resource_id=<task
+      id>)`` returns a ``curl`` that writes the description to a FILE. Prefer
+      it: the bytes never enter the conversation, so reading a long design
+      note costs nothing and stays readable with the tools you read files
+      with.
+    - ``full_description=True`` inlines it. Use it when you are going to read
+      the prose end to end anyway; it puts every character in context and
+      leaves it there for the rest of the session."""
     from mycelium_core.services import identities as identities_svc
 
     async with _tenant(token, org_id) as (s, org, _user):
@@ -1944,6 +2081,7 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
         return _task_full(
             t,
             tagmap.get(t.id, []),
+            snippet_chars=None if full_description else _TASK_DESCRIPTION_CHARS,
             assignee_handle=assignee_handle,
             owner_handle=owner_handle,
             collaborators=collaborators,
@@ -4988,6 +5126,7 @@ async def memory_search(
     channel_key: str | None = None,
     created_by: str | None = None,
     snippet_chars: int | None = _RECALL_SNIPPET_CHARS,
+    explain: bool = False,
 ) -> dict[str, Any]:
     """Hybrid RRF retrieval within the (org, project) boundary.
     Degrades to keyword-only without embedder. ``tag_ids``,
@@ -5011,7 +5150,11 @@ async def memory_search(
     ``text_chars``) and names the way to the whole: ``memory_get_blob``,
     which is never capped. Pass ``snippet_chars=null`` for full text on
     every hit, or a number to trade differently; ``limit`` reduces how
-    MANY hits come back, never how big each one is."""
+    MANY hits come back, never how big each one is.
+
+    Hits arrive ranked, most relevant first, and the ORDER is the ranking:
+    ``rrf`` and ``scores_by_stage`` are emitted only under ``explain=True``,
+    for auditing recall rather than for reading results."""
     async with _tenant(token, org_id) as (s, org, user):
         hits, meta = await memory_svc.retrieve_with_meta(
             s,
@@ -5030,18 +5173,22 @@ async def memory_search(
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in page])
         return {
             "hits": [
-                {
-                    "blob": _blob(h.blob, tagmap.get(h.blob.id), snippet_chars=snippet_chars),
-                    "rrf": h.rrf,
-                    # Why this hit ranked here (WS-B2 / R8): the per-stage RRF
-                    # branch scores + rerank logit, the winning chunk, its
-                    # snippet, and the humus provenance marker -- so an agent
-                    # can reason about retrieval quality, not just the order.
-                    "scores_by_stage": h.scores_by_stage,
-                    "chunk_index": h.chunk_index,
-                    "chunk_snippet": h.chunk_snippet,
-                    "provenance": h.provenance,
-                }
+                _compact(
+                    {
+                        "blob": _blob(h.blob, tagmap.get(h.blob.id), snippet_chars=snippet_chars),
+                        "chunk_index": h.chunk_index,
+                        "chunk_snippet": _plain_snippet(h.chunk_snippet),
+                        "provenance": h.provenance,
+                        # Why this hit ranked here (WS-B2 / R8): the per-stage
+                        # RRF branch scores + the rerank logit. Behind
+                        # ``explain`` since 2026-09-17: the hits arrive ranked,
+                        # so the order already carries the answer and these two
+                        # floats were read by nobody while being charged on
+                        # every hit of every recall. Ask for them when auditing
+                        # retrieval quality.
+                        **({"rrf": h.rrf, "scores_by_stage": h.scores_by_stage} if explain else {}),
+                    }
+                )
                 for h in page
             ],
             "meta": _retrieval_meta(meta),
@@ -5246,6 +5393,7 @@ async def search(
     due_before: str | None = None,
     assignee_handles: list[str] | None = None,
     state_id: str | None = None,
+    explain: bool = False,
 ) -> dict[str, Any]:
     """Unified search across tasks/notes/blobs; the TASK branch is org-wide
     even when ``project_id`` is set (each hit's ``scope`` says 'org' or
@@ -5276,13 +5424,20 @@ async def search(
     no stemming. An unknown code returns an EMPTY list, which is the honest
     answer -- do not read it as "the search is broken".
 
-    Returns ``{hits, meta}``. Each hit carries ``model_id`` ('none' = a
-    keyword-only row, no dense vector). ``offset`` pages the ranked results
-    (offset, not cursor: ranked retrieval has no stable keyset). ``meta``
-    (RetrievalMeta) exposes whether the query embedded and whether the dense
-    branch contributed / was rejected by the per-org similarity floor, so an
-    empty or thin result distinguishes 'nothing relevant' from 'recall
-    silently degraded'.
+    Returns ``{hits, meta}``, most relevant first. **The ORDER is the
+    ranking**: no per-hit score is emitted, because a caller acts on the
+    order and the snippet, never on the float. ``explain=True`` adds
+    ``score`` + ``scores_by_stage`` back for debugging retrieval quality --
+    ask for it when you are auditing recall, not when you are reading
+    results. ``meta.model_id`` is per-response ('none' = keyword-only rows, no
+    dense vector) instead of repeated identically on every hit; it is null
+    when a page mixes models, and then the hits carry their own. ``offset``
+    pages the ranked results (offset, not cursor: ranked retrieval has no
+    stable keyset).
+    ``meta`` (RetrievalMeta) exposes whether the query embedded and whether
+    the dense branch contributed / was rejected by the per-org similarity
+    floor, so an empty or thin result distinguishes 'nothing relevant' from
+    'recall silently degraded'.
     """
     async with _tenant(token, org_id) as (s, org, user):
         due_before_dt = _to_instant(due_before, await _caller_tz(s, user)) if due_before else None
@@ -5306,43 +5461,75 @@ async def search(
             task_state_id=uuid.UUID(state_id) if state_id else None,
         )
         page = hits[offset : offset + limit] if offset > 0 else hits[:limit]
-        return {
-            "hits": [
-                {
-                    "kind": h.kind,
-                    "scope": h.scope,
-                    "model_id": h.model_id,
-                    "task_id": str(h.task_id) if h.task_id else None,
-                    "note_id": str(h.note_id) if h.note_id else None,
-                    "part_id": str(h.part_id) if h.part_id else None,
-                    "blob_id": str(h.blob_id),
-                    "title": h.title,
-                    "snippet": h.snippet,
-                    "score": h.score,
-                    # Why this hit ranked here, same shape `memory_search`
-                    # returns. Branch entries are 1-BASED RANKS, not
-                    # scores; only "rrf" is a score and it equals "score"
-                    # above. The fused value alone cannot tell a lexical
-                    # hit from a dense-only one: RRF fuses by rank, so a
-                    # dense-only hit is exactly 0.2/(60+rank) whatever its
-                    # cosine was. Empty on the entity-code path, where
-                    # nothing was ranked.
-                    "scores_by_stage": h.scores_by_stage,
-                    # The other sections of the SAME note that matched. A
-                    # note takes ONE slot however many of its parts answered
-                    # (task 859ad2d3), so these are the sections that did not
-                    # get a row; read them when one answer spans a document.
-                    "other_part_ids": [str(p) for p in h.other_part_ids],
-                    # Present only when it bites, like the blob payload cap
-                    # above: this hit's vector covers the head of its text,
-                    # so a query about the rest of the document may have
-                    # missed it and reading the whole row is worth it.
-                    **({"embedding_truncated": True} if h.embedding_truncated else {}),
-                }
-                for h in page
-            ],
-            "meta": _retrieval_meta(meta),
-        }
+        # A hit is a row the caller will act on, and the cost of this shape is
+        # paid on every row of every search. Measured over 83 recorded
+        # searches on 2026-09-17, the parts below that no caller ever read
+        # were 43% of the tool's tokens: the ranking floats, ``model_id``
+        # repeated identically per row, ``blob_id`` (170 returned, 0 ever used
+        # again as an argument), the null id of whichever kind the hit is not,
+        # and the ts_headline markup.
+        out_hits: list[dict[str, Any]] = []
+        for h in page:
+            hit: dict[str, Any] = {
+                "kind": h.kind,
+                "scope": h.scope,
+                "task_id": str(h.task_id) if h.task_id else None,
+                "note_id": str(h.note_id) if h.note_id else None,
+                "part_id": str(h.part_id) if h.part_id else None,
+                # Only when it is the hit's ONLY handle. For a task or note
+                # hit the caller navigates by task_id/note_id and never by
+                # the blob; for kind='blob' this is the id memory_get_blob
+                # takes, so dropping it there would strand the row.
+                "blob_id": str(h.blob_id) if h.kind == "blob" else None,
+                "title": h.title,
+                # ts_headline emphasises the match with <b>...</b> for the
+                # SPA's inline preview (memory._ts_headlines). It is
+                # presentation: no agent acts on it, and it costs tokens on
+                # every snippet, so the adapter for THIS surface strips it
+                # rather than the service dropping it for both.
+                "snippet": _plain_snippet(h.snippet),
+                # The other sections of the SAME note that matched. A note
+                # takes ONE slot however many of its parts answered (task
+                # 859ad2d3), so these are the sections that did not get a
+                # row; read them when one answer spans a document. Omitted
+                # when empty rather than sent as [].
+                "other_part_ids": [str(p) for p in h.other_part_ids] or None,
+                # Present only when it bites, like the blob payload cap
+                # above: this hit's vector covers the head of its text,
+                # so a query about the rest of the document may have
+                # missed it and reading the whole row is worth it.
+                **({"embedding_truncated": True} if h.embedding_truncated else {}),
+            }
+            if explain:
+                # Branch entries are 1-BASED RANKS, not scores; only "rrf" is
+                # a score and it equals "score". The fused value alone cannot
+                # tell a lexical hit from a dense-only one: RRF fuses by rank,
+                # so a dense-only hit is exactly 0.2/(60+rank) whatever its
+                # cosine was. Empty on the entity-code path, where nothing was
+                # ranked.
+                hit["score"] = h.score
+                hit["scores_by_stage"] = h.scores_by_stage
+            out_hits.append(_compact(hit))
+        # One model per retrieval in the ordinary case, so it belongs to the
+        # response and not to each of its rows. When a page genuinely mixes
+        # models (a keyword-only row next to dense ones) the rows carry their
+        # own again: hoisting is a de-duplication, never a value the caller has
+        # to reconstruct.
+        #
+        # The KEY is always present, null in the two cases where no single
+        # model answers for the page (mixed, or no hits at all). The meta
+        # envelope is asserted as a whole set by its contract test, and a key
+        # that comes and goes is the shape that test exists to prevent: a
+        # caller reading meta must not have to ask whether a field is missing
+        # because nothing matched or because the field was renamed.
+        response_meta = _retrieval_meta(meta)
+        models = {h.model_id for h in page}
+        one_model = next(iter(models)) if len(models) == 1 else None
+        response_meta["model_id"] = one_model
+        if one_model is None and models:
+            for row, h in zip(out_hits, page, strict=True):
+                row["model_id"] = h.model_id
+        return {"hits": out_hits, "meta": response_meta}
 
 
 @mcp.tool()

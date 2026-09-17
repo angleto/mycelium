@@ -55,6 +55,7 @@ from typing import Any
 
 from mycelium_core.db import tenant_session
 from mycelium_core.services import agent_tokens as agent_tokens_svc
+from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services.eval_metrics import freshness_ok, ndcg_at_k, tokens_chars4
 from mycelium_core.services.eval_queries import QueryRecord
 from mycelium_core.services.eval_stats import clopper_pearson_upper_zero, percentile_bootstrap
@@ -264,6 +265,12 @@ class ScenarioRunner:
                 "operation_id": f"wseval-t3-{uuid.uuid4().hex}",
                 "project_id": str(project_id) if project_id else None,
                 "limit": limit or self.k,
+                # The harness scores retrieval quality, which is the one caller
+                # ``explain`` exists for: ``rrf`` and ``scores_by_stage`` stopped
+                # being emitted by default on 2026-09-17 because a reader acts on
+                # the order, and this is not a reader. ``_top_score`` reads
+                # ``hits[0]["rrf"]``.
+                "explain": True,
             },
         )
         if not isinstance(res, dict) or "hits" not in res:
@@ -319,6 +326,32 @@ def _abstained(res: dict[str, Any]) -> bool:
     return bool(res.get("meta", {}).get("abstained", False))
 
 
+async def _entity_uuid(
+    value: str | uuid.UUID, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> uuid.UUID:
+    """The whole uuid behind an id this harness read from the gateway.
+
+    The gateway speaks the short ADR-0038 form for task and note ids
+    (ADR-0064), and this harness is a programmatic client rather than a
+    reader: it takes those ids back to the DATABASE, which keys on the whole
+    uuid. An LLM caller never needs this -- it passes the short id straight
+    back to the surface, which expands it -- so the conversion belongs here
+    and not on the surface.
+
+    A full uuid passes through, so nothing that already held one changes."""
+    if isinstance(value, uuid.UUID):
+        return value
+    if len(value) == 36:
+        return uuid.UUID(value)
+    async with tenant_session(str(org_id), str(actor_id)) as s:
+        matches = await lookup_svc.resolve_prefix(
+            s, prefix=value, kinds=("task", "note"), include_archived=True, include_deleted=True
+        )
+    if len(matches) != 1:
+        raise RuntimeError(f"{value!r} resolved to {len(matches)} entities, expected exactly one")
+    return matches[0].id
+
+
 class BlobMap:
     """unit_id -> blob ids (as str) resolved once per ingested workspace;
     late notes (atoms, scenario writes) resolve on demand."""
@@ -338,9 +371,10 @@ class BlobMap:
                     )
                     self.by_unit[unit_id] = {str(b) for b in blobs}
 
-    async def resolve_note(self, note_id: uuid.UUID) -> set[str]:
+    async def resolve_note(self, note_id: uuid.UUID | str) -> set[str]:
+        nid = await _entity_uuid(note_id, org_id=self._org_id, actor_id=self._actor_id)
         async with tenant_session(str(self._org_id), str(self._actor_id)) as s:
-            blobs = await resolve_unit_blobs(s, org_id=self._org_id, note_id=note_id)
+            blobs = await resolve_unit_blobs(s, org_id=self._org_id, note_id=nid)
         return {str(b) for b in blobs}
 
     def gold_set(self, unit_ids: Sequence[str]) -> set[str]:
@@ -479,7 +513,7 @@ async def run_freshness_interactive(
             "project_id": str(project_id) if project_id else None,
         },
     )
-    note_id = uuid.UUID(note["id"])
+    note_id = note["id"]
     note_blobs = await blobmap.resolve_note(note_id)
     pre = await runner.search(
         reader, f"codice di sblocco cassaforte {marker}", project_id=project_id
@@ -488,7 +522,7 @@ async def run_freshness_interactive(
     await runner.call(
         writer,
         "append_note_part",
-        {"note_id": str(note_id), "chunk": v2},
+        {"note_id": note_id, "chunk": v2},
     )
     note_blobs = await blobmap.resolve_note(note_id)
     post = await runner.search(reader, f"codice omega cassaforte {marker}", project_id=project_id)
@@ -1018,7 +1052,7 @@ async def run_multi_agent(
             "project_id": str(project_id) if project_id else None,
         },
     )
-    note_blobs = await blobmap.resolve_note(uuid.UUID(note["id"]))
+    note_blobs = await blobmap.resolve_note(note["id"])
     t0 = time.perf_counter()
     seen_rank: int | None = None
     probes = 0
@@ -1162,7 +1196,7 @@ async def run_multi_agent(
         },
     )
     atom_id = distilled["distilled_note_id"]
-    atom_blobs = await blobmap.resolve_note(uuid.UUID(atom_id))
+    atom_blobs = await blobmap.resolve_note(atom_id)
     pre = await runner.search(reader, f"sintesi cantiere {gate_marker}", project_id=project_id)
     visible_before = _rank_of(pre, atom_blobs) is not None
     await runner.call(human, "garden_review_approve", {"note_id": str(atom_id)})
@@ -1600,7 +1634,7 @@ async def run_review_gate_cycles(
         if not isinstance(distilled, dict) or "distilled_note_id" not in distilled:
             continue
         atom_id = distilled["distilled_note_id"]
-        atom_blobs = await _resolve_blobs(runner, human, uuid.UUID(atom_id))
+        atom_blobs = await _resolve_blobs(runner, human, atom_id)
         run_cycles += 1
         before = await _probe_atom_surfaces(
             runner,
@@ -1650,10 +1684,11 @@ async def run_review_gate_cycles(
 
 
 async def _resolve_blobs(
-    runner: ScenarioRunner, actor: ScenarioActor, note_id: uuid.UUID
+    runner: ScenarioRunner, actor: ScenarioActor, note_id: uuid.UUID | str
 ) -> set[str]:
+    nid = await _entity_uuid(note_id, org_id=actor.org_id, actor_id=actor.user_id)
     async with tenant_session(str(actor.org_id), str(actor.user_id)) as s:
-        blobs = await resolve_unit_blobs(s, org_id=actor.org_id, note_id=note_id)
+        blobs = await resolve_unit_blobs(s, org_id=actor.org_id, note_id=nid)
     return {str(b) for b in blobs}
 
 
@@ -1841,7 +1876,7 @@ async def run_dense_visibility_probe(
             "project_id": str(project_id) if project_id else None,
         },
     )
-    note_blobs = await _resolve_blobs(runner, reader, uuid.UUID(note["id"]))
+    note_blobs = await _resolve_blobs(runner, reader, note["id"])
     # Query with disjoint vocabulary (no shared content word) — dense-only.
     res = await runner.search(
         reader, "raduno di emergenza punto d'incontro nord", project_id=project_id
@@ -1907,7 +1942,7 @@ async def run_personal_to_shared(
         },
     )
     note_id = note["id"]
-    note_blobs = await _resolve_blobs(runner, owner, uuid.UUID(note_id))
+    note_blobs = await _resolve_blobs(runner, owner, note_id)
     # (2) peer cannot find it in the project perimeter while it is personal.
     peer_pre = await runner.search(peer, f"combinazione {marker}", project_id=project_id)
     hidden_before_share = _rank_of(peer_pre, note_blobs) is None

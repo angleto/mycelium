@@ -7,11 +7,13 @@ loading with auth stripped, and dispatch with the principal injected.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from collections.abc import Iterator
 
 import pytest
 from _fake_embedder import FakeEmbedder
+from mcp.types import TextContent
 
 import mycelium_mcp.gateway as gw
 from mycelium_core.db import admin_session
@@ -297,12 +299,24 @@ async def test_telemetry_is_noop_when_unset(tmp_path, monkeypatch) -> None:
 # ── MCP gateway I/O metering (op='mcp_io', WS task e30d188e) ──────────
 
 
-def test_estimate_tokens_is_char_over_4() -> None:
-    """The coarse token estimate is ceil(compact-JSON-chars / 4)."""
+def test_estimate_tokens_uses_the_measured_ratio() -> None:
+    """The estimate is ceil(compact-JSON bytes / BYTES_PER_TOKEN).
+
+    The divisor was a rule-of-thumb 4, spelled out in this module, in
+    ``scripts/perf/usage_report.py`` and in ``scripts/perf/measure_baseline.py``.
+    Measured on 2026-09-17 with the cl100k tokenizer over 721 recorded gateway
+    results (1,592,718 bytes for 553,547 tokens) the real ratio is 2.87, so all
+    three under-reported by 28%. It is now one constant in ``billing``, next to
+    the fee it denominates, and this test pins the arithmetic rather than the
+    number so a future re-measurement moves one place.
+    """
+    from mycelium_core.services import billing
+
     payload = {"a": "x" * 40, "b": [1, 2, 3]}
-    n = len(json.dumps(payload, separators=(",", ":"), default=str))
-    assert gw._estimate_tokens(payload) == (n + 3) // 4
-    assert gw._estimate_tokens([]) == 1  # "[]" -> ceil(2/4)
+    n = len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
+    assert gw._estimate_tokens(payload) == math.ceil(n / billing.BYTES_PER_TOKEN)
+    assert gw._estimate_tokens is billing.estimate_tokens
+    assert gw._estimate_tokens([]) == 1  # "[]" is 2 bytes -> one token
 
 
 async def _seed_card(org_id: uuid.UUID, user_id: uuid.UUID, *, with_card: bool) -> None:
@@ -463,3 +477,56 @@ async def test_bootstrap_payloads_never_write_a_non_meta_tool_as_a_call() -> Non
         assert called <= _META_TOOLS, (
             f"not callable on this surface: {sorted(called - _META_TOOLS)}"
         )
+
+
+async def test_execute_result_reaches_the_client_as_one_compact_block() -> None:
+    """The execute path is the one that pays for formatting.
+
+    ``search_tools`` / ``describe_tools`` annotate a ``list[dict]`` return, so
+    FastMCP gives them an output schema and the client reads the compact
+    ``structuredContent``. ``execute_tool`` returns ``Any``, which took the
+    ``pydantic_core.to_json(..., indent=2)`` path in ``_convert_to_content``:
+    measured over 721 recorded gateway calls on 2026-09-17, that indentation
+    was 12.3% of every result token the server had ever put in a context
+    window, all of it here. Two properties are pinned, because either one
+    alone lets the bytes back: the block is compact, and there is exactly ONE
+    of it (a structured return would send the payload twice and leave the
+    client to decide which copy it charges for).
+    """
+    user_id, org_id = await _signup_principal()
+    tok = _PRINCIPAL.set((user_id, org_id, uuid.uuid4()))
+    try:
+        blocks = await gateway.call_tool(
+            "execute_tool", {"name": "create_tag", "arguments": {"kind": "generic", "name": "wire"}}
+        )
+    finally:
+        _PRINCIPAL.reset(tok)
+    assert isinstance(blocks, list) and len(blocks) == 1
+    block = blocks[0]
+    assert isinstance(block, TextContent)
+    text = block.text
+    assert json.loads(text)["name"] == "wire"
+    assert "\n" not in text and ": " not in text and ", " not in text
+
+
+async def test_execute_tool_publishes_no_output_schema() -> None:
+    """The companion to the test above, from the schema side: an output schema
+    is what turns a tool structured, and a structured tool is what puts the
+    payload on the wire twice.
+
+    Observed against the pre-change gateway on 2026-09-17: it PASSED there
+    too, because an ``Any`` return yields no output model either. So this one
+    is not evidence about the defect that was fixed; it is the guard against
+    the obvious future repair of it -- annotating a structured return to get
+    compact ``structuredContent`` -- which would restore compactness and pay
+    for the payload twice."""
+    tool = next(t for t in await gateway.list_tools() if t.name == "execute_tool")
+    assert tool.outputSchema is None
+
+
+async def test_wire_keeps_non_ascii_raw() -> None:
+    """``\\uXXXX`` escapes cost several tokens per accented character and the
+    content here is largely Italian. ``pydantic_core.to_json`` emits raw
+    UTF-8, so this pins a property the replaced path had and ``json.dumps``
+    loses by default."""
+    assert gw._wire({"t": "però"}).text == '{"t":"però"}'

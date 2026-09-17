@@ -55,6 +55,13 @@ class MessageCode(enum.StrEnum):
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
     TASK_NOT_FOUND = "task.not_found"
+    # A short entity id (the ADR-0038 8-hex prefix) that named no row, or
+    # named more than one. Raised where a prefix is expanded on the caller's
+    # behalf: an ambiguous prefix is REFUSED and never resolved to the
+    # freshest candidate, because picking one silently writes to the wrong
+    # entity and the caller has no way to notice.
+    ID_PREFIX_UNKNOWN = "id.prefix_unknown"
+    ID_PREFIX_AMBIGUOUS = "id.prefix_ambiguous"
     CHECKLIST_ITEM_NOT_FOUND = "task.checklist_item.not_found"
     CHECKLIST_ITEM_TEXT_EMPTY = "task.checklist_item.text_empty"
     CHECKLIST_REORDER_MISMATCH = "task.checklist.reorder_mismatch"
@@ -361,6 +368,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.CHECKLIST_ITEM_TEXT_EMPTY: "Checklist item text must not be empty",
         MessageCode.CHECKLIST_REORDER_MISMATCH: (
             "Reorder payload does not match the task's checklist items"
+        ),
+        MessageCode.ID_PREFIX_UNKNOWN: (
+            "No {kinds} has an id starting with {prefix}; pass the full uuid, "
+            "or find it with resolve_prefix"
+        ),
+        MessageCode.ID_PREFIX_AMBIGUOUS: (
+            "{count} entities have an id starting with {prefix}; pass the full "
+            "uuid of the one you mean"
         ),
         MessageCode.TAG_NOT_FOUND: "Tag not found",
         # Raised by services/adjudication.get_adjudication with no

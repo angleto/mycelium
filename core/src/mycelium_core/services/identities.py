@@ -16,6 +16,7 @@ identifier returns the existing row instead of conflicting.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -601,6 +602,39 @@ async def handle_for_identity(
             )
         )
     ).scalar_one_or_none()
+
+
+async def handles_for_identities(
+    session: AsyncSession, *, org_id: uuid.UUID, identity_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """The batch form of :func:`handle_for_identity`, for a page of rows.
+
+    A list surface needs the handle of every row's assignee, and resolving
+    them one at a time is a query per row. Absent ids are simply missing from
+    the map, which is the same "None if absent" contract seen per row."""
+    ids = [i for i in identity_ids if i is not None]
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(Identity.id, Identity.handle).where(
+            Identity.id.in_(ids),
+            Identity.org_id == org_id,
+        )
+    )
+    return {rid: handle for rid, handle in rows if handle}
+
+
+async def handles_for_users(
+    session: AsyncSession, *, user_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """The batch form of :func:`handle_for_user`. Users are not org-scoped
+    here for the same reason the single-row helper is not: ``task.owner_id``
+    is a user id, and the row is already inside the caller's tenant."""
+    ids = [i for i in user_ids if i is not None]
+    if not ids:
+        return {}
+    rows = await session.execute(select(User.id, User.handle).where(User.id.in_(ids)))
+    return {uid: handle for uid, handle in rows if handle}
 
 
 async def handle_for_user(session: AsyncSession, *, user_id: uuid.UUID) -> str | None:

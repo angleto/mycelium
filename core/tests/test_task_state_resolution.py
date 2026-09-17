@@ -3,7 +3,12 @@
 get_task / list_tasks / create_task used to return only ``state_id`` (a bare
 uuid), so an agent could not read a task's state without a separate lookup and
 would sometimes infer the state set from existing tasks. They now resolve the
-state name (+ is_terminal + workflow_id) alongside the id, in one batch query.
+state name (+ is_terminal) alongside the id, in one batch query.
+
+``workflow_id`` is on the FULL shape only. It answers "which machine is this
+task on", which is a question about the page and not about the row, and on a
+page of 200 tasks in one workflow it was the same uuid 200 times; the lean row
+keeps ``state_id``, which is what ``set_task_state`` takes.
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ async def test_tasks_expose_resolved_state_over_mcp() -> None:
     tid = created["id"]
     # create_task return is enriched too.
     assert isinstance(created["state"], str) and created["state"]
-    assert created["workflow_id"]
+    assert "workflow_id" not in created  # lean shape: see the module docstring
 
     full = await get_task(token=token, org_id=org, task_id=tid)
     assert isinstance(full["state"], str) and full["state"]  # a NAME, not the uuid
@@ -45,5 +50,6 @@ async def test_tasks_expose_resolved_state_over_mcp() -> None:
     page = await list_tasks(token=token, org_id=org)
     row = next(x for x in page["items"] if x["id"] == tid)
     assert row["state"] == full["state"]
-    assert row["workflow_id"] == full["workflow_id"]
+    assert row["state_id"] == full["state_id"]
+    assert "workflow_id" not in row
     assert row["state_is_terminal"] is False

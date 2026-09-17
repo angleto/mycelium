@@ -798,7 +798,11 @@ async def test_moving_a_task_through_mcp_without_a_worker_is_the_ordinary_call(
     finally:
         _PRINCIPAL.reset(principal)
 
-    assert res == {"task_id": str(task_id), "version": version + 1}
+    # The id comes back in the short form this surface speaks (ADR-0064): the
+    # gateway shortens a task id on the way out and expands one on the way in,
+    # including in an echo-back like this one, so that every id a caller reads
+    # from Mycelium is spelled the same way whatever call produced it.
+    assert res == {"task_id": str(task_id)[:8], "version": version + 1}
     async with tenant_session(str(org), str(user)) as s:
         assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id == (
             states["working"]
@@ -829,7 +833,7 @@ async def test_reading_who_holds_what_through_mcp_without_naming_a_worker(
     finally:
         _PRINCIPAL.reset(principal)
 
-    assert [r["task_id"] for r in rows] == [str(task_id)]
+    assert [r["task_id"] for r in rows] == [str(task_id)[:8]]  # short form, see above
     assert rows[0]["worker_id"] == str(holder)
     # The NAME travels with it, because neither a person nor an agent can
     # resolve a uuid, and a refusal that names nobody sends both round a

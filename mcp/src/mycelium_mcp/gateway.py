@@ -33,11 +33,13 @@ import json
 import logging
 import math
 import os
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import TextContent
 
 from mycelium_core import __version__
 from mycelium_core.db import tenant_session
@@ -106,6 +108,125 @@ _MCP_IO_MODEL = "mcp:gateway"
 _TELEMETRY_ENV = "MYCELIUM_MCP_TELEMETRY"
 
 
+async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
+    """Replace any short task/note id in ``args`` with the full uuid it names.
+
+    Returns an error envelope when a prefix names nothing or names more than
+    one row, and ``None`` when every argument is fine (``args`` is mutated in
+    place). Ambiguity is REFUSED rather than resolved to the freshest
+    candidate: ``resolve_prefix`` orders its matches, so picking the first
+    would always succeed and would sometimes write to the wrong entity, which
+    the caller has no way to notice. The refusal names the candidates with
+    their full ids, so the next call is a correct one rather than a guess.
+
+    Costs one query per prefix-shaped argument, and nothing at all for a
+    caller that passes full uuids.
+    """
+    principal = _PRINCIPAL.get()
+    if principal is None:
+        return None  # stdio / unauthenticated: no session to resolve against
+    user_id, org_id, _token_id = principal
+    pending: list[tuple[str, str, tuple[str, ...]]] = []
+    for key, value in args.items():
+        if not isinstance(value, str) or len(value) >= _FULL_UUID_LEN:
+            continue
+        if not _PREFIX_RE.match(value):
+            continue
+        kinds = _PREFIX_ARGS.get(key)
+        if kinds is None and key in _PREFIX_ARGS_BY_KIND:
+            discriminator, by_value = _PREFIX_ARGS_BY_KIND[key]
+            sibling = args.get(discriminator)
+            if isinstance(sibling, str):
+                kinds = by_value.get(sibling.strip().lower())
+        if kinds is not None:
+            pending.append((key, value, kinds))
+    if not pending:
+        return None
+    from mycelium_core.services import lookup as lookup_svc
+
+    async with tenant_session(str(org_id), str(user_id), actor_kind="mcp_token") as session:
+        for key, value, kinds in pending:
+            try:
+                # Archived AND deleted are both in scope here, which is wider
+                # than what a picker would ask for. Expanding a prefix is name
+                # resolution, not authorization: ``restore_task`` and
+                # ``restore_note`` exist precisely to act on a soft-deleted
+                # row, and refusing to resolve its id would make them
+                # unreachable by the only id form this surface hands out.
+                # Whether the operation is legal stays the tool's decision.
+                matches = await lookup_svc.resolve_prefix(
+                    session,
+                    prefix=value,
+                    kinds=kinds,
+                    include_archived=True,
+                    include_deleted=True,
+                )
+            except DomainError:
+                # Not a usable prefix at all (too short, not hex). Leave it
+                # alone: the tool's own uuid parsing gives the better message.
+                continue
+            if not matches:
+                return {
+                    "error": {
+                        "code": MessageCode.ID_PREFIX_UNKNOWN.value,
+                        "detail": (
+                            f"no {' or '.join(kinds)} has an id starting with {value!r}; "
+                            "pass the full uuid, or find it with "
+                            "execute_tool(name='resolve_prefix', arguments={'prefix': ...})"
+                        ),
+                        "argument": key,
+                        "prefix": value,
+                    }
+                }
+            if len(matches) > 1:
+                return {
+                    "error": {
+                        "code": MessageCode.ID_PREFIX_AMBIGUOUS.value,
+                        "detail": (
+                            f"{len(matches)} entities have an id starting with {value!r}; "
+                            "pass the full uuid of the one you mean"
+                        ),
+                        "argument": key,
+                        "prefix": value,
+                        "candidates": [
+                            {"kind": m.kind, "id": str(m.id), "title": m.title} for m in matches
+                        ],
+                    }
+                }
+            args[key] = str(matches[0].id)
+    return None
+
+
+def _wire(result: Any) -> TextContent:
+    """Serialize a concrete tool's result the way it will be read: compact
+    JSON, one copy, raw UTF-8.
+
+    FastMCP renders any non-``str`` return with
+    ``pydantic_core.to_json(..., indent=2)`` (``func_metadata``'s
+    ``_convert_to_content``), and ``execute_tool`` is the only meta-tool that
+    reaches that path: ``search_tools`` and ``describe_tools`` annotate a
+    ``list[dict]`` return, so FastMCP builds an output schema for them and the
+    client reads the already-compact ``structuredContent`` instead. Measured
+    on 2026-09-17 over 721 recorded gateway calls, that indentation alone was
+    12.3% of every result token this server has put into a context window
+    (67,873 of 553,547), and all of it on the execute path.
+
+    Returning a ``TextContent`` rather than annotating a structured return is
+    what keeps it at ONE copy on the wire: a structured tool sends the
+    payload twice (``structuredContent`` plus the text block) and leaves it to
+    the client which one it charges for. ``ensure_ascii=False`` because the
+    content is largely Italian and ``\\uXXXX`` escapes cost several tokens per
+    accented character.
+
+    What it does not cover: anything inside the payload. This is the envelope;
+    the content is slimmed by the serializers in ``server.py``.
+    """
+    return TextContent(
+        type="text",
+        text=json.dumps(result, separators=(",", ":"), default=str, ensure_ascii=False),
+    )
+
+
 def _result_bytes(result: Any) -> int:
     """UTF-8 byte size of a tool result as the MCP client will read it
     (compact JSON, ``default=str`` for uuid/Decimal/datetime)."""
@@ -135,16 +256,12 @@ def _record(kind: str, tool: str, result: Any) -> None:
         return
 
 
-def _estimate_tokens(payload: Any) -> int:
-    """Coarse char/4 token estimate of a JSON payload, consistent with the
-    22k->1k token measure already in the docs. Compact JSON, ``default=str``
-    for uuid/Decimal/datetime; a serialization failure counts as 0 (never
-    let estimation break a call)."""
-    try:
-        n = len(json.dumps(payload, separators=(",", ":"), default=str))
-    except (TypeError, ValueError):
-        return 0
-    return (n + 3) // 4  # ceil(chars / 4)
+#: The estimator lives in ``billing`` with the constant it divides by: this
+#: module and ``scripts/perf/usage_report.py`` both bill or report on the same
+#: telemetry, and two copies of a ratio are two chances to be measured once and
+#: corrected once. Re-exported under the old name so the call sites below and
+#: their tests keep reading as they did.
+_estimate_tokens = billing.estimate_tokens
 
 
 async def _meter_io(tool: str, request: Any, result: Any) -> None:
@@ -189,6 +306,173 @@ async def _meter_io(tool: str, request: Any, result: Any) -> None:
 # principal comes from the bearer, so these are injected as empties at
 # dispatch time and stripped from every schema the LLM sees.
 _AUTH_PARAMS: tuple[str, ...] = ("token", "org_id")
+
+#: Argument names that take a task or a note id, and which kind each one
+#: takes. These are the two kinds ``lookup.resolve_prefix`` can expand, and
+#: they are the same names ``_shorten_entity_ids`` writes short on the way out:
+#: this surface has to accept back what it hands out, or a short id is a dead
+#: end and the caller pays a ``resolve_prefix`` round trip to undo an economy.
+#:
+#: Expansion happens HERE and not in each tool because this is the single path
+#: every concrete call takes, and because a tool that did its own would be the
+#: 78th place in this package that turns a string into a uuid.
+#: Derived by enumerating every ``@mcp.tool()`` argument that the tool body
+#: passes to ``uuid.UUID(...)``, then keeping the ones whose value is a task or
+#: a note. Re-derive it with:
+#:
+#:     grep -n 'uuid\.UUID(' mcp/src/mycelium_mcp/server.py
+#:
+#: The enumeration matters more than it looks. Two arguments were missed by
+#: naming alone and were found only by a test failing: ``resource_id`` (below,
+#: it is the capability tools' id) and ``seed`` (the note the note-graph walk
+#: starts from), which reads like a parameter and is an id. Every other
+#: uuid-parsed argument on this surface -- ``tag_id``, ``part_id``,
+#: ``comment_id``, ``annotation_id``, ``blob_id``, ``revision_id``,
+#: ``worker_id``, ``budget_id``, ``project_id``, ``user_id`` and the rest -- is
+#: a kind ``resolve_prefix`` cannot expand, and those are exactly the ids this
+#: surface never shortens either. The two halves agree by construction.
+_PREFIX_ARGS: dict[str, tuple[str, ...]] = {
+    "task_id": ("task",),
+    "parent_task_id": ("task",),
+    "predecessor_id": ("task",),
+    "successor_id": ("task",),
+    "other_id": ("task",),
+    "note_id": ("note",),
+    "parent_note_id": ("note",),
+    "child_note_id": ("note",),
+    "dst_note_id": ("note",),
+    "src_note_id": ("note",),
+    "source_note_id": ("note",),
+    "target_note_id": ("note",),
+    # The note a graph traversal starts from (``graph_walk`` /
+    # ``graph_focus_context``), and the note the garden proposes about
+    # (``garden_classify`` / ``garden_apply``).
+    "seed": ("note",),
+    "node_id": ("note",),
+}
+
+#: The same thing for arguments whose kind is decided by a SIBLING argument:
+#: ``{arg: (discriminator_arg, {discriminator_value: kinds})}``. These are the
+#: multiplexer tools, and they matter more than their number suggests --
+#: ``get_text_block_capability(kind='task_description', resource_id=<task id>)``
+#: is the token-free way to read a long description, which is precisely what
+#: ``get_task`` now tells a caller holding a SHORT id to do. Without this entry
+#: the surface would hand out a short id and then refuse it at the one door it
+#: had just pointed at.
+#:
+#: A discriminator value that is absent from the inner map is left alone, which
+#: is how ``kind='annotation'`` stays untouched: an annotation id cannot be
+#: resolved from a prefix. A tool that has the argument but not the
+#: discriminator (``add_annotation`` has ``parent_id`` under ``doc_kind``, and
+#: its parent is another annotation) is left alone for the same reason.
+_PREFIX_ARGS_BY_KIND: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
+    "resource_id": ("kind", {"task_description": ("task",)}),
+    "parent_id": ("parent_kind", {"task": ("task",), "note": ("note",)}),
+    # An annotation's document: a note PART under 'note_part' (not expandable,
+    # so absent from the inner map) or a task under 'task_description'.
+    "doc_id": ("doc_kind", {"task_description": ("task",)}),
+}
+
+#: A value this layer may expand: hex, dashes allowed, at least the ADR-0038
+#: floor of 8 significant digits and shorter than a full uuid. A full uuid is
+#: deliberately NOT matched -- it is passed through untouched, so nothing that
+#: worked before this existed takes a different path now.
+_PREFIX_RE = re.compile(r"^[0-9a-f]{8}[0-9a-f-]*$", re.IGNORECASE)
+_FULL_UUID_LEN = 36
+_SHORT_ID_LEN = 8
+
+#: The top-level keys whose list holds rows of the tool's own entity.
+#: ``open_tasks`` is here because ``whoami`` is the single worst payload to
+#: miss: twelve calls in the whole recorded corpus carried 10% of this
+#: server's context weight, because a bootstrap is read at turn 1 and then sits
+#: in context for a thousand turns. It was missed by the first version of this
+#: walk and found by reading a real payload rather than by a test.
+_ROW_LIST_KEYS: frozenset[str] = frozenset({"items", "hits", "open_tasks"})
+
+#: Tools whose result carries a task or a note under the bare key ``id``: at
+#: the TOP level of the result, or in the rows of a top-level list named by
+#: ``_ROW_LIST_KEYS``. Nothing deeper is touched, which is the rule that keeps
+#: ``get_note``'s ``parts[].id`` (a part) and ``memory_search``'s
+#: ``hits[].blob.id`` (a blob) full -- neither kind can be resolved back from a
+#: prefix, and a short id nobody can expand is data loss rather than economy.
+#:
+#: A tool missing from this list keeps emitting full uuids, which still work
+#: everywhere. That is the property that makes the list safe to be incomplete:
+#: a miss costs tokens, never correctness.
+_ENTITY_ROW_TOOLS: frozenset[str] = frozenset(
+    {
+        "whoami",
+        "get_task",
+        "list_tasks",
+        "create_task",
+        "task_pull",
+        "task_claim",
+        "task_offer",
+        "task_decline",
+        "get_note",
+        "list_notes",
+        "create_note",
+        "get_or_create_task_note",
+    }
+)
+
+
+def _short(value: Any) -> Any:
+    """The short form of one id value, ADR-0038's 8 hex digits."""
+    if isinstance(value, str) and len(value) == _FULL_UUID_LEN:
+        return value[:_SHORT_ID_LEN]
+    return value
+
+
+def _shorten_entity_ids(result: Any, tool: str) -> Any:
+    """Rewrite the task and note ids in a result to their short form.
+
+    Why here and not in the serializers, which is where the entity kind is
+    actually known: the short form is a property of THIS surface, and the
+    other half of it -- accepting a short id back -- lives in
+    ``_expand_prefixes`` a few lines below. A surface that hands out an
+    identifier it cannot consume is broken, and the first version of this did
+    exactly that: the serializers are shared with the stdio registry, which has
+    no expansion, so ``create_task`` there returned an id that its own
+    ``get_task`` refused. Keeping both halves in one module is what makes that
+    mistake impossible rather than merely fixed.
+
+    Two rules, and both are conservative on purpose:
+
+    - a key in ``_PREFIX_ARGS`` (``task_id``, ``note_id``, ...) anywhere in the
+      payload, because the key names the kind;
+    - the bare ``id``, only at the top level or in the rows of a top-level
+      ``_ROW_LIST_KEYS`` list, and only for a tool in ``_ENTITY_ROW_TOOLS``.
+
+    Measured over 32 recorded sessions on 2026-09-17: a uuid costs ~23 tokens
+    against ~4 for the prefix, uuids were 21% of every token this server
+    returned, and 90% of the ones returned were never passed back to anything.
+
+    What it does not cover: uniqueness. Two entities can share 8 hex digits,
+    and this does not check. The guarantee is on the way back in --
+    ``_expand_prefixes`` refuses an ambiguous prefix and names the candidates
+    -- so a collision costs a round trip and never resolves to the wrong row.
+    """
+
+    def walk(node: Any, depth: int, row: bool) -> Any:
+        if isinstance(node, dict):
+            out: dict[str, Any] = {}
+            for key, value in node.items():
+                if key in _PREFIX_ARGS:
+                    out[key] = _short(value)
+                elif key == "id" and row and tool in _ENTITY_ROW_TOOLS:
+                    out[key] = _short(value)
+                elif key in _ROW_LIST_KEYS and depth == 0 and isinstance(value, list):
+                    out[key] = [walk(v, depth + 1, True) for v in value]
+                else:
+                    out[key] = walk(value, depth + 1, False)
+            return out
+        if isinstance(node, list):
+            return [walk(v, depth + 1, row) for v in node]
+        return node
+
+    return walk(result, 0, True)
+
 
 # Coarse domain tags for the optional structural prefilter in
 # ``search_tools``. Embeddings carry the real semantic match; tags are a
@@ -543,7 +827,6 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
     return out
 
 
-@gateway.tool()
 async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
     """Run a concrete Mycelium tool by name with ``arguments`` (the schema
     from ``describe_tools``, minus the auth args). token/org_id are
@@ -607,6 +890,13 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
                 "required_scope": req if req is not UNMAPPED else None,
             }
         }
+    # Short ids are expanded here, AFTER the scope gate on purpose: a caller
+    # that may not run this tool must not learn from the refusal whether an id
+    # exists, which is the same reasoning that puts the gate before argument
+    # validation.
+    prefix_error = await _expand_prefixes(args)
+    if prefix_error is not None:
+        return prefix_error
     props = (tool.parameters or {}).get("properties", {})
     for p in _AUTH_PARAMS:
         if p in props:
@@ -636,6 +926,10 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
         result = tool.fn(**args)
         if tool.is_async:
             result = await result
+        # Only on the success path: the refusals above carry full uuids on
+        # purpose (an ambiguous prefix is answered with the candidates' whole
+        # ids, which is the one thing that lets the caller get unstuck).
+        result = _shorten_entity_ids(result, name)
         _record("execute", name, result)
         await _meter_io("execute_tool", {"name": name, "arguments": arguments}, result)
         return result
@@ -647,6 +941,26 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
                 "params": jsonable_params(exc.params),
             }
         }
+
+
+# The registered tool is this adapter, not ``execute_tool`` itself: the
+# published surface owes the client a wire format, while the function owes its
+# callers (the test suite, the eval scenarios) a Python value. Splitting them
+# is what lets the wire format change without rewriting every assertion that
+# reads a field off a result. The signature is the one the LLM sees, so it
+# mirrors ``execute_tool``'s exactly; the description is taken verbatim from
+# it so there is one text and not two that drift.
+#
+# ``structured_output=False`` is explicit rather than inferred: a ContentBlock
+# return happens to suppress the output schema today, and this call is what
+# makes the payload-sent-once property a decision instead of an accident.
+@gateway.tool(
+    name="execute_tool",
+    description=execute_tool.__doc__ or "",
+    structured_output=False,
+)
+async def _execute_tool_wire(name: str, arguments: dict[str, Any] | None = None) -> TextContent:
+    return _wire(await execute_tool(name, arguments))
 
 
 __all__ = ["describe_tools", "execute_tool", "gateway", "ping", "prewarm", "search_tools"]

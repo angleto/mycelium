@@ -188,5 +188,11 @@ async def test_mcp_get_task_readback_and_list_fields() -> None:
     listed = next(
         t for t in (await list_tasks(token=token, org_id=org))["items"] if t["id"] == created["id"]
     )
-    assert "owner_id" in listed
+    # The lean row carries accountability as a HANDLE, not as the stored uuid:
+    # same question answered, a few tokens instead of ~23 on every row of every
+    # page, and it is the form ``set_task_assignee`` takes back. Resolved in
+    # batch for the page (``_row_handles``), so the readable form is not an
+    # N+1.
+    assert listed["owner_handle"] == full["owner_handle"]
+    assert "owner_id" not in listed
     assert listed["collaborators_count"] == 1

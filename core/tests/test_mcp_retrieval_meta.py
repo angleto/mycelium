@@ -144,9 +144,14 @@ async def test_mcp_tools_return_the_meta_envelope(_fake_embedder: None) -> None:
 
     us = await search(token=token, org_id=org, q="kilo", project_id=proj)
     assert set(us) == {"hits", "meta"}
-    assert set(us["meta"]) == _META_KEYS
-    # Per-hit model_id is re-exposed on the unified search rows.
-    assert all("model_id" in h for h in us["hits"])
+    # ``search`` adds one key the memory envelope does not have: the
+    # retrieval model. It used to sit on every hit, identical on each; it is
+    # one value per retrieval, so it is hoisted to the response and the rows
+    # carry it again ONLY when a page genuinely mixes models. Asserted as a
+    # separate set rather than by widening _META_KEYS, so a field added to the
+    # shared meta still fails both callers.
+    assert set(us["meta"]) == _META_KEYS | {"model_id"}
+    assert all("model_id" not in h for h in us["hits"])
 
 
 async def test_meta_query_not_embedded_without_embedder() -> None:

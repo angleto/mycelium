@@ -12,7 +12,8 @@ The gateway appends one JSONL row per meta-tool call:
 ``kind`` is ``search`` / ``describe`` / ``execute``; for ``execute`` the
 ``tool`` is the concrete tool name. This script reports, per tool and per
 kind: call count, total/avg response bytes, an estimated token figure
-(bytes / 4, the same coarse rule the baseline script uses) and each row's
+(bytes over ``billing.BYTES_PER_TOKEN``, the measured ratio the meter
+and the baseline script use too) and each row's
 share of the total response cost. That product — frequency x cost — is
 what the static ``measure_baseline.py`` shape numbers cannot give on
 their own.
@@ -36,10 +37,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Same coarse rule as scripts/perf/measure_baseline.py: ~4 bytes/token
-# for JSON text. Approximate; the real Claude tokenizer differs, but the
-# ratio is stable enough to rank and size the buckets.
-_BYTES_PER_TOKEN = 4
+# The ratio lives with the fee it denominates, in ``billing``: this script and
+# the gateway's meter read the same telemetry, and a second copy of the number
+# is a second thing to correct. It was 4 here and in the meter until
+# 2026-09-17, when measuring 721 recorded results with the cl100k tokenizer
+# put it at 2.87 -- the old rule of thumb under-counted by 28%.
+from mycelium_core.services.billing import BYTES_PER_TOKEN as _BYTES_PER_TOKEN
 
 
 @dataclass
@@ -66,7 +69,7 @@ class _Bucket:
             "total_bytes": self.total_bytes,
             "avg_bytes": round(self.avg_bytes, 1),
             "max_bytes": self.max_bytes,
-            "est_total_tokens": self.total_bytes // _BYTES_PER_TOKEN,
+            "est_total_tokens": int(self.total_bytes / _BYTES_PER_TOKEN),
             "share_of_bytes": round(share, 4),
         }
 
@@ -105,7 +108,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "total_calls": len(rows),
         "total_bytes": grand_total,
-        "est_total_tokens": grand_total // _BYTES_PER_TOKEN,
+        "est_total_tokens": int(grand_total / _BYTES_PER_TOKEN),
         "by_kind": {k: b.as_dict(grand_total) for k, b in sorted(by_kind.items())},
         "by_tool": {k: b.as_dict(grand_total) for k, b in tools_sorted},
     }
