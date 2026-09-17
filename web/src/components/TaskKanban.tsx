@@ -7,7 +7,8 @@ import { TaskTimer } from './TaskTimer'
 import { IdentityBadge } from './IdentityBadge'
 import { CopyIdButton } from './CopyIdButton'
 import { PeekButton } from './PeekButton'
-import type { components } from '../shared'
+import { LeaseBadge } from './LeaseBadge'
+import type { Possession, components } from '../shared'
 import { formatDueDate } from '../lib/time'
 
 type Task = components['schemas']['TaskOut']
@@ -30,11 +31,18 @@ export function TaskKanban({
   states,
   allowed,
   onChangeState,
+  possessions,
 }: {
   tasks: Task[]
   states: State[]
   allowed: Map<string, Set<string>>
   onChangeState: (task: Task, toStateId: string) => Promise<void> | void
+  // Who holds each card, indexed by task. Optional so the board stays
+  // renderable before the possessions arrive: a card with no entry is a
+  // card nobody holds, which is also the answer while the request is in
+  // flight, and it is the honest one -- the alternative is a spinner on
+  // every card for a fact that is usually "free".
+  possessions?: Map<string, Possession>
 }) {
   const { t } = useTranslation()
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -215,6 +223,7 @@ export function TaskKanban({
                     </div>
                     <div className="kanban__meta">
                       <PriorityChip priority={tk.priority} score={score} />
+                      <LeaseBadge possession={possessions?.get(tk.id)} />
                       {tk.start_at && tk.duration_minutes ? (
                         <span
                           className="muted"

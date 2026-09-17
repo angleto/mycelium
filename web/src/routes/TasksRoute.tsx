@@ -7,6 +7,8 @@ import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { IdentityBadge } from '../components/IdentityBadge'
 import { TaskKanban } from '../components/TaskKanban'
+import { LeaseBadge } from '../components/LeaseBadge'
+import { SessionsPanel } from '../components/SessionsPanel'
 import { RecentTasks } from '../components/RecentTasks'
 import { TaskTimer } from '../components/TaskTimer'
 import { CopyIdButton } from '../components/CopyIdButton'
@@ -20,9 +22,17 @@ import {
   parseFilter,
   TASKS_LASTSEARCH_KEY,
 } from '../lib/taskFilter'
+import { usePossessions } from '../lib/usePossessions'
+import type { Lease } from '../shared'
 import type { components } from '../shared'
 
+type Worker = components['schemas']['WorkerOut']
+
 type View = 'kanban' | 'list'
+// One page of possessions. Bounded by the sessions running at once,
+// which is a small number by construction: a lease exists only while
+// work is in flight and expires by itself.
+const LEASE_PAGE = 500
 const VIEW_KEY = 'mycelium.tasks.view'
 const SCOPE_KEY = 'mycelium.tasks.scope'
 const DATEFOCUS_KEY = 'mycelium.tasks.dateFocus'
@@ -137,6 +147,16 @@ export function TasksRoute() {
     projectId: focusProjectId,
   } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
+  // Possession (ADR-0063), workspace-wide and in ONE request rather than
+  // one per row. Without it a taken card looks free until somebody opens
+  // it, which with ten sessions pulling from the same column is the
+  // collision this mechanism exists to prevent, discovered too late.
+  const [leases, setLeases] = useState<Lease[]>([])
+  const [workers, setWorkers] = useState<Worker[]>([])
+  // Live possessions are bounded by the sessions actually running, so
+  // one page covers it; this says so out loud instead of quietly
+  // dropping the oldest holds, which are the ones worth seeing.
+  const [leasesCapped, setLeasesCapped] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tags, setTags] = useState<Tag[]>([])
   // Projects come from /projects (not /tags) because only ProjectOut
@@ -389,8 +409,32 @@ export function TasksRoute() {
     setProjectId(focusProjectId || '')
   }, [focusActive, focusClientId, focusProjectId, setClientId, setProjectId])
 
+  // The possession of every task on this board, plus the sessions that
+  // hold it. Refreshed on the same triggers as the task list: every
+  // mutation this view makes that moves a state also ends a lease, and a
+  // badge that outlives the hold it describes is worse than none.
+  const loadPossession = useCallback(async () => {
+    const h = workspaceHeader()
+    const [ls, wk] = await Promise.all([
+      api.GET('/tasks/leases', { params: { header: h, query: { limit: LEASE_PAGE } } }),
+      api.GET('/tasks/workers', { params: { header: h, query: { limit: LEASE_PAGE } } }),
+    ])
+    if (ls.data) {
+      setLeases(ls.data)
+      setLeasesCapped(ls.data.length >= LEASE_PAGE)
+    }
+    if (wk.data) setWorkers(wk.data)
+  }, [])
+
+  // Whether a hold still stands depends on the clock as much as on the
+  // row, so the hook owns the clock and moves it at the next deadline
+  // rather than on a poll.
+  const possessions = usePossessions(leases)
+  const titles = useMemo(() => new Map(tasks.map((tk) => [tk.id, tk.title])), [tasks])
+
   const loadTasks = useCallback(async () => {
     setErr(null)
+    void loadPossession()
     const { data, error } = await api.GET('/tasks', {
       params: {
         header: workspaceHeader(),
@@ -408,7 +452,7 @@ export function TasksRoute() {
       return
     }
     setTasks(data)
-  }, [filter])
+  }, [filter, loadPossession])
 
   useEffect(() => {
     let active = true
@@ -460,6 +504,7 @@ export function TasksRoute() {
         if (tg.data) setTags(tg.data)
         if (pj.data) setProjectsByClient(pj.data)
         if (cl.data) setClientsList(cl.data)
+        void loadPossession()
       } finally {
         if (active) setLoading(false)
       }
@@ -467,7 +512,7 @@ export function TasksRoute() {
     return () => {
       active = false
     }
-  }, [activeId, filter])
+  }, [activeId, filter, loadPossession])
 
   useEffect(() => {
     let active = true
@@ -1279,6 +1324,9 @@ export function TasksRoute() {
         </div>
       )}
 
+      {leasesCapped && <p className="hint">{t('tasks.heldTruncated')}</p>}
+      <SessionsPanel workers={workers} possessions={possessions} titles={titles} />
+
       {loading ? (
         <p className="hint" role="status" aria-live="polite">
           {t('common.loading')}
@@ -1289,6 +1337,7 @@ export function TasksRoute() {
           states={kanbanStates}
           allowed={allowed}
           onChangeState={changeState}
+          possessions={possessions}
         />
       ) : listShown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
@@ -1338,6 +1387,7 @@ export function TasksRoute() {
                   {(tk.tags ?? []).map((g) => (
                     <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
                   ))}
+                  <LeaseBadge possession={possessions.get(tk.id)} />
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />

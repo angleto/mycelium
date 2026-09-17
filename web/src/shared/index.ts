@@ -69,6 +69,9 @@ export {
   parseExtensionRelease,
 } from './extension'
 
+export type { Lease, Possession } from './leases'
+export { possessionOf, possessionsByTask } from './leases'
+
 export type { NoteLinkKind, NoteEdge, NoteLinkGroup } from './noteLinks'
 export {
   NOTE_LINK_KINDS,

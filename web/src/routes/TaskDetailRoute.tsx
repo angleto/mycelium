@@ -31,6 +31,7 @@ import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { pushRecent } from '../lib/recents'
 
+import { usePossession } from '../lib/usePossessions'
 import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
@@ -140,6 +141,10 @@ export function TaskDetailRoute({
   // The live possession, or null when nobody holds the task
   // (ADR-0063). Null is the ordinary case and renders nothing.
   const [lease, setLease] = useState<Lease | null>(null)
+  // Whether that lease still stands is a question about the clock as
+  // much as about the row, and the hook re-asks it when the deadline
+  // passes instead of leaving the banner to outlive the hold.
+  const possession = usePossession(lease)
   const [tags, setTags] = useState<Tag[]>([])
   // /projects, not the project tags: only ProjectOut carries
   // ``client_tag_id``, which couples the two structural selects.
@@ -1157,17 +1162,34 @@ export function TaskDetailRoute({
             reloading changes nothing about who holds it. Rendered only
             when somebody actually holds it, which is the uncommon
             case. */}
-        {lease && !lease.released_at && (
+        {/* Past its deadline a hold is not a hold: the server hands the
+            task to whoever asks next, and the sweep only tidies the row
+            afterwards. Filtering on ``released_at`` alone showed the old
+            holder's name for as long as that took, and told the reader
+            to wait for something that had already happened. The verdict
+            is the one predicate in shared/leases, the same the board
+            badge reads. */}
+        {possession?.kind === 'held' && (
           <div className="taskdetail__held" role="status">
             <span>
               {t('tasks.heldBy', {
-                holder: lease.holder_label,
-                until: fmtDateTime(lease.expires_at),
+                holder: possession.lease.holder_label,
+                until: fmtDateTime(possession.lease.expires_at),
               })}
             </span>
             <button type="button" className="btn--sm" onClick={() => void onTakeBack()}>
               {t('tasks.heldTakeBack')}
             </button>
+          </div>
+        )}
+        {possession?.kind === 'stale' && (
+          <div className="taskdetail__held" role="status">
+            <span>
+              {t('tasks.heldLapsedTitle', {
+                holder: possession.lease.holder_label,
+                until: fmtDateTime(possession.lease.expires_at),
+              })}
+            </span>
           </div>
         )}
         <div className="taskdetail__headeractions">

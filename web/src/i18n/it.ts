@@ -1075,6 +1075,14 @@ export const it: Catalog = {
       'Questo task e tenuto da {{holder}} fino alle {{until}}, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
     heldConflictNoDetail:
       'Questo task e tenuto da un altro worker, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
+    heldLapsed: 'Possesso scaduto',
+    heldLapsedTitle:
+      'Il possesso di {{holder}} e scaduto alle {{until}}. Il task e libero e lo puo prendere chiunque; la riga la ripulisce la prossima bonifica.',
+    heldTruncated:
+      'Troppi possessi da mostrare insieme: qualche scheda potrebbe non risultare presa.',
+    sessionsOpen: 'Sessioni di lavoro ({{count}})',
+    sessionsSeen: 'vista {{when}}',
+    sessionsIdle: 'non tiene niente',
     heldTakeBack: 'Riprendilo',
     heldTakenBack: 'Ripreso. Il task e libero.',
     tagsTitle: 'Tag',

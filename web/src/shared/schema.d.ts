@@ -946,6 +946,208 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers
+         * @description Member: the working sessions that are open in this workspace.
+         */
+        get: operations["list_workers_tasks_workers_get"];
+        put?: never;
+        /**
+         * Open Worker
+         * @description Member: open a working session and get the id that identifies it.
+         *
+         *     Nothing is created in advance and no authorization happens here: the
+         *     one already covering this connection is what lets the caller ask. The
+         *     row grants nothing and is never an authorization input; it exists so
+         *     several sessions on one credential can be told apart, which nothing
+         *     else can do -- the transport is stateless by design and the
+         *     credential is one for all of them.
+         */
+        post: operations["open_worker_tasks_workers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/workers/{worker_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close Worker
+         * @description Member: end a working session and give back every task it holds.
+         *
+         *     The fast half of recovery: a session that is stopped frees its tasks
+         *     now instead of waiting out their deadlines. The slow half needs
+         *     nobody -- a session that dies is reclaimed when its leases expire.
+         */
+        post: operations["close_worker_tasks_workers__worker_id__close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/leases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Leases
+         * @description Member: who holds what across the workspace, and until when.
+         *
+         *     A possession nobody can see is an invisible lock, which is worse than
+         *     no lock: the caller that cannot proceed also cannot say why.
+         */
+        get: operations["list_leases_tasks_leases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/leases/pull": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pull Task
+         * @description Member: take the next unheld task in a state, atomically.
+         *
+         *     Choosing and taking are one statement, which is the whole point:
+         *     list-then-transition is two round trips over a deterministic ranking,
+         *     so every caller that asks gets the same answer and they collide in
+         *     the gap. 404 (``task.lease.queue_empty``) when nothing matches.
+         */
+        post: operations["pull_task_tasks_leases_pull_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/leases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Task Leases
+         * @description Member: this task's possession, and with ``include_released`` its
+         *     history -- which is what says who handed it off for checking.
+         */
+        get: operations["list_task_leases_tasks__task_id__leases_get"];
+        put?: never;
+        /**
+         * Acquire Lease
+         * @description Member: take possession of this task.
+         *
+         *     Idempotent for the same ``worker_id`` (re-acquiring extends), so a
+         *     call whose reply was lost can be retried. 409 when somebody else
+         *     holds it, naming the deadline so the caller can choose between
+         *     waiting and moving on. ``preempt`` is owner-only.
+         */
+        post: operations["acquire_lease_tasks__task_id__leases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/leases/preempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preempt Lease
+         * @description Owner: take a held task back, freeing it for anybody.
+         *
+         *     What a person looking at a stuck board actually wants. Distinct from
+         *     acquiring with ``preempt``, which would assign the task to the
+         *     caller's browser tab and leave it held by something that never
+         *     releases. 404 when nothing was held.
+         */
+        post: operations["preempt_lease_tasks__task_id__leases_preempt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/leases/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew Lease
+         * @description Member: push the deadline out on a lease you hold, for work that
+         *     outlasts it.
+         */
+        post: operations["renew_lease_tasks__task_id__leases_renew_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/leases/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Lease
+         * @description Member: hand a task back without moving it -- you are stopping
+         *     work on something you are not finishing. Moving it to another state
+         *     releases the lease on its own, so this is for giving up, not for
+         *     handing on. 404 when nothing was held.
+         */
+        post: operations["release_lease_tasks__task_id__leases_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -1540,208 +1742,6 @@ export interface paths {
          *     + audit; no assignment). 400 if not offered.
          */
         post: operations["decline_task_tasks__task_id__decline_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/workers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workers
-         * @description Member: the working sessions that are open in this workspace.
-         */
-        get: operations["list_workers_tasks_workers_get"];
-        put?: never;
-        /**
-         * Open Worker
-         * @description Member: open a working session and get the id that identifies it.
-         *
-         *     Nothing is created in advance and no authorization happens here: the
-         *     one already covering this connection is what lets the caller ask. The
-         *     row grants nothing and is never an authorization input; it exists so
-         *     several sessions on one credential can be told apart, which nothing
-         *     else can do -- the transport is stateless by design and the
-         *     credential is one for all of them.
-         */
-        post: operations["open_worker_tasks_workers_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/workers/{worker_id}/close": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Close Worker
-         * @description Member: end a working session and give back every task it holds.
-         *
-         *     The fast half of recovery: a session that is stopped frees its tasks
-         *     now instead of waiting out their deadlines. The slow half needs
-         *     nobody -- a session that dies is reclaimed when its leases expire.
-         */
-        post: operations["close_worker_tasks_workers__worker_id__close_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/leases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Leases
-         * @description Member: who holds what across the workspace, and until when.
-         *
-         *     A possession nobody can see is an invisible lock, which is worse than
-         *     no lock: the caller that cannot proceed also cannot say why.
-         */
-        get: operations["list_leases_tasks_leases_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/leases/pull": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pull Task
-         * @description Member: take the next unheld task in a state, atomically.
-         *
-         *     Choosing and taking are one statement, which is the whole point:
-         *     list-then-transition is two round trips over a deterministic ranking,
-         *     so every caller that asks gets the same answer and they collide in
-         *     the gap. 404 (``task.lease.queue_empty``) when nothing matches.
-         */
-        post: operations["pull_task_tasks_leases_pull_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/leases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Task Leases
-         * @description Member: this task's possession, and with ``include_released`` its
-         *     history -- which is what says who handed it off for checking.
-         */
-        get: operations["list_task_leases_tasks__task_id__leases_get"];
-        put?: never;
-        /**
-         * Acquire Lease
-         * @description Member: take possession of this task.
-         *
-         *     Idempotent for the same ``worker_id`` (re-acquiring extends), so a
-         *     call whose reply was lost can be retried. 409 when somebody else
-         *     holds it, naming the deadline so the caller can choose between
-         *     waiting and moving on. ``preempt`` is owner-only.
-         */
-        post: operations["acquire_lease_tasks__task_id__leases_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/leases/preempt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preempt Lease
-         * @description Owner: take a held task back, freeing it for anybody.
-         *
-         *     What a person looking at a stuck board actually wants. Distinct from
-         *     acquiring with ``preempt``, which would assign the task to the
-         *     caller's browser tab and leave it held by something that never
-         *     releases. 404 when nothing was held.
-         */
-        post: operations["preempt_lease_tasks__task_id__leases_preempt_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/leases/renew": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Renew Lease
-         * @description Member: push the deadline out on a lease you hold, for work that
-         *     outlasts it.
-         */
-        post: operations["renew_lease_tasks__task_id__leases_renew_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/leases/release": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Release Lease
-         * @description Member: hand a task back without moving it -- you are stopping
-         *     work on something you are not finishing. Moving it to another state
-         *     releases the lease on its own, so this is for giving up, not for
-         *     handing on. 404 when nothing was held.
-         */
-        post: operations["release_lease_tasks__task_id__leases_release_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -17630,6 +17630,387 @@ export interface operations {
             };
         };
     };
+    list_workers_tasks_workers_get: {
+        parameters: {
+            query?: {
+                include_closed?: boolean;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_worker_tasks_workers_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerOpenIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_worker_tasks_workers__worker_id__close_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerClosedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_leases_tasks_leases_get: {
+        parameters: {
+            query?: {
+                worker_id?: string | null;
+                include_released?: boolean;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pull_task_tasks_leases_pull_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeasePullIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeasePullOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_task_leases_tasks__task_id__leases_get: {
+        parameters: {
+            query?: {
+                include_released?: boolean;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acquire_lease_tasks__task_id__leases_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseAcquireIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preempt_lease_tasks__task_id__leases_preempt_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    renew_lease_tasks__task_id__leases_renew_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseRenewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_lease_tasks__task_id__leases_release_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseReleaseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_task_tasks__task_id__get: {
         parameters: {
             query?: never;
@@ -19018,387 +19399,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workers_tasks_workers_get: {
-        parameters: {
-            query?: {
-                include_closed?: boolean;
-                limit?: number;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkerOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    open_worker_tasks_workers_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WorkerOpenIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkerOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    close_worker_tasks_workers__worker_id__close_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                worker_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkerClosedOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_leases_tasks_leases_get: {
-        parameters: {
-            query?: {
-                worker_id?: string | null;
-                include_released?: boolean;
-                limit?: number;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pull_task_tasks_leases_pull_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LeasePullIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeasePullOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_task_leases_tasks__task_id__leases_get: {
-        parameters: {
-            query?: {
-                include_released?: boolean;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    acquire_lease_tasks__task_id__leases_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LeaseAcquireIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preempt_lease_tasks__task_id__leases_preempt_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    renew_lease_tasks__task_id__leases_renew_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LeaseRenewIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    release_lease_tasks__task_id__leases_release_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LeaseReleaseIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaseOut"];
                 };
             };
             /** @description Validation Error */

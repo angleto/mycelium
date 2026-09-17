@@ -1078,6 +1078,14 @@ export const en = {
       'This task is held by {{holder}} until {{until}}, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
     heldConflictNoDetail:
       'This task is held by another worker, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
+    heldLapsed: 'Hold lapsed',
+    heldLapsedTitle:
+      'The hold by {{holder}} ran out at {{until}}. The task is free for anybody to take; the row is tidied up by the next sweep.',
+    heldTruncated:
+      'Too many holds to show at once: some cards may not be marked as taken.',
+    sessionsOpen: 'Working sessions ({{count}})',
+    sessionsSeen: 'last seen {{when}}',
+    sessionsIdle: 'holding nothing',
     heldTakeBack: 'Take it back',
     heldTakenBack: 'Taken back. The task is free.',
     tagsTitle: 'Tags',
