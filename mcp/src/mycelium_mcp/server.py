@@ -3584,6 +3584,19 @@ async def worker_close(token: str, org_id: str, worker_id: str) -> dict[str, Any
         return {**_worker(worker), "released_tasks": [str(t) for t in freed]}
 
 
+def _lease_cursor(cursor: str | None) -> tuple[dt.datetime, uuid.UUID] | None:
+    """Decode the opaque page cursor into the listing's sort key.
+
+    The key is ``(acquired_at, id)``, which is the order the service
+    already imposes: a cursor that is not the order's own key would page
+    a different sequence from the one the caller is reading.
+    """
+    if not cursor:
+        return None
+    at, last_id = _decode_cursor(cursor)
+    return dt.datetime.fromisoformat(at), uuid.UUID(last_id)
+
+
 def _lease(x: TaskLease, holder_label: str | None = None) -> dict[str, Any]:
     return _compact(
         {
@@ -3763,25 +3776,42 @@ async def task_leases_list(
     task_id: str | None = None,
     worker_id: str | None = None,
     include_released: bool = False,
+    cursor: str | None = None,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Who holds what, and until when. This is how a session sees its
     collaborators instead of discovering them at a conflict, and how it
     finds out what it was holding when it resumes. ``include_released``
-    adds the history, which is what says who handed a task off."""
+    adds the history, which is what says who handed a task off.
+
+    Returns the paginated envelope ``{items, next_cursor, truncated}``
+    like every other paginated list here: pass ``next_cursor`` back as
+    ``cursor`` for the next page (keyset, so no page repeats a row and
+    none skips one). Live possessions are bounded by the sessions
+    running and fit one page; the history is what grows."""
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await task_leases_svc.list_leases(
-            s,
-            org_id=org,
-            task_id=(uuid.UUID(task_id) if task_id else None),
-            # Narrows to one holder; absent means every holder, which is
-            # the call this tool exists for.
-            worker_id=(uuid.UUID(worker_id) if worker_id else None),
-            include_released=include_released,
-            limit=limit,
+        rows = list(
+            await task_leases_svc.list_leases(
+                s,
+                org_id=org,
+                task_id=(uuid.UUID(task_id) if task_id else None),
+                # Narrows to one holder; absent means every holder, which is
+                # the call this tool exists for.
+                worker_id=(uuid.UUID(worker_id) if worker_id else None),
+                include_released=include_released,
+                after=_lease_cursor(cursor),
+                limit=(limit + 1) if limit > 0 else limit,
+            )
         )
-        labels = await task_leases_svc.labels_for(s, rows)
-        return [_lease(x, labels[x.id]) for x in rows]
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit, key=lambda x: [x.acquired_at, x.id]
+        )
+        labels = await task_leases_svc.labels_for(s, items)
+        return {
+            "items": [_lease(x, labels[x.id]) for x in items],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---

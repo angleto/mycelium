@@ -48,6 +48,7 @@ from mycelium_core.services import task_leases as leases_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import workflow as wf_svc
 from mycelium_core.services.auth import signup
+from mycelium_core.services.memberships import add_member
 from mycelium_mcp.gateway import execute_tool
 from mycelium_mcp.server import _PRINCIPAL
 
@@ -833,9 +834,94 @@ async def test_reading_who_holds_what_through_mcp_without_naming_a_worker(
     finally:
         _PRINCIPAL.reset(principal)
 
-    assert [r["task_id"] for r in rows] == [str(task_id)[:8]]  # short form, see above
-    assert rows[0]["worker_id"] == str(holder)
+    # The paginated envelope every list here speaks, not a bare list: the
+    # live half fits one page, the released history is what grows.
+    assert rows["truncated"] is False and rows["next_cursor"] is None
+    items = rows["items"]
+    assert [r["task_id"] for r in items] == [str(task_id)[:8]]  # short form, see above
+    assert items[0]["worker_id"] == str(holder)
     # The NAME travels with it, because neither a person nor an agent can
     # resolve a uuid, and a refusal that names nobody sends both round a
     # loop that cannot terminate.
-    assert rows[0]["holder"] == "holder-1"
+    assert items[0]["holder"] == "holder-1"
+
+
+# --- paging the history, and telling my sessions from everybody's --------
+
+
+async def test_the_history_pages_without_repeating_or_skipping_a_row(_embedder: None) -> None:
+    """The released list is the only unbounded one here.
+
+    Live possessions are bounded by the sessions running, so a limit
+    covers them and a truncation would be a curiosity. The history keeps
+    a row per acquisition for as long as the retention does, and a limit
+    alone drops the OLDEST rows in silence -- which on this list are the
+    handoffs somebody is looking for. Paged by the order's own key, so
+    the pages partition the rows exactly.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    tasks_ids = await _make_tasks(org, user, 5)
+    worker = await _worker(org, user, "pager")
+    for task_id in tasks_ids:
+        async with tenant_session(str(org), str(user)) as s:
+            await leases_svc.acquire(
+                s, org_id=org, actor_id=user, task_id=task_id, worker_id=worker
+            )
+            await leases_svc.release(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                reason=LeaseRelease.explicit,
+                worker_id=worker,
+            )
+    assert states  # the workflow exists; this test does not move anything
+
+    seen: list[uuid.UUID] = []
+    after: tuple[dt.datetime, uuid.UUID] | None = None
+    for _ in range(10):  # a bound, so a broken cursor fails instead of hanging
+        async with tenant_session(str(org), str(user)) as s:
+            page = await leases_svc.list_leases(
+                s, org_id=org, include_released=True, after=after, limit=2
+            )
+        if not page:
+            break
+        seen += [x.id for x in page]
+        after = (page[-1].acquired_at, page[-1].id)
+
+    assert len(seen) == 5, seen
+    assert len(set(seen)) == 5, "a page repeated a row"
+    async with tenant_session(str(org), str(user)) as s:
+        whole = await leases_svc.list_leases(s, org_id=org, include_released=True, limit=50)
+    assert seen == [x.id for x in whole], "the pages are not the unpaged order"
+
+
+async def test_a_person_can_ask_which_sessions_are_theirs(_embedder: None) -> None:
+    """``mine_only`` where there is no credential to key on.
+
+    Over MCP the narrowing is by token, because every agent session
+    authenticates as the same user and the credential is the finer key.
+    In a browser there is no token at all, so that narrowing would return
+    nothing; the row records who opened it, and for a person that is the
+    answer. Two members of one workspace is the case that tells the two
+    apart from "everything in the org".
+    """
+    org, owner = await _org()
+    member_email = f"{uuid.uuid4().hex[:10]}@example.test"
+    async with admin_session() as s:
+        await signup(s, email=member_email, password="pw-strong-123", org_name="throwaway")
+    async with tenant_session(str(org), str(owner)) as s:
+        member_id = await add_member(
+            s, org_id=org, actor_id=owner, email=member_email, role="member"
+        )
+    async with tenant_session(str(org), str(owner)) as s:
+        mine = await workers_svc.open_worker(s, org_id=org, actor_id=owner, label="mine")
+    async with tenant_session(str(org), str(member_id)) as s:
+        theirs = await workers_svc.open_worker(s, org_id=org, actor_id=member_id, label="theirs")
+
+    async with tenant_session(str(org), str(owner)) as s:
+        everybody = await workers_svc.list_workers(s, org_id=org)
+        only_mine = await workers_svc.list_workers(s, org_id=org, user_id=owner)
+    assert {w.id for w in everybody} >= {mine.id, theirs.id}
+    assert {w.id for w in only_mine} == {mine.id}

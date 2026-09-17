@@ -135,6 +135,7 @@ async def list_workers(
     *,
     org_id: uuid.UUID,
     token_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     include_closed: bool = False,
     limit: int = 50,
 ) -> Sequence[AgentWorker]:
@@ -143,10 +144,20 @@ async def list_workers(
     ``token_id`` narrows to the ones opened on one credential, which is
     the question a resumed session asks about itself. Left out, it
     answers the question a human asks about the workspace.
+
+    ``user_id`` is the same question asked where there is no credential
+    to key on. A browser session has no token, so narrowing it by one
+    would return nothing at all; every worker records who opened it, and
+    for a person that is the finest key there is. The two are not the
+    same narrowing and must not be described as one: a credential is
+    shared by the sessions launched on a machine, and a user by every
+    credential they hold.
     """
     stmt = select(AgentWorker).where(AgentWorker.org_id == org_id)
     if token_id is not None:
         stmt = stmt.where(AgentWorker.opened_by_token_id == token_id)
+    if user_id is not None:
+        stmt = stmt.where(AgentWorker.opened_by_user_id == user_id)
     if not include_closed:
         stmt = stmt.where(AgentWorker.closed_at.is_(None))
     stmt = stmt.order_by(AgentWorker.opened_at.desc(), AgentWorker.id.asc()).limit(limit)

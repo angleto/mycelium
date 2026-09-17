@@ -44,7 +44,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, and_, exists, func, select, text, true, update
+from sqlalchemy import Select, and_, exists, func, or_, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
@@ -912,6 +912,7 @@ async def list_leases(
     task_id: uuid.UUID | None = None,
     worker_id: uuid.UUID | None = None,
     include_released: bool = False,
+    after: tuple[dt.datetime, uuid.UUID] | None = None,
     limit: int = 50,
 ) -> Sequence[TaskLease]:
     """Who holds what, and since when.
@@ -919,6 +920,15 @@ async def list_leases(
     Not optional furniture: a possession nobody can see is an invisible
     lock, which is worse than no lock, because the agent that cannot
     proceed also cannot say why.
+
+    Two collections behind one signature, and only one of them is
+    bounded. Live possessions are bounded by the sessions running, so a
+    page covers them; with ``include_released`` this is the HISTORY, one
+    row per acquisition for as long as the retention keeps it, and a
+    limit alone would drop the oldest rows in silence. Hence ``after``:
+    the keyset is ``(acquired_at, id)``, the order's own key, and both
+    columns are NOT NULL so the predicate is exact -- no page repeats a
+    row and none skips one.
     """
     stmt = select(TaskLease).where(TaskLease.org_id == org_id)
     if task_id is not None:
@@ -927,6 +937,14 @@ async def list_leases(
         stmt = stmt.where(TaskLease.holder_worker_id == worker_id)
     if not include_released:
         stmt = stmt.where(TaskLease.released_at.is_(None))
+    if after is not None:
+        at, last_id = after
+        stmt = stmt.where(
+            or_(
+                TaskLease.acquired_at < at,
+                and_(TaskLease.acquired_at == at, TaskLease.id > last_id),
+            )
+        )
     stmt = stmt.order_by(TaskLease.acquired_at.desc(), TaskLease.id.asc()).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 

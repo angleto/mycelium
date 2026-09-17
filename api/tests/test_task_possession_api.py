@@ -160,3 +160,50 @@ async def test_the_holder_name_is_resolved_for_a_whole_page_at_once() -> None:
 
         rows = (await c.get("/tasks/leases", headers=h)).json()
         assert {x["task_id"]: x["holder_label"] for x in rows} == expected
+
+
+async def test_the_history_pages_over_http_and_my_sessions_can_be_told_apart() -> None:
+    """The two query shapes the interface needs, at the layer where a
+    route can be reachable and still answer the wrong thing.
+
+    The cursor is spelled as its two columns rather than as an opaque
+    token: an HTTP caller already has both fields in the row it just
+    read, and asking it to round-trip a base64 blob buys nothing it
+    cannot do itself.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        worker = (await c.post("/tasks/workers", headers=h, json={"label": "pager"})).json()
+        for i in range(5):
+            task = (await c.post("/tasks", headers=h, json={"title": f"p{i}"})).json()
+            await c.post(f"/tasks/{task['id']}/leases", headers=h, json={"worker_id": worker["id"]})
+            r = await c.post(
+                f"/tasks/{task['id']}/leases/release",
+                headers=h,
+                json={"worker_id": worker["id"]},
+            )
+            assert r.status_code == 200, r.text
+
+        whole = (
+            await c.get("/tasks/leases", headers=h, params={"include_released": True, "limit": 50})
+        ).json()
+        assert len(whole) == 5
+
+        seen: list[str] = []
+        params: dict[str, object] = {"include_released": True, "limit": 2}
+        for _ in range(10):  # bounded, so a broken cursor fails instead of hanging
+            page = (await c.get("/tasks/leases", headers=h, params=params)).json()
+            if not page:
+                break
+            seen += [x["id"] for x in page]
+            params = {
+                "include_released": True,
+                "limit": 2,
+                "after_acquired_at": page[-1]["acquired_at"],
+                "after_id": page[-1]["id"],
+            }
+        assert seen == [x["id"] for x in whole]
+
+        mine = (await c.get("/tasks/workers", headers=h, params={"mine_only": True})).json()
+        assert [w["id"] for w in mine] == [worker["id"]]

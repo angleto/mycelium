@@ -956,6 +956,13 @@ export interface paths {
         /**
          * List Workers
          * @description Member: the working sessions that are open in this workspace.
+         *
+         *     ``mine_only`` narrows to the ones this caller opened. It keys on the
+         *     USER here and on the credential over MCP, and the difference is not
+         *     an oversight: a browser session has no token to key on, and over MCP
+         *     the user is shared by every agent while the credential is shared only
+         *     by the sessions on one machine. Each surface narrows by the finest
+         *     key it actually has.
          */
         get: operations["list_workers_tasks_workers_get"];
         put?: never;
@@ -1014,6 +1021,14 @@ export interface paths {
          *
          *     A possession nobody can see is an invisible lock, which is worse than
          *     no lock: the caller that cannot proceed also cannot say why.
+         *
+         *     With ``include_released`` this is the history, which grows without
+         *     bound, so it pages: pass the last row's ``acquired_at`` and ``id``
+         *     back as ``after_acquired_at`` / ``after_id``. The cursor is spelled
+         *     as its two columns rather than as an opaque token because the rows
+         *     already carry both, and a caller here reads the shape it is paging
+         *     through -- the MCP twin, whose caller does not, gets the opaque
+         *     form.
          */
         get: operations["list_leases_tasks_leases_get"];
         put?: never;
@@ -17659,6 +17674,7 @@ export interface operations {
     list_workers_tasks_workers_get: {
         parameters: {
             query?: {
+                mine_only?: boolean;
                 include_closed?: boolean;
                 limit?: number;
             };
@@ -17772,6 +17788,8 @@ export interface operations {
             query?: {
                 worker_id?: string | null;
                 include_released?: boolean;
+                after_acquired_at?: string | null;
+                after_id?: string | null;
                 limit?: number;
             };
             header: {

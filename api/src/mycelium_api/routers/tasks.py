@@ -621,12 +621,24 @@ async def open_worker(
 @router.get("/workers", response_model=list[WorkerOut])
 async def list_workers(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    mine_only: bool = False,
     include_closed: bool = False,
     limit: int = 50,
 ) -> list[WorkerOut]:
-    """Member: the working sessions that are open in this workspace."""
+    """Member: the working sessions that are open in this workspace.
+
+    ``mine_only`` narrows to the ones this caller opened. It keys on the
+    USER here and on the credential over MCP, and the difference is not
+    an oversight: a browser session has no token to key on, and over MCP
+    the user is shared by every agent while the credential is shared only
+    by the sessions on one machine. Each surface narrows by the finest
+    key it actually has."""
     rows = await workers_svc.list_workers(
-        ctx.session, org_id=ctx.org_id, include_closed=include_closed, limit=limit
+        ctx.session,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id if mine_only else None,
+        include_closed=include_closed,
+        limit=limit,
     )
     return [_worker_out(w) for w in rows]
 
@@ -652,17 +664,32 @@ async def list_leases(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     worker_id: uuid.UUID | None = None,
     include_released: bool = False,
+    after_acquired_at: datetime.datetime | None = None,
+    after_id: uuid.UUID | None = None,
     limit: int = 50,
 ) -> list[LeaseOut]:
     """Member: who holds what across the workspace, and until when.
 
     A possession nobody can see is an invisible lock, which is worse than
-    no lock: the caller that cannot proceed also cannot say why."""
+    no lock: the caller that cannot proceed also cannot say why.
+
+    With ``include_released`` this is the history, which grows without
+    bound, so it pages: pass the last row's ``acquired_at`` and ``id``
+    back as ``after_acquired_at`` / ``after_id``. The cursor is spelled
+    as its two columns rather than as an opaque token because the rows
+    already carry both, and a caller here reads the shape it is paging
+    through -- the MCP twin, whose caller does not, gets the opaque
+    form."""
     rows = await lease_svc.list_leases(
         ctx.session,
         org_id=ctx.org_id,
         worker_id=worker_id,
         include_released=include_released,
+        after=(
+            (after_acquired_at, after_id)
+            if after_acquired_at is not None and after_id is not None
+            else None
+        ),
         limit=limit,
     )
     labels = await lease_svc.labels_for(ctx.session, rows)
