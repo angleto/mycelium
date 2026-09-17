@@ -669,6 +669,23 @@ async def list_leases(
     return [_lease_out(x, labels[x.id]) for x in rows]
 
 
+@router.get("/leases/last-handoff", response_model=list[LeaseOut])
+async def list_last_handoffs(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    limit: int = 500,
+) -> list[LeaseOut]:
+    """Member: who passed each task on, one row per task.
+
+    The other half of what a board needs, and not the same question as
+    who holds it: a card nobody holds is one somebody may pick up, and
+    who did the work before it arrived is what decides whether they
+    should. Only releases with reason ``handoff`` -- work finished and
+    sessions that died answer a different question."""
+    rows = await lease_svc.last_handoffs(ctx.session, org_id=ctx.org_id, limit=limit)
+    labels = await lease_svc.labels_for(ctx.session, rows)
+    return [_lease_out(x, labels[x.id]) for x in rows]
+
+
 @router.post("/leases/pull", response_model=LeasePullOut)
 async def pull_task(
     body: LeasePullIn,

@@ -70,7 +70,7 @@ export {
 } from './extension'
 
 export type { Lease, Possession } from './leases'
-export { possessionOf, possessionsByTask } from './leases'
+export { possessionOf, possessionsByTask, possessionsForBoard } from './leases'
 
 export type { NoteLinkKind, NoteEdge, NoteLinkGroup } from './noteLinks'
 export {

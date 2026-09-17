@@ -1073,11 +1073,12 @@ export const en = {
     properties: 'Properties',
     conflict: 'The task changed meanwhile; reloaded the current version.',
     heldBy: 'Held by {{holder}} until {{until}}',
-    heldByShort: 'Held by {{holder}}',
     heldConflict:
       'This task is held by {{holder}} until {{until}}, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
     heldConflictNoDetail:
       'This task is held by another worker, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
+    handedOffBy: 'from {{holder}}',
+    handedOffTitle: 'Passed on by {{holder}} on {{when}}. Nobody is holding it now.',
     heldLapsed: 'Hold lapsed',
     heldLapsedTitle:
       'The hold by {{holder}} ran out at {{until}}. The task is free for anybody to take; the row is tidied up by the next sweep.',

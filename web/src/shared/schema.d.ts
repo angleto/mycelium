@@ -1024,6 +1024,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/leases/last-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Last Handoffs
+         * @description Member: who passed each task on, one row per task.
+         *
+         *     The other half of what a board needs, and not the same question as
+         *     who holds it: a card nobody holds is one somebody may pick up, and
+         *     who did the work before it arrived is what decides whether they
+         *     should. Only releases with reason ``handoff`` -- work finished and
+         *     sessions that died answer a different question.
+         */
+        get: operations["list_last_handoffs_tasks_leases_last_handoff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/leases/pull": {
         parameters: {
             query?: never;
@@ -17746,6 +17772,42 @@ export interface operations {
             query?: {
                 worker_id?: string | null;
                 include_released?: boolean;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_last_handoffs_tasks_leases_last_handoff_get: {
+        parameters: {
+            query?: {
                 limit?: number;
             };
             header: {

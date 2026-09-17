@@ -31,6 +31,8 @@ test('the board says which cards are taken, and by which session', async ({ page
   const api = await authedApi()
   const title = `possession-e2e-${Date.now()}`
   const freeTitle = `possession-e2e-free-${Date.now()}`
+  const passedTitle = `possession-e2e-passed-${Date.now()}`
+  const author = `w7-${Date.now()}`
   // Unique per run, and not decoration: the e2e database is long
   // lived, a session stays open until somebody closes it, and two runs
   // sharing a label would leave the assertions pointing at whichever
@@ -39,6 +41,9 @@ test('the board says which cards are taken, and by which session', async ({ page
   let taskId = ''
   let freeId = ''
   let freeVersion = 1
+  let passedId = ''
+  let passedVersion = 1
+  let authorId = ''
   let taskVersion = 1
   let workerId = ''
   try {
@@ -69,6 +74,53 @@ test('the board says which cards are taken, and by which session', async ({ page
     const freeTask = (await freeRes.json()) as { id: string; version: number }
     freeId = freeTask.id
     freeVersion = freeTask.version
+
+    // A third card, handed on and then left alone: taken by a session,
+    // moved to the next station, which releases the lease in the same
+    // transaction. Nobody holds it now, and who passed it here is the
+    // fact that decides whether the reader should be the one to check
+    // it.
+    const passedRes = await api.ctx.post('/tasks', {
+      headers: api.headers,
+      data: { title: passedTitle },
+    })
+    expect(
+      passedRes.ok(),
+      `create passed task failed: ${passedRes.status()} ${await passedRes.text()}`,
+    ).toBeTruthy()
+    const passedTask = (await passedRes.json()) as { id: string; version: number }
+    passedId = passedTask.id
+    passedVersion = passedTask.version
+
+    const authorRes = await api.ctx.post('/tasks/workers', {
+      headers: api.headers,
+      data: { label: author },
+    })
+    expect(authorRes.ok(), `open author worker failed: ${authorRes.status()}`).toBeTruthy()
+    authorId = ((await authorRes.json()) as { id: string }).id
+
+    await api.ctx.post(`/tasks/${passedTask.id}/leases`, {
+      headers: api.headers,
+      data: { worker_id: authorId },
+    })
+    const states = (await (
+      await api.ctx.get(`/tasks/${passedTask.id}/states`, { headers: api.headers })
+    ).json()) as { id: string; name: string }[]
+    const working = states.find((x) => x.name === 'in_progress')
+    expect(working, 'the default workflow has an in_progress station').toBeTruthy()
+    const movedRes = await api.ctx.post(`/tasks/${passedTask.id}/state`, {
+      headers: api.headers,
+      data: {
+        state_id: working!.id,
+        expected_version: passedTask.version,
+        worker_id: authorId,
+      },
+    })
+    expect(
+      movedRes.ok(),
+      `handoff move failed: ${movedRes.status()} ${await movedRes.text()}`,
+    ).toBeTruthy()
+    passedVersion = ((await movedRes.json()) as { version: number }).version
 
     const workerRes = await api.ctx.post('/tasks/workers', {
       headers: api.headers,
@@ -124,6 +176,13 @@ test('the board says which cards are taken, and by which session', async ({ page
     const freeRow = page.locator('li.taskrow', { hasText: freeTitle }).first()
     await expect(freeRow).toBeVisible()
     await expect(freeRow.locator('.leasebadge')).toHaveCount(0)
+
+    // And a card nobody holds that WAS handed here says who by, in the
+    // quiet variant: one fact per row, and on a free card that fact is
+    // the provenance.
+    const passedRow = page.locator('li.taskrow', { hasText: passedTitle }).first()
+    await expect(passedRow).toBeVisible()
+    await expect(passedRow.locator('.leasebadge--handoff')).toContainText(author)
   } finally {
     // Closing the session gives back everything it holds, which is the
     // fast half of recovery and also the tidy-up this spec owes: an open
@@ -138,6 +197,18 @@ test('the board says which cards are taken, and by which session', async ({ page
       await api.ctx.post(`/tasks/${taskId}/delete`, {
         headers: api.headers,
         data: { expected_version: taskVersion },
+      })
+    }
+    if (passedId) {
+      await api.ctx.post(`/tasks/${passedId}/delete`, {
+        headers: api.headers,
+        data: { expected_version: passedVersion },
+      })
+    }
+    if (authorId) {
+      await api.ctx.post(`/tasks/workers/${authorId}/close`, {
+        headers: api.headers,
+        data: {},
       })
     }
     if (freeId) {

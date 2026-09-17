@@ -75,3 +75,21 @@ describe('LeaseBadge', () => {
     expect(badge()).toBeNull()
   })
 })
+
+describe('LeaseBadge, the provenance of a free card', () => {
+  it('names who passed it on, quietly', () => {
+    const passed = lease({
+      holder_label: 'w7',
+      released_at: '2026-09-17T09:40:00+00:00',
+      release_reason: 'handoff',
+    })
+    act(() => root.render(<LeaseBadge possession={{ kind: 'handoff', lease: passed }} />))
+    const el = badge()
+    expect(el?.textContent).toContain('w7')
+    // Subordinate by class, not by wording: it informs a choice, it does
+    // not block an action, and a board where every row shouts is a board
+    // nobody scans.
+    expect(el?.classList.contains('leasebadge--handoff')).toBe(true)
+    expect(el?.classList.contains('leasebadge--stale')).toBe(false)
+  })
+})

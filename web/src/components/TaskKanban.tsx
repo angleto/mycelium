@@ -222,8 +222,12 @@ export function TaskKanban({
                       </div>
                     </div>
                     <div className="kanban__meta">
-                      <PriorityChip priority={tk.priority} score={score} />
+                      {/* First in the meta row, i.e. directly under the
+                          title and in the same slot the list uses: on a
+                          column being scanned for work to pick up, "is
+                          it taken" is the first question. */}
                       <LeaseBadge possession={possessions?.get(tk.id)} />
+                      <PriorityChip priority={tk.priority} score={score} />
                       {tk.start_at && tk.duration_minutes ? (
                         <span
                           className="muted"

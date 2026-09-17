@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { possessionOf, possessionsByTask, type Lease } from './leases'
+import { possessionOf, possessionsByTask, possessionsForBoard, type Lease } from './leases'
 
 const NOW = Date.parse('2026-09-17T10:00:00+00:00')
 
@@ -70,5 +70,44 @@ describe('possessionsByTask', () => {
       NOW,
     )
     expect(map.get('t1')?.lease.holder_label).toBe('w2')
+  })
+})
+
+describe('possessionsForBoard', () => {
+  const handoff = (taskId: string, holder: string): Lease =>
+    lease({
+      id: `h-${taskId}`,
+      task_id: taskId,
+      holder_label: holder,
+      released_at: '2026-09-17T09:40:00+00:00',
+      release_reason: 'handoff',
+    })
+
+  it('says who passed on a card nobody is holding', () => {
+    const map = possessionsForBoard([], [handoff('a', 'w7')], NOW)
+    expect(map.get('a')).toMatchObject({ kind: 'handoff' })
+    expect(map.get('a')?.lease.holder_label).toBe('w7')
+  })
+
+  // The rule the whole design turns on: one fact per row, and the one
+  // the reader can act on. A held card cannot be picked up, so who
+  // passed it here decides nothing while somebody has it.
+  it('prefers the live hold over the provenance, never showing both', () => {
+    const map = possessionsForBoard([lease({ task_id: 'a' })], [handoff('a', 'w7')], NOW)
+    expect(map.get('a')?.kind).toBe('held')
+    expect(map.get('a')?.lease.holder_label).toBe('verify-3')
+  })
+
+  // A lapsed hold is free, but what the reader needs first is that the
+  // session working on it stopped -- not who it came from before that.
+  it('keeps a lapsed hold visible instead of replacing it with the provenance', () => {
+    const lapsed = lease({ task_id: 'a', expires_at: '2026-09-17T09:59:00+00:00' })
+    const map = possessionsForBoard([lapsed], [handoff('a', 'w7')], NOW)
+    expect(map.get('a')?.kind).toBe('stale')
+  })
+
+  it('ignores a handoff row that is not released, which is not a handoff at all', () => {
+    const notReleased = lease({ task_id: 'b', released_at: null, release_reason: 'handoff' })
+    expect(possessionsForBoard([], [notReleased], NOW).has('b')).toBe(false)
   })
 })

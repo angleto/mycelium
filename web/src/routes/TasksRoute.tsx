@@ -153,6 +153,12 @@ export function TasksRoute() {
   // collision this mechanism exists to prevent, discovered too late.
   const [leases, setLeases] = useState<Lease[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
+  // Who passed each task on. Read beside the live holds and never shown
+  // on top of one: a card somebody is holding cannot be picked up, so
+  // its provenance decides nothing, while a free card's provenance
+  // decides everything -- the check is done by somebody other than
+  // whoever did the work.
+  const [handedOff, setHandedOff] = useState<Lease[]>([])
   // Live possessions are bounded by the sessions actually running, so
   // one page covers it; this says so out loud instead of quietly
   // dropping the oldest holds, which are the ones worth seeing.
@@ -415,21 +421,25 @@ export function TasksRoute() {
   // badge that outlives the hold it describes is worse than none.
   const loadPossession = useCallback(async () => {
     const h = workspaceHeader()
-    const [ls, wk] = await Promise.all([
+    const [ls, wk, ho] = await Promise.all([
       api.GET('/tasks/leases', { params: { header: h, query: { limit: LEASE_PAGE } } }),
       api.GET('/tasks/workers', { params: { header: h, query: { limit: LEASE_PAGE } } }),
+      api.GET('/tasks/leases/last-handoff', {
+        params: { header: h, query: { limit: LEASE_PAGE } },
+      }),
     ])
     if (ls.data) {
       setLeases(ls.data)
       setLeasesCapped(ls.data.length >= LEASE_PAGE)
     }
     if (wk.data) setWorkers(wk.data)
+    if (ho.data) setHandedOff(ho.data)
   }, [])
 
   // Whether a hold still stands depends on the clock as much as on the
   // row, so the hook owns the clock and moves it at the next deadline
   // rather than on a poll.
-  const possessions = usePossessions(leases)
+  const possessions = usePossessions(leases, handedOff)
   const titles = useMemo(() => new Map(tasks.map((tk) => [tk.id, tk.title])), [tasks])
 
   const loadTasks = useCallback(async () => {
@@ -1387,7 +1397,6 @@ export function TasksRoute() {
                   {(tk.tags ?? []).map((g) => (
                     <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
                   ))}
-                  <LeaseBadge possession={possessions.get(tk.id)} />
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />
@@ -1413,6 +1422,16 @@ export function TasksRoute() {
                       📅 {tk.due_date}
                     </span>
                   ) : null}
+                  {/* Leading the status cluster, immediately before the
+                      priority chip, which is exactly where the kanban
+                      card puts it: the geometry differs between the two
+                      views but the reading order does not, so the eye
+                      learns one place. It sits here rather than beside
+                      the title because the title is what the list is
+                      read FOR -- a chip between the title and its tags
+                      took a fifth of the line and truncated the one
+                      thing nobody can infer. */}
+                  <LeaseBadge possession={possessions.get(tk.id)} />
                   <PriorityChip priority={tk.priority} score={score} />
                   {stateById.has(tk.state_id) ? (
                     <select

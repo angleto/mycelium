@@ -7,10 +7,14 @@ export type Lease = components['schemas']['LeaseOut']
  *  `held` is somebody working on the task now. `stale` is a lease whose
  *  deadline has passed and which the sweep has not reclaimed yet: the
  *  task is free for anybody to take, and saying "held" about it sends
- *  the reader off to wait for something that has already happened. */
+ *  the reader off to wait for something that has already happened.
+ *  `handoff` is nobody working on it and a name for who passed it here,
+ *  which is what decides whether the reader should be the one to pick it
+ *  up: the check is done by somebody other than whoever did the work. */
 export type Possession =
   | { kind: 'held'; lease: Lease }
   | { kind: 'stale'; lease: Lease }
+  | { kind: 'handoff'; lease: Lease }
 
 /** What a lease says about its task at `now` (epoch ms).
  *
@@ -29,6 +33,29 @@ export function possessionOf(lease: Lease | null | undefined, now: number): Poss
   // badge that lingers.
   if (Number.isNaN(until)) return { kind: 'held', lease }
   return until > now ? { kind: 'held', lease } : { kind: 'stale', lease }
+}
+
+/** One fact per task, chosen by what the reader can act on.
+ *
+ *  A card can be both held now and handed here earlier, and showing both
+ *  is what turns a board into a wall of chips. They are not equally
+ *  useful at the same moment: while somebody holds it, the provenance
+ *  changes nothing the reader can do, because the card cannot be taken
+ *  anyway; once it is free, provenance is the whole decision. So live
+ *  possession wins, and the handoff is what a free card says instead of
+ *  saying nothing. */
+export function possessionsForBoard(
+  live: Lease[],
+  handedOff: Lease[],
+  now: number,
+): Map<string, Possession> {
+  const out = possessionsByTask(live, now)
+  for (const lease of handedOff) {
+    if (out.has(lease.task_id)) continue
+    if (!lease.released_at) continue
+    out.set(lease.task_id, { kind: 'handoff', lease })
+  }
+  return out
 }
 
 /** Index one workspace-wide listing by task, for a board that asks

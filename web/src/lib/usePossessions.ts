@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { possessionOf, possessionsByTask, type Lease, type Possession } from '../shared'
+import { possessionOf, possessionsForBoard, type Lease, type Possession } from '../shared'
 
 // Reading the clock is not a render-time act: React may re-render at any
 // moment, and a verdict computed from ``Date.now()`` mid-render is a
@@ -29,10 +29,12 @@ function useDeadlineClock(leases: Lease[]): number {
   return now
 }
 
-/** Who holds each of these tasks, kept true as deadlines pass. */
-export function usePossessions(leases: Lease[]): Map<string, Possession> {
+/** One fact per task -- who holds it, or who passed it on -- kept true
+ *  as deadlines pass. The handoffs move nothing by themselves: they are
+ *  already released, so only the live half needs the clock. */
+export function usePossessions(leases: Lease[], handedOff: Lease[] = EMPTY): Map<string, Possession> {
   const now = useDeadlineClock(leases)
-  return possessionsByTask(leases, now)
+  return possessionsForBoard(leases, handedOff, now)
 }
 
 /** The same question about one task. */

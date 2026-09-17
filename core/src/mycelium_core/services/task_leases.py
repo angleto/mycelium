@@ -827,15 +827,82 @@ async def release_on_transition(
 
 
 async def labels_for(session: AsyncSession, leases: Sequence[TaskLease]) -> dict[uuid.UUID, str]:
-    """Holder names for a page of leases, in one pass.
+    """Holder names for a page of leases, in two queries whatever the page.
 
     The projections need them and cannot each go and look: a list of
     twenty leases resolved one at a time is twenty round trips for a
     column, which is how a read that exists to be cheap stops being
-    cheap. Same resolution as the refusal message uses, so a person sees
-    one name for one holder wherever they meet it.
+    cheap. It said that and then did it anyway -- a call to ``held_by``
+    per row -- which nobody noticed while the only caller was one task's
+    history. A board asks for every live possession at once, so the
+    figure went from twenty to as many as there are sessions, twice.
+
+    Same resolution as ``held_by``, deliberately: a person must see one
+    name for one holder wherever they meet it, in a refusal or in a list.
     """
-    return {x.id: await held_by(session, x) for x in leases}
+    worker_ids = {x.holder_worker_id for x in leases if x.holder_worker_id is not None}
+    user_ids = {x.holder_user_id for x in leases if x.holder_worker_id is None}
+    workers: dict[uuid.UUID, str | None] = {}
+    users: dict[uuid.UUID, str | None] = {}
+    if worker_ids:
+        workers = {
+            wid: label
+            for wid, label in (
+                await session.execute(
+                    select(AgentWorker.id, AgentWorker.label).where(AgentWorker.id.in_(worker_ids))
+                )
+            ).all()
+        }
+    if user_ids:
+        users = {
+            uid: handle
+            for uid, handle in (
+                await session.execute(select(User.id, User.handle).where(User.id.in_(user_ids)))
+            ).all()
+        }
+    out: dict[uuid.UUID, str] = {}
+    for x in leases:
+        if x.holder_worker_id is not None:
+            out[x.id] = workers.get(x.holder_worker_id) or str(x.holder_worker_id)
+        else:
+            out[x.id] = users.get(x.holder_user_id) or str(x.holder_user_id)
+    return out
+
+
+async def last_handoffs(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    limit: int = 500,
+) -> Sequence[TaskLease]:
+    """The most recent HANDOFF per task: who passed this one on.
+
+    The board's other question, and it is not the same as who holds it.
+    A card nobody holds is a card somebody may pick up, and the one fact
+    that decides whether they should is who did the work before it
+    arrived here -- the checking station's rule is that the check is done
+    by somebody other than whoever did it.
+
+    ``handoff`` and not every release: ``done`` is work finished and
+    ``expired`` is a session that died, and neither answers "who passed
+    this to me". That distinction is why the reason column exists.
+
+    One row per task, chosen by the datastore (``DISTINCT ON``) rather
+    than by reading the history and filtering it here: the history grows
+    without bound and per task only its head is ever wanted.
+    """
+    stmt = (
+        select(TaskLease)
+        .where(
+            TaskLease.org_id == org_id,
+            TaskLease.released_at.is_not(None),
+            TaskLease.release_reason == LeaseRelease.handoff.value,
+        )
+        .distinct(TaskLease.task_id)
+        .order_by(TaskLease.task_id, TaskLease.released_at.desc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def list_leases(

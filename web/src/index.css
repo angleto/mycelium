@@ -7131,12 +7131,19 @@ button.btn--danger:hover {
 .leasebadge {
   display: inline-flex;
   align-items: center;
+  gap: var(--sp-4);
   padding: var(--sp-2) var(--sp-6);
   border-radius: var(--radius-4);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
+  /* A session label is chosen by whoever opened the session and can be
+     long. The chip yields rather than pushing the row around; the whole
+     sentence is in the title attribute either way. */
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--info);
   border: 1px solid color-mix(in srgb, var(--info) 33%, transparent);
   background: color-mix(in srgb, var(--info) 10%, transparent);
@@ -7188,4 +7195,16 @@ button.btn--danger:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Who passed a card on, said only where it is useful: on a card nobody
+   holds. Quiet on purpose -- it informs a choice rather than blocking
+   one, and a board where every row shouts is a board nobody scans. */
+.leasebadge--handoff {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+  padding-right: var(--sp-4);
+  font-weight: 500;
 }

@@ -1070,11 +1070,12 @@ export const it: Catalog = {
     properties: 'Proprietà',
     conflict: 'Il task e cambiato nel frattempo; ricaricata la versione corrente.',
     heldBy: 'Tenuto da {{holder}} fino alle {{until}}',
-    heldByShort: 'Tenuto da {{holder}}',
     heldConflict:
       'Questo task e tenuto da {{holder}} fino alle {{until}}, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
     heldConflictNoDetail:
       'Questo task e tenuto da un altro worker, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
+    handedOffBy: 'da {{holder}}',
+    handedOffTitle: 'Passata da {{holder}} il {{when}}. Adesso non la tiene nessuno.',
     heldLapsed: 'Possesso scaduto',
     heldLapsedTitle:
       'Il possesso di {{holder}} e scaduto alle {{until}}. Il task e libero e lo puo prendere chiunque; la riga la ripulisce la prossima bonifica.',
