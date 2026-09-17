@@ -110,21 +110,41 @@ from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
 from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, required_keys
 
-_INSTRUCTIONS = (
+#: What Mycelium is and how to behave in it. Surface-NEUTRAL on purpose: it
+#: names tools ('whoami', 'help') but never writes one as a call, because the
+#: two surfaces do not share a calling convention -- this registry exposes
+#: every tool by name, the HTTP gateway exposes four meta-tools and routes the
+#: rest through ``execute_tool``. Each surface adds its own convention to this
+#: body. Until 2026-09-17 there was no body and no convention: one constant,
+#: shared verbatim by both surfaces, telling every client to "call whoami()"
+#: and to "read platform docs with help(topic)". Over the gateway neither name
+#: is a tool, so a client that believed the text asked its HOST for
+#: ``mcp__claude_ai_Mycelium__help`` and was told "No such tool available" --
+#: a refusal by the host, which reads like a missing capability and is not one
+#: (observed in a real session after 11 successful calls).
+_INSTRUCTIONS_BODY = (
     "You are working through Mycelium, a shared work hub that is ALSO your durable, "
     "portable memory: it persists across machines and MCP clients, so agents coordinate "
-    "through it rather than through machine-local files. AT SESSION START call whoami() "
-    "-- it returns your identity and granted scope, your open assigned tasks, and a "
-    "recall of your durable memory lane, so you resume from Mycelium instead of a local "
-    "file. Your DURABLE, shareable memory lives here: write facts/decisions/an index with "
-    "memory_write on channel 'agent'; durable PROCEDURES live as protected notes. Your "
-    "EPHEMERAL working memory stays with you, the caller (ADR-0049) -- do not store "
-    "scratch/session state here. NEVER write secrets, credentials, production/operator "
-    "runbooks, deploy commands or personal data into this shared store (it is org+project "
-    "shared, without per-actor read isolation): keep those machine-local. Discover tools "
-    "with search_tools(query); read platform docs with help(topic). The human steers and "
-    "gives direction; agents execute and PROPOSE, never impose."
+    "through it rather than through machine-local files. AT SESSION START run the "
+    "'whoami' tool -- it returns your identity and granted scope, your open assigned "
+    "tasks, and a recall of your durable memory lane, so you resume from Mycelium "
+    "instead of a local file. Your DURABLE, shareable memory lives here: write "
+    "facts/decisions/an index with memory_write on channel 'agent'; durable PROCEDURES "
+    "live as protected notes. Your EPHEMERAL working memory stays with you, the caller "
+    "(ADR-0049) -- do not store scratch/session state here. NEVER write secrets, "
+    "credentials, production/operator runbooks, deploy commands or personal data into "
+    "this shared store (it is org+project shared, without per-actor read isolation): "
+    "keep those machine-local. The human steers and gives direction; agents execute and "
+    "PROPOSE, never impose."
 )
+
+#: The registry surface (stdio / the test suite): every tool is a tool.
+_CALLING_REGISTRY = (
+    " This surface lists every Mycelium tool directly, so a tool named in a description "
+    "or in a result -- 'whoami', 'help', 'search_tools' -- is called by that name."
+)
+
+_INSTRUCTIONS = _INSTRUCTIONS_BODY + _CALLING_REGISTRY
 
 mcp: FastMCP = FastMCP("mycelium", instructions=_INSTRUCTIONS)
 
@@ -333,8 +353,8 @@ _OVERVIEW = (
     "scheduling, time tracking and billing, notes with a knowledge graph, a "
     "client/project taxonomy, workflows, email and calendar, and Italian "
     "electronic invoicing (FatturaPA / SdI). The MCP surface is co-equal to the "
-    "web GUI over one service layer (ADR-0001). Use search_tools(query) to find "
-    "a tool for a task; the REST API reference is at /apidocs."
+    "web GUI over one service layer (ADR-0001). Use the 'search_tools' tool to "
+    "find a tool for a task; the REST API reference is at /apidocs."
 )
 
 #: Appended only when there is a drill-down to point at. The overview used to
@@ -344,15 +364,16 @@ _OVERVIEW = (
 #: pointer at an empty list is worse than no pointer: it spends a call to
 #: discover that the thing does not exist.
 _DOCS_POINTER = (
-    " Design and feature docs are listed under 'doc_topics' -- call "
-    "help('<topic>') for a document's full text."
+    " Design and feature docs are listed under 'doc_topics' -- run the 'help' "
+    "tool with topic='<topic>' for a document's full text."
 )
 
 #: Said instead when the docs are not on this deployment, so the absence is a
 #: STATED fact rather than an empty field the reader has to interpret.
 _NO_DOCS_POINTER = (
     " The document set is not installed on this deployment, so 'doc_topics' is "
-    "empty; call help('configuration') for the environment reference."
+    "empty; run the 'help' tool with topic='configuration' for the environment "
+    "reference."
 )
 
 
@@ -458,7 +479,9 @@ def help(topic: str | None = None) -> dict[str, Any]:
         return {
             "error": f"no document matches '{topic}'",
             "doc_topics": topics,
-            "hint": "call help() with no topic for the index, or help('configuration')",
+            "hint": (
+                "run the 'help' tool with no topic for the index, or with topic='configuration'"
+            ),
         }
 
     # The default answer is an INDEX, not the manual. It used to carry the
@@ -473,8 +496,10 @@ def help(topic: str | None = None) -> dict[str, Any]:
         "overview": _OVERVIEW + (_DOCS_POINTER if topics else _NO_DOCS_POINTER),
         "doc_topics": topics,
         "pointers": {
-            "tools": "use search_tools(query) to find an MCP tool for a task",
-            "configuration": "call help('configuration') for the MYCELIUM_* reference",
+            "tools": "the 'search_tools' tool finds an MCP tool for a task",
+            "configuration": (
+                "the 'help' tool with topic='configuration' gives the MYCELIUM_* reference"
+            ),
             "rest_api": "the REST API reference (OpenAPI) is served at /apidocs",
         },
     }
@@ -489,8 +514,9 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
     of your durable memory lane (channel 'agent'), so you resume from Mycelium
     instead of a machine-local file. Durable/shareable memory lives here (write it
     with ``memory_write`` on channel 'agent'; durable procedures as protected
-    notes); ephemeral working memory stays with you, the caller (ADR-0049). Use
-    ``search_tools(query)`` to find tools and ``help(topic)`` for docs."""
+    notes); ephemeral working memory stays with you, the caller (ADR-0049). The
+    ``search_tools`` tool finds tools; the ``help`` tool, argument ``topic``, serves
+    the platform documentation."""
     from sqlalchemy import select as _sel
 
     from mycelium_core.models.agent_token import AgentToken
@@ -630,8 +656,8 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                 "protocol": (
                     "search for the 'Protocollo agente mycelium' protocol note (how to work here)"
                 ),
-                "tools": "search_tools(query) to find an MCP tool",
-                "docs": "help(topic) for platform documentation",
+                "tools": "the 'search_tools' tool finds an MCP tool",
+                "docs": "the 'help' tool, argument 'topic', serves platform documentation",
             },
         }
 

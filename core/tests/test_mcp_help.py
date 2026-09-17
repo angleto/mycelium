@@ -24,7 +24,13 @@ def test_the_index_is_an_index_and_not_the_manual() -> None:
     # And it SAYS where the reference went, so the economy costs nobody a
     # guess: a field that vanishes without a pointer is not cheaper, it is
     # just harder to find.
-    assert "help('configuration')" in idx["pointers"]["configuration"]
+    # Pinned on the CONTENT of the pointer, not on its phrasing: the tool and
+    # the topic that carries the reference. The phrasing moved on 2026-09-17,
+    # when call syntax was dropped from every bootstrap payload -- over the
+    # gateway 'help' is not a tool and a client read "help('configuration')"
+    # as one.
+    cfg = idx["pointers"]["configuration"]
+    assert "help" in cfg and "configuration" in cfg
 
 
 def test_the_config_reference_is_derived_and_leaks_no_secret() -> None:
@@ -42,7 +48,7 @@ def test_the_config_reference_is_derived_and_leaks_no_secret() -> None:
 def test_the_overview_promises_a_drill_down_only_when_there_is_one() -> None:
     """In production ``doc_topics`` was EMPTY -- the runtime image never
     carried ``docs/`` forward from its builder stage -- while the overview
-    said "docs are listed under 'doc_topics' -- call help('<topic>')". A
+    said "docs are listed under 'doc_topics' -- call the 'help' tool". A
     pointer at an empty list is worse than none: it spends a call to learn
     the thing does not exist.
 
@@ -50,7 +56,7 @@ def test_the_overview_promises_a_drill_down_only_when_there_is_one() -> None:
     is asserted below against an empty index."""
     idx = mcp_help()
     assert idx["doc_topics"]
-    assert "help('<topic>')" in idx["overview"]
+    assert "'help'" in idx["overview"] and "<topic>" in idx["overview"]
 
 
 def test_without_docs_the_overview_says_so_instead_of_pointing(
@@ -65,7 +71,7 @@ def test_without_docs_the_overview_says_so_instead_of_pointing(
     idx = mcp_help()
     assert idx["doc_topics"] == []
     assert "not installed on this deployment" in idx["overview"]
-    assert "help('<topic>')" not in idx["overview"]
+    assert "<topic>" not in idx["overview"]
 
 
 def test_help_topic_by_filename() -> None:

@@ -52,13 +52,41 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
-from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL, _scope_permits
+from mycelium_mcp.server import _INSTRUCTIONS_BODY, _PRINCIPAL, _scope_permits
 from mycelium_mcp.server import mcp as _registry
 from mycelium_mcp.tool_scopes import TOOL_SCOPES, UNMAPPED, required_scope_for_call
 
 _log = logging.getLogger("mycelium.mcp.gateway")
 
-gateway: FastMCP = FastMCP("mycelium", instructions=_INSTRUCTIONS)
+#: The calling convention of THIS surface, joined to the surface-neutral body.
+#: It has to be said out loud: the client sees four tools and no hint that the
+#: rest of the catalogue exists, while every description and every result it
+#: will read writes a tool the compact way, ``name(arg=...)``. Read as a call
+#: that notation is a lie here, and a client that believes it asks its host for
+#: a tool that does not exist and is told so by the HOST, not by Mycelium -- a
+#: refusal that reads like a missing capability and is not one. Measured on
+#: 2026-09-17 from a real session: 11 successful calls, then "No such tool
+#: available: mcp__claude_ai_Mycelium__help", because the shared instructions
+#: said "read platform docs with help(topic)". Naming the notation is what
+#: keeps the catalogue's descriptions surface-neutral instead of rewriting
+#: every one of them.
+_CALLING_GATEWAY = (
+    "CALLING CONVENTION, read this before your first call: the only tools on this "
+    "surface are search_tools, describe_tools, execute_tool and ping. Every other "
+    "Mycelium tool -- 'whoami', 'help', 'memory_write', the whole catalogue -- is NOT a "
+    "tool here: you run it as execute_tool(name='<tool>', arguments={...}). Tool descriptions "
+    "and tool results name a tool together with its arguments in the compact source-like "
+    "form a reader expects -- a write_hint spelling out memory_write and its parameters, "
+    "for instance. That is the tool's name and signature, it is never a tool you can call "
+    "directly. Find tools with search_tools, load their schemas with describe_tools, and "
+    "read the platform documentation with "
+    "execute_tool(name='help', arguments={'topic': '<topic>'})."
+)
+
+# The convention comes FIRST here, unlike on the registry surface. The body's
+# second sentence is an imperative -- run 'whoami' -- and an instruction on how
+# to act is worth nothing after the instruction to act.
+gateway: FastMCP = FastMCP("mycelium", instructions=f"{_CALLING_GATEWAY} {_INSTRUCTIONS_BODY}")
 
 # A platform usage fee denominated in payload tokens for the MCP gateway
 # path (decision 2026-06-02; 90e4db3e §6/§13.2, task e30d188e). It is NOT a

@@ -384,3 +384,82 @@ async def test_mcp_io_is_free_without_rate_card() -> None:
     assert await _mcp_io_records(org_id, user_id) == []
     async with tenant_session(str(org_id), str(user_id)) as s:
         assert await billing.balance(s, org_id=org_id) == before
+
+
+# --- Calling convention -------------------------------------------------
+#
+# The gateway serves four tools and ~140 descriptions that name the other
+# tools the compact way, ``name(arg=...)``. A client that reads that notation
+# as a call asks its HOST for a tool that does not exist ("No such tool
+# available: ...Mycelium__help") -- a refusal by the host, which reads like a
+# missing capability and is not one. That happened in a real session on
+# 2026-09-17 because both surfaces shared one instructions string that said
+# "read platform docs with help(topic)". The convention is now stated per
+# surface, and these tests are what keeps it stated.
+
+_META_TOOLS = {"ping", "search_tools", "describe_tools", "execute_tool"}
+
+
+async def _tools_written_as_calls(text: str) -> set[str]:
+    """Names written ``name(`` in agent-facing text that are REAL Mycelium
+    tools. Intersecting with the registry is what keeps ordinary English out:
+    "the protocol note (how to work here)" is not a call to a tool named
+    ``note``, and a bare regex says it is."""
+    import re
+
+    registry = {t.name for t in await gw._registry.list_tools()}
+    return set(re.findall(r"\b([a-z_][a-z0-9_]{2,})\s*\(", text)) & registry
+
+
+def test_gateway_instructions_state_the_convention() -> None:
+    text = gateway.instructions or ""
+    for name in _META_TOOLS:
+        assert name in text, f"the gateway must name its own tool {name!r}"
+    # The routing sentence: without it the four meta-tools are unexplained.
+    assert "execute_tool(name=" in text
+    # And the notation must be disarmed explicitly, because the descriptions
+    # keep using it.
+    assert "never a tool you can call directly" in text
+
+
+async def test_gateway_instructions_never_write_a_non_meta_tool_as_a_call() -> None:
+    """Every tool written as a call in the gateway's instructions is one the
+    client actually has. An imperative like "call whoami()" reaches the model as
+    an instruction it cannot satisfy on this surface."""
+    called = await _tools_written_as_calls(gateway.instructions or "")
+    assert called <= _META_TOOLS, f"not callable on this surface: {sorted(called - _META_TOOLS)}"
+
+
+def test_registry_and_gateway_instructions_share_a_body_not_a_convention() -> None:
+    """The two surfaces describe the same Mycelium and route calls differently.
+    Sharing the whole string is what produced the incident above."""
+    from mycelium_mcp.server import _CALLING_REGISTRY, _INSTRUCTIONS, _INSTRUCTIONS_BODY
+
+    assert _INSTRUCTIONS_BODY in (gateway.instructions or "")
+    assert _INSTRUCTIONS != gateway.instructions
+    assert _CALLING_REGISTRY not in (gateway.instructions or "")
+
+
+async def test_bootstrap_payloads_never_write_a_non_meta_tool_as_a_call() -> None:
+    """``whoami`` and ``help`` are what an agent reads BEFORE it has learned
+    anything, and they arrive after the instructions, so a call written there
+    is the one the model imitates. Their pointers name tools, never call them.
+    The ``memory_lane.write_hint`` is exempt by design: it documents arguments,
+    and the convention text points at exactly that shape."""
+    set_embedder_override(FakeEmbedder)  # whoami recalls the memory lane
+    try:
+        user_id, org_id = await _signup_principal()
+        tok = _PRINCIPAL.set((user_id, org_id, None))
+        try:
+            who = await execute_tool(name="whoami", arguments={})
+            doc = await execute_tool(name="help", arguments={})
+        finally:
+            _PRINCIPAL.reset(tok)
+    finally:
+        set_embedder_override(None)
+
+    for probe in (who["pointers"], doc["pointers"], doc["overview"]):
+        called = await _tools_written_as_calls(json.dumps(probe))
+        assert called <= _META_TOOLS, (
+            f"not callable on this surface: {sorted(called - _META_TOOLS)}"
+        )
