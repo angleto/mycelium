@@ -129,7 +129,13 @@ _INSTRUCTIONS_BODY = (
     "through it rather than through machine-local files. AT SESSION START run the "
     "'whoami' tool -- it returns your identity and granted scope, your open assigned "
     "tasks, and a recall of your durable memory lane, so you resume from Mycelium "
-    "instead of a local file. Your DURABLE, shareable memory lives here: write "
+    "instead of a local file. TAKE work, do not merely move it: open a working session "
+    "once with the 'worker_open' tool and keep the id it returns, then take a task with "
+    "'task_pull' (or 'task_lease_acquire' for one you were handed). Several sessions "
+    "share one credential, so that id is the only thing that tells you apart, and a "
+    "task nobody has taken looks free to every other session -- which is how two of you "
+    "end up doing the same work. Moving a task to another state gives your hold back. "
+    "Your DURABLE, shareable memory lives here: write "
     "facts/decisions/an index with memory_write on channel 'agent'; durable PROCEDURES "
     "live as protected notes. Your EPHEMERAL working memory stays with you, the caller "
     "(ADR-0049) -- do not store scratch/session state here. NEVER write secrets, "
@@ -672,6 +678,17 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
             "pointers": {
                 "protocol": (
                     "search for the 'Protocollo agente mycelium' protocol note (how to work here)"
+                ),
+                # The mechanism exists, is refused by nobody, and was used
+                # by 2 of the 25 tasks in a working state on 2026-09-18.
+                # It is voluntary by design (ADR-0063 keeps every path
+                # that predates it working), and nothing a session read at
+                # turn 1 mentioned it. An efficiency that has to be asked
+                # for is an efficiency nobody gets; so is a coordination
+                # mechanism.
+                "possession": (
+                    "take a task before working it: the 'worker_open' tool once, then "
+                    "'task_pull'. A task nobody holds reads as free to every other session"
                 ),
                 "tools": "the 'search_tools' tool finds an MCP tool",
                 "docs": "the 'help' tool, argument 'topic', serves platform documentation",

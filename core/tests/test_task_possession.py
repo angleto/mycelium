@@ -925,3 +925,35 @@ async def test_a_person_can_ask_which_sessions_are_theirs(_embedder: None) -> No
         only_mine = await workers_svc.list_workers(s, org_id=org, user_id=owner)
     assert {w.id for w in everybody} >= {mine.id, theirs.id}
     assert {w.id for w in only_mine} == {mine.id}
+
+
+async def test_a_session_is_told_to_take_work_before_it_can_collide(_embedder: None) -> None:
+    """The mechanism is voluntary, so it has to be said where a session
+    reads.
+
+    Possession constrains only what it covers -- that is what keeps the
+    UI, the CLI and the scheduler working -- so a session that never
+    takes a task moves it anyway and shows nobody. Measured on
+    2026-09-18, two of the twenty-five tasks in a working state had a
+    holder, and the reason was not refusal: the instructions and
+    ``whoami``, which is what a session reads at turn 1, did not mention
+    the verbs at all. A mechanism that has to be asked for is a
+    mechanism nobody uses.
+
+    Pinned on the two verbs and on both places, because dropping either
+    puts it back to being advice somebody has to go and find.
+    """
+    from mycelium_mcp.server import _INSTRUCTIONS_BODY
+
+    for verb in ("worker_open", "task_pull"):
+        assert verb in _INSTRUCTIONS_BODY, f"the bootstrap instructions must name {verb!r}"
+
+    org, user = await _org()
+    principal = _PRINCIPAL.set((user, org, None))
+    try:
+        me = await execute_tool(name="whoami", arguments={})
+    finally:
+        _PRINCIPAL.reset(principal)
+    pointers = " ".join(me["pointers"].values())
+    for verb in ("worker_open", "task_pull"):
+        assert verb in pointers, f"whoami must point at {verb!r}"
