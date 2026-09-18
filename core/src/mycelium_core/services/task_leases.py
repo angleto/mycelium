@@ -773,6 +773,32 @@ async def assert_may_move(
     """
     lease = await live_lease(session, task_id=task_id)
     if lease is None or not lease.is_live(_now()):
+        # Nobody holds it, which used to end the question: a task nobody
+        # holds was movable by anyone, and that is still true of every
+        # caller that is not an agent credential.
+        #
+        # It is no longer true of one that is, and the measurement is why.
+        # Possession was voluntary, so an agent that never took a task
+        # moved it anyway and appeared nowhere: two holders across
+        # twenty-five tasks in a working state on 2026-09-18, and the
+        # twenty-three others were not refusals but sessions that had
+        # never been told. Saying it in the instructions is the cheap
+        # half; this is the half that cannot be skipped, because the
+        # failure it prevents is SILENT -- two sessions doing the same
+        # work, each believing the task free, neither ever learning
+        # otherwise.
+        #
+        # Scoped by the discriminator this module already trusts for the
+        # owner exemption: a credential, not a person. A human at the
+        # board, a dispatched agent run and the scheduler all keep
+        # moving tasks they never took, which is what ADR-0063 protected
+        # and is still protected here.
+        if get_settings().task_lease_required_for_agents:
+            holder = await resolve_holder(
+                session, org_id=org_id, actor_id=actor_id, worker_id=worker_id
+            )
+            if holder.token_id is not None:
+                raise ConflictError(MessageCode.LEASE_REQUIRED)
         return lease
     holder = await resolve_holder(session, org_id=org_id, actor_id=actor_id, worker_id=worker_id)
     if holder.holds(lease):

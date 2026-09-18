@@ -221,6 +221,7 @@ class MessageCode(enum.StrEnum):
     LEASE_FENCE_STALE = "task.lease.fence_stale"
     LEASE_QUEUE_EMPTY = "task.lease.queue_empty"
     LEASE_SELF_VERIFICATION = "task.lease.self_verification"
+    LEASE_REQUIRED = "task.lease.required"
     WORKER_NOT_FOUND = "worker.not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
@@ -694,6 +695,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.LEASE_QUEUE_EMPTY: ("No unheld task matches in that state"),
         MessageCode.LEASE_SELF_VERIFICATION: (
             "You handed this task off yourself; the check is done by someone else"
+        ),
+        # The refusal has to carry the whole repair, because the caller
+        # that meets it has never used the mechanism: it is meeting it
+        # precisely because nothing told it to.
+        MessageCode.LEASE_REQUIRED: (
+            "Take this task before moving it: open a working session once with "
+            "worker_open, then task_pull to take work from a station, or "
+            "task_lease_acquire for this task by id. Sessions share one credential, so "
+            "a task nobody has taken reads as free to every other session"
         ),
         MessageCode.WORKER_NOT_FOUND: (
             "No such worker in this workspace. Open one with worker_open and pass the id it returns"

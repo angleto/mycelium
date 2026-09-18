@@ -185,6 +185,12 @@ class Settings(BaseSettings):
     # the first number to revisit once the sweep has run for a week and
     # ``release_reason='expired'`` can be counted against what the sweep
     # actually interrupted.
+    # An agent credential must hold a task to move it (ADR-0063 left this
+    # voluntary, which measured 2 holders across 25 tasks in a working
+    # state on 2026-09-18). It is a switch and not a constant because it
+    # can stop every agent session at once: turning it off is the
+    # rollback that does not need a release.
+    task_lease_required_for_agents: bool = True
     task_lease_ttl_seconds: int = 3600
     # The clamp exists so a caller cannot ask for a lease that outlives
     # the sweep's usefulness, in either direction: one second would make

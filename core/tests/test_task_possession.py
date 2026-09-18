@@ -38,9 +38,11 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from sqlalchemy import select
 
+from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import ConflictError, NotFoundError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import agent_workers as workers_svc
@@ -957,3 +959,146 @@ async def test_a_session_is_told_to_take_work_before_it_can_collide(_embedder: N
     pointers = " ".join(me["pointers"].values())
     for verb in ("worker_open", "task_pull"):
         assert verb in pointers, f"whoami must point at {verb!r}"
+
+
+# --- possession is required of a credential, not of a person ------------
+
+
+async def test_an_agent_credential_must_take_a_task_before_it_moves_it(
+    _embedder: None,
+) -> None:
+    """The half that saying it could not buy.
+
+    Possession was voluntary, so a session that never took a task moved
+    it anyway and appeared nowhere: two holders across twenty-five tasks
+    in a working state, and the other twenty-three were sessions nobody
+    had told rather than sessions the server refused. Telling them is
+    cheap and does not close it, because the failure it prevents is
+    SILENT -- two sessions doing the same work, each reading the task as
+    free, neither ever finding out.
+
+    The refusal carries the repair, because whoever meets it has by
+    definition never used the mechanism.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    async with tenant_session(str(org), str(user)) as s:
+        version = (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).version
+
+    async with tenant_session(
+        str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
+    ) as s:
+        with pytest.raises(ConflictError) as err:
+            await tasks_svc.set_state(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                expected_version=version,
+                state_id=states["working"],
+            )
+    assert err.value.code is MessageCode.LEASE_REQUIRED
+    detail = str(err.value)
+    for verb in ("worker_open", "task_pull", "task_lease_acquire"):
+        assert verb in detail, f"the refusal must name {verb!r}: it is the whole repair"
+
+    # And nothing moved: a refused write is refused, not half applied.
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id != (
+            states["working"]
+        )
+
+
+async def test_the_same_agent_moves_it_once_it_has_taken_it(_embedder: None) -> None:
+    """The refusal is a door with a handle, not a wall: the sequence the
+    message names works, and it is the one ``task_pull`` performs in a
+    single call."""
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    holder = await _worker(org, user, "taker")
+    token = str(uuid.uuid4())
+
+    async with tenant_session(
+        str(org), str(user), actor_kind="mcp_token", actor_subject_id=token
+    ) as s:
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder)
+        version = (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).version
+        await tasks_svc.set_state(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=task_id,
+            expected_version=version,
+            state_id=states["working"],
+            worker_id=holder,
+        )
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id == (
+            states["working"]
+        )
+
+
+async def test_a_person_still_moves_a_task_nobody_took(_embedder: None) -> None:
+    """What the enforcement must NOT reach.
+
+    ADR-0063 kept every path that predates possession working, and this
+    is that promise: the board, the CLI, the scheduler and a dispatched
+    agent run move tasks they never took. The discriminator is the one
+    this module already trusts for the owner exemption -- a credential,
+    not a person -- so the rule lands on the population that collides and
+    on nobody else.
+    """
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
+        await tasks_svc.set_state(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=task_id,
+            expected_version=task.version,
+            state_id=states["working"],
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id == (
+            states["working"]
+        )
+
+
+async def test_the_rule_can_be_turned_off_without_a_release(_embedder: None) -> None:
+    """It can stop every agent session at once, so the way back is a
+    setting and not a deploy. Asserted rather than assumed: a switch
+    nobody has seen move is a switch that does not work."""
+    org, user = await _org()
+    states = await _states(org, user)
+    (task_id,) = await _make_tasks(org, user, 1)
+    async with tenant_session(str(org), str(user)) as s:
+        version = (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).version
+
+    settings = get_settings()
+    settings.task_lease_required_for_agents = False
+    try:
+        async with tenant_session(
+            str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
+        ) as s:
+            await tasks_svc.set_state(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                expected_version=version,
+                state_id=states["working"],
+            )
+    finally:
+        settings.task_lease_required_for_agents = True
+
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await tasks_svc.get_task(s, org_id=org, task_id=task_id)).state_id == (
+            states["working"]
+        )
