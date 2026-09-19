@@ -129,6 +129,14 @@ type State = components['schemas']['StateOut']
 type Wf = components['schemas']['WorkflowOut']
 type Client = components['schemas']['ClientOut']
 
+// How many tag chips a LIST row renders before the rest collapse into a
+// "+N". Three, because the tag cell is capped at 40% of the row and three
+// chips of ordinary length (measured: ~250px for
+// "fatturazione / sdi / compliance") is what fits on one line at the
+// content width a 1440px window leaves after the 232px rail. The board
+// card is not capped: it owns its own width and wraps without cost.
+const LIST_TAGS_SHOWN = 3
+
 // Tasks surface: quick-add (title + due + client/project) with inline
 // create; the rows are title-left / actions-right with a colored
 // priority chip and a clock-play/clock-stop timer. Importance/urgency
@@ -1393,10 +1401,28 @@ export function TasksRoute() {
                   ) : null}
                   {tk.title}
                 </Link>
-                <span className="taskrow__tags">
-                  {(tk.tags ?? []).map((g) => (
+                <span
+                  className={`taskrow__tags${
+                    (tk.tags ?? []).length > LIST_TAGS_SHOWN ? ' taskrow__tags--more' : ''
+                  }`}
+                >
+                  {(tk.tags ?? []).slice(0, LIST_TAGS_SHOWN).map((g) => (
                     <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
                   ))}
+                  {(tk.tags ?? []).length > LIST_TAGS_SHOWN ? (
+                    (() => {
+                      const rest = (tk.tags ?? []).slice(LIST_TAGS_SHOWN)
+                      const label = t('tasks.moreTags', {
+                        n: rest.length,
+                        names: rest.map((g) => g.name).join(', '),
+                      })
+                      return (
+                        <span className="chip chip--more" title={label} aria-label={label}>
+                          +{rest.length}
+                        </span>
+                      )
+                    })()
+                  ) : null}
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />

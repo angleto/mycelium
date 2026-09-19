@@ -734,11 +734,32 @@ async def count_tasks(
     return int((await session.execute(stmt)).scalar_one())
 
 
+# Display order of a task's tag chips. The structural pair leads
+# (docs/adr/0003: a task is exactly one project and exactly one client),
+# because that is what a reader scanning a list is looking for, and
+# because a surface that shows only the first few chips must not be the
+# thing that decides WHICH few. Ordered here rather than in the SPA so
+# the list, the board, the CLI and MCP agree without four sorts.
+_TAG_CHIP_ORDER = case(
+    (Tag.kind == TagKind.project, 0),
+    (Tag.kind == TagKind.client, 1),
+    (Tag.kind == TagKind.generic, 2),
+    else_=3,
+)
+
+
 async def tags_by_task(
     session: AsyncSession, *, task_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, list[Tag]]:
     """Batched task -> tags (for showing tag chips in the task list
-    without an N+1)."""
+    without an N+1).
+
+    ORDER BY is not cosmetic here: without it Postgres returns the join
+    in whatever order the plan happens to produce, so the same task's
+    chips could come back in a different order on two consecutive reads
+    of the same page -- and a caller that renders only the first N would
+    show a different N each time.
+    """
     out: dict[uuid.UUID, list[Tag]] = {}
     if not task_ids:
         return out
@@ -746,6 +767,7 @@ async def tags_by_task(
         select(TaskTag.task_id, Tag)
         .join(Tag, Tag.id == TaskTag.tag_id)
         .where(TaskTag.task_id.in_(task_ids))
+        .order_by(_TAG_CHIP_ORDER, Tag.name)
     )
     for tid, tag in rows.all():
         out.setdefault(tid, []).append(tag)

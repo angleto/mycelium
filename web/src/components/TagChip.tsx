@@ -41,7 +41,13 @@ export function TagChip({
       >
         {glyph}
       </span>
-      {name}
+      {/* The name is wrapped rather than a bare text node so a narrow
+          container can ellipsize it. A chip is an atomic label: sliced
+          by an ancestor's overflow it is not merely shortened, it is
+          unreadable AND indistinguishable from any other tag sharing
+          its prefix. Ellipsis is opt-in per surface (see
+          .taskrow__tags); everywhere else this span is inert. */}
+      <span className="chip__label">{name}</span>
     </span>
   )
 }

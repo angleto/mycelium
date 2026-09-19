@@ -653,6 +653,10 @@ button.running__n {
                             (mirrors useMediaQuery MOBILE_QUERY).
      768px  tablet        — kanban column sizing, tasks default view.
      640px  small phone   — single-column form grids, popover sizing.
+    1200px  dense row     — the task list row stacks (see .taskrow). Out
+                            of scale order on purpose: it is not a class
+                            of device, it is the width at which one
+                            specific row runs out of room.
    =========================================================== */
 @media (max-width: 820px) {
   .topbar__hamburger { display: inline-block; }
@@ -4193,8 +4197,17 @@ button.btn--danger:hover {
   .kanban__col { flex-basis: 14rem; max-height: none; }
 }
 .taskrow__title {
-  flex: 1 1 auto;
-  min-width: 0;
+  /* Shrinks FIRST, and by a wide margin. Flex hands a width deficit to
+     every shrinkable item in proportion to (shrink factor x base size),
+     so with the default factor of 1 the tag cell lost width alongside
+     the title -- and the title degrades gracefully (an ellipsis on a
+     line the reader is already reading) while the tag cell does not (an
+     atomic chip sliced in half). A factor of 50 makes the title absorb
+     essentially the whole deficit until it hits the floor below; only
+     then does anything else give. The floor is what keeps "shrinks
+     first" from meaning "disappears". */
+  flex: 1 50 auto;
+  min-width: 6rem;
   font-weight: 600;
   color: var(--text-h);
   /* Single line + ellipsis: a long title must never spill over the
@@ -4238,12 +4251,74 @@ button.btn--danger:hover {
   margin-right: var(--sp-6);
   vertical-align: middle;
 }
+/* The tag cell of a list row. Measured before this rule was written:
+   with ``flex-wrap: wrap`` the row grew to two lines at ~960px of
+   content width and to three at ~800px (three tags), and because
+   ``max-width`` also clamps a flex item's AUTOMATIC MINIMUM SIZE the
+   cell then shrank past its narrowest chip -- at 600px of content it
+   was 17px wide, so ``overflow: hidden`` sliced the chips into
+   unreadable slivers with no ellipsis and no cue that anything was
+   missing.
+   One line, therefore, and a chip either reads or is counted: the cell
+   no longer wraps (uniform row height is what a scanned list is for),
+   the chips shrink with an ellipsis on the label, and TasksRoute caps
+   how many are rendered with a ``+N`` chip carrying the rest. The cap
+   is safe to apply blind because services/tasks.tags_by_task orders the
+   chips project -> client -> generic, so the first few are the ones
+   worth the width. */
 .taskrow__tags {
   display: flex;
   gap: var(--sp-4);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  /* A floor as well, because "the title shrinks first" runs out once the
+     title is at ITS floor, and past that point ``max-width`` would let
+     this cell go to 0px (a max clamps a flex item's automatic minimum
+     size too). 5.5rem is a glyph plus a few characters plus the
+     ellipsis; 8.5rem when a counter is present, since the counter is the
+     one chip whose whole content is the information. */
+  min-width: 5.5rem;
   max-width: 40%;
   overflow: hidden;
+  /* Yields a quarter of what an equally-sized item would: the cell is
+     the last thing that should give, because the title above it
+     degrades to an ellipsis on a line the reader is already reading
+     while a tag name degrades to two letters. Not zero -- a cell that
+     refuses to shrink at all pushes the deficit onto a row that has
+     nowhere left to put it. */
+  flex-shrink: 0.25;
+}
+.taskrow__tags--more {
+  min-width: 8.5rem;
+}
+.taskrow__tags .chip {
+  /* Shrinkable, and below its content: the default ``min-width: auto``
+     on a flex item would hold each chip at full width and hand the
+     excess straight back to the clipping this cell used to do. */
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.taskrow__tags .chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* A step of cushion, taken straight back with a negative margin so the
+     chip is not a step wider. Without it the ellipsis fires on ROUNDING
+     rather than on a shortage: measured at 1440px, a label box came out
+     70.02px against text that wants 70.38 -- a third of a pixel -- and
+     ``text-overflow`` answers any overflow at all by dropping however
+     many characters the ellipsis glyph needs. "sdi" rendered as "s...",
+     on a row with 13px to spare. */
+  padding-right: var(--sp-2);
+  margin-right: calc(-1 * var(--sp-2));
+}
+/* The overflow counter. Never shrinks -- it is the one chip whose whole
+   content IS the information, so shortening it says nothing. It is also
+   why the floor above is not enough on its own: with a counter present
+   the cell has to hold one legible chip AND the counter, or the counter
+   is what falls off the end. */
+.taskrow__tags .chip--more {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .taskrow__sel {
   flex: none;
@@ -4252,11 +4327,32 @@ button.btn--danger:hover {
 .taskrow__state {
   font-size: 0.8rem;
   padding: var(--sp-2) var(--sp-4);
+  /* A select is as wide as its WIDEST option, so one long workflow
+     state name ("waiting for review") sets the width of the control on
+     every row of the list. Capped, because the meta cluster does not
+     shrink and every pixel it takes comes out of the title and the
+     tags. The full name is still in the open list. */
+  max-width: 7rem;
 }
-/* Phone: the task row stacks — title on its own line (wrapping in full),
-   the no-shrink meta cluster (due/priority/state/timer) on the next —
-   instead of squeezing the title to zero width beside the meta. */
-@media (max-width: 640px) {
+/* Same argument as the select, one notch tighter than the 12rem the
+   badge is allowed elsewhere: in a list row the holder's name competes
+   with the title, and it is the title the list is read for. */
+.taskrow__meta .leasebadge {
+  max-width: 7rem;
+}
+/* The task row stacks — title on its own line (wrapping in full), the
+   no-shrink meta cluster (due/priority/state/timer) on the next —
+   instead of squeezing the title to zero width beside the meta.
+   1200px, not the 640px this rule used to carry, because the arithmetic
+   of the row says so rather than the shape of a phone: the meta cluster
+   measures 490-570px and does not shrink, the title floor is 6rem and
+   the tag cell's 5.5rem, and the rail takes 232px before the content
+   box starts. Below ~1150px of window the four do not fit on one line,
+   and what "does not fit" used to mean was a tag chip sliced in half
+   (before) or a row overflowing its card into a horizontal scrollbar
+   (the same rule with the chips protected). Measured at every width
+   from 360 to 1600. */
+@media (max-width: 1200px) {
   .tasklist .taskrow {
     flex-wrap: wrap;
   }

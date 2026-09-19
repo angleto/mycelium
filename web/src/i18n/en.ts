@@ -991,6 +991,7 @@ export const en = {
     nav: 'Tasks',
     title: 'Tasks',
     copyId: 'Copy task ID',
+    moreTags: '{{n}} more tags: {{names}}',
     idCopied: 'ID copied',
     newTitle: 'New task title',
     priority: 'Priority',

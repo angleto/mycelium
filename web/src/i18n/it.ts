@@ -988,6 +988,7 @@ export const it: Catalog = {
     nav: 'Task',
     title: 'Task',
     copyId: 'Copia ID task',
+    moreTags: 'Altri {{n}} tag: {{names}}',
     idCopied: 'ID copiato',
     newTitle: 'Titolo nuovo task',
     priority: 'Priorita',
