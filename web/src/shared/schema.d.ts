@@ -1955,6 +1955,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/activity/watermark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Watermark */
+        get: operations["get_watermark_activity_watermark_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/annotations": {
         parameters: {
             query?: never;
@@ -15335,6 +15352,24 @@ export interface components {
             version: number;
         };
         /**
+         * WatchScope
+         * @description What a watcher is watching. A closed set, because it decides which
+         *     index range is read: an unrecognised value must fail rather than fall
+         *     back to a probe that reads the whole log.
+         * @enum {string}
+         */
+        WatchScope: "tasks";
+        /** WatermarkOut */
+        WatermarkOut: {
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** Changes */
+            changes: number;
+        };
+        /**
          * WebhookDeliveryOut
          * @description One delivery attempt row for the endpoint's recent-activity view.
          */
@@ -19905,6 +19940,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionSealOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_watermark_activity_watermark_get: {
+        parameters: {
+            query: {
+                scope: components["schemas"]["WatchScope"];
+                since?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatermarkOut"];
                 };
             };
             /** @description Validation Error */

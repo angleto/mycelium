@@ -73,3 +73,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0062 The reranker's number has a scale, and the pipeline stops guessing it](0062-the-reranker-number-has-a-scale.md)
 - [0063 Possession of a task is an object, not a column](0063-possession-is-not-state.md) — answers the shareable working-set object left open by [0049](0049-working-memory-delegated-to-the-caller.md)
 - [0064 An MCP result is charged for the whole session, so the default shape is the cheap one](0064-a-result-is-charged-for-the-whole-session.md) — completes the input half of the short id in [0038](0038-uuid-prefix-resolver.md)
+- [0065 A live view asks how much changed, not what changed](0065-a-view-asks-how-much-changed-not-what-changed.md) — reads the activity log of [0002](0002-multi-tenant-optimistic-concurrency-rls.md); defers the push transport of [0036](0036-agent-event-bus.md)

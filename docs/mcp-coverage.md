@@ -449,6 +449,11 @@ accumulating.)
   internal to the invoice and mail pipelines, not user-facing.
 - **Admin-mode elevation**: `X-Admin-Mode` / sudo is an HTTP-header pattern;
   MCP gates the equivalent inline on the `users.is_admin` capability.
+- **Change watermark** (`activity.py`, `GET /activity/watermark`): the count
+  a rendered view polls to notice it went stale. Deliberately REST-only, and
+  not a gap: it exists because a browser holds a snapshot it did not make. An
+  agent reads the task at the moment it acts, so the answer it would get here
+  is one it has no use for.
 
 A capability that has a REST route *and* a clear agent use-case but no MCP
 tool is a real gap — file it as a task rather than letting it rot in prose

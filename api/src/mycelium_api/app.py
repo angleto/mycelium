@@ -17,6 +17,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from mycelium_api import correlation
 from mycelium_api.deps import enforce_route_scope
 from mycelium_api.routers import (
+    activity,
     actors,
     admin_sdi,
     admin_users,
@@ -370,6 +371,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace.router)
     app.include_router(tags.router)
     app.include_router(tasks.router)
+    app.include_router(activity.router)
     app.include_router(annotations_router.router)
     app.include_router(workflows.router)
     app.include_router(dependencies.router)

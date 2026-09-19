@@ -446,6 +446,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/llm-provider"): HUMAN_ONLY,
     ("PUT", "/llm-provider"): HUMAN_ONLY,
     ("GET", "/llm-provider/scaleway/models"): HUMAN_ONLY,
+    # --- activity ---
+    ("GET", "/activity/watermark"): "tasks:read",
     # --- lookup ---
     ("GET", "/lookup/{prefix}"): "tasks:read",
     # --- memory ---

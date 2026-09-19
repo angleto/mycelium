@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, searchTasksByText, workspaceHeader } from '../api/client'
+import { useChangeWatch, watermarkProbe } from '../lib/useChangeWatch'
 import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
@@ -136,6 +137,11 @@ type Client = components['schemas']['ClientOut']
 // content width a 1440px window leaves after the 232px rail. The board
 // card is not capped: it owns its own width and wraps without cost.
 const LIST_TAGS_SHOWN = 3
+
+// The default transport for the watch below. Module scope because it
+// closes over nothing this component owns: the workspace travels on the
+// header the shared client attaches, not in this closure.
+const taskWatermark = watermarkProbe('tasks')
 
 // Tasks surface: quick-add (title + due + client/project) with inline
 // create; the rows are title-left / actions-right with a colored
@@ -471,6 +477,18 @@ export function TasksRoute() {
     }
     setTasks(data)
   }, [filter, loadPossession])
+
+  // Agents write to this workspace while it is on screen, so the board and
+  // the list re-read themselves rather than showing the snapshot they were
+  // mounted with. ``loadTasks`` and not the mount effect: this refresh must
+  // not raise the loading flag, or an agent moving a card every few seconds
+  // would blank the view it is updating.
+  useChangeWatch({
+    enabled: !loading,
+    resetKey: activeId ?? '',
+    probe: taskWatermark,
+    onChange: () => void loadTasks(),
+  })
 
   useEffect(() => {
     let active = true
