@@ -176,8 +176,8 @@ otherwise) transmits it to SdI.
     "customer": {
       "legal_name": "Hahn-Banach SRL",
       "country_code": "IT",
-      "vat_number": "01234567890",
-      "tax_code": "01234567890",
+      "vat_number": "01234567897",
+      "tax_code": "01234567897",
       "address": "Via Roma",
       "civic_number": "1",
       "postal_code": "00100",
