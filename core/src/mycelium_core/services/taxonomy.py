@@ -35,7 +35,23 @@ from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import audit
 from mycelium_core.services.date_format import validate_date_format
 from mycelium_core.services.rbac import require_role
+from mycelium_core.tax_code import is_valid_tax_code, normalize_tax_code, tax_code_country
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
+
+
+def _checked_tax_code(
+    code: str | None, *, country: str | None, country_code: str | None
+) -> str | None:
+    """The one place a client's codice fiscale is admitted: normalized, and
+    refused when it cannot be one. Every write path of ``client_profile`` goes
+    through here, the connector's gap-filling door included, so a placeholder
+    like ``0`` can no longer reach the record and fail later as an XSD error
+    on a document built from it. A foreign counterpart is judged by the XSD
+    facet only (see ``mycelium_core.tax_code``)."""
+    normalized = normalize_tax_code(code)
+    if not is_valid_tax_code(normalized, tax_code_country(country, country_code)):
+        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client tax_code '{normalized}'")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,8 +164,9 @@ def _new_client_profile(
     profile: ClientInput,
     country_code: str | None,
     vat_number: str | None,
+    tax_code: str | None,
 ) -> ClientProfile:
-    """Map a ``ClientInput`` (+ normalized VAT) to a ``ClientProfile`` row.
+    """Map a ``ClientInput`` (+ normalized VAT and tax code) to a ``ClientProfile`` row.
     Shared by ``create_client`` and ``resolve_or_create_client`` so the two
     paths never drift on which fields are persisted."""
     return ClientProfile(
@@ -160,7 +177,7 @@ def _new_client_profile(
         last_name=profile.last_name,
         country_code=country_code,
         vat_number=vat_number,
-        tax_code=profile.tax_code,
+        tax_code=tax_code,
         address=profile.address,
         civic_number=profile.civic_number,
         postal_code=profile.postal_code,
@@ -199,7 +216,10 @@ async def create_client(
     country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
     if not is_valid_vat_code(vat_number, country_code):
         raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client vat_number '{vat_number}'")
-    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number))
+    tax_code = _checked_tax_code(
+        profile.tax_code, country=profile.country, country_code=country_code
+    )
+    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number, tax_code))
     await session.flush()
     await audit.log(
         session,
@@ -275,7 +295,9 @@ async def resolve_or_create_client(
     country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
     if vat_number and not is_valid_vat_code(vat_number, country_code):
         raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client vat_number '{vat_number}'")
-    tax_code = (profile.tax_code or "").strip() or None
+    tax_code = _checked_tax_code(
+        profile.tax_code, country=profile.country, country_code=country_code
+    )
     if not vat_number and not tax_code:
         raise DomainError(
             MessageCode.INVOICE_INVALID, detail="client requires vat_number or tax_code"
@@ -290,7 +312,7 @@ async def resolve_or_create_client(
     if existing is not None:
         return existing
     tag = await _insert_client_tag_dedup(session, org_id, name, vat_number or tax_code)
-    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number))
+    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number, tax_code))
     await session.flush()
     await audit.log(
         session,
@@ -961,6 +983,11 @@ async def fill_client_gaps(
     }
     incoming["country_code"] = country_code
     incoming["vat_number"] = vat_number
+    incoming["tax_code"] = _checked_tax_code(
+        profile.tax_code,
+        country=profile.country or row.country,
+        country_code=country_code or row.country_code,
+    )
 
     filled: list[str] = []
     for field, value in incoming.items():
@@ -1037,6 +1064,10 @@ async def update_client(
             raise DomainError(
                 MessageCode.INVOICE_INVALID, detail=f"client vat_number '{prof.vat_number}'"
             )
+    if "tax_code" in flds or "country" in flds or "country_code" in flds:
+        prof.tax_code = _checked_tax_code(
+            prof.tax_code, country=prof.country, country_code=prof.country_code
+        )
     await session.flush()
     await audit.log(
         session,

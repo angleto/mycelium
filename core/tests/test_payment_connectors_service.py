@@ -2457,6 +2457,51 @@ async def test_the_instrument_is_known_before_the_first_invoice() -> None:
         assert inv.payment_method_code == "MP19", "known before the first charge existed"
 
 
+async def test_a_placeholder_tax_code_beside_a_vat_number_is_dropped_not_filed() -> None:
+    """A ``0`` meaning "none" sat in the CF metadata of 13 production customers
+    (2026-10-16), and every document built for them failed the XSD. The VAT
+    number alone identifies the counterpart, so the placeholder is not a reason
+    to stop: it is simply not a codice fiscale. Observed failing before the fix
+    with ``dry_run_invalid_document``."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    payload = _invoice_paid(
+        event_id="evt_cf0",
+        metadata={"vat_number": "IT09876543210", "tax_code": "0", "sdi_code": "ABCDEFG"},
+    )
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+
+    assert await _run(org_id, connector_id, event_id) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.dry_run_xml is not None
+        assert "<CodiceFiscale>" not in event.dry_run_xml.split("CessionarioCommittente")[1]
+        profile = (
+            await s.execute(select(ClientProfile).where(ClientProfile.vat_number == "09876543210"))
+        ).scalar_one()
+        assert profile.tax_code is None
+
+
+async def test_a_placeholder_tax_code_alone_waits_for_billing_data() -> None:
+    """Without a VAT number the placeholder was the counterpart's ONLY fiscal
+    id, and dropping it leaves none: the payment waits for the customer like
+    any other missing one, instead of failing as an invalid document."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    payload = _invoice_paid(
+        event_id="evt_cf0_alone", metadata={"tax_code": "0", "sdi_code": "ABCDEFG"}
+    )
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+
+    assert await _run(org_id, connector_id, event_id) == "no_billing_data"
+
+
 _VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 
 

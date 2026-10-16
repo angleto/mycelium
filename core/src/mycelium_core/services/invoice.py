@@ -95,6 +95,7 @@ from mycelium_core.services.system_settings import (
     get_sdi_environment,
     get_sdi_intermediary_id_codice,
 )
+from mycelium_core.tax_code import is_valid_tax_code, normalize_tax_code, tax_code_country
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
 
 log = logging.getLogger(__name__)
@@ -238,6 +239,9 @@ async def create_issuer_profile(
     country_code = new_paese or country_code
     if not is_valid_vat_code(vat_number, country_code):
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{vat_number}'")
+    tax_code = normalize_tax_code(tax_code)
+    if not is_valid_tax_code(tax_code):
+        raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"tax_code '{tax_code}'")
     # Closed enums (FatturaPA tables TPxx/MPxx) and a sane integer range
     # for the net-days default: catch typos here before they reach SdI.
     default_payment_conditions_code = validate_condizioni(default_payment_conditions_code)
@@ -344,6 +348,12 @@ async def update_issuer_profile(
         if not is_valid_vat_code(p.vat_number, p.country_code):
             raise DomainError(
                 MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{p.vat_number}'"
+            )
+    if "tax_code" in values:
+        p.tax_code = normalize_tax_code(p.tax_code)
+        if not is_valid_tax_code(p.tax_code):
+            raise DomainError(
+                MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"tax_code '{p.tax_code}'"
             )
     # Promoting to default demotes the rest; the default is moved away
     # only via set_default_issuer_profile (an org keeps exactly one).
@@ -1667,6 +1677,21 @@ def _validate(
     if client_missing:
         raise DomainError(
             MessageCode.INVOICE_INVALID, detail="client: " + ", ".join(client_missing)
+        )
+    # The write paths refuse a malformed codice fiscale, but a record written
+    # before they did may still hold one (a ``0`` meaning "none" was measured
+    # in production). The XSD would reject only the wrong-length ones, and a
+    # well-shaped code with a wrong check character goes all the way to SdI to
+    # be refused there; this names the field on every one of them, before.
+    if not is_valid_tax_code(
+        normalize_tax_code(client.tax_code), tax_code_country(client.country, client.country_code)
+    ):
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail=f"client tax_code '{client.tax_code}'"
+        )
+    if not is_valid_tax_code(normalize_tax_code(fiscal.tax_code)):
+        raise DomainError(
+            MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"tax_code '{fiscal.tax_code}'"
         )
     # Provincia: the XSD only checks the [A-Z]{2} shape; reject a well-formed
     # but nonexistent Italian province before SdI does (scarto).

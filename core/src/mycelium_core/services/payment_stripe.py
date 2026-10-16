@@ -64,6 +64,7 @@ from mycelium_core.services.payment_events import (
     province_code,
     resolve_inclusive,
     signature_matches,
+    tax_code_field,
     within_tolerance,
 )
 
@@ -189,7 +190,8 @@ def _party(
         vat_number=clamp_field(
             "vat_number", first_present(metadata, config.metadata_vat_keys) or vat_from_ids
         ),
-        tax_code=clamp_field("tax_code", first_present(metadata, config.metadata_tax_code_keys)),
+        # One country serves both roles here: Stripe states only the address's.
+        tax_code=tax_code_field(first_present(metadata, config.metadata_tax_code_keys), country),
         address=clamp_field("address", as_str(addr.get("line1"))),
         postal_code=clamp_field("postal_code", as_str(addr.get("postal_code"))),
         city=clamp_field("city", as_str(addr.get("city"))),

@@ -547,7 +547,7 @@ def test_stripe_metadata_wins_over_the_customer_tax_id() -> None:
     intent = _as_emission(_to_intent(_event("invoice.paid", obj)))
 
     assert intent.party.vat_number == "IT11111111111"
-    assert intent.party.tax_code == "rssmra80a01h501u"
+    assert intent.party.tax_code == "RSSMRA80A01H501U"
     assert intent.party.pec == "a@pec.it"
 
 

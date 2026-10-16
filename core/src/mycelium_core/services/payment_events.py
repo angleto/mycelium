@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
+from mycelium_core.tax_code import is_valid_tax_code, normalize_tax_code
+
 # --- money -----------------------------------------------------------------
 
 # Currencies whose minor unit is the major unit (Stripe sends them unscaled).
@@ -116,6 +118,32 @@ def clamp_field(name: str, value: str | None) -> str | None:
         return None
     limit = _FIELD_LIMITS.get(name)
     return value[:limit] if limit else value
+
+
+def tax_code_field(value: str | None, country: str | None) -> str | None:
+    """A provider's codice fiscale, or None when the value cannot be one.
+
+    Dropped, not refused, and not clamped. A provider field is typed by the
+    end customer, and a ``0`` meaning "none" was found on 13 of 343 customers
+    of the production Stripe account (2026-10-16), beside CF fields holding a
+    wrong-length typo or a partita IVA with its ``IT`` prefix. Refusing the
+    event would block a document that the counterpart's partita IVA alone
+    makes valid; keeping the value is what used to happen, and it failed as
+    an XSD error on the built document. Treated as absent, the counterpart is
+    judged on what it really supplied: with a VAT number it is invoiced,
+    without one it waits in ``no_billing_data`` like any customer missing a
+    fiscal id. ``country`` is the counterpart's (see
+    ``mycelium_core.tax_code.tax_code_country``): a foreign one may carry its
+    foreign identifier here, which only the XSD facet constrains.
+
+    What it does not do: tell the operator WHY the field is empty. The
+    no_billing_data reason names the field as missing, and the provider's
+    record still shows the rejected value beside it.
+    """
+    normalized = normalize_tax_code(value)
+    if normalized is None or not is_valid_tax_code(normalized, country):
+        return None
+    return normalized
 
 
 #: Bounds the persisted document can hold: ``invoice_lines.quantity`` is
@@ -784,6 +812,7 @@ __all__ = [
     "register_mapper",
     "resolve_inclusive",
     "signature_matches",
+    "tax_code_field",
     "timestamped_mac",
     "within_tolerance",
 ]

@@ -68,8 +68,10 @@ from mycelium_core.services.payment_events import (
     province_code,
     resolve_inclusive,
     signature_matches,
+    tax_code_field,
     within_tolerance,
 )
+from mycelium_core.tax_code import tax_code_country
 
 SIGNATURE_HEADER = "x-mycelium-signature"
 TIMESTAMP_HEADER = "x-mycelium-timestamp"
@@ -90,6 +92,10 @@ def _party(node: Mapping[str, Any], *, config: MapperConfig) -> PartyIn:
         or " ".join(p for p in (as_str(node.get("first_name")), as_str(node.get("last_name"))) if p)
         or "Cliente"
     )
+    vat_country = country_code(as_str(node.get("country_code"))) or config.default_country_code
+    address_country = country_code(as_str(node.get("country"))) or country_code(
+        as_str(node.get("country_code"))
+    )
     # Clamped like the vendor adapter: our contract is documented but a sender
     # is still someone else's code, and an over-long field must not fail an
     # event with a driver error the runner cannot classify.
@@ -97,16 +103,17 @@ def _party(node: Mapping[str, Any], *, config: MapperConfig) -> PartyIn:
         legal_name=clamp_field("legal_name", name) or "Cliente",
         first_name=clamp_field("first_name", as_str(node.get("first_name"))),
         last_name=clamp_field("last_name", as_str(node.get("last_name"))),
-        country_code=country_code(as_str(node.get("country_code"))) or config.default_country_code,
+        country_code=vat_country,
         vat_number=clamp_field("vat_number", as_str(node.get("vat_number"))),
-        tax_code=clamp_field("tax_code", as_str(node.get("tax_code"))),
+        tax_code=tax_code_field(
+            as_str(node.get("tax_code")), tax_code_country(address_country, vat_country)
+        ),
         address=clamp_field("address", as_str(node.get("address"))),
         civic_number=clamp_field("civic_number", as_str(node.get("civic_number"))),
         postal_code=clamp_field("postal_code", as_str(node.get("postal_code"))),
         city=clamp_field("city", as_str(node.get("city"))),
         province=province_code(as_str(node.get("province"))),
-        country=country_code(as_str(node.get("country")))
-        or country_code(as_str(node.get("country_code"))),
+        country=address_country,
         sdi_code=clamp_field("sdi_code", as_str(node.get("sdi_code"))),
         pec=clamp_field("pec", as_str(node.get("pec"))),
         email=clamp_field("email", as_str(node.get("email"))),

@@ -230,7 +230,7 @@ Every field is optional at parse time; what is *fiscally* required is in
 | `first_name`, `last_name` | Persona fisica. Used to build the name when `legal_name` is absent. |
 | `country_code` | ISO-2. Falls back to the connector's `default_country_code`. |
 | `vat_number` | Partita IVA. A country-prefixed value (`IT01234567890`) is normalised downstream. |
-| `tax_code` | Codice fiscale. |
+| `tax_code` | Codice fiscale: the 16-character personal code or the 11-digit one, with a correct check character. For a counterpart outside Italy the field may carry the foreign identifier (AdE FAQ 63), and only the XSD's `[A-Z0-9]{11,16}` applies. A value that does not qualify -- a `0` meaning "none", a partita IVA with its `IT` prefix -- is treated as **absent**, not refused: with a `vat_number` the document is composed without it, without one the payment waits for billing data. |
 | `address`, `civic_number` | Indirizzo / numero civico. |
 | `postal_code`, `city`, `province` | CAP, comune, sigla provincia (2 letters). |
 | `country` | Falls back to `country_code`. |
