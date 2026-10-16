@@ -2008,3 +2008,20 @@ def test_native_digest_assembles_a_personal_name_and_invents_none() -> None:
         )
         == PartyDigest()
     )
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        ("abcdefg", "ABCDEFG"),  # lower case, measured in production
+        (" ABC DEFG ", "ABCDEFG"),
+        ("abcdefgh", None),  # eight characters: once clamped to a stranger's code
+        ("AB-C123", None),
+    ],
+)
+def test_stripe_codice_destinatario_is_normalized_never_clamped(
+    typed: str, expected: str | None
+) -> None:
+    obj = _invoice_obj(metadata={"vat_number": "IT09876543210", "sdi_code": typed})
+    intent = _as_emission(_to_intent(_event("invoice.paid", obj)))
+    assert intent.party.sdi_code == expected

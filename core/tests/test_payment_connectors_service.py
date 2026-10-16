@@ -2632,3 +2632,75 @@ async def test_a_retried_invalid_shadow_is_validated_again() -> None:
         ).scalar_one()
         assert event.dry_run_xml is not None
         assert len(await inv_svc.list_invoices(s, org_id=org_id, view="archived")) == 1
+
+
+async def test_0020_clears_a_clamped_code_and_normalizes_the_rest() -> None:
+    """Measured on production (2026-10-16): one client code in lower case, and
+    one Stripe customer who typed EIGHT characters, which ``clamp_field`` used
+    to cut to a well-formed seven naming somebody else."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+
+    async def customer(customer_id: str, sdi: str, vat: str) -> uuid.UUID:
+        payload = _customer_event(
+            event_id=f"evt_{customer_id}",
+            customer_id=customer_id,
+            metadata={"vatId": vat, "Codice Destinatario": sdi},
+        )
+        _c, event_id = await _ingest(org_id, connector_id, payload)
+        assert event_id is not None
+        assert await _run(org_id, connector_id, event_id) == "done"
+        async with tenant_session(str(org_id), str(user_id)) as s:
+            return (
+                await s.execute(
+                    select(PaymentCustomerLink.client_tag_id).where(
+                        PaymentCustomerLink.connector_id == connector_id,
+                        PaymentCustomerLink.provider_customer_id == customer_id,
+                    )
+                )
+            ).scalar_one()
+
+    forged = await customer("cus_forged", "abcdefgh", "IT09876543210")
+    honest = await customer("cus_honest", "QWERTY1", "IT01234567897")
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        lower = await taxonomy.create_client(
+            s, org_id=org_id, actor_id=user_id, name="lower", profile=_counterpart("02223334448")
+        )
+        overlong = await taxonomy.create_client(
+            s, org_id=org_id, actor_id=user_id, name="long", profile=_counterpart("03535510048")
+        )
+    legacy = {
+        forged: "abcdefg",  # what the clamp stored
+        lower.id: "xyz1234",
+        overlong.id: "AB-C123",
+    }
+    m = _migration("0020_normalize_client_sdi_codes.py")
+    with _owner_transaction() as conn:
+        for tag_id, value in legacy.items():
+            conn.execute(
+                text("UPDATE client_profile SET sdi_code = :v WHERE tag_id = :t"),
+                {"v": value, "t": tag_id},
+            )
+        for statement in (m.CLEAR_FORGED_SQL, m.NORMALIZE_SQL):
+            conn.execute(text(statement))
+        after = {
+            tag_id: conn.execute(
+                text("SELECT sdi_code FROM client_profile WHERE tag_id = :t"), {"t": tag_id}
+            ).scalar_one()
+            for tag_id in (forged, honest, lower.id, overlong.id)
+        }
+    assert after == {forged: None, honest: "QWERTY1", lower.id: "XYZ1234", overlong.id: None}
+
+
+def _counterpart(vat_number: str) -> ClientInput:
+    return ClientInput(
+        legal_name="Cliente",
+        country_code="IT",
+        vat_number=vat_number,
+        address="Via Milano 9",
+        postal_code="20100",
+        city="Milano",
+        province="MI",
+        country="IT",
+        sdi_code="ABCDEFG",
+    )

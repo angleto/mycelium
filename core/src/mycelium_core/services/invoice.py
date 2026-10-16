@@ -56,6 +56,7 @@ from mycelium_core.models.invoice import (
 from mycelium_core.models.membership import Role
 from mycelium_core.models.sdi_notification import InvoiceNotification
 from mycelium_core.sdi_channel import IntermediaryIdentity, SdiChannel, get_channel
+from mycelium_core.sdi_code import is_valid_sdi_code, normalize_sdi_code
 from mycelium_core.services import audit
 from mycelium_core.services import webhooks as webhooks_svc
 from mycelium_core.services.image_validation import (
@@ -239,6 +240,9 @@ async def create_issuer_profile(
     country_code = new_paese or country_code
     if not is_valid_vat_code(vat_number, country_code):
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{vat_number}'")
+    sdi_code = normalize_sdi_code(sdi_code)
+    if not is_valid_sdi_code(sdi_code):
+        raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"sdi_code '{sdi_code}'")
     tax_code = normalize_tax_code(tax_code)
     if not is_valid_tax_code(tax_code):
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"tax_code '{tax_code}'")
@@ -348,6 +352,12 @@ async def update_issuer_profile(
         if not is_valid_vat_code(p.vat_number, p.country_code):
             raise DomainError(
                 MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{p.vat_number}'"
+            )
+    if "sdi_code" in values:
+        p.sdi_code = normalize_sdi_code(p.sdi_code)
+        if not is_valid_sdi_code(p.sdi_code):
+            raise DomainError(
+                MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"sdi_code '{p.sdi_code}'"
             )
     if "tax_code" in values:
         p.tax_code = normalize_tax_code(p.tax_code)
@@ -1678,6 +1688,13 @@ def _validate(
     if client_missing:
         raise DomainError(
             MessageCode.INVOICE_INVALID, detail="client: " + ", ".join(client_missing)
+        )
+    # A record written before the write paths normalized the codice
+    # destinatario may hold one in lower case (measured once in production),
+    # which the XSD refuses with a pattern message that names no field.
+    if not is_valid_sdi_code(normalize_sdi_code(client.sdi_code)):
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail=f"client sdi_code '{client.sdi_code}'"
         )
     # The write paths refuse a malformed codice fiscale, but a record written
     # before they did may still hold one (a ``0`` meaning "none" was measured

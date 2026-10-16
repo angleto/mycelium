@@ -67,6 +67,7 @@ from mycelium_core.services.payment_events import (
     country_code,
     province_code,
     resolve_inclusive,
+    sdi_code_field,
     signature_matches,
     tax_code_field,
     within_tolerance,
@@ -114,7 +115,7 @@ def _party(node: Mapping[str, Any], *, config: MapperConfig) -> PartyIn:
         city=clamp_field("city", as_str(node.get("city"))),
         province=province_code(as_str(node.get("province"))),
         country=address_country,
-        sdi_code=clamp_field("sdi_code", as_str(node.get("sdi_code"))),
+        sdi_code=sdi_code_field(as_str(node.get("sdi_code"))),
         pec=clamp_field("pec", as_str(node.get("pec"))),
         email=clamp_field("email", as_str(node.get("email"))),
     )

@@ -32,6 +32,7 @@ from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.tag_scope import TagScope
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
+from mycelium_core.sdi_code import is_valid_sdi_code, normalize_sdi_code
 from mycelium_core.services import audit
 from mycelium_core.services.date_format import validate_date_format
 from mycelium_core.services.rbac import require_role
@@ -51,6 +52,17 @@ def _checked_tax_code(
     normalized = normalize_tax_code(code)
     if not is_valid_tax_code(normalized, tax_code_country(country, country_code)):
         raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client tax_code '{normalized}'")
+    return normalized
+
+
+def _checked_sdi_code(code: str | None) -> str | None:
+    """The one place a client's codice destinatario is admitted: normalized,
+    and refused when the schema facet cannot accept it. A refusal rather than a
+    repair: an over-long code has no correct shorter form, and truncating one
+    names a different recipient."""
+    normalized = normalize_sdi_code(code)
+    if not is_valid_sdi_code(normalized):
+        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client sdi_code '{normalized}'")
     return normalized
 
 
@@ -184,7 +196,7 @@ def _new_client_profile(
         city=profile.city,
         province=profile.province,
         country=profile.country,
-        sdi_code=profile.sdi_code,
+        sdi_code=_checked_sdi_code(profile.sdi_code),
         pec=profile.pec,
         invoice_series=profile.invoice_series,
         payment_iban=profile.payment_iban,
@@ -983,6 +995,7 @@ async def fill_client_gaps(
     }
     incoming["country_code"] = country_code
     incoming["vat_number"] = vat_number
+    incoming["sdi_code"] = _checked_sdi_code(profile.sdi_code)
     incoming["tax_code"] = _checked_tax_code(
         profile.tax_code,
         country=profile.country or row.country,
@@ -1064,6 +1077,8 @@ async def update_client(
             raise DomainError(
                 MessageCode.INVOICE_INVALID, detail=f"client vat_number '{prof.vat_number}'"
             )
+    if "sdi_code" in flds:
+        prof.sdi_code = _checked_sdi_code(prof.sdi_code)
     if "tax_code" in flds or "country" in flds or "country_code" in flds:
         prof.tax_code = _checked_tax_code(
             prof.tax_code, country=prof.country, country_code=prof.country_code

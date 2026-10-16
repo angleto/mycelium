@@ -63,6 +63,7 @@ from mycelium_core.services.payment_events import (
     minor_to_decimal,
     province_code,
     resolve_inclusive,
+    sdi_code_field,
     signature_matches,
     tax_code_field,
     within_tolerance,
@@ -199,7 +200,7 @@ def _party(
         # region ("Lazio") as often as the sigla. Truncating would invent "LAZI".
         province=province_code(as_str(addr.get("state"))),
         country=country,
-        sdi_code=clamp_field("sdi_code", first_present(metadata, config.metadata_sdi_keys)),
+        sdi_code=sdi_code_field(first_present(metadata, config.metadata_sdi_keys)),
         pec=clamp_field("pec", first_present(metadata, config.metadata_pec_keys)),
         email=clamp_field("email", as_str(node.get("email"))),
     )

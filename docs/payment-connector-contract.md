@@ -234,7 +234,7 @@ Every field is optional at parse time; what is *fiscally* required is in
 | `address`, `civic_number` | Indirizzo / numero civico. |
 | `postal_code`, `city`, `province` | CAP, comune, sigla provincia (2 letters). For a counterpart outside Italy the document carries the conventional CAP `00000` and no province (AdE FAQ 63 and 74); the real postal code, which may be omitted, is appended to the address when it fits. |
 | `country` | Falls back to `country_code`. |
-| `sdi_code` | Codice destinatario, exactly 7 characters. **`0000000` is not accepted as a way to make a document emittable**: it cannot be used to deliver. Send the recipient's real code, or send `pec` instead. A counterpart outside Italy needs neither -- the connector applies the standard's `XXXXXXX` by rule. |
+| `sdi_code` | Codice destinatario: 7 characters, or 6 for a public administration. Whitespace is removed and the value upper-cased; a value that still is not `[A-Z0-9]{6,7}` is treated as **absent**, never shortened, because a truncated code names a different recipient. **`0000000` is not accepted as a way to make a document emittable**: it cannot be used to deliver. Send the recipient's real code, or send `pec` instead. A counterpart outside Italy needs neither -- the connector applies the standard's `XXXXXXX` by rule. |
 | `pec` | The counterpart's PEC. |
 > The Stripe adapter reads the codice destinatario from the customer's **metadata** only. It deliberately does not interpret `address.line2`, where customers sometimes type it: a second address line is an address line, and guessing otherwise would decide invoice delivery from a street field.
 | `email` | Ordinary email; carried for reference, not a FatturaPA field. |

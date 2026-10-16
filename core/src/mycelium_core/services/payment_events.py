@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
+from mycelium_core.sdi_code import is_valid_sdi_code, normalize_sdi_code
 from mycelium_core.tax_code import is_valid_tax_code, normalize_tax_code
 
 # --- money -----------------------------------------------------------------
@@ -118,6 +119,24 @@ def clamp_field(name: str, value: str | None) -> str | None:
         return None
     limit = _FIELD_LIMITS.get(name)
     return value[:limit] if limit else value
+
+
+def sdi_code_field(value: str | None) -> str | None:
+    """A provider's codice destinatario, or None when the value cannot be one.
+
+    Normalized BEFORE any length is enforced, and never clamped. ``clamp_field``
+    used to cut it to seven characters, and on the production Stripe account
+    (2026-10-16) one customer had typed eight: the clamp turned a typo into a
+    well-formed code naming a different recipient, which SdI would have
+    delivered to. A lower-case code, also measured there, is simply
+    upper-cased. Dropped rather than refused, like ``tax_code_field``: without
+    it the counterpart is judged on its PEC, and without either it waits for
+    billing data, which names ``sdi_code|pec`` as the missing field.
+    """
+    normalized = normalize_sdi_code(value)
+    if normalized is None or not is_valid_sdi_code(normalized):
+        return None
+    return normalized
 
 
 def tax_code_field(value: str | None, country: str | None) -> str | None:
@@ -811,6 +830,7 @@ __all__ = [
     "province_code",
     "register_mapper",
     "resolve_inclusive",
+    "sdi_code_field",
     "signature_matches",
     "tax_code_field",
     "timestamped_mac",
