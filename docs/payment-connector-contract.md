@@ -232,7 +232,7 @@ Every field is optional at parse time; what is *fiscally* required is in
 | `vat_number` | Partita IVA. A country-prefixed value (`IT01234567890`) is normalised downstream. |
 | `tax_code` | Codice fiscale: the 16-character personal code or the 11-digit one, with a correct check character. For a counterpart outside Italy the field may carry the foreign identifier (AdE FAQ 63), and only the XSD's `[A-Z0-9]{11,16}` applies. A value that does not qualify -- a `0` meaning "none", a partita IVA with its `IT` prefix -- is treated as **absent**, not refused: with a `vat_number` the document is composed without it, without one the payment waits for billing data. |
 | `address`, `civic_number` | Indirizzo / numero civico. |
-| `postal_code`, `city`, `province` | CAP, comune, sigla provincia (2 letters). |
+| `postal_code`, `city`, `province` | CAP, comune, sigla provincia (2 letters). For a counterpart outside Italy the document carries the conventional CAP `00000` and no province (AdE FAQ 63 and 74); the real postal code, which may be omitted, is appended to the address when it fits. |
 | `country` | Falls back to `country_code`. |
 | `sdi_code` | Codice destinatario, exactly 7 characters. **`0000000` is not accepted as a way to make a document emittable**: it cannot be used to deliver. Send the recipient's real code, or send `pec` instead. A counterpart outside Italy needs neither -- the connector applies the standard's `XXXXXXX` by rule. |
 | `pec` | The counterpart's PEC. |

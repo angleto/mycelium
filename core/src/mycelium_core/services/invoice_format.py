@@ -356,6 +356,42 @@ def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
     return el
 
 
+#: The conventional CAP of an address outside Italy. ``CAPType`` admits five
+#: digits and nothing else, and the element is mandatory, so a foreign postal
+#: code ("6900" in Lugano, "SW1A 1AA") cannot be written there at all.
+FOREIGN_CAP = "00000"
+
+#: ``String60LatinType``, the facet of ``Indirizzo``.
+_INDIRIZZO_MAX = 60
+
+
+def _cessionario_sede(client: ClientProfile) -> tuple[str, str, str | None]:
+    """``(Indirizzo, CAP, Provincia)`` of the counterpart's Sede.
+
+    For an Italian address, the stored values. For a FOREIGN one, the rule of
+    AdE FAQ 63 and 74 (19 July 2019): the CAP is compiled with the generic
+    ``00000``, the foreign postal code may be carried in the address, and the
+    province is not needed once the country is stated. Measured in production
+    on 2026-10-16: two documents for Swiss counterparts failed the XSD on
+    ``CAP`` with their real four-digit codes.
+
+    The record keeps the real postal code: this is how FatturaPA REPRESENTS a
+    foreign address, not a fact about the counterpart, so it lives where the
+    document is built. The foreign code is appended to the address only when
+    the result still fits the facet; it is optional, and an address that no
+    longer validates would be a worse trade than an omitted postcode.
+    """
+    address = client.address or ""
+    if (client.country or "IT").upper() == "IT":
+        return address, client.postal_code or "", client.province or None
+    postal = (client.postal_code or "").strip()
+    if postal and postal not in address:
+        candidate = f"{address} {postal}".strip()
+        if len(candidate) <= _INDIRIZZO_MAX:
+            address = candidate
+    return address, FOREIGN_CAP, None
+
+
 def _bare_id_codice(vat_number: str, country_code: str | None) -> str:
     """Never assemble the country code into IdCodice. FatturaPA keeps the
     country (IdPaese) and the VAT number (IdCodice) in separate elements, so a
@@ -576,14 +612,15 @@ def _build_xml(
         last_name=client.last_name,
     )
     csede = _sub(cess, "Sede")
-    _sub(csede, "Indirizzo", client.address or "")
+    indirizzo, cap, provincia = _cessionario_sede(client)
+    _sub(csede, "Indirizzo", indirizzo)
     ccivico = _fatturapa_civico(client.civic_number)
     if ccivico:
         _sub(csede, "NumeroCivico", ccivico)
-    _sub(csede, "CAP", client.postal_code or "")
+    _sub(csede, "CAP", cap)
     _sub(csede, "Comune", client.city or "")
-    if client.province:
-        _sub(csede, "Provincia", client.province)
+    if provincia:
+        _sub(csede, "Provincia", provincia)
     _sub(csede, "Nazione", client.country or "IT")
     # No 1.5 TerzoIntermediarioOSoggettoEmittente / 1.6 SoggettoEmittente here,
     # deliberately. The AdE binds both to EMISSION by a subject other than the

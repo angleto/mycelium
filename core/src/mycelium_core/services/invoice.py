@@ -1660,16 +1660,17 @@ def _validate(
     # The cessionario's Sede (Indirizzo/CAP/Comune) is mandatory in
     # FatturaPA; surface a clean domain error here rather than letting the
     # XSD reject an empty Indirizzo with a cryptic pattern message.
-    client_missing = [
-        f
-        for f, v in (
-            ("legal_name", client.legal_name),
-            ("address", client.address),
-            ("postal_code", client.postal_code),
-            ("city", client.city),
-        )
-        if not v
+    # A foreign counterpart's CAP is the conventional 00000 whatever its
+    # record holds (``invoice_format._cessionario_sede``), so a missing postal
+    # code is not a reason to refuse it.
+    client_required: list[tuple[str, str | None]] = [
+        ("legal_name", client.legal_name),
+        ("address", client.address),
     ]
+    if (client.country or "IT").upper() == "IT":
+        client_required.append(("postal_code", client.postal_code))
+    client_required.append(("city", client.city))
+    client_missing = [f for f, v in client_required if not v]
     if not (client.vat_number or client.tax_code):
         client_missing.append("vat_number|tax_code")
     if not (client.sdi_code or client.pec):

@@ -1335,7 +1335,8 @@ def _assert_invoiceable(party: PartyIn) -> None:
         missing.append("sdi_code|pec")
     if not party.address:
         missing.append("address")
-    if not party.postal_code:
+    # Abroad the document carries the conventional 00000 instead (AdE FAQ 63).
+    if not party.postal_code and (party.country or "IT").upper() == "IT":
         missing.append("postal_code")
     if not party.city:
         missing.append("city")
@@ -1365,7 +1366,7 @@ async def _assert_client_invoiceable(
         missing.append("sdi_code|pec")
     if not row.address:
         missing.append("address")
-    if not row.postal_code:
+    if not row.postal_code and (row.country or "IT").upper() == "IT":
         missing.append("postal_code")
     if not row.city:
         missing.append("city")

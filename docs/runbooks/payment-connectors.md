@@ -425,7 +425,7 @@ resolve straight through.
 | --- | --- |
 | `vat_number\|tax_code` | no P.IVA and no codice fiscale. A codice fiscale that cannot be one (a `0`, a P.IVA with its `IT` prefix, a wrong length or check character) counts as absent, so the provider record may show a value here |
 | `sdi_code\|pec` | no codice destinatario and no PEC. `0000000` is **not** a substitute: it cannot be used to deliver |
-| `address` / `postal_code` / `city` | the postal address is incomplete |
+| `address` / `postal_code` / `city` | the postal address is incomplete. `postal_code` is never asked of a counterpart outside Italy: its document carries the conventional `00000` |
 
 A counterpart outside Italy never needs a codice destinatario: the connector
 addresses it with the standard's `XXXXXXX` by rule.
