@@ -1496,6 +1496,34 @@ async def _mark_paid_if_needed(
     )
 
 
+async def _validate_shadow(
+    session: AsyncSession,
+    *,
+    connector: PaymentConnector,
+    event: PaymentConnectorEvent,
+    invoice_id: uuid.UUID,
+) -> None:
+    """Everything a real emission does, stopping one step before SdI: build
+    the document and validate it against the official XSD, so the reason a
+    shadow run fails is the same reason a real one would have.
+
+    ``get_xml_preview`` allocates nothing -- the XML carries a would-be number
+    and the ANTEPRIMA progressivo -- so shadowing can never consume a sequence
+    a real document will need. It also builds from the CURRENT client record,
+    which is what makes a retry after a data fix meaningful.
+    """
+    try:
+        event.dry_run_xml = await invoice_svc.get_xml_preview(
+            session, org_id=connector.org_id, invoice_id=invoice_id
+        )
+    except DomainError as exc:
+        # A shadow run exists to surface exactly this. Retrying it would be
+        # pointless (the data will not change on its own) and would bury the
+        # finding under attempts; park it with the validator's own words,
+        # which name the field and the rule that rejected it.
+        raise QuarantineError("dry_run_invalid_document", str(exc)[:512]) from exc
+
+
 async def _process_emission(
     session: AsyncSession,
     *,
@@ -1512,12 +1540,21 @@ async def _process_emission(
         session, connector_id=connector.id, keys=intent.object_keys, dry_run=dry_run
     )
     if existing is not None:
+        event.invoice_id = existing
+        if dry_run:
+            # A shadow is VALIDATED again, never just found. This is the path an
+            # operator's retry takes after fixing the data that failed it --
+            # the runbook's "fix the data and retry" -- and returning "done"
+            # here without looking marked the event resolved while the
+            # document still failed, which is a shadow run reporting the one
+            # thing it exists to catch as fixed.
+            await _validate_shadow(session, connector=connector, event=event, invoice_id=existing)
+            return "done"
         inv = await _settle(
             session, connector=connector, invoice_id=existing, mode=connector.invoice_mode
         )
-        if intent.paid and not dry_run:
+        if intent.paid:
             await _mark_paid_if_needed(session, connector=connector, inv=inv)
-        event.invoice_id = inv.id
         return "done"
 
     client_tag_id = await _resolve_client(session, connector=connector, intent=intent)
@@ -1608,22 +1645,15 @@ async def _process_emission(
     await session.flush()
 
     if dry_run:
-        # Everything a real emission does, stopping one step before SdI: build
-        # the document and validate it against the official XSD, so the reason
-        # a shadow run fails is the same reason a real one would have.
-        # ``get_xml_preview`` allocates nothing -- the XML carries a would-be
-        # number and the ANTEPRIMA progressivo -- so shadowing can never
-        # consume a sequence a real document will need.
-        try:
-            event.dry_run_xml = await invoice_svc.get_xml_preview(
-                session, org_id=connector.org_id, invoice_id=inv.id
-            )
-        except DomainError as exc:
-            # A shadow run exists to surface exactly this. Retrying it would be
-            # pointless (the data will not change on its own) and would bury the
-            # finding under attempts; park it with the validator's own words,
-            # which name the field and the rule that rejected it.
-            raise QuarantineError("dry_run_invalid_document", str(exc)[:512]) from exc
+        # The document is marked a shadow BEFORE it is validated, never after.
+        # A failed validation parks the event without rolling the transaction
+        # back, so whatever this branch had not yet written stays unwritten:
+        # with the marking after the check, every shadow that failed it was
+        # left behind as an unflagged, unarchived draft in the active list,
+        # indistinguishable from a real invoice awaiting payment (seven of
+        # them in production on 2026-10-16, each read by the operator as a
+        # Stripe-paid invoice that we were showing unpaid).
+        #
         # The document says WHY it was not sent. Without this it is an archived
         # draft like any other, and "held back because we are shadowing" reads
         # the same as "incomplete" or "rejected and being redone" -- on the one
@@ -1632,7 +1662,8 @@ async def _process_emission(
         inv.dry_run = True
         # Out of the active list: a shadow document must not sit where an
         # operator browses documents they may transmit. It stays fully
-        # inspectable (XML, PDF, totals) in the archived view.
+        # inspectable (XML, PDF, totals) in the archived view, which is also
+        # where an invalid one is most useful: it shows what failed.
         await invoice_svc.archive_invoice(
             session,
             org_id=connector.org_id,
@@ -1640,6 +1671,7 @@ async def _process_emission(
             invoice_id=inv.id,
             archived=True,
         )
+        await _validate_shadow(session, connector=connector, event=event, invoice_id=inv.id)
         return "done"
 
     await tenant_checkpoint(session)

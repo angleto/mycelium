@@ -378,7 +378,11 @@ Two things shadow mode does not cover:
   the duration of the trial.
 - a document that fails validation parks as `dry_run_invalid_document` with
   the validator's message. That is the finding, not a fault: fix the data and
-  retry.
+  retry: the retry builds and validates the document again from the current
+  client record, so it passes only once the data really is fixed. The
+  shadow document itself stays flagged and archived like every
+  other one, so it is inspectable in the archived view and never appears in
+  the active list as an invoice awaiting payment.
 
 ## The waiting room vs. the queue
 

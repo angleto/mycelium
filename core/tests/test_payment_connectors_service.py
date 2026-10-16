@@ -18,11 +18,18 @@ lease cleared. That is the settled shape here, not an unsettled one.
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
@@ -1540,6 +1547,14 @@ async def test_dry_run_surfaces_an_invalid_document_instead_of_retrying_it() -> 
         ).scalar_one()
         assert event.last_error == "dry_run_invalid_document"
         assert event.dry_run is True
+        # The invalid shadow is still a shadow. Observed failing before the fix
+        # (2026-10-16): the document was left as an unflagged draft in the
+        # active list, where it read as a real invoice awaiting payment.
+        assert event.invoice_id is not None
+        shadow = await inv_svc.get_invoice(s, org_id=org_id, invoice_id=event.invoice_id)
+        assert shadow.dry_run is True
+        assert shadow.is_archived is True
+        assert await inv_svc.list_invoices(s, org_id=org_id) == []
 
 
 async def test_dry_run_refuses_to_pretend_about_credit_notes() -> None:
@@ -2440,3 +2455,135 @@ async def test_the_instrument_is_known_before_the_first_invoice() -> None:
     async with tenant_session(str(org_id), str(user_id)) as s:
         inv = (await inv_svc.list_invoices(s, org_id=org_id))[0]
         assert inv.payment_method_code == "MP19", "known before the first charge existed"
+
+
+_VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+
+
+def _migration(filename: str) -> ModuleType:
+    """A migration module by file name (they start with a digit, so no import)."""
+    spec = importlib.util.spec_from_file_location(
+        filename.removesuffix(".py"), _VERSIONS / filename
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@contextmanager
+def _owner_transaction() -> Iterator[sa.Connection]:
+    """The migration runner's role, inside a transaction that is ROLLED BACK:
+    a data migration is not scoped to one workspace and the test database is
+    shared by the rest of the suite."""
+    url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
+    if not url:
+        pytest.skip("MYCELIUM_DATABASE_URL_SYNC not set")
+    engine = sa.create_engine(url, future=True)
+    try:
+        with engine.connect() as conn:
+            tx = conn.begin()
+            try:
+                yield conn
+            finally:
+                tx.rollback()
+    finally:
+        engine.dispose()
+
+
+async def _shadow_invoice(org_id: uuid.UUID, user_id: uuid.UUID, issuer_id: uuid.UUID) -> uuid.UUID:
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(
+        org_id, connector_id, _invoice_paid(event_id=f"evt_{uuid.uuid4().hex}")
+    )
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        row = (
+            await s.execute(
+                sa.text("SELECT invoice_id FROM payment_connector_events WHERE id = :e"),
+                {"e": event_id},
+            )
+        ).scalar_one()
+    assert row is not None
+    return row
+
+
+async def test_0018_reshadows_an_escaped_draft_and_nothing_else() -> None:
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    escaped = await _shadow_invoice(org_id, user_id, issuer_id)
+    proper_shadow = await _shadow_invoice(org_id, user_id, issuer_id)
+
+    # A live draft: composed by a connector in draft mode, claims are live.
+    live_connector = await _connector(org_id, user_id, issuer_id, invoice_mode="draft")
+    payload = _invoice_paid(
+        event_id="evt_live", invoice_id="in_live", charge_id="ch_live", payment_intent_id="pi_live"
+    )
+    _c, live_event = await _ingest(org_id, live_connector, payload)
+    assert live_event is not None
+    assert await _run(org_id, live_connector, live_event) == "done"
+
+    m = _migration("0018_reshadow_invalid_dry_run_drafts.py")
+    with _owner_transaction() as conn:
+        # The legacy shape: what the pre-fix service left behind.
+        conn.execute(
+            sa.text("UPDATE invoices SET dry_run = false, is_archived = false WHERE id = :i"),
+            {"i": escaped},
+        )
+        conn.execute(sa.text(m.RESHADOW_SQL))
+        rows = {
+            r.id: (r.dry_run, r.is_archived)
+            for r in conn.execute(
+                sa.text("SELECT id, dry_run, is_archived FROM invoices WHERE org_id = :o"),
+                {"o": org_id},
+            )
+        }
+    assert rows[escaped] == (True, True)
+    assert rows[proper_shadow] == (True, True)
+    live = [k for k in rows if k not in (escaped, proper_shadow)]
+    assert len(live) == 1
+    assert rows[live[0]] == (False, False)
+
+
+async def test_a_retried_invalid_shadow_is_validated_again() -> None:
+    """The runbook says "fix the data and retry". A retry used to find the
+    shadow already claimed and answer ``done`` without building it again, so
+    an unchanged invalid document was reported fixed. Observed failing before
+    the fix (2026-10-16): the unfixed retry returned ``done``."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    payload = _invoice_paid(event_id="evt_retry_shadow")
+    obj = payload["data"]["object"]
+    obj["customer_address"] = {**obj["customer_address"], "state": "ZZ"}
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "needs_attention"
+
+    async def retry() -> str:
+        async with tenant_session(str(org_id), str(user_id)) as s:
+            await svc.retry_event(
+                s, org_id=org_id, actor_id=user_id, connector_id=connector_id, event_id=event_id
+            )
+        return await _run(org_id, connector_id, event_id)
+
+    # Nothing fixed: still invalid, and still saying so.
+    assert await retry() == "needs_attention"
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        tag_id = (
+            await s.execute(
+                select(ClientProfile.tag_id).where(ClientProfile.vat_number == "09876543210")
+            )
+        ).scalar_one()
+        await taxonomy.update_client(
+            s, org_id=org_id, actor_id=user_id, tag_id=tag_id, fields={"province": "MI"}
+        )
+    assert await retry() == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.dry_run_xml is not None
+        assert len(await inv_svc.list_invoices(s, org_id=org_id, view="archived")) == 1
