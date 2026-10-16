@@ -21,7 +21,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.crypto import decrypt_secret
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import ConflictError, UnprocessableError
-from mycelium_core.models.invoice import ConservationStatus
+from mycelium_core.models.invoice import ConservationStatus, PaymentStatus
 from mycelium_core.sdi_channel import IntermediaryIdentity, TransmitResult
 from mycelium_core.services import invoice as inv
 from mycelium_core.services import sdi_mandate
@@ -520,3 +520,50 @@ async def test_real_transmit_enqueues_transmitted_event() -> None:
         assert deliveries[0].event_type == svc.EVENT_TRANSMITTED
         assert deliveries[0].invoice_id == invoice_id
         assert deliveries[0].payload_snapshot["event"] == svc.EVENT_TRANSMITTED
+
+
+async def test_a_draft_payment_is_recorded_now_and_announced_when_filed() -> None:
+    """A payment arriving before the document is filed is a fact to keep, not
+    one to discard (a payment connector used to skip drafts and dry-run
+    shadows, and nothing looked again). What waits is the announcement: an
+    integration hears ``invoice.payment_recorded`` about a filed document,
+    once. Observed failing before the change: ``mark_paid`` on the draft
+    enqueued the event immediately."""
+    org, user = await _org()
+    issuer, client = await _issuer_and_client(org, user)
+    async with tenant_session(str(org), str(user)) as s:
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer)
+    invoice_id = await _draft(org, user, client)
+    async with tenant_session(str(org), str(user)) as s:
+        ep = (
+            await svc.create_endpoint(
+                s,
+                org_id=org,
+                actor_id=user,
+                issuer_profile_id=issuer,
+                name="e",
+                url="https://1.1.1.1/h",
+            )
+        ).endpoint
+
+    async with tenant_session(str(org), str(user)) as s:
+        paid = await inv.mark_paid(s, org_id=org, actor_id=user, invoice_id=invoice_id)
+        assert paid.payment_status is PaymentStatus.paid
+    async with tenant_session(str(org), str(user)) as s:
+        assert await svc.list_deliveries(s, org_id=org, endpoint_id=ep.id) == []
+
+    async with tenant_session(str(org), str(user)) as s:
+        await inv.transmit(
+            s, org_id=org, actor_id=user, invoice_id=invoice_id, channel=_SuccessCoop()
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        events = sorted(
+            d.event_type for d in await svc.list_deliveries(s, org_id=org, endpoint_id=ep.id)
+        )
+    assert events == sorted([svc.EVENT_TRANSMITTED, svc.EVENT_PAYMENT_RECORDED])
+
+    # Marking it paid again announces nothing new.
+    async with tenant_session(str(org), str(user)) as s:
+        await inv.mark_paid(s, org_id=org, actor_id=user, invoice_id=invoice_id)
+    async with tenant_session(str(org), str(user)) as s:
+        assert len(await svc.list_deliveries(s, org_id=org, endpoint_id=ep.id)) == 2

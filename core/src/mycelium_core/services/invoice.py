@@ -2226,6 +2226,9 @@ async def transmit(
         dedupe_key=f"transmitted:{inv.id}",
         occurred_at=dt.datetime.now(tz=dt.UTC),
     )
+    # A payment recorded while this was a draft is published now that there
+    # is a filed document for it to be about (see ``mark_paid``).
+    await _publish_payment_if_filed(session, org_id=org_id, inv=inv)
     return inv
 
 
@@ -2338,6 +2341,29 @@ async def create_credit_note(
     return note
 
 
+async def _publish_payment_if_filed(
+    session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice
+) -> None:
+    """Announce a recorded payment, once, and only about a filed document.
+
+    The dedupe key makes this safe to call from both places that can complete
+    the pair "paid" + "filed": ``mark_paid`` on a document already filed, and
+    ``transmit`` on a document already paid.
+    """
+    if inv.payment_status is not PaymentStatus.paid:
+        return
+    if inv.state is InvoiceState.draft or inv.dry_run:
+        return
+    await webhooks_svc.enqueue_invoice_event(
+        session,
+        org_id=org_id,
+        invoice=inv,
+        event_type=webhooks_svc.EVENT_PAYMENT_RECORDED,
+        dedupe_key=f"payment_recorded:{inv.id}",
+        occurred_at=dt.datetime.now(tz=dt.UTC),
+    )
+
+
 async def mark_paid(
     session: AsyncSession,
     *,
@@ -2346,7 +2372,18 @@ async def mark_paid(
     invoice_id: uuid.UUID,
 ) -> Invoice:
     """Payment is operational reconciliation, not document content, so
-    it is allowed post-emission (does not break immutability)."""
+    it is allowed post-emission (does not break immutability).
+
+    It is also allowed BEFORE emission, on a draft or a dry-run shadow: the
+    money arrived whatever the state of the document about it, and refusing
+    to record that is how a payment connector used to DISCARD it -- a shadow
+    promoted and filed later, or a draft composed by a connector in draft
+    mode and transmitted by hand, came out unpaid although the provider had
+    collected it. What waits is the PUBLICATION: integrations hear
+    ``invoice.payment_recorded`` only about a filed document, so a shadow
+    never sends them a real-looking event, and a draft's payment is announced
+    when ``transmit`` files it.
+    """
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     await require_role(session, org_id, actor_id, Role.member)
     inv.payment_status = PaymentStatus.paid
@@ -2360,14 +2397,7 @@ async def mark_paid(
         entity_id=invoice_id,
         action="mark_paid",
     )
-    await webhooks_svc.enqueue_invoice_event(
-        session,
-        org_id=org_id,
-        invoice=inv,
-        event_type=webhooks_svc.EVENT_PAYMENT_RECORDED,
-        dedupe_key=f"payment_recorded:{inv.id}",
-        occurred_at=dt.datetime.now(tz=dt.UTC),
-    )
+    await _publish_payment_if_filed(session, org_id=org_id, inv=inv)
     return inv
 
 

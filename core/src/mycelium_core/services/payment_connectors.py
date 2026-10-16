@@ -1481,16 +1481,20 @@ async def _settle(
 async def _mark_paid_if_needed(
     session: AsyncSession, *, connector: PaymentConnector, inv: Invoice
 ) -> None:
+    """Record that the provider collected the money for this document.
+
+    Whatever the document's state and the connector's mode: a draft and a
+    dry-run shadow included. These two used to be skipped, and a skip here is
+    not a deferral -- no later step looks again -- so the fact was LOST, and a
+    shadow promoted and filed, or a draft transmitted by hand, came out
+    unpaid although Stripe had collected it (measured 2026-10-16: 173 shadows
+    of the hahnbanach connector, every one paid on Stripe, all unpaid here).
+    ``mark_paid`` keeps the outbound webhook for the moment the document is
+    filed, which is what the dry-run skip was really protecting.
+    """
     if not connector.payment_sync_enabled:
         return
-    if connector.invoice_mode == "dry_run":
-        # Nothing was emitted, so there is no payment state to mirror. Writing
-        # one would put a real-looking mutation on a document that does not
-        # exist as far as the tax authority is concerned.
-        return
     if inv.payment_status is PaymentStatus.paid:
-        return
-    if inv.state is InvoiceState.draft:
         return
     await invoice_svc.mark_paid(
         session, org_id=connector.org_id, actor_id=connector.id, invoice_id=inv.id
@@ -1543,6 +1547,11 @@ async def _process_emission(
     if existing is not None:
         event.invoice_id = existing
         if dry_run:
+            if intent.paid:
+                shadow = await invoice_svc.get_invoice(
+                    session, org_id=connector.org_id, invoice_id=existing
+                )
+                await _mark_paid_if_needed(session, connector=connector, inv=shadow)
             # A shadow is VALIDATED again, never just found. This is the path an
             # operator's retry takes after fixing the data that failed it --
             # the runbook's "fix the data and retry" -- and returning "done"
@@ -1672,6 +1681,10 @@ async def _process_emission(
             invoice_id=inv.id,
             archived=True,
         )
+        # Before validating: an invalid document is still a payment received,
+        # and the parked event commits what was written before it parked.
+        if intent.paid:
+            await _mark_paid_if_needed(session, connector=connector, inv=inv)
         await _validate_shadow(session, connector=connector, event=event, invoice_id=inv.id)
         return "done"
 

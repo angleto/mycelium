@@ -85,3 +85,20 @@ invoices), the snapshot's retention equals the invoice's own; a TTL sweep
 - Config knobs: `webhook_delivery_timeout_seconds`, `webhook_delivery_lease_seconds`,
   `webhook_max_attempts`, `webhook_backoff_base_seconds` / `_cap_seconds`,
   `webhook_poll_interval_seconds`, `webhook_delivery_retention_days`.
+
+## Amendment (2026-10-16) — a payment is recorded before it is announced
+
+`mark_paid` no longer fires `invoice.payment_recorded` on a document that is
+not filed (a draft, or a payment connector's dry-run shadow). It records the
+payment and fires nothing; `transmit` fires the event when it files a document
+that is already paid. The dedupe key `payment_recorded:{id}` is unchanged, so
+the event still fires exactly once whichever of the two completes the pair.
+
+The reason is a defect in the caller, not in this ADR. A payment connector
+skipped drafts and shadows to avoid announcing a payment about a document that
+does not exist for the tax authority, and the skip discarded the payment: a
+shadow promoted and filed, or a connector draft transmitted by hand, came out
+unpaid although the provider had collected it (173 shadows in production on
+2026-10-16). Keeping the record and deferring only the announcement removes
+both problems.
+

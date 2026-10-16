@@ -217,7 +217,7 @@ otherwise) transmits it to SdI.
 | `currency` | string | no | Default `EUR`, upper-cased. Recorded on the event; the emitted document is in the issuer profile's currency and **no conversion is performed**. |
 | `customer_reference` | string | no | Your stable customer id. Keys the connector's identity map -- see [§4.3](#43-customer-identity). |
 | `purpose` | string | no | The document's causale. Falls back to the connector's `default_purpose`. |
-| `paid` | boolean | no | Default `true`. `true` marks the emitted document paid (if the connector's `payment_sync_enabled` is on and the document is not left as a draft). |
+| `paid` | boolean | no | Default `true`. `true` marks the document paid if the connector's `payment_sync_enabled` is on, whatever its state: a draft and a dry-run shadow included. Integrations hear `invoice.payment_recorded` only once the document is filed. |
 
 ### 4.2 `customer`
 
@@ -389,8 +389,9 @@ already exists.
 - A reference Mycelium has no document for is **not an error**: the event is
   marked `ignored` (it is money we did not invoice -- a payment predating the
   connector, for instance).
-- The document is marked paid only if the connector's `payment_sync_enabled`
-  is on and the document is past `draft`.
+- The document is marked paid if the connector's `payment_sync_enabled` is
+  on, whatever its state. A payment recorded on a draft is announced to
+  webhook endpoints when the document is transmitted, once.
 
 ## 7. Money is a decimal string
 

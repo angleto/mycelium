@@ -1253,7 +1253,11 @@ async def test_dry_run_builds_a_valid_xml_without_spending_a_number() -> None:
         inv = await inv_svc.get_invoice(s, org_id=org_id, invoice_id=event.invoice_id)
         assert inv.state is InvoiceState.draft, "a shadow document is never transmitted"
         assert inv.number is None, "a shadow run must not consume a fiscal number"
-        assert inv.payment_status is PaymentStatus.unpaid
+        # The money arrived: Stripe sent invoice.paid. A shadow records it like
+        # any document does; only the outbound announcement waits for a filed
+        # document (see test_webhooks). Before 2026-10-16 this asserted
+        # unpaid, and that skip LOST the fact for a shadow promoted later.
+        assert inv.payment_status is PaymentStatus.paid
         assert inv.is_archived is True, "kept out of the list an operator transmits from"
 
 
@@ -2704,3 +2708,106 @@ def _counterpart(vat_number: str) -> ClientInput:
         country="IT",
         sdi_code="ABCDEFG",
     )
+
+
+async def test_an_invalid_shadow_still_records_the_payment() -> None:
+    """A document that fails validation is still a payment received. The
+    payment is written before the validation parks the event."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    payload = _invoice_paid(event_id="evt_paid_invalid")
+    obj = payload["data"]["object"]
+    obj["customer_address"] = {**obj["customer_address"], "state": "ZZ"}
+    _c, event_id = await _ingest(org_id, connector_id, payload)
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "needs_attention"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        event = (
+            await s.execute(
+                select(PaymentConnectorEvent).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert event.invoice_id is not None
+        inv = await inv_svc.get_invoice(s, org_id=org_id, invoice_id=event.invoice_id)
+        assert inv.payment_status is PaymentStatus.paid
+
+
+async def test_a_promoted_shadow_is_filed_paid() -> None:
+    """The case the old skip broke for real: a shadow promoted and transmitted
+    came out unpaid although the provider had collected the money, because the
+    payment was skipped on the shadow and nothing looked again."""
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    connector_id = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    _c, event_id = await _ingest(org_id, connector_id, _invoice_paid(event_id="evt_promote_paid"))
+    assert event_id is not None
+    assert await _run(org_id, connector_id, event_id) == "done"
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        shadow_id = (
+            await s.execute(
+                select(PaymentConnectorEvent.invoice_id).where(PaymentConnectorEvent.id == event_id)
+            )
+        ).scalar_one()
+        assert shadow_id is not None
+        await svc.promote_dry_run(
+            s, org_id=org_id, actor_id=user_id, connector_id=connector_id, invoice_id=shadow_id
+        )
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        filed = await inv_svc.transmit(s, org_id=org_id, actor_id=user_id, invoice_id=shadow_id)
+        assert filed.state is not InvoiceState.draft
+        assert filed.payment_status is PaymentStatus.paid
+
+
+async def test_0021_records_skipped_payments_and_nothing_else() -> None:
+    org_id, user_id, issuer_id = await _org_and_issuer()
+    synced = await _connector(org_id, user_id, issuer_id, invoice_mode="dry_run")
+    unsynced = await _connector(
+        org_id, user_id, issuer_id, invoice_mode="dry_run", payment_sync_enabled=False
+    )
+
+    async def shadow(connector_id: uuid.UUID, n: str) -> uuid.UUID:
+        payload = _invoice_paid(
+            event_id=f"evt_0021_{n}",
+            invoice_id=f"in_{n}",
+            charge_id=f"ch_{n}",
+            payment_intent_id=f"pi_{n}",
+        )
+        _c, event_id = await _ingest(org_id, connector_id, payload)
+        assert event_id is not None
+        assert await _run(org_id, connector_id, event_id) == "done"
+        async with tenant_session(str(org_id), str(user_id)) as s:
+            invoice_id = (
+                await s.execute(
+                    select(PaymentConnectorEvent.invoice_id).where(
+                        PaymentConnectorEvent.id == event_id
+                    )
+                )
+            ).scalar_one()
+        assert invoice_id is not None
+        return invoice_id
+
+    skipped = await shadow(synced, "a")
+    not_synced = await shadow(unsynced, "b")
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        client_id = (
+            await s.execute(
+                select(ClientProfile.tag_id).where(ClientProfile.vat_number == "09876543210")
+            )
+        ).scalar_one()
+        by_hand = (
+            await inv_svc.create_draft(s, org_id=org_id, actor_id=user_id, client_tag_id=client_id)
+        ).id
+
+    m = _migration("0021_record_connector_payments.py")
+    with _owner_transaction() as conn:
+        # The legacy shape: what the pre-fix service left on the shadow.
+        conn.execute(
+            text("UPDATE invoices SET payment_status = 'unpaid' WHERE id = :i"), {"i": skipped}
+        )
+        conn.execute(text(m.RECORD_SQL))
+        after = {
+            i: conn.execute(
+                text("SELECT payment_status FROM invoices WHERE id = :i"), {"i": i}
+            ).scalar_one()
+            for i in (skipped, not_synced, by_hand)
+        }
+    assert after == {skipped: "paid", not_synced: "unpaid", by_hand: "unpaid"}

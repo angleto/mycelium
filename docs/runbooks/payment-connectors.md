@@ -316,7 +316,9 @@ What it costs you: nothing that cannot be undone.
 
 - **No fiscal number is spent.** The XML carries a would-be number and the
   `ANTEPRIMA` progressivo, so the counter is untouched.
-- **Nothing is sent**, and nothing is marked paid.
+- **Nothing is sent.** The payment IS recorded, because the provider collected
+  it: a shadow reads paid, and keeps that if it is promoted and filed later.
+  No webhook announces it while it is a shadow.
 - **The shadow documents are archived**, out of the active invoice list, so
   they cannot be transmitted by accident. They stay inspectable (XML, PDF,
   totals) in the archived view.
