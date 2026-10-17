@@ -1,21 +1,32 @@
 name: CI
 
-# Trigger policy (per operator request): fire only on tag pushes,
-# not on every branch commit. The release mycelium is tag-driven (each
-# v1.X.Y goes through tag-push -> build-images -> deploy), so the
-# CI gate runs at the same boundary the operator already cares
-# about. ``workflow_dispatch`` is kept for manual ad-hoc runs.
+# Trigger policy. CI runs on demand (``workflow_dispatch``), normally on the
+# release branch right before it is tagged, and as the gate of build-images
+# (``workflow_call``). It no longer fires on a tag push by itself: a tag push
+# starts build-images, which reuses a successful CI run on the tagged commit
+# if there is one and runs this workflow on that commit otherwise, and builds
+# no image until it is green. Before that, CI and build-images both fired on
+# the tag and nothing tied one to the other: v2.3.48 published its images
+# with e2e red.
+#
+# ``ref`` is the commit to test. Empty means the ref the run was started on.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to test (empty: the triggering ref)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -65,6 +76,8 @@ jobs:
       MYCELIUM_DB_APP_PASSWORD: mycelium_app
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -97,6 +110,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -200,6 +215,8 @@ jobs:
         working-directory: extension
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -293,6 +310,8 @@ jobs:
       MYCELIUM_DB_APP_PASSWORD: mycelium_app
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true

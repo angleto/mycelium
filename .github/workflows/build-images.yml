@@ -35,13 +35,72 @@ on:
 permissions:
   contents: read
   packages: write
+  # The gate reads the CI runs of the commit it is about to build.
+  actions: read
 
 concurrency:
   group: mycelium-build-images-${{ github.event.inputs.image_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  # No image is published for a commit without a successful CI run on that
+  # same commit. v2.3.48 was built while its CI was red (e2e), because the
+  # two workflows both fired on the tag and nothing tied one to the other.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      ci_green: ${{ steps.prior.outputs.ci_green }}
+    steps:
+      - name: Resolve the commit to build
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.event.inputs.mycelium_ref || github.sha }}
+        run: |
+          set -euo pipefail
+          # The build below checks out this SHA, not the ref: a branch can
+          # move between the gate and the build, and the image must be the
+          # commit that was tested.
+          SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${REF}" --jq .sha)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Commit to build: $SHA (from $REF)"
+
+      - name: Look for a successful CI run on that commit
+        id: prior
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # A CI run on the same SHA tested this exact tree with the ci.yml
+          # of that tree. The release flow runs CI on the branch right
+          # before tagging, so the tag usually finds one and does not wait
+          # for a second run of the same tests.
+          RUN=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=success&per_page=1" \
+                  --jq '.workflow_runs[0].html_url // ""')
+          if [ -n "$RUN" ]; then
+            echo "ci_green=true" >> "$GITHUB_OUTPUT"
+            echo "CI already green on $SHA: $RUN"
+          else
+            echo "ci_green=false" >> "$GITHUB_OUTPUT"
+            echo "No successful CI run on $SHA: running it now."
+          fi
+
+  ci:
+    needs: gate
+    if: needs.gate.outputs.ci_green != 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.gate.outputs.sha }}
+
   build:
+    needs: [gate, ci]
+    # ``always()`` because a skipped ``ci`` (CI was already green) would
+    # otherwise skip this job too; the condition then states the gate.
+    if: >-
+      always() && needs.gate.result == 'success' &&
+      (needs.gate.outputs.ci_green == 'true' || needs.ci.result == 'success')
     # Native arm64 hosted runner (free for public repos): builds the
     # linux/arm64 images directly, no QEMU. The previous QEMU-on-amd64
     # emulation made the 3-image build heavy and flaky (~15 min, periodic
@@ -56,7 +115,7 @@ jobs:
       - name: Checkout source @ ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.mycelium_ref || github.ref }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: mycelium-src
 
       - name: Compute image tag
