@@ -11,7 +11,7 @@ riproduce da solo: va costruito.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from mycelium_core.migration_rls import (
     forced_tables,
     owner_sees_all_tenants,
     role_bypasses_rls,
+    tables_without_owner_policy,
 )
 
 
@@ -48,6 +49,28 @@ def _conn(*, transaction: bool = False) -> Iterator[sa.Connection]:
             yield conn
     finally:
         engine.dispose()
+
+
+@contextmanager
+def _rolled_back() -> Iterator[sa.Connection]:
+    """A transaction that is rolled back whatever happens inside it.
+
+    For the tests that break the catalog on purpose (a policy dropped, FORCE
+    taken away): ``_conn(transaction=True)`` commits on a clean exit, and a
+    test that catches the expected error inside it would commit the hole it
+    made into the database every later test runs against."""
+    with _conn() as conn:
+        tx = conn.begin()
+        try:
+            yield conn
+        finally:
+            tx.rollback()
+
+
+def _drop_owner_policy(conn: sa.Connection, table: str) -> None:
+    from mycelium_core.migration_rls import OWNER_POLICY
+
+    conn.execute(sa.text(f'DROP POLICY {OWNER_POLICY} ON public."{table}"'))
 
 
 def test_dove_il_ruolo_scavalca_gia_rls_non_tocca_niente() -> None:
@@ -103,105 +126,227 @@ def test_il_padre_partizionato_non_viene_dimenticato() -> None:
         assert "memory_blobs" in forzate
 
 
-def test_percorso_produzione_solleva_force_e_lo_rimette(monkeypatch: pytest.MonkeyPatch) -> None:
-    """La prova che conta: il percorso che scatta in PRODUZIONE.
-
-    In locale il ruolo e' superuser e il contesto va in corto circuito, il
-    che e' giusto ma lascia il ramo di produzione senza copertura. Qui si
-    finge il ruolo non-privilegiato e si verifica sullo schema vero che
-    FORCE venga sollevato su tutte le tabelle e rimesso identico."""
-    import mycelium_core.migration_rls as m
-
-    with _conn(transaction=True) as conn:
-        prima = forced_tables(conn)
-        assert prima, "lo schema dovrebbe avere tabelle con FORCE"
-        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
-        with m.owner_sees_all_tenants(conn, log=lambda _m: None):
-            assert forced_tables(conn) == [], (
-                "dentro il blocco il proprietario deve vedere ogni tenant"
-            )
-        assert forced_tables(conn) == prima, "FORCE va rimesso esattamente com'era"
-
-
-def test_una_tabella_nuova_con_force_non_e_una_violazione(
+def test_production_path_takes_no_lock_on_a_covered_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Il caso che ha fermato un rilascio in produzione.
+    """The path that runs in PRODUCTION, on the schema at head.
 
-    Il bracket solleva FORCE dalle tabelle che ce l'hanno e lo rimette
-    all'uscita. Una migrazione che CREA una tabella con FORCE la aggiunge
-    all'insieme di uscita senza che sia mai stata in quello di ingresso, e il
-    controllo confrontava i due per disuguaglianza: sollevava, e calcolava le
-    mancanti come ingresso meno uscita, che li' e' vuoto. La Job moriva con
-    "non ripristinato su 0 tabelle:" e la lista vuota, cioe' un messaggio che
-    non si puo' nemmeno leggere.
-
-    Non era mai scattato perche' dalla baseline nessuna migrazione aveva
-    ancora creato una tabella con FORCE. La prima che lo ha fatto ha trovato
-    un guard che rifiuta per costruzione ogni tabella org-scoped futura.
-
-    Qui la creazione e' simulata dentro il blocco, che e' esattamente dove una
-    migrazione la farebbe.
-    """
+    Locally the role is a superuser and the bracket short-circuits, which is
+    right but leaves the production branch untested: here the unprivileged
+    role is faked. Every forced table carries the owner-session policy, so
+    the bracket must emit no ALTER at all, which is the property that keeps a
+    migrate Job out of a deadlock with live traffic (release 2.3.50: 89
+    ACCESS EXCLUSIVE, first pod dead in DeadlockDetected)."""
     import mycelium_core.migration_rls as m
 
-    # Tolta INCONDIZIONATAMENTE, e con una connessione sua: ``_conn`` apre con
-    # ``begin()``, quindi su uscita pulita COMMITTA, e una tabella creata qui
-    # sopravvive al test. La prima stesura non lo faceva e ha lasciato la
-    # tabella nel database, dove ha fatto fallire la corsa successiva con
-    # "relation already exists" -- un test che sporca lo schema che sta
-    # verificando.
-    def _drop() -> None:
-        with _conn(transaction=True) as c:
-            c.execute(sa.text("DROP TABLE IF EXISTS public.rls_nuova_probe"))
+    with _rolled_back() as conn:
+        before = forced_tables(conn)
+        assert before, "lo schema dovrebbe avere tabelle con FORCE"
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        seen, spy = _count_rls_alters()
+        try:
+            with m.owner_sees_all_tenants(conn, log=lambda _m: None):
+                assert forced_tables(conn) == before
+        finally:
+            sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
+        assert seen["alters"] == 0, f"{seen['alters']} ALTER ... ROW LEVEL SECURITY emitted"
+        assert forced_tables(conn) == before
 
-    _drop()
+
+def test_every_rls_table_at_head_carries_the_owner_policy() -> None:
+    """The invariant the lock-free bracket stands on, read from the catalog.
+
+    A table that gets RLS without ``create_owner_session_policy`` fails
+    here in CI, where the bracket itself never runs (the role is a superuser
+    there)."""
+    with _conn() as conn:
+        assert forced_tables(conn), "lo schema dovrebbe avere tabelle con FORCE"
+        assert tables_without_owner_policy(conn) == []
+
+
+def test_a_policy_with_the_right_name_and_another_body_does_not_count() -> None:
+    """The check reads the body, not the name: a policy called
+    ``owner_session_all`` that is granted to PUBLIC, or that is simply true,
+    would open every tenant to whoever it covers."""
+    from mycelium_core.migration_rls import OWNER_POLICY
+
+    with _rolled_back() as conn:
+        table, other = forced_tables(conn)[:2]
+        _drop_owner_policy(conn, table)
+        conn.execute(sa.text(f'CREATE POLICY {OWNER_POLICY} ON public."{table}" USING (true)'))
+        _drop_owner_policy(conn, other)
+        assert tables_without_owner_policy(conn) == sorted([table, other])
+
+
+_PROBE_ROLES = ("rls_probe_member", "rls_probe_app", "rls_probe_owner")
+_PROBE_PASSWORD = "rls-probe"  # a role on the disposable test database, dropped after use
+
+
+def _drop_probe() -> None:
+    with _conn(transaction=True) as conn:
+        conn.execute(sa.text("DROP TABLE IF EXISTS public.rls_probe CASCADE"))
+        conn.execute(sa.text("DROP FUNCTION IF EXISTS public.rls_probe_count()"))
+        for role in _PROBE_ROLES:
+            exists = conn.execute(
+                sa.text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
+            ).scalar()
+            if exists:
+                conn.execute(sa.text(f"DROP OWNED BY {role}"))
+                conn.execute(sa.text(f"DROP ROLE {role}"))
+
+
+@pytest.fixture
+def owner_probe() -> Iterator[None]:
+    """A real NOSUPERUSER owner, as in production, with a forced table of its own.
+
+    Built on the test database, which is disposable; the roles are
+    cluster-wide, so they are dropped before (a run that died half-way) and
+    after. The table lives in ``public`` because that is the schema the
+    policy helper addresses."""
+    _drop_probe()
+    with _conn(transaction=True) as conn:
+        for role in _PROBE_ROLES:
+            # A utility statement takes no bind parameters; both are constants.
+            conn.execute(
+                sa.text(
+                    f"CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{_PROBE_PASSWORD}'"
+                )
+            )
+        conn.execute(sa.text("GRANT rls_probe_owner TO rls_probe_member"))
+        conn.execute(sa.text("GRANT USAGE, CREATE ON SCHEMA public TO rls_probe_owner"))
+        conn.execute(sa.text("GRANT USAGE ON SCHEMA public TO rls_probe_app, rls_probe_member"))
+        conn.execute(sa.text("SET LOCAL ROLE rls_probe_owner"))
+        conn.execute(sa.text("CREATE TABLE public.rls_probe (org text, v int)"))
+        conn.execute(sa.text("ALTER TABLE public.rls_probe ENABLE ROW LEVEL SECURITY"))
+        conn.execute(sa.text("ALTER TABLE public.rls_probe FORCE ROW LEVEL SECURITY"))
+        conn.execute(
+            sa.text(
+                "CREATE POLICY tenant ON public.rls_probe "
+                "USING (org = current_setting('app.org', true)) "
+                "WITH CHECK (org = current_setting('app.org', true))"
+            )
+        )
+        conn.execute(
+            sa.text(
+                "CREATE FUNCTION public.rls_probe_count() RETURNS bigint LANGUAGE sql "
+                "SECURITY DEFINER SET search_path = public "
+                "AS 'SELECT count(*) FROM public.rls_probe'"
+            )
+        )
+        conn.execute(sa.text("GRANT SELECT, INSERT, UPDATE ON public.rls_probe TO rls_probe_app"))
+        conn.execute(sa.text("GRANT SELECT ON public.rls_probe TO rls_probe_member"))
+        conn.execute(sa.text("GRANT EXECUTE ON FUNCTION public.rls_probe_count() TO rls_probe_app"))
     try:
-        with _conn(transaction=True) as conn:
-            prima = forced_tables(conn)
-            assert prima, "lo schema dovrebbe avere tabelle con FORCE"
-            monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
-            detto: list[str] = []
-            with m.owner_sees_all_tenants(conn, log=detto.append):
+        yield
+    finally:
+        _drop_probe()
+
+
+def _scalar_as(role: str, *statements: str) -> object:
+    """Run ``statements`` in one transaction logged in as ``role``; the last one's value."""
+    url = sa.engine.make_url(os.environ["MYCELIUM_DATABASE_URL_SYNC"])
+    engine = sa.create_engine(url.set(username=role, password=_PROBE_PASSWORD), future=True)
+    try:
+        with engine.begin() as conn:
+            *before, last = statements
+            for statement in before:
+                conn.execute(sa.text(statement))
+            result = conn.execute(sa.text(last))
+            return result.scalar() if result.returns_rows else None
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.usefixtures("owner_probe")
+def test_the_owner_policy_opens_the_owner_session_and_nothing_else() -> None:
+    """The policy, as shipped, against real roles: no superuser anywhere.
+
+    Each case is the one that would be wrong if the predicate were: the
+    owner's own session sees and writes both tenants (the migrate Job); the
+    app sees its tenant only, directly and through a SECURITY DEFINER
+    function that runs as the owner; with no tenant set the definer sees
+    nothing; a role that is a MEMBER of the owner, in its own session, sees
+    nothing (``session_user = current_user`` alone would have let it see
+    everything); and without the policy the owner's session sees nothing,
+    which is the defect the policy closes."""
+    from mycelium_core.migration_rls import OWNER_POLICY, create_owner_session_policy
+
+    with _conn(transaction=True) as conn:
+        create_owner_session_policy(conn, "rls_probe")
+
+    owner, app, member = "rls_probe_owner", "rls_probe_app", "rls_probe_member"
+    _scalar_as(owner, "INSERT INTO public.rls_probe VALUES ('a', 0), ('b', 0)")
+    touched = _scalar_as(
+        owner,
+        "UPDATE public.rls_probe SET v = 1",
+        "SELECT count(*) FROM public.rls_probe WHERE v = 1",
+    )
+    assert touched == 2
+    assert _scalar_as(app, "SET app.org = 'a'", "SELECT count(*) FROM public.rls_probe") == 1
+    assert _scalar_as(app, "SET app.org = 'a'", "SELECT public.rls_probe_count()") == 1
+    assert _scalar_as(app, "SELECT public.rls_probe_count()") == 0
+    assert _scalar_as(member, "SELECT count(*) FROM public.rls_probe") == 0
+
+    with _conn(transaction=True) as conn:
+        conn.execute(sa.text(f"DROP POLICY {OWNER_POLICY} ON public.rls_probe"))
+    assert _scalar_as(owner, "SELECT count(*) FROM public.rls_probe") == 0
+
+
+def test_a_new_forced_table_with_its_policy_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A migration that creates a forced table and gives it the policy is the
+    migration doing its job: it passes, and the new table is said in the log."""
+    import mycelium_core.migration_rls as m
+
+    with _rolled_back() as conn:
+        before = forced_tables(conn)
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        said: list[str] = []
+        with m.owner_sees_all_tenants(conn, log=said.append):
+            conn.execute(sa.text("CREATE TABLE public.rls_nuova_probe (id int primary key)"))
+            conn.execute(sa.text("ALTER TABLE public.rls_nuova_probe ENABLE ROW LEVEL SECURITY"))
+            conn.execute(sa.text("ALTER TABLE public.rls_nuova_probe FORCE ROW LEVEL SECURITY"))
+            m.create_owner_session_policy(conn, "rls_nuova_probe")
+        after = forced_tables(conn)
+        assert "rls_nuova_probe" in after
+        assert set(before) <= set(after)
+        assert any("rls_nuova_probe" in line for line in said)
+
+
+def test_a_new_forced_table_without_its_policy_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the policy the next release would lift FORCE from it again,
+    under live traffic. The bracket refuses, inside the migration
+    transaction, and says which table and which helper."""
+    import mycelium_core.migration_rls as m
+
+    with _rolled_back() as conn:
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        with pytest.raises(RuntimeError, match="create_owner_session_policy") as err:
+            with m.owner_sees_all_tenants(conn, log=lambda _m: None):
                 conn.execute(sa.text("CREATE TABLE public.rls_nuova_probe (id int primary key)"))
                 conn.execute(
                     sa.text("ALTER TABLE public.rls_nuova_probe ENABLE ROW LEVEL SECURITY")
                 )
                 conn.execute(sa.text("ALTER TABLE public.rls_nuova_probe FORCE ROW LEVEL SECURITY"))
-
-            dopo = forced_tables(conn)
-            assert "rls_nuova_probe" in dopo, "la tabella nuova deve restare forzata"
-            assert set(prima) <= set(dopo), "e tutto cio' che era forzato prima deve esserlo ancora"
-            # Detta, non ingoiata: e' l'unico posto dove qualcuno la legge.
-            assert any("rls_nuova_probe" in riga for riga in detto)
-    finally:
-        _drop()
+        assert "rls_nuova_probe" in str(err.value)
 
 
 def test_una_tabella_che_perde_force_resta_un_errore(monkeypatch: pytest.MonkeyPatch) -> None:
-    """L'altra direzione, che il fix non deve avere allentato.
-
-    Il controllo esiste per una tabella che il bracket ha sollevato e non ha
+    """Il controllo esiste per una tabella che il bracket ha sollevato e non ha
     rimesso: li' la tenancy resta allentata dopo la migrazione, ed e' il caso
-    che deve continuare a fermare tutto. Simulato togliendo FORCE a una
-    tabella dentro il blocco, cosi' il ripristino la rimette e qualcosa gliela
-    toglie di nuovo -- che e' la forma di una migrazione che la disabilita
-    senza accorgersene.
-    """
+    che deve continuare a fermare tutto. Serve una tabella che il bracket
+    sollevi, quindi le si toglie la policy; poi il ripristino la salta."""
     import mycelium_core.migration_rls as m
 
-    with _conn(transaction=True) as conn:
-        prima = forced_tables(conn)
-        assert prima, "lo schema dovrebbe avere tabelle con FORCE"
-        vittima = prima[0]
+    with _rolled_back() as conn:
+        vittima = forced_tables(conn)[0]
+        _drop_owner_policy(conn, vittima)
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
 
-        def _sabota(c: sa.Connection, tables: object, on: bool) -> None:
-            if on:
-                # Il ripristino rimette tutte tranne una.
-                _set_force(c, [t for t in prima if t != vittima], on=True)
-            else:
-                _set_force(c, prima, on=False)
+        def _sabota(c: sa.Connection, tables: Sequence[str], on: bool) -> None:
+            if not on:
+                _set_force(c, tables, on=False)
 
         monkeypatch.setattr(m, "_set_force", _sabota)
         with pytest.raises(RuntimeError) as err:
@@ -219,11 +364,13 @@ def test_un_errore_non_lascia_force_spento(monkeypatch: pytest.MonkeyPatch) -> N
     che e' la parte che potrebbe sbagliare da sola."""
     import mycelium_core.migration_rls as m
 
-    with _conn(transaction=True) as conn:
+    with _rolled_back() as conn:
         prima = forced_tables(conn)
+        _drop_owner_policy(conn, prima[0])
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
         with pytest.raises(RuntimeError, match="migrazione fallita"):
             with m.owner_sees_all_tenants(conn, log=lambda _m: None):
+                assert prima[0] not in forced_tables(conn)
                 raise RuntimeError("migrazione fallita")
         assert forced_tables(conn) == prima
 
@@ -322,20 +469,27 @@ def test_pending_steps_says_unknown_rather_than_raising() -> None:
     assert migration_steps_pending(_NoWorkFunction()) is None  # type: ignore[arg-type]
 
 
-def test_the_bracket_still_lifts_when_there_is_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The other half: the condition must not break the case the module exists
-    for. With a step to apply, FORCE is lifted on every forced table and put
-    back exactly as it was."""
+def test_the_bracket_lifts_only_the_tables_without_the_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The release that ships 0022, in miniature.
+
+    When it starts the policies do not exist, so the bracket has to lift FORCE
+    from exactly the tables without one, let the migration create the
+    policies, and put FORCE back. Here one table plays that part."""
     import mycelium_core.migration_rls as m
 
-    with _conn(transaction=True) as conn:
+    with _rolled_back() as conn:
         before = forced_tables(conn)
-        assert before, "lo schema dovrebbe avere tabelle con FORCE"
+        table = before[0]
+        _drop_owner_policy(conn, table)
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
         bracket = m.MigrationRlsBracket(conn, log=lambda _msg: None)
         with bracket.around(_context_with_steps(conn, ["a step"])):
-            assert forced_tables(conn) == [], "inside the bracket the owner sees every tenant"
+            assert sorted(set(before) - set(forced_tables(conn))) == [table]
+            m.create_owner_session_policy(conn, table)
         assert forced_tables(conn) == before
+        assert tables_without_owner_policy(conn) == []
 
 
 def test_the_bracket_skips_when_there_is_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -411,3 +565,69 @@ def test_the_guard_is_wired_into_env_py(monkeypatch: pytest.MonkeyPatch) -> None
         # database must not be left one revision behind for every later test.
         if _revision() != before:
             command.upgrade(cfg, "head")
+
+
+def test_the_release_that_ships_0022_through_the_real_env_py(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production release itself: a database at 0021 with no owner policy,
+    an owner that is not a superuser, ``upgrade head`` through env.py.
+
+    That release must lift FORCE from every forced table once (the policies do
+    not exist yet when it starts), leave every one covered, and put FORCE
+    back. The release after it, with a migration to apply, must lift none."""
+    from alembic import command
+    from alembic.config import Config
+
+    import mycelium_core.migration_rls as m
+
+    if not os.environ.get("MYCELIUM_DATABASE_URL_SYNC"):
+        pytest.skip("MYCELIUM_DATABASE_URL_SYNC non impostata")
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "core" / "alembic.ini"))
+
+    with _conn(transaction=True) as conn:
+        before = forced_tables(conn)
+        assert before
+        rls_tables = (
+            conn.execute(
+                sa.text(
+                    "SELECT c.relname FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid = c.relnamespace WHERE n.nspname = 'public' "
+                    "AND c.relkind IN ('r','p') AND c.relrowsecurity"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for table in rls_tables:
+            _drop_owner_policy(conn, table)
+    command.stamp(cfg, "0021")
+    try:
+        monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
+        seen, spy = _count_rls_alters()
+        try:
+            command.upgrade(cfg, "head")
+        finally:
+            sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
+        assert seen["alters"] == 2 * len(before), "lifted and restored once per table"
+        with _conn() as conn:
+            assert forced_tables(conn) == before
+            assert tables_without_owner_policy(conn) == []
+
+        # The next release: 0022's downgrade is empty, so stepping back and
+        # forth through it is a release with a migration to apply.
+        command.stamp(cfg, "0021")
+        seen, spy = _count_rls_alters()
+        try:
+            command.upgrade(cfg, "head")
+        finally:
+            sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
+        assert seen["alters"] == 0, f"{seen['alters']} ALTER ... ROW LEVEL SECURITY emitted"
+    finally:
+        # Whatever happened above, rebuild the policies through 0022 itself, so
+        # a failure here does not leave every later test an uncovered schema.
+        monkeypatch.undo()
+        command.stamp(cfg, "0021")
+        command.upgrade(cfg, "head")
+        with _conn() as conn:
+            assert tables_without_owner_policy(conn) == [], "the test left the schema uncovered"

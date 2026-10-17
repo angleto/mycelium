@@ -45,6 +45,7 @@ import re
 import pytest
 import sqlalchemy as sa
 
+from mycelium_core.migration_rls import OWNER_POLICY
 from mycelium_core.models.payment_connector import (
     AUTOMATION_MODES,
     DELIVERY_OUTCOMES,
@@ -218,14 +219,23 @@ def test_every_table_carries_its_org_policy() -> None:
     try:
         with engine.connect() as conn:
             for table in ALL_TABLES:
+                # The owner-session policy sits beside the tenant one (see
+                # mycelium_core.migration_rls); it is checked there, and it is
+                # the only other policy a table may carry.
+                names = set(
+                    conn.execute(
+                        sa.text("SELECT policyname FROM pg_policies WHERE tablename = :t"),
+                        {"t": table},
+                    ).scalars()
+                )
+                assert names == {f"p_{table}", OWNER_POLICY}, f"{table}: {sorted(names)}"
                 row = conn.execute(
                     sa.text(
                         "SELECT policyname, cmd, qual, with_check FROM pg_policies "
-                        "WHERE tablename = :t"
+                        "WHERE tablename = :t AND policyname = :p"
                     ),
-                    {"t": table},
+                    {"t": table, "p": f"p_{table}"},
                 ).one()
-                assert row.policyname == f"p_{table}"
                 assert row.cmd == "ALL", f"{table}: policy does not cover writes"
                 for expression in (row.qual, row.with_check):
                     assert expression is not None, f"{table}: half of the policy is missing"

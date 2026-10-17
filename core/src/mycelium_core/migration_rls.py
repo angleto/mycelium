@@ -24,16 +24,44 @@ ricaduto.
 
 QUESTA E' LA CORREZIONE CENTRALE. ``FORCE ROW LEVEL SECURITY`` esiste per
 vincolare il PROPRIETARIO: un ruolo non proprietario e' soggetto alle
-policy comunque, con o senza FORCE. Sollevarlo per la durata della
-transazione di migrazione ripristina esattamente la semantica che
-l'ADR-0015 assumeva, senza toccare l'isolamento di ``mycelium_app`` e
-senza bisogno del superuser.
+policy comunque, con o senza FORCE. E il proprietario va vincolato davvero
+quando agisce per conto dell'app, cioe' dentro le funzioni e i trigger
+SECURITY DEFINER che ``mycelium_app`` invoca: per questo FORCE non si toglie.
+
+Una migrazione e' l'altro caso: e' il proprietario che si e' COLLEGATO come
+proprietario. PostgreSQL distingue i due con ``session_user``::
+
+    migrate Job                          current_user=owner  session_user=owner
+    definer invocato da mycelium_app     current_user=owner  session_user=mycelium_app
+    query di mycelium_app                current_user=app    session_user=mycelium_app
+
+Ogni tabella con RLS porta quindi una policy permissiva ``owner_session_all``,
+riservata al proprietario e vera solo quando anche la sessione e' sua (vedi
+``owner_policy_statement``). Il migrate vede ogni tenant senza nessun ALTER;
+un definer invocato dall'app resta vincolato alle policy di tenant, e l'app
+non puo' cambiare ``session_user`` (``SET SESSION AUTHORIZATION`` vuole un
+superuser, ``SET ROLE`` cambia solo ``current_user``). La policy non da' al
+proprietario niente che non abbia gia': con le sue credenziali si puo' fare
+``NO FORCE``, che e' esattamente quello che questo modulo faceva prima.
+
+Prima della policy il modulo sollevava FORCE da tutte le tabelle che ce
+l'hanno, con un ACCESS EXCLUSIVE ciascuna a traffico vivo. Release 2.3.50: 89
+tabelle, e il primo pod del migrate e' morto in ``DeadlockDetected`` su
+``organizations`` contro una transazione dell'app. Nessun ordine dei lock lo
+evita, perche' l'ordine in cui l'app tocca le tabelle e' arbitrario: l'unico
+lock che non partecipa a un ciclo e' quello che non si prende.
 
 Garanzie:
 
 - **Nulla cambia dove non serve.** Se il ruolo scavalca gia' l'RLS
-  (superuser o BYPASSRLS), non viene eseguito nessun ALTER: niente lock,
-  nessuna differenza di comportamento in sviluppo e in CI.
+  (superuser o BYPASSRLS), non viene eseguito niente: sviluppo e CI.
+- **FORCE si solleva solo dove la policy manca.** A regime nessuna tabella:
+  zero ALTER. Il sollevamento resta per la transizione (la migrazione che
+  crea le policy gira prima che esistano) e per una tabella che ne fosse
+  rimasta senza.
+- **All'uscita la policy c'e' su ogni tabella con RLS**, o la transazione
+  fallisce e il rollback annulla la migrazione. Una tabella nuova con RLS
+  nasce con ``create_owner_session_policy``.
 - **Il ripristino non dipende dal percorso felice.** Gli ALTER stanno
   nella stessa transazione delle migrazioni: se qualcosa fallisce, il
   rollback li annulla insieme al resto. Sul percorso riuscito il
@@ -97,6 +125,99 @@ def forced_tables(conn: Connection) -> list[str]:
     return list(rows)
 
 
+OWNER_POLICY = "owner_session_all"
+
+# The predicate names the owner instead of comparing session_user with
+# current_user. "TO <owner>" also applies to every role that is a MEMBER of the
+# owner, and for such a role, logged in as itself, session_user = current_user
+# holds: the shorter predicate would hand it every tenant. Naming the owner
+# leaves no role but the owner, logged in as the owner.
+#
+# Both strings are format() templates that PostgreSQL fills in (%I quotes an
+# identifier, %L a literal), passed as bind parameters: no name is ever
+# concatenated into SQL here.
+_OWNER_POLICY_TEMPLATE = (
+    "CREATE POLICY %1$I ON public.%2$I AS PERMISSIVE FOR ALL TO %3$I "
+    "USING (session_user = %3$L::name AND current_user = %3$L::name) "
+    "WITH CHECK (session_user = %3$L::name AND current_user = %3$L::name)"
+)
+
+# How PostgreSQL renders that predicate back (pg_get_expr), measured on 16.15
+# and 17.11. The check compares against it so that a policy with the right name
+# and a different body does not count.
+_OWNER_PREDICATE_RENDERED = "((SESSION_USER = %1$L::name) AND (CURRENT_USER = %1$L::name))"
+
+
+def tables_without_owner_policy(conn: Connection) -> list[str]:
+    """The tables under row level security that lack the owner-session policy.
+
+    Every table with RLS enabled must carry it, not only the forced ones. Inside
+    the bracket FORCE is lifted, so "forced" is not a property a migration can
+    read there: the first version asked for forced tables, and the migration
+    that creates the policies, running with FORCE lifted, found none and
+    created nothing. On a table without FORCE the policy is inert (the owner
+    is not subject to RLS there), and a table that gets FORCE later is
+    already covered.
+
+    A table counts as covered only if it carries ``owner_session_all`` exactly:
+    permissive, for every command, granted to the table's owner and nobody
+    else, with the owner-session predicate in both USING and WITH CHECK.
+    """
+    rows = (
+        conn.execute(
+            sa.text(
+                "SELECT c.relname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relkind IN ('r','p') "
+                "  AND c.relrowsecurity "
+                "  AND NOT EXISTS ("
+                "        SELECT 1 FROM pg_policy p"
+                "         WHERE p.polrelid = c.oid"
+                "           AND p.polname = :name"
+                "           AND p.polcmd = '*'"
+                "           AND p.polpermissive"
+                "           AND p.polroles = ARRAY[c.relowner]"
+                "           AND pg_get_expr(p.polqual, p.polrelid)"
+                "               = format(:rendered, pg_get_userbyid(c.relowner))"
+                "           AND pg_get_expr(p.polwithcheck, p.polrelid)"
+                "               = format(:rendered, pg_get_userbyid(c.relowner))"
+                "      ) "
+                "ORDER BY c.relname"
+            ),
+            {"name": OWNER_POLICY, "rendered": _OWNER_PREDICATE_RENDERED},
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+def owner_policy_statement(conn: Connection, table: str) -> str:
+    """The CREATE POLICY that lets ``table``'s owner, in its own session, see every tenant."""
+    statement = conn.execute(
+        sa.text(
+            "SELECT format(:template, CAST(:name AS text), c.relname, "
+            "              pg_get_userbyid(c.relowner)) "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relname = :table"
+        ),
+        {"template": _OWNER_POLICY_TEMPLATE, "name": OWNER_POLICY, "table": table},
+    ).scalar()
+    if statement is None:
+        raise LookupError(f"rls: no table public.{table}")
+    return str(statement)
+
+
+def create_owner_session_policy(conn: Connection, table: str) -> None:
+    """Give ``table`` its owner-session policy. Call it wherever a table gets RLS.
+
+    In a migration: ``create_owner_session_policy(op.get_bind(), "my_table")``
+    right after ``ALTER TABLE my_table ENABLE ROW LEVEL SECURITY``. The runner
+    refuses to commit a migration that leaves a table under RLS without it.
+    """
+    conn.exec_driver_sql(owner_policy_statement(conn, table))
+
+
 def _set_force(conn: Connection, tables: Sequence[str], on: bool) -> None:
     verb = "FORCE" if on else "NO FORCE"
     for t in tables:
@@ -110,24 +231,25 @@ def owner_sees_all_tenants(
     """Per la durata del blocco, il proprietario vede ogni tenant.
 
     No-op quando il ruolo scavalca gia' l'RLS. Altrimenti solleva FORCE
-    dalle tabelle che ce l'hanno e lo rimette identico all'uscita.
+    dalle sole tabelle senza la policy ``owner_session_all`` (a regime
+    nessuna), lo rimette identico all'uscita, e rifiuta di uscire se una
+    tabella con RLS e' rimasta senza la policy.
     """
     if role_bypasses_rls(conn):
         # Sviluppo e CI: il ruolo e' superuser, l'invariante c'e' gia'.
         yield
         return
 
-    lifted = forced_tables(conn)
-    if not lifted:
-        yield
-        return
-
-    log(
-        f"rls: il ruolo delle migrazioni non scavalca l'RLS; "
-        f"sollevo FORCE da {len(lifted)} tabelle per la durata della migrazione"
-    )
-    conn.execute(sa.text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
-    _set_force(conn, lifted, on=False)
+    before = forced_tables(conn)
+    uncovered_before = set(tables_without_owner_policy(conn))
+    lifted = [t for t in before if t in uncovered_before]
+    if lifted:
+        log(
+            f"rls: {len(lifted)} tabelle con FORCE non hanno la policy {OWNER_POLICY}; "
+            "sollevo FORCE da quelle per la durata della migrazione"
+        )
+        conn.execute(sa.text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
+        _set_force(conn, lifted, on=False)
     try:
         yield
     finally:
@@ -135,7 +257,8 @@ def owner_sees_all_tenants(
         # importa, gli ALTER sono nella transazione delle migrazioni e il
         # rollback li annulla. Su quello riuscito, invece, deve tornare
         # esattamente com'era, e lo verifichiamo.
-        _set_force(conn, lifted, on=True)
+        if lifted:
+            _set_force(conn, lifted, on=True)
 
     restored = forced_tables(conn)
     # L'invariante e' "tutto cio' che ho sollevato e' tornato", non "l'insieme
@@ -156,13 +279,25 @@ def owner_sees_all_tenants(
             "rls: FORCE ROW LEVEL SECURITY non ripristinato su "
             f"{len(missing)} tabelle: {', '.join(missing)}"
         )
-    added = sorted(set(restored) - set(lifted))
+    added = sorted(set(restored) - set(before))
     if added:
         # Detto invece che ignorato: una tabella con FORCE che compare durante
         # una migrazione e' un cambio di schema che vale la pena leggere nel
         # log della Job, ed e' l'unico posto dove qualcuno lo guarda.
         log(f"rls: FORCE anche su {len(added)} tabelle nuove: {', '.join(added)}")
-    log(f"rls: FORCE ripristinato su {len(lifted)} tabelle")
+    uncovered = tables_without_owner_policy(conn)
+    if uncovered:
+        # Without the policy the next release would have to lift FORCE from
+        # these again, under live traffic, which is the deadlock this module
+        # exists to avoid. Refused here, inside the migration transaction, so
+        # the migration that created them is rolled back with it.
+        raise RuntimeError(
+            f"rls: {len(uncovered)} tabelle con RLS senza la policy {OWNER_POLICY}: "
+            f"{', '.join(uncovered)}. Una migrazione che abilita l'RLS su una tabella "
+            "deve chiamare mycelium_core.migration_rls.create_owner_session_policy."
+        )
+    if lifted:
+        log(f"rls: FORCE ripristinato su {len(lifted)} tabelle")
 
 
 def migration_steps_pending(migration_context: MigrationContext) -> bool | None:
@@ -224,10 +359,10 @@ class MigrationRlsBracket:
     183 statements. Release 2.3.34, which carried no migration at all,
     failed two attempts out of three on ``lock_timeout`` on one of them.
 
-    What it does not cover: a release that does carry a migration still
-    lifts FORCE on every forced table, because a migration does not
-    declare which tables its backfills touch. That is a wider change than
-    this one.
+    What it does not cover: lifting FORCE when there is work to do is
+    ``owner_sees_all_tenants``'s job, and since the owner-session policy it
+    lifts nothing at all on a schema where every forced table has the policy.
+    A migration that carries real DDL still takes the locks of that DDL.
     """
 
     def __init__(self, conn: Connection, *, log: Callable[[str], None] = print) -> None:

@@ -56,10 +56,12 @@ def run_migrations_online() -> None:
         # it is the central fix for the problem 0037 worked around by hand for
         # `tasks` alone.
         #
-        # The bracket is asked for, not entered unconditionally: lifting FORCE
-        # takes an ACCESS EXCLUSIVE per forced table, and a release with no
-        # migration in it used to take 174 of them for nothing. on_version_apply
-        # is what makes the condition safe rather than merely cheap.
+        # Since 0022 every forced table carries the owner-session policy, so
+        # the bracket lifts FORCE from none of them and takes no lock: it only
+        # reads the catalog and refuses to commit a forced table left without
+        # the policy. It is still asked for rather than entered
+        # unconditionally, and on_version_apply still checks that no migration
+        # ran outside it.
         bracket = MigrationRlsBracket(connection)
         context.configure(
             connection=connection,

@@ -227,6 +227,28 @@ committing a no-op backfill. So a migrate Job that says `no revision to
 apply; FORCE ROW LEVEL SECURITY left alone` has done exactly nothing to
 the catalog, on purpose.
 
+**Since 2026-10-17 (`0022`) it lifts nothing.** Every table under RLS
+carries the policy `owner_session_all`, which lets the owner see every
+tenant when the session is the owner's own (the migrate Job) and not when
+the owner runs on behalf of the app (a `SECURITY DEFINER` function or
+trigger). Lifting `FORCE` from 89 tables under live traffic had deadlocked
+the first migrate pod of release 2.3.50. The runner now lifts `FORCE` only
+from a forced table that lacks the policy, and refuses to commit a
+migration that leaves a table under RLS without it. **A migration that
+enables RLS on a table must give it the policy:**
+
+```python
+from mycelium_core.migration_rls import create_owner_session_policy
+
+op.execute("ALTER TABLE my_table ENABLE ROW LEVEL SECURITY")
+op.execute("ALTER TABLE my_table FORCE ROW LEVEL SECURITY")
+op.execute("CREATE POLICY p_my_table ON my_table USING (...) WITH CHECK (...)")
+create_owner_session_policy(op.get_bind(), "my_table")
+```
+
+The reasoning, and why `FORCE` itself stays, is in the second ADR-0015
+amendment.
+
 That fix exists because documenting the trap was not enough. This
 section has described it since the 0011/0013 incident, and `0016`,
 `0022`, `0039`, `0095` and `0099` still shipped without the bracket. All

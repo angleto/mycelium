@@ -84,6 +84,48 @@ Granting the migration role `BYPASSRLS` would be the smaller change and
 is preferable where the platform allows it; Scaleway does not, since
 setting that attribute itself requires superuser.
 
+## Amendment (2026-10-17): the owner sees every tenant from its own session, FORCE stays
+
+Lifting `FORCE` worked, and it cost an `ACCESS EXCLUSIVE` per forced table,
+held until commit, while the previous release's pods still serve traffic.
+Release 2.3.50 lifted 89 and its first migrate pod died in
+`DeadlockDetected` on `organizations`, against a transaction of the app; the
+Job's retry passed. No lock order prevents it, because the app touches
+tables in whatever order it likes.
+
+`FORCE` cannot be dropped instead: it is what binds the 27 `SECURITY
+DEFINER` functions and triggers, which run as the owner on behalf of
+`mycelium_app`. What tells a migration apart from them is the session:
+
+| context | `current_user` | `session_user` |
+|---|---|---|
+| migrate Job | owner | owner |
+| definer called by `mycelium_app` | owner | `mycelium_app` |
+| query of `mycelium_app` | `mycelium_app` | `mycelium_app` |
+
+So migration `0022` gives every table under RLS a permissive policy
+`owner_session_all`, granted to the table's owner, with `session_user =
+'<owner>' AND current_user = '<owner>'` in `USING` and `WITH CHECK`. The
+owner's own session sees every tenant, with no `ALTER`; a definer called by
+the app stays bound to the tenant policies. The app cannot change
+`session_user`: `SET SESSION AUTHORIZATION` needs a superuser, `SET ROLE`
+changes `current_user` only. The predicate names the owner rather than
+comparing the two users, because a policy `TO <owner>` also covers members
+of the owner role, and for such a role logged in as itself the two users
+are equal.
+
+The policy grants the owner nothing it does not already have: with its
+credentials `NO FORCE` is one statement away, and that is what the runner
+used to do. Only the migrate Job logs in as the owner; backend, worker and
+sdi-inbound do not receive the owner DSN.
+
+The runner (`mycelium_core.migration_rls`) now lifts `FORCE` only from
+forced tables without the policy, which is none from the release after
+`0022`, and refuses to commit a migration that leaves a table under RLS
+without it. A migration that enables RLS on a table calls
+`create_owner_session_policy`. Tested against real non-superuser roles in
+`core/tests/test_migration_rls_context.py`.
+
 ## Alternatives rejected
 
 - App as superuser/owner: RLS would not be enforced (bypass).
