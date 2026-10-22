@@ -361,6 +361,7 @@ _NOT_AN_ENTITY_ID = {
     "client_tag_id",
     "comment_id",
     "created_by",
+    "decision_comment_id",
     "dependency_id",
     "entity",
     "entry_id",

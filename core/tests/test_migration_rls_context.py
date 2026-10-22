@@ -601,12 +601,18 @@ def test_the_release_that_ships_0022_through_the_real_env_py(
         )
         for table in rls_tables:
             _drop_owner_policy(conn, table)
+    # This replays the release that shipped 0022, so it upgrades TO 0022, not
+    # to head. Stamping 0021 and upgrading to head would re-run every later
+    # migration against a schema that already has it (0023 failed exactly so,
+    # with a duplicate column). The later ones are stepped down for real
+    # first, then back up at the end.
+    command.downgrade(cfg, "0022")
     command.stamp(cfg, "0021")
     try:
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)
         seen, spy = _count_rls_alters()
         try:
-            command.upgrade(cfg, "head")
+            command.upgrade(cfg, "0022")
         finally:
             sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
         assert seen["alters"] == 2 * len(before), "lifted and restored once per table"
@@ -619,7 +625,7 @@ def test_the_release_that_ships_0022_through_the_real_env_py(
         command.stamp(cfg, "0021")
         seen, spy = _count_rls_alters()
         try:
-            command.upgrade(cfg, "head")
+            command.upgrade(cfg, "0022")
         finally:
             sa.event.remove(sa.engine.Engine, "before_cursor_execute", spy)
         assert seen["alters"] == 0, f"{seen['alters']} ALTER ... ROW LEVEL SECURITY emitted"
@@ -628,6 +634,7 @@ def test_the_release_that_ships_0022_through_the_real_env_py(
         # a failure here does not leave every later test an uncovered schema.
         monkeypatch.undo()
         command.stamp(cfg, "0021")
+        command.upgrade(cfg, "0022")
         command.upgrade(cfg, "head")
         with _conn() as conn:
             assert tables_without_owner_policy(conn) == [], "the test left the schema uncovered"
