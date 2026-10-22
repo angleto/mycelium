@@ -8394,6 +8394,10 @@ export interface components {
             author_label?: string | null;
             /** Resolved By Identity Id */
             resolved_by_identity_id?: string | null;
+            /** Decided By Identity Id */
+            decided_by_identity_id?: string | null;
+            /** Decision Comment Id */
+            decision_comment_id?: string | null;
             /** Assigned To Identity Id */
             assigned_to_identity_id?: string | null;
             /** Resolved At */

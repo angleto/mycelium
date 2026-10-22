@@ -1017,6 +1017,11 @@ class AnnotationOut(BaseModel):
     author_kind: str | None = None
     author_label: str | None = None
     resolved_by_identity_id: uuid.UUID | None = None
+    # Set only when an agent accepted on a person's decision (ADR-0066):
+    # the person who decided, and the comment they decided in.
+    # ``resolved_by_identity_id`` is then the agent that executed it.
+    decided_by_identity_id: uuid.UUID | None = None
+    decision_comment_id: uuid.UUID | None = None
     assigned_to_identity_id: uuid.UUID | None = None
     resolved_at: datetime.datetime | None = None
     edited_at: datetime.datetime | None = None

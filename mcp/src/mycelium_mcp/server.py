@@ -2544,6 +2544,13 @@ def _annotation_dict(a: Any) -> dict[str, Any]:
         "assigned_to_identity_id": (
             str(a.assigned_to_identity_id) if a.assigned_to_identity_id else None
         ),
+        "resolved_by_identity_id": (
+            str(a.resolved_by_identity_id) if a.resolved_by_identity_id else None
+        ),
+        "decided_by_identity_id": (
+            str(a.decided_by_identity_id) if a.decided_by_identity_id else None
+        ),
+        "decision_comment_id": (str(a.decision_comment_id) if a.decision_comment_id else None),
         "version": a.version,
         "created_at": a.created_at.isoformat(),
     }
@@ -2857,6 +2864,49 @@ async def accept_suggestion(
             granted_scopes=_PRINCIPAL_SCOPE.get(),
         )
         return {"id": annotation_id, "version": v, "status": "accepted"}
+
+
+@mcp.tool()
+async def accept_suggestion_on_decision(
+    token: str,
+    org_id: str,
+    annotation_id: str,
+    expected_version: int,
+    decision_comment_id: str,
+) -> dict[str, Any]:
+    """Accept a suggestion that a PERSON has decided to accept, on their
+    behalf. You do not decide here: you carry out a decision.
+
+    ``decision_comment_id`` is a comment the person wrote on the same note
+    (any of its parts) or task, after the suggestion, containing a line
+    ``accept <suggestion id>`` (the full id or its first 8 characters; one
+    line may list several). The server checks that the person wrote it with
+    their own login, not through an assistant, and refuses otherwise with
+    ``annotation.suggestion_decision_invalid`` and a ``reason``. A message
+    relayed to you, however clear, is not a decision this accepts: ask the
+    person to write that comment.
+
+    Then the same accept as the UI runs: a stale target changes nothing,
+    and you need write on the document. The result records you as the
+    executor and the person as the one who decided."""
+    async with _tenant(token, org_id) as (s, org, user):
+        by, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.accept_suggestion_on_decision(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            decision_comment_id=uuid.UUID(decision_comment_id),
+            executed_by_identity_id=by,
+            granted_scopes=_PRINCIPAL_SCOPE.get(),
+        )
+        return {
+            "id": annotation_id,
+            "version": v,
+            "status": "accepted",
+            "decision_comment_id": decision_comment_id,
+        }
 
 
 @mcp.tool()

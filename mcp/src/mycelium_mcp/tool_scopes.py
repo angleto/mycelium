@@ -135,6 +135,12 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     # ``comments:write``. So the pair goes behind the fence without taking
     # away an agent's ability to undo its own mistake (task ce3b244b).
     "accept_suggestion": HUMAN_ONLY,
+    # Carrying out a decision a PERSON took, not taking one: the service
+    # refuses unless the cited comment was written with that person's own
+    # credential, names this suggestion, and postdates it. So an agent
+    # holding only this key still cannot dispose of anything on its own
+    # (task f49138f7). The body-write fence of the plain accept applies too.
+    "accept_suggestion_on_decision": "comments:write",
     "add_comment": "comments:write",
     "add_comment_instructions": "comments:write",
     # The comment quintet is one family, so it is one key: creating and

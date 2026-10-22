@@ -167,6 +167,21 @@ class Annotation(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # --- a suggestion accepted on a person's decision (migration 0023) ---
+    # Set together, and only when an agent executed the accept: the person
+    # who decided and the comment in which they did. ``resolved_by`` stays
+    # whoever executed it, so the two roles are never folded into one
+    # column. Both NULL for an accept a person clicked themselves.
+    decided_by_identity_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("identities.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    decision_comment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("comments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # --- assignment (task 861b360b / 1f161485 #1) --------------------
     # The person responsible for acting on this annotation (Google-Docs
     # "assign to @someone"). NULL = unassigned. ``SET NULL`` on identity

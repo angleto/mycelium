@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**284 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**285 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -63,11 +63,12 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### navigation (19)
+### navigation (20)
 
 | Tool | Summary |
 |---|---|
 | `accept_suggestion` | Accept a suggestion: splice the proposed text into the document |
+| `accept_suggestion_on_decision` | Accept a suggestion that a PERSON has decided to accept, on their |
 | `add_dependency` | Add a typed task dependency (FS/SS/FF/SF). Cycles are rejected. |
 | `add_task_relation` | Link two tasks as "related" (symmetric, bidirectional; NOT a |
 | `graph` | Return the dependency DAG (nodes + edges) for a scope. |

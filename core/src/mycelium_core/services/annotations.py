@@ -23,6 +23,7 @@ the XOR CHECK live in the table.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 from typing import Any, cast
 
@@ -34,6 +35,7 @@ from mycelium_core.concurrency import optimistic_update
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.annotation import (
     ANNOTATION_DOC_KINDS,
     Annotation,
@@ -48,7 +50,7 @@ from mycelium_core.services import audit, md_anchor, text_patch
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services.note_effective import effective_note_clause
-from mycelium_core.services.rbac import require_role
+from mycelium_core.services.rbac import ensure_role, get_role, require_role
 
 
 # --------------------------------------------------------------------------
@@ -1238,6 +1240,221 @@ async def accept_suggestion(
     holds identically over every transport (MCP tool and REST route)."""
     await require_role(session, org_id, actor_id, Role.member)
     ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    return await _accept(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        ann=ann,
+        expected_version=expected_version,
+        resolved_by_identity_id=resolved_by_identity_id,
+        granted_scopes=granted_scopes,
+        decision=None,
+    )
+
+
+# The one credential a decision may have been written with: a person's own
+# bearer over REST (the SPA, the CLI), which the API publishes as
+# ``human_api`` with no subject. An agent token over REST is ``human_api``
+# WITH its token id as subject, and every MCP call over HTTP is
+# ``mcp_token``. ``human_telegram`` is left out on purpose: its writes are
+# made by the conversational assistant's tool loop, not typed by the person.
+_PERSON_CREDENTIAL_KIND = "human_api"
+
+# A line of the decision comment that accepts: the word, then the ids.
+_ACCEPT_LINE = re.compile(r"^\s*accept\b[\s:]*(?P<ids>.*)$", re.IGNORECASE | re.MULTILINE)
+_ID_TOKEN = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,35}")
+_MIN_ID_PREFIX = 8
+
+
+def _named_prefixes(body: str) -> list[str]:
+    """The suggestion ids (full or an 8+ hex prefix) a comment accepts."""
+    out: list[str] = []
+    for line in _ACCEPT_LINE.finditer(body):
+        for tok in _ID_TOKEN.findall(line.group("ids")):
+            hexed = tok.replace("-", "").lower()
+            if len(hexed) >= _MIN_ID_PREFIX:
+                out.append(hexed)
+    return out
+
+
+def _same_document_clause(ann: Annotation) -> ColumnElement[bool]:
+    """Annotations on the same document as ``ann``. A note counts as one
+    document across its parts, so a person can decide several suggestions on
+    one note in a single comment; a task description is its own document."""
+    if ann.doc_kind == "task_description":
+        return and_(Annotation.doc_kind == "task_description", Annotation.task_id == ann.task_id)
+    same_note_parts = select(NotePart.id).where(
+        NotePart.note_id
+        == select(NotePart.note_id).where(NotePart.id == ann.note_part_id).scalar_subquery()
+    )
+    return and_(Annotation.doc_kind == "note_part", Annotation.note_part_id.in_(same_note_parts))
+
+
+async def _verify_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    ann: Annotation,
+    decision_comment_id: uuid.UUID,
+) -> uuid.UUID:
+    """Check that ``decision_comment_id`` is a person's decision to accept
+    ``ann`` and return the deciding person's identity id.
+
+    Every clause answers one way an agent could otherwise approve itself:
+
+    - the author identity must be a person, so an agent's own comment is not
+      a decision;
+    - every write to the comment -- its creation and each later edit or
+      restore -- must have been made with a person's own credential. The
+      author column alone is not enough: an agent running on an owner's
+      token passes the admin override and may edit that owner's comment, so
+      the text could be the agent's while the author is the person. The
+      audit log is append-only and never pruned, so it is the record of who
+      wrote what; a comment with no creation row there is refused;
+    - that person must still be a member who could accept in the UI;
+    - the comment sits on the same document and was written after the
+      suggestion, so it cannot predate what it decides;
+    - it names the suggestion on an ``accept`` line, and the name matches no
+      other suggestion on the document, so a decision about one suggestion
+      cannot be spent on another.
+
+    A ``reason`` names the clause that failed; nothing is changed."""
+
+    def refuse(reason: str) -> DomainError:
+        return DomainError(MessageCode.SUGGESTION_DECISION_INVALID, reason=reason)
+
+    dec = (
+        await session.execute(
+            select(Annotation).where(
+                Annotation.id == decision_comment_id, Annotation.org_id == org_id
+            )
+        )
+    ).scalar_one_or_none()
+    if dec is None or dec.kind != "comment":
+        raise refuse("not_a_comment")
+    if dec.deleted_at is not None:
+        raise refuse("deleted")
+    on_document = (
+        await session.execute(
+            select(Annotation.id).where(Annotation.id == dec.id, _same_document_clause(ann))
+        )
+    ).scalar_one_or_none()
+    if on_document is None:
+        raise refuse("other_document")
+    if dec.created_at <= ann.created_at:
+        raise refuse("before_suggestion")
+
+    author = (
+        await session.execute(select(Identity).where(Identity.id == dec.author_identity_id))
+    ).scalar_one_or_none()
+    if author is None or author.kind != IdentityKind.user or author.user_id is None:
+        raise refuse("author_not_a_person")
+
+    writes = (
+        await session.execute(
+            select(ActivityLog.action, ActivityLog.actor_kind, ActivityLog.actor_subject_id).where(
+                ActivityLog.org_id == org_id,
+                ActivityLog.entity == "annotation",
+                ActivityLog.entity_id == dec.id,
+                ActivityLog.action.in_(("create", "edit", "restore", "restore_revision")),
+            )
+        )
+    ).all()
+    if not any(w.action == "create" for w in writes):
+        raise refuse("no_record_of_writer")
+    by_person = (
+        w.actor_kind == _PERSON_CREDENTIAL_KIND and w.actor_subject_id is None for w in writes
+    )
+    if not all(by_person):
+        raise refuse("written_through_an_agent")
+
+    try:
+        ensure_role(await get_role(session, org_id, author.user_id), Role.member)
+    except (NotFoundError, ForbiddenError):
+        raise refuse("decider_not_member") from None
+
+    named = _named_prefixes(dec.body)
+    mine = ann.id.hex
+    hits = [p for p in named if mine.startswith(p)]
+    if not hits:
+        raise refuse("suggestion_not_named")
+    others = (
+        await session.execute(
+            select(Annotation.id).where(
+                Annotation.org_id == org_id,
+                Annotation.kind == "suggestion",
+                Annotation.id != ann.id,
+                _same_document_clause(ann),
+            )
+        )
+    ).scalars()
+    if any(o.hex.startswith(p) for o in others for p in hits):
+        raise refuse("ambiguous_id")
+    return author.id
+
+
+async def accept_suggestion_on_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    expected_version: int,
+    decision_comment_id: uuid.UUID,
+    executed_by_identity_id: uuid.UUID | None,
+    granted_scopes: list[str] | None = None,
+) -> int:
+    """Accept a suggestion that a PERSON decided, on behalf of that person.
+
+    Accepting is a person's act (agents propose, they do not dispose), and
+    the plain accept stays out of an assistant credential's reach. This is
+    the way an agent carries out a decision a person already took: it cites
+    the comment in which the person accepted the suggestion, the server
+    verifies that comment (``_verify_decision``), and only then runs the
+    same accept the UI runs -- same stale check, same body-write fence.
+
+    An instruction the agent merely reports would not do: the server cannot
+    tell a real one from an invented one, so recording it would turn the
+    fence into a formality. A comment written with the person's own
+    credential is something the server can check.
+
+    The accept records both roles: ``resolved_by`` is the executor,
+    ``decided_by`` the person, ``decision_comment_id`` where they decided."""
+    await require_role(session, org_id, actor_id, Role.member)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    if ann.kind != "suggestion":
+        raise DomainError(MessageCode.ANNOTATION_NOT_SUGGESTION)
+    if ann.status != "open":
+        raise DomainError(MessageCode.SUGGESTION_NOT_PENDING)
+    decided_by = await _verify_decision(
+        session, org_id=org_id, ann=ann, decision_comment_id=decision_comment_id
+    )
+    return await _accept(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        ann=ann,
+        expected_version=expected_version,
+        resolved_by_identity_id=executed_by_identity_id,
+        granted_scopes=granted_scopes,
+        decision=(decided_by, decision_comment_id),
+    )
+
+
+async def _accept(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    ann: Annotation,
+    expected_version: int,
+    resolved_by_identity_id: uuid.UUID | None,
+    granted_scopes: list[str] | None,
+    decision: tuple[uuid.UUID, uuid.UUID] | None,
+) -> int:
+    """The accept itself, shared by the person's path and the agent's: one
+    splice, one stale check, one body-write fence, whoever triggers it."""
+    annotation_id = ann.id
     if ann.kind != "suggestion":
         raise DomainError(MessageCode.ANNOTATION_NOT_SUGGESTION)
     if ann.status != "open":
@@ -1250,16 +1467,27 @@ async def accept_suggestion(
     by = resolved_by_identity_id or await _user_identity_id(
         session, org_id=org_id, actor_id=actor_id
     )
+    values: dict[str, Any] = {
+        "status": "accepted",
+        "resolved_at": dt.datetime.now(dt.UTC),
+        "resolved_by_identity_id": by,
+    }
+    diff: dict[str, Any] | None = None
+    if decision is not None:
+        decided_by, decision_comment_id = decision
+        values["decided_by_identity_id"] = decided_by
+        values["decision_comment_id"] = decision_comment_id
+        diff = {
+            "decided_by_identity_id": str(decided_by),
+            "decision_comment_id": str(decision_comment_id),
+            "executed_by_identity_id": str(by) if by is not None else None,
+        }
     new_version = await optimistic_update(
         session,
         Annotation,
         pk=annotation_id,
         expected_version=expected_version,
-        values={
-            "status": "accepted",
-            "resolved_at": dt.datetime.now(dt.UTC),
-            "resolved_by_identity_id": by,
-        },
+        values=values,
     )
     await audit.log(
         session,
@@ -1268,6 +1496,7 @@ async def accept_suggestion(
         entity="annotation",
         entity_id=annotation_id,
         action="accept",
+        diff=diff,
     )
     await _log_annotation_revision(
         session,

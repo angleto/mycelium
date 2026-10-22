@@ -129,6 +129,8 @@ def annotation_out(
         author_kind=kind,
         author_label=label,
         resolved_by_identity_id=a.resolved_by_identity_id,
+        decided_by_identity_id=a.decided_by_identity_id,
+        decision_comment_id=a.decision_comment_id,
         assigned_to_identity_id=a.assigned_to_identity_id,
         resolved_at=a.resolved_at,
         edited_at=a.edited_at,

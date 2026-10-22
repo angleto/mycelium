@@ -291,6 +291,7 @@ class MessageCode(enum.StrEnum):
     ANNOTATION_NOT_SUGGESTION = "annotation.not_suggestion"
     SUGGESTION_NOT_PENDING = "annotation.suggestion_not_pending"
     SUGGESTION_STALE = "annotation.suggestion_stale"
+    SUGGESTION_DECISION_INVALID = "annotation.suggestion_decision_invalid"
     SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
     ANNOTATION_BODY_REQUIRED = "annotation.body_required"
     BODY_INVALID_ENCODING = "body.invalid_encoding"
@@ -875,6 +876,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.SUGGESTION_STALE: (
             "The text this suggestion targets has changed; "
             "it can no longer be applied automatically."
+        ),
+        MessageCode.SUGGESTION_DECISION_INVALID: (
+            "The cited comment is not a person's decision to accept this "
+            "suggestion ({reason}). Ask the person to reply on the document "
+            "with a line 'accept <suggestion id>'."
         ),
         MessageCode.SUGGESTION_TEXT_REQUIRED: ("A suggestion needs the original text it replaces."),
         MessageCode.DOMAIN_ERROR: "Domain error",
