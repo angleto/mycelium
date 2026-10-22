@@ -30,7 +30,10 @@ on:
         default: "https://mycelium.xeno.garden"
   push:
     tags:
-      - "v*"
+      # A release tag is three numbers with no prefix (2.4.0), the first two
+      # naming the branch it is cut on. Lines up to 2.3 were tagged v2.3.NNN;
+      # those are history and are not re-released, so they are not matched.
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
@@ -125,7 +128,9 @@ jobs:
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             TAG="${{ github.event.inputs.image_tag }}"
           else
-            # tag push: strip leading "v" (v1.0.0 -> 1.0.0)
+            # tag push: the tag is the image tag (2.4.0). The strip keeps a
+            # v-prefixed tag of an older line building as 2.3.NN if one is
+            # ever pushed by hand.
             TAG="${GITHUB_REF_NAME#v}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"

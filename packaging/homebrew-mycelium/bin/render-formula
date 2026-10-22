@@ -7,29 +7,29 @@
 # resolved formula to stdout.
 #
 # Usage:
-#   bin/render-formula v2.0.6 > /tmp/mycelium-cli.rb        # local smoke
-#   bin/render-formula v2.0.6 --in-place                # rewrite Formula/mycelium-cli.rb
+#   bin/render-formula 2.4.0 > /tmp/mycelium-cli.rb         # local smoke
+#   bin/render-formula 2.4.0 --in-place                 # rewrite Formula/mycelium-cli.rb
 #
 # Source of truth: the ``mirror-homebrew-mycelium`` GitHub Actions workflow
-# runs the same logic at every ``v*`` tag push.
+# runs the same logic at every release tag push.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
   echo "usage: $0 <tag> [--in-place]" >&2
-  echo "       <tag> is the git tag, e.g. v2.0.6" >&2
+  echo "       <tag> is the git tag, e.g. 2.4.0" >&2
   exit 2
 fi
 
 TAG="$1"
 IN_PLACE="${2:-}"
 
-case "$TAG" in
-  v*) ;;
-  *)
-    echo "error: tag '$TAG' must start with 'v' (e.g. v2.0.6)" >&2
-    exit 2
-    ;;
-esac
+# Release tags are three numbers with no prefix from the 2.4 line on; the
+# v-prefixed form is still accepted so an older tag (v2.3.51) can be
+# re-rendered by hand.
+if [[ ! "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: tag '$TAG' is not a release tag (e.g. 2.4.0)" >&2
+  exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORMULA="${SCRIPT_DIR%/bin}/Formula/mycelium-cli.rb"

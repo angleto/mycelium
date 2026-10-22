@@ -1,5 +1,5 @@
 # Mirror packaging/homebrew-mycelium/ into github.com/angleto/homebrew-mycelium
-# on every v* tag (the unified Mycelium release tag). The tap repo is a
+# on every release tag (2.4.0: three numbers, no prefix). The tap repo is a
 # public mirror used by `brew tap angleto/mycelium`; the monorepo is the
 # source of truth for the formula template.
 #
@@ -21,11 +21,14 @@ name: mirror-homebrew-mycelium
 on:
   push:
     tags:
-      - "v*"
+      # A release tag is three numbers with no prefix (2.4.0), the first two
+      # naming the branch it is cut on. Lines up to 2.3 were tagged v2.3.NNN;
+      # those are history and are not re-released, so they are not matched.
+      - "[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to mirror (e.g. v2.0.6). Defaults to the latest v* tag."
+        description: "Tag to mirror (e.g. 2.4.0). Defaults to the latest release tag."
         required: false
       message:
         description: "Override commit message to use in the tap repo"
@@ -48,14 +51,14 @@ jobs:
           elif [[ -n "${INPUT_TAG}" ]]; then
             TAG="${INPUT_TAG}"
           else
-            # workflow_dispatch with no tag input: take the latest v*
+            # workflow_dispatch with no tag input: take the latest release
             # tag reachable from the default branch.
             git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" \
-              | awk -F/ '/refs\/tags\/v[0-9]/{print $NF}' \
+              | awk -F/ '/refs\/tags\/[0-9]+\.[0-9]+\.[0-9]+$/{print $NF}' \
               | sort -V | tail -1 > /tmp/latest-tag
             TAG=$(cat /tmp/latest-tag)
             if [[ -z "${TAG}" ]]; then
-              echo "::error::no v* tag found"
+              echo "::error::no release tag (N.N.N) found"
               exit 1
             fi
           fi
