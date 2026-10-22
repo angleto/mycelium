@@ -661,7 +661,7 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                         "blob": _blob(
                             h.blob, tagmap.get(h.blob.id), snippet_chars=_WHOAMI_SNIPPET_CHARS
                         ),
-                        "from_project": _recall_project(
+                        "from_projects": _recall_projects(
                             h.blob, tagmap.get(h.blob.id), project_names
                         ),
                         "written_on": h.blob.created_at.date().isoformat(),
@@ -690,9 +690,10 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                 "channel": "agent",
                 "recall": memory_recall,
                 "recall_scope": (
-                    "every project of this workspace; each entry says the project it "
-                    "comes from and the day it was written, and an entry from another "
-                    "project or an older day is a hypothesis to re-verify, not a fact"
+                    "every project of this workspace; each entry says the projects it "
+                    "comes from (empty: none) and the day it was written, and an entry "
+                    "from another project or an older day is a hypothesis to re-verify, "
+                    "not a fact"
                 ),
                 # The call AND the shape of what goes in it. The lane takes free
                 # text and this recall hands it back blind, which is the shape
@@ -5143,20 +5144,24 @@ async def _project_names(s: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID
     return {tid: name for tid, name in rows.all()}
 
 
-def _recall_project(
+def _recall_projects(
     b: MemoryBlob, tags: list[Tag] | None, names: dict[uuid.UUID, str]
-) -> str | None:
-    """The project a recalled entry belongs to: its perimeter when it has one,
-    else the project tag it carries. Both exist by design -- task blobs keep a
-    NULL perimeter and ride their project TAG (task_search) -- so reading only
-    the perimeter would label such an entry as belonging to no project, which
-    is the mislabelling this field exists to prevent. None means neither."""
+) -> list[str]:
+    """The projects a recalled entry belongs to: its perimeter when it has
+    one, else every project tag it carries. Both exist by design -- task blobs
+    keep a NULL perimeter and ride their project TAG (task_search) -- so
+    reading only the perimeter would label such an entry as belonging to no
+    project, which is the mislabelling this field exists to prevent.
+
+    A list, not the first match: nothing caps a blob at one project tag, and
+    picking one would label an entry from two projects as coming from one of
+    them, arbitrarily. A perimeter whose project tag is gone is named by its
+    id rather than dropped, because an empty list means "no project" and that
+    entry has one. Empty means neither."""
     if b.project_id is not None:
-        return names.get(b.project_id)
-    for g in tags or []:
-        if g.kind == TagKind.project:
-            return g.name
-    return None
+        name = names.get(b.project_id)
+        return [name if name is not None else f"unknown project {str(b.project_id)[:8]}"]
+    return sorted({g.name for g in tags or [] if g.kind == TagKind.project})
 
 
 def _blob(
