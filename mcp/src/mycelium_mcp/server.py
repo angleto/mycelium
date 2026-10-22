@@ -5097,7 +5097,9 @@ def _retrieval_meta(m: memory_svc.RetrievalMeta) -> dict[str, Any]:
         "keyword_only_hits": m.keyword_only_hits,
         "abstained": m.abstained,
         "abstain_reason": m.abstain_reason,
-        "rerank_failed": m.rerank_failed,
+        # What a requested rerank did (None when none was requested): the
+        # only way a caller can tell a reranked order from the plain one.
+        "rerank": m.rerank.value if m.rerank is not None else None,
         # Hits whose vector was made from the HEAD of their text: the row is
         # indexed, but only its beginning is semantically reachable. Notes
         # are chunked and so are not affected; a long task description or a
@@ -5436,6 +5438,7 @@ async def search(
     include_archived: bool = False,
     include_deleted: bool = False,
     rerank: bool = False,
+    rerank_budget_ms: int | None = None,
     task_scope: str = "org",
     due_before: str | None = None,
     assignee_handles: list[str] | None = None,
@@ -5462,8 +5465,18 @@ async def search(
     snippet, and a note takes ONE slot however many of its parts matched:
     the best part wins the row and the others are listed in
     ``other_part_ids`` (task 859ad2d3). Use this over ``memory_search`` for
-    "everything that mentions X". ``rerank=True`` opts into the
-    cross-encoder top-K pass.
+    "everything that mentions X".
+
+    ``rerank=True`` asks for a cross-encoder pass over the leading results,
+    for as long as ``rerank_budget_ms`` allows (default: the deployment's,
+    about a second; capped by the deployment). The depth is not fixed: the
+    reranker scores in ranking order while its measured cost still fits the
+    budget. Whether it ran is in ``meta.rerank``: ``ran`` means the order is
+    the cross-encoder's; ``unavailable`` (not enabled on this deployment, or
+    model not loaded), ``skipped_budget`` (the budget could not cover even
+    two results), ``skipped_gate`` (query or result set too small) and
+    ``failed`` all mean you got the normal ranking. Raising the budget is
+    the only lever, and it is useful only for ``skipped_budget``.
 
     An ENTITY CODE (8+ hex digits, e.g. ``f62ff51d`` or a full UUID) is
     answered as an exact LOOKUP, not a similarity question: the entity whose
@@ -5501,6 +5514,7 @@ async def search(
             include_archived=include_archived,
             include_deleted=include_deleted,
             rerank=rerank,
+            rerank_budget_ms=rerank_budget_ms,
             operation_id=operation_id,
             task_scope=task_scope,
             due_before=due_before_dt,

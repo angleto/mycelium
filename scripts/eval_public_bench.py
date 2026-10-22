@@ -46,9 +46,10 @@ import json
 import uuid
 from pathlib import Path
 
+from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import Embedder, EmbedSide, set_embedder_override
-from mycelium_core.reranker import LocalReranker, set_reranker_override
+from mycelium_core.reranker import LocalReranker, get_reranker, set_reranker_override
 from mycelium_core.services import eval_embedder_round as round_
 from mycelium_core.services import eval_public_bench as bench
 from mycelium_core.services.auth import signup
@@ -265,6 +266,10 @@ async def _install_candidate_reranker(
         revision=revision,
         code_revision=code_revision,
     )
+    # Loads the model and takes the first cost measurement: a request never
+    # loads it, so without this every reranked question would report
+    # ``unavailable`` and the arm would silently be the baseline.
+    await provider.prewarm()
     probe = await provider.rerank(
         "quale soglia usa il reranker?",
         ["la soglia di abstain va letta sul punteggio del reranker", "ricetta della carbonara"],
@@ -345,9 +350,12 @@ async def main() -> None:
         "the candidates in this size class ship their own architecture, and "
         "running their code is a supply-chain decision that has to be taken "
         "deliberately, not inherited from a benchmark. "
-        "Needs the stage ON (MYCELIUM_RERANKER_ENABLED=true); "
-        "MYCELIUM_RERANKER_TOP_K decides how many pairs it scores, which is "
-        "what it costs.",
+        "Needs the stage ON (MYCELIUM_RERANKER_ENABLED=true) and a pinned "
+        "depth (MYCELIUM_RERANKER_MAX_PAIRS) with a budget that never binds "
+        "(MYCELIUM_RERANKER_BUDGET_MS, MYCELIUM_RERANKER_BUDGET_MAX_MS): in "
+        "production the depth follows a time budget, which on different "
+        "machines scores different pairs, and a measurement has to score the "
+        "same ones everywhere.",
     )
     ap.add_argument(
         "--reranker-code-revision",
@@ -405,12 +413,25 @@ async def main() -> None:
         instances = instances[: args.limit_instances]
     print(f"{args.dataset}: {len(instances)} instance(s) from {args.path}")
 
+    settings = get_settings()
+    if (args.reranker_model or settings.reranker_enabled) and settings.reranker_max_pairs is None:
+        # A rerank arm whose depth follows a time budget scores a different
+        # number of pairs on every machine, so its numbers would compare the
+        # machine as much as the model. Refused rather than warned about.
+        raise SystemExit(
+            "rerank arm without MYCELIUM_RERANKER_MAX_PAIRS: pin the depth (and set "
+            "MYCELIUM_RERANKER_BUDGET_MS / _BUDGET_MAX_MS high enough never to bind)"
+        )
     if args.reranker_model:
         await _install_candidate_reranker(
             args.reranker_model,
             revision=args.reranker_revision,
             code_revision=args.reranker_code_revision,
         )
+    elif settings.reranker_enabled:
+        configured = get_reranker()
+        if isinstance(configured, LocalReranker):
+            await configured.prewarm()
     try:
         if args.embedders:
             await _run_round(instances, args, round_.load_round_spec(args.embedders))

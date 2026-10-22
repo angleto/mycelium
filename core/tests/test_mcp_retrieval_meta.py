@@ -130,7 +130,8 @@ async def test_mcp_tools_return_the_meta_envelope(_fake_embedder: None) -> None:
         "keyword_only_hits",
         "abstained",
         "abstain_reason",
-        "rerank_failed",
+        # What a requested rerank did; None when none was requested.
+        "rerank",
         # Hits whose vector covers only the head of their text (task
         # ef3f477b). The set is asserted WHOLE, so a field added to the
         # meta and never surfaced fails here instead of shipping invisible.

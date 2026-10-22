@@ -58,6 +58,7 @@ import asyncio
 import datetime as dt
 import hashlib
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -82,6 +83,7 @@ from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
 from mycelium_core.services.fts_language import detect_fts_language
 from mycelium_core.services.note_effective import note_is_effective
+from mycelium_core.services.retrieval.stages.rerank import combine_outcomes
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING only: ``memory`` is otherwise imported at
@@ -685,7 +687,7 @@ def _aggregate_unified_meta(metas: list[RetrievalMeta], final: list[UnifiedHit])
         keyword_only_hits=sum(1 for h in final if (h.model_id or "none") == "none"),
         abstained=abstained,
         abstain_reason=abstained_metas[0].abstain_reason if abstained else None,
-        rerank_failed=any(m.rerank_failed for m in metas),
+        rerank=combine_outcomes(m.rerank for m in metas),
         embedding_truncated_hits=sum(1 for h in final if h.embedding_truncated),
     )
 
@@ -705,6 +707,7 @@ async def search_unified_with_meta(
     include_deleted: bool,
     operation_id: str,
     rerank: bool = False,
+    rerank_budget_ms: int | None = None,
     task_scope: str = "org",
     due_before: dt.datetime | None = None,
     assignee_handles: list[str] | None = None,
@@ -752,6 +755,16 @@ async def search_unified_with_meta(
     # can produce (a note does not contain its own id).
     code_query = lookup_svc.looks_like_entity_code(query)
 
+    # One rerank budget for the whole search, not one per branch: the
+    # branches below run one after another, so granting each the full budget
+    # would let a three-branch search spend three times what the caller
+    # allowed. Each branch gets what the earlier ones left.
+    rerank_budget_s = memory_svc.resolve_rerank_budget_ms(rerank_budget_ms) / 1000
+    rerank_deadline = time.monotonic() + rerank_budget_s
+
+    def _rerank_remaining_ms() -> int:
+        return max(0, int((rerank_deadline - time.monotonic()) * 1000))
+
     want_task = "task" in kinds
     want_note = "note" in kinds
     want_blob = "blob" in kinds
@@ -796,6 +809,7 @@ async def search_unified_with_meta(
             tag_ids=task_tag_ids,
             channel_key="task",
             rerank=rerank,
+            rerank_budget_ms=_rerank_remaining_ms(),
             include_deleted_sources=include_deleted,
             exact_only=code_query,
         )
@@ -880,6 +894,7 @@ async def search_unified_with_meta(
                 tag_ids=tag_ids,
                 channel_key="note",
                 rerank=rerank,
+                rerank_budget_ms=_rerank_remaining_ms(),
                 include_deleted_sources=include_deleted,
                 exact_only=code_query,
             )
@@ -1003,6 +1018,7 @@ async def search_unified_with_meta(
             tag_ids=tag_ids,
             channel_key=single_channel,
             rerank=rerank,
+            rerank_budget_ms=_rerank_remaining_ms(),
             include_deleted_sources=include_deleted,
             exact_only=code_query,
         )
@@ -1233,6 +1249,7 @@ async def search_unified(
     include_deleted: bool,
     operation_id: str,
     rerank: bool = False,
+    rerank_budget_ms: int | None = None,
     task_scope: str = "org",
     due_before: dt.datetime | None = None,
     assignee_handles: list[str] | None = None,
@@ -1256,6 +1273,7 @@ async def search_unified(
         include_deleted=include_deleted,
         operation_id=operation_id,
         rerank=rerank,
+        rerank_budget_ms=rerank_budget_ms,
         task_scope=task_scope,
         due_before=due_before,
         assignee_handles=assignee_handles,

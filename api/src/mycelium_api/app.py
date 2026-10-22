@@ -262,6 +262,22 @@ def _make_lifespan(mcp_app: Any) -> Any:
                     logging.getLogger(__name__).exception(
                         "mcp gateway prewarm failed; first search_tools will pay the cost"
                     )
+                # The cross-encoder is loaded HERE or not at all: a request
+                # never loads it (114.6 s and ~2.7 GiB on the production node,
+                # task 03cdf674). Until this finishes, or if it fails, every
+                # rerank request is answered with ``unavailable`` and the
+                # normal ranking, which is the degradation it should be.
+                if settings.reranker_enabled:
+                    from mycelium_core.reranker import LocalReranker, get_reranker
+
+                    provider = get_reranker()
+                    if isinstance(provider, LocalReranker):
+                        try:
+                            await provider.prewarm()
+                        except Exception:  # pragma: no cover - defensive
+                            logging.getLogger(__name__).exception(
+                                "reranker prewarm failed; rerank requests report unavailable"
+                            )
 
             # Keep a reference so the task is not garbage-collected
             # while it runs (asyncio holds only weakrefs to tasks).

@@ -151,6 +151,9 @@ async def test_run_eval_threads_rerank_score_floor(
 
         model_id = "const"
 
+        def estimate_seconds(self, query: str, pairs: object) -> float | None:
+            return 0.0
+
         async def rerank(self, query: str, pairs: object) -> RerankResult:
             n = len(pairs)  # type: ignore[arg-type]
             return RerankResult(scores=[0.5] * n, model_id=self.model_id)

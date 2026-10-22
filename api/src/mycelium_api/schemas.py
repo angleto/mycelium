@@ -4059,8 +4059,12 @@ class SearchIn(BaseModel):
     path, ``kinds=['blob']`` mirrors /memory/search, ``kinds=['note']``
     returns titled note hits (a note part blob resolved to its note).
     ``include_archived`` and ``include_deleted`` apply to ``task`` and
-    ``note`` hits. ``rerank`` opts into the cross-encoder reranker for
-    this call regardless of the env default (task 27579d6a)."""
+    ``note`` hits. ``rerank`` asks for the cross-encoder reranker for this
+    call regardless of the env default (task 27579d6a), for at most
+    ``rerank_budget_ms`` (default and ceiling are the deployment's). What it
+    did is reported in the recall meta, which this endpoint does not return
+    yet (see the router): until it does, a REST caller cannot tell a
+    reranked order from the plain one, and the MCP ``search`` tool can."""
 
     q: str = Field(min_length=1, max_length=2000)
     kinds: list[str] = Field(default_factory=lambda: ["task", "blob", "note"])
@@ -4070,6 +4074,7 @@ class SearchIn(BaseModel):
     include_archived: bool = False
     include_deleted: bool = False
     rerank: bool = False
+    rerank_budget_ms: int | None = Field(default=None, ge=0)
     operation_id: str = Field(min_length=1, max_length=128, default="search")
     # The four below were accepted by the service long before they were
     # reachable over HTTP. A caller that could not express them had to

@@ -18,7 +18,9 @@ production would pay, and they are labelled as such wherever they appear.
 
 Same dataset, same ingest, same embedder (bge-m3), a fresh throwaway database
 per arm. The reranker arms run with `MYCELIUM_RERANKER_ENABLED=true` and
-`MYCELIUM_RERANKER_TOP_K=16`, the candidate injected through the reranker
+`MYCELIUM_RERANKER_TOP_K=16` (the depth setting of the time; it is now
+`MYCELIUM_RERANKER_MAX_PAIRS=16` with a budget that never binds), the
+candidate injected through the reranker
 override seam by `scripts/eval_public_bench.py --reranker-model`, which loads
 it with `trust_remote_code` so the production factory never has to.
 
@@ -182,9 +184,14 @@ counting RSS on memory-mapped weights.
 under 6Gi. Not only is it unmet, the model it rested on does not work on the
 node. The global switch stays off with a number beside it, and the sentence
 "2-5s is within the noise of an agent turn" is falsified: on the node it is
-16.7s at top_k=10 and 121s at the shipped default of 50, so a caller that flips
-`rerank=true` without also lowering `reranker_top_k` waits two minutes. A
-cross-encoder on this node, on CPU, is not an interactive-path component. What
+16.7s at top_k=10 and 121s at what was then the shipped default of 50 pairs.
+(This paragraph used to conclude that a caller flipping `rerank=true` would
+wait two minutes. It would not have: with the global switch off the per-call
+flag reached a no-op provider and returned the RRF order in silence, which
+was the real defect. Since 2026-10-22 the depth is a time budget,
+`reranker_budget_ms`, with the cost measured by the provider on every batch,
+and the response says what the rerank did.) A cross-encoder on this node, on
+CPU, is not an interactive-path component. What
 remains open, and unmeasured, is a hosted reranker, a much smaller int8 model,
 or reranking off the response path -- none of which this measurement touched.
 

@@ -714,26 +714,31 @@ class Settings(BaseSettings):
     # work with) or on candidate sets too small to be worth the cost.
     reranker_min_query_tokens: int = 3
     reranker_min_candidates: int = 5
-    # How many of the fused candidates the cross-encoder actually scores,
-    # and the knob that dominates the cost of having it on at all: the model
-    # runs once per (query, document) pair, so this multiplies directly.
-    # Measured 2026-09-13 on a laptop (Apple Silicon, 4 threads):
-    # `bge-reranker-v2-m3` takes 7.8s at 10 pairs and 44s at 50;
-    # `gte-multilingual-reranker-base`, a third the size, 1.4s and 8.8s.
-    # Until then this was a dataclass default on the stage that no caller
-    # passed, so the most expensive setting in the pipeline was the one
-    # that could not be set.
+    # How long a search may spend in the cross-encoder, queue wait included.
+    # This replaced a fixed count of pairs (`reranker_top_k=50`) on
+    # 2026-10-22, because the cost of a pair is not a property of the
+    # pipeline. Measured: `bge-reranker-v2-m3` takes 7.8s at 10 pairs on a
+    # laptop (2026-09-13) and 16.7s on the production node (2026-09-14, task
+    # 03cdf674, arm64, 4 CPU), 1.67s a pair in a batch of 10 and 2.42s in a
+    # batch of 50, so the old default cost 121s there. The stage now scores in
+    # RRF order while the provider's measured estimate of the next batch fits
+    # in this budget, so the depth follows the hardware, the model and the
+    # document length by itself.
     #
-    # Measured again 2026-09-14 ON THE PRODUCTION NODE (task 03cdf674, arm64,
-    # 4 CPU), which is the only place the number means anything, and it is
-    # roughly 2.2x worse: `bge-reranker-v2-m3` takes 16.7s at 10 pairs, 27.2s
-    # at 16 and **121s at this default of 50**. So the default is a trap for
-    # whoever flips `rerank=true` without also lowering it, and the small
-    # candidate cannot stand in for it: `gte-multilingual-reranker-base`
-    # loads on that node and then fails every forward pass (see reranker.py).
-    # The global switch stays off, and that is now a measurement rather than
-    # a caution.
-    reranker_top_k: int = 50
+    # One second because that is about what a search box can add before it
+    # feels broken, next to a first stage that answers well under a second.
+    # On the production node it buys nothing (not even two pairs), and the
+    # stage says so with `skipped_budget` instead of pretending; the same
+    # setting starts buying a rerank on hardware that can afford one.
+    reranker_budget_ms: int = Field(default=1000, ge=0)
+    # The most a single call may ask for with `rerank_budget_ms`. An agent can
+    # wait longer than a person, but not forever: the MCP tool call has to
+    # come back, and a forward pass in flight cannot be interrupted.
+    reranker_budget_max_ms: int = Field(default=30000, ge=0)
+    # Depth cap for reproducible measurement ONLY: the bench pins it so that
+    # a run scores the same pairs on any machine (with a budget large enough
+    # never to bind). Production leaves it None and lets the budget decide.
+    reranker_max_pairs: int | None = Field(default=None, ge=1)
 
     # Fase 0 of the search-informed graph (task 561c6aca): append-only
     # trace of the returned top-m per search (``retrieval_trace``

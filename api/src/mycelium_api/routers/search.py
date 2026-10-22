@@ -63,6 +63,7 @@ async def search(
         include_deleted=body.include_deleted,
         operation_id=body.operation_id,
         rerank=body.rerank,
+        rerank_budget_ms=body.rerank_budget_ms,
         task_scope=body.task_scope,
         due_before=body.due_before,
         assignee_handles=body.assignee_handles,

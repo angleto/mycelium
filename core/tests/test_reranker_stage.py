@@ -7,6 +7,7 @@ and the Noop provider behavior.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Iterator, Sequence
 from typing import cast
@@ -14,9 +15,21 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mycelium_core.reranker import NoopReranker, RerankResult, set_reranker_override
+from mycelium_core.reranker import (
+    LocalReranker,
+    NoopReranker,
+    RerankerUnavailable,
+    RerankResult,
+    cost_units,
+    set_reranker_override,
+)
 from mycelium_core.services.retrieval import Candidate
-from mycelium_core.services.retrieval.stages import CrossEncoderRerankerStage, RerankGate
+from mycelium_core.services.retrieval.stages import (
+    CrossEncoderRerankerStage,
+    RerankGate,
+    RerankOutcome,
+    combine_outcomes,
+)
 from mycelium_core.services.retrieval.types import RetrievalContext
 
 
@@ -25,6 +38,9 @@ class _StaticReranker:
     we can verify the score override + ordering side-effect."""
 
     model_id = "test-rerank"
+
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        return 0.0
 
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         scores = [float(len(pairs) - i) for i in range(len(pairs))]
@@ -36,6 +52,9 @@ class _RaisingReranker:
     in prod). The stage must degrade to the RRF order, not crash the search."""
 
     model_id = "boom"
+
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        return 0.0
 
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         raise RuntimeError("reranker model unavailable")
@@ -113,10 +132,12 @@ async def test_rerank_skips_under_gate() -> None:
         gate=RerankGate(min_query_tokens=3, min_candidates=5),
     )
     cands = [_cand(f"c{i}", score=0.1 * i) for i in range(3)]
-    out = await stage.run("short", _ctx_stub(), cands)
+    ctx = _ctx_stub()
+    out = await stage.run("short", ctx, cands)
     # Scores untouched, no rerank entry in scores_by_stage.
     for c in out:
         assert "rerank" not in c.scores_by_stage
+    assert ctx.extras["rerank"] is RerankOutcome.SKIPPED_GATE
 
 
 async def test_rerank_with_no_candidates_is_noop() -> None:
@@ -157,11 +178,11 @@ async def test_rerank_loads_missing_text_via_db() -> None:
     assert out == [cand_a, cand_b]
 
 
-async def test_noop_reranker_returns_zeros() -> None:
+async def test_noop_reranker_cannot_score() -> None:
     provider = NoopReranker()
-    result = await provider.rerank("q", ["doc1", "doc2"])
-    assert result.scores == [0.0, 0.0]
-    assert result.model_id == "noop"
+    assert provider.estimate_seconds("q", ["doc1"]) is None
+    with pytest.raises(RerankerUnavailable):
+        await provider.rerank("q", ["doc1", "doc2"])
 
 
 def test_provider_override_seam() -> None:
@@ -192,13 +213,19 @@ async def test_rerank_degrades_gracefully_on_provider_failure() -> None:
     assert out == [a, b]
     assert a.score == 0.05 and b.score == 0.04
     assert "rerank" not in a.scores_by_stage
-    assert ctx.extras.get("rerank_failed") is True
+    assert ctx.extras["rerank"] is RerankOutcome.FAILED
 
 
-async def test_rerank_noop_provider_preserves_rrf_order() -> None:
-    # A Noop reranker (feature gated off but rerank requested per-call) must
-    # pass through UNCHANGED; applying its flat 0.0 scores would let
-    # OrderingStage re-sort on the created_at tiebreak and destroy RRF order.
+async def test_rerank_with_feature_off_says_unavailable_and_keeps_rrf_order() -> None:
+    # The feature gated off but rerank requested per-call: the RRF order passes
+    # through UNCHANGED (a flat score would let OrderingStage re-sort on the
+    # created_at tiebreak) AND the request is reported as unavailable.
+    #
+    # The second half is the defect this guards. Observed failing against the
+    # version that carried it (HEAD 59bc556b, 2026-10-22): the same request
+    # with the production configuration (reranker_enabled=False, provider
+    # NoopReranker) left the order untouched and ``ctx.extras`` EMPTY, so the
+    # caller of a reranked search could not tell it had not been reranked.
     stage = CrossEncoderRerankerStage(
         provider=NoopReranker(),
         gate=RerankGate(min_query_tokens=1, min_candidates=1),
@@ -207,7 +234,192 @@ async def test_rerank_noop_provider_preserves_rrf_order() -> None:
     b = _cand("bravo", score=0.04)
     a.scores_by_stage = {"rrf": 0.05}
     b.scores_by_stage = {"rrf": 0.04}
-    out = await stage.run("one two three", _ctx_stub(), [a, b])
+    ctx = _ctx_stub()
+    out = await stage.run("one two three", ctx, [a, b])
     assert out == [a, b]
     assert a.score == 0.05 and b.score == 0.04
     assert "rerank" not in a.scores_by_stage
+    assert ctx.extras["rerank"] is RerankOutcome.UNAVAILABLE
+
+
+class _MeteredReranker:
+    """A provider whose estimate is a known cost per pair, recording every
+    batch it is asked to score. Implements the whole contract: an estimate
+    that grows with the batch, ``None`` once it is told it cannot score, and
+    [0,1] scores that rank the batch in the order it arrived reversed, so a
+    reranked prefix is visibly re-ordered."""
+
+    model_id = "metered"
+
+    def __init__(self, seconds_per_pair: float, *, unavailable_after: int | None = None) -> None:
+        self.seconds_per_pair = seconds_per_pair
+        self.batches: list[list[str]] = []
+        self._unavailable_after = unavailable_after
+
+    def _gone(self) -> bool:
+        return self._unavailable_after is not None and len(self.batches) >= self._unavailable_after
+
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        if self._gone():
+            return None
+        return self.seconds_per_pair * len(pairs)
+
+    async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
+        if self._gone():
+            raise RerankerUnavailable("gone")
+        self.batches.append(list(pairs))
+        # Spends the time it declared, like a real forward pass: the stage
+        # judges the budget on the clock, not on the estimate.
+        await asyncio.sleep(self.seconds_per_pair * len(pairs))
+        n = len(pairs)
+        return RerankResult(scores=[(i + 1) / (n + 1) for i in range(n)], model_id=self.model_id)
+
+
+def _rrf_list(n: int) -> list[Candidate]:
+    out = []
+    for i in range(n):
+        c = _cand(f"doc{i}", score=0.016 - i * 0.001)
+        c.scores_by_stage = {"rrf": c.score}
+        out.append(c)
+    return out
+
+
+async def test_budget_decides_depth_and_tail_keeps_rrf() -> None:
+    # 0.1 s of budget at 0.03 s a pair buys 3 pairs: the first three
+    # candidates in RRF order are reranked, the other five keep their RRF score.
+    provider = _MeteredReranker(0.03)
+    stage = CrossEncoderRerankerStage(
+        provider=provider, budget_s=0.1, gate=RerankGate(min_query_tokens=1, min_candidates=1)
+    )
+    cands = _rrf_list(8)
+    ctx = _ctx_stub()
+    await stage.run("one two three", ctx, cands)
+    assert ctx.extras["rerank"] is RerankOutcome.RAN
+    assert sum(len(b) for b in provider.batches) == 3
+    assert all("rerank" in c.scores_by_stage for c in cands[:3])
+    assert all("rerank" not in c.scores_by_stage for c in cands[3:])
+    assert [c.score for c in cands[3:]] == [0.016 - i * 0.001 for i in range(3, 8)]
+
+
+async def test_budget_that_cannot_buy_two_pairs_skips_and_says_so() -> None:
+    # The production node: ~1.67 s a pair against a 1 s budget. Not even two
+    # pairs fit, so nothing is scored and the caller is told why.
+    provider = _MeteredReranker(1.67)
+    stage = CrossEncoderRerankerStage(
+        provider=provider, budget_s=1.0, gate=RerankGate(min_query_tokens=1, min_candidates=1)
+    )
+    cands = _rrf_list(8)
+    ctx = _ctx_stub()
+    await stage.run("one two three", ctx, cands)
+    assert ctx.extras["rerank"] is RerankOutcome.SKIPPED_BUDGET
+    assert provider.batches == []
+    assert all("rerank" not in c.scores_by_stage for c in cands)
+
+
+async def test_a_larger_budget_reaches_deeper_on_the_same_provider() -> None:
+    # The production node's ratio scaled down 100x (1.67 s a pair, a 20 s
+    # agent budget): depth follows the budget, here floor(0.2 / 0.0167) = 11.
+    provider = _MeteredReranker(0.0167)
+    stage = CrossEncoderRerankerStage(
+        provider=provider, budget_s=0.2, gate=RerankGate(min_query_tokens=1, min_candidates=1)
+    )
+    ctx = _ctx_stub()
+    await stage.run("one two three", ctx, _rrf_list(30))
+    assert ctx.extras["rerank"] is RerankOutcome.RAN
+    assert sum(len(b) for b in provider.batches) == 11
+
+
+async def test_max_pairs_pins_depth_for_measurement() -> None:
+    provider = _MeteredReranker(0.0)
+    stage = CrossEncoderRerankerStage(
+        provider=provider,
+        budget_s=1000.0,
+        max_pairs=4,
+        gate=RerankGate(min_query_tokens=1, min_candidates=1),
+    )
+    ctx = _ctx_stub()
+    await stage.run("one two three", ctx, _rrf_list(10))
+    assert sum(len(b) for b in provider.batches) == 4
+
+
+async def test_provider_lost_after_a_batch_keeps_what_ran() -> None:
+    # 0.03 s a pair in 0.1 s: the first batch takes 3 of 6, and the provider
+    # is gone before the second. What was scored stays applied, nothing more
+    # is attempted, and the result is reported as the reranked prefix it is.
+    provider = _MeteredReranker(0.03, unavailable_after=1)
+    stage = CrossEncoderRerankerStage(
+        provider=provider, budget_s=0.1, gate=RerankGate(min_query_tokens=1, min_candidates=1)
+    )
+    cands = _rrf_list(6)
+    ctx = _ctx_stub()
+    await stage.run("one two three", ctx, cands)
+    assert [len(b) for b in provider.batches] == [3]
+    assert all("rerank" in c.scores_by_stage for c in cands[:3])
+    assert all("rerank" not in c.scores_by_stage for c in cands[3:])
+    assert ctx.extras["rerank"] is RerankOutcome.RAN
+
+
+def test_combine_outcomes_reports_the_worst_and_ignores_unrequested() -> None:
+    assert combine_outcomes([None, None]) is None
+    assert combine_outcomes([RerankOutcome.RAN, None]) is RerankOutcome.RAN
+    assert combine_outcomes([RerankOutcome.RAN, RerankOutcome.SKIPPED_BUDGET]) is (
+        RerankOutcome.SKIPPED_BUDGET
+    )
+    assert combine_outcomes([RerankOutcome.UNAVAILABLE, RerankOutcome.FAILED]) is (
+        RerankOutcome.FAILED
+    )
+
+
+def test_cost_units_pads_to_the_longest_pair() -> None:
+    assert cost_units("qq", []) == 0
+    assert cost_units("qq", ["a", "bbbb"]) == 2 * (2 + 4)
+
+
+async def test_local_reranker_never_loads_inside_a_request() -> None:
+    # Constructed, never prewarmed: it cannot estimate and refuses to score,
+    # instead of loading the model inline (114.6 s and ~2.7 GiB on the
+    # production node, task 03cdf674).
+    provider = LocalReranker("not-a-real-model")
+    assert provider.estimate_seconds("q", ["d"]) is None
+    with pytest.raises(RerankerUnavailable):
+        await provider.rerank("q", ["d"])
+    assert provider._model is None
+
+
+def test_local_reranker_estimate_includes_queued_work_and_follows_measurements() -> None:
+    provider = LocalReranker("not-a-real-model")
+    provider._model = object()  # stands for a loaded model; nothing is run
+    provider._observe(100, 1.0)  # first measurement seeds: 0.01 s/unit
+    assert provider.estimate_seconds("q", ["x" * 9]) == pytest.approx(0.01 * 10)
+    provider._pending_units = 90  # another request is being scored
+    assert provider.estimate_seconds("q", ["x" * 9]) == pytest.approx(0.01 * 100)
+    provider._pending_units = 0
+    provider._observe(100, 2.0)  # slower batch: moves the estimate a third of the way
+    assert provider.estimate_seconds("q", ["x" * 9]) == pytest.approx((0.01 + 0.3 * 0.01) * 10)
+
+
+async def test_a_slow_text_load_is_not_charged_to_the_budget() -> None:
+    # The budget is the cross-encoder's. A database that takes longer than the
+    # whole budget to hand over the texts must not turn a zero-cost provider
+    # into "over budget". Observed failing against the first cut of the
+    # budgeted stage (clock started before the SELECT): SKIPPED_BUDGET.
+    session = AsyncMock()
+    result = MagicMock()
+    ids = [uuid.uuid4() for _ in range(3)]
+    result.all.return_value = [(i, f"text {n}") for n, i in enumerate(ids)]
+
+    async def _slow_execute(*_a: object, **_k: object) -> MagicMock:
+        await asyncio.sleep(0.15)
+        return result
+
+    session.execute = _slow_execute
+    ctx = _ctx_stub()
+    object.__setattr__(ctx, "session", session)
+    stage = CrossEncoderRerankerStage(
+        provider=_MeteredReranker(0.0),
+        budget_s=0.1,
+        gate=RerankGate(min_query_tokens=1, min_candidates=1),
+    )
+    cands = [Candidate(blob_id=i, score=0.01) for i in ids]
+    await stage.run("one two three", ctx, cands)
+    assert ctx.extras["rerank"] is RerankOutcome.RAN

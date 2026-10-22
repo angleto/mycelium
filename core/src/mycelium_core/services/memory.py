@@ -42,6 +42,7 @@ from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import audit, billing, taxonomy
 from mycelium_core.services.chunker import Chunker
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.retrieval.stages.rerank import RerankOutcome
 
 # The perimeter type lives in the retrieval layer, which is where it is
 # carried (``RetrievalContext.project_id``) and where the predicate that
@@ -287,10 +288,13 @@ class RetrievalMeta:
       ``grader_min_rrf`` (the coarse RRF floor, WS-B1).
     - ``graph_ran`` / ``graph_contributed``: the Fase 4 graph-proximity source
       ran, and how many candidates it added that no live branch had found.
-    - ``rerank_failed``: the cross-encoder reranker was requested but errored
-      (model missing / OOM) and the pipeline degraded to RRF order. Results are
-      still returned, but the precision uplift is absent -- surface it so the
-      degradation is not silent (the same failure mode A1 exists to expose).
+    - ``rerank``: what a rerank did, ``None`` when none was in the pipeline.
+      ``ran`` is the only value under which the order is the cross-encoder's;
+      every other value (``skipped_gate``, ``skipped_budget``,
+      ``unavailable``, ``failed``) means the results are in RRF order, and
+      says why. It replaced a ``rerank_failed`` flag that covered only the
+      last of those, so a request made where the reranker is off came back
+      in RRF order looking exactly like a reranked one.
     - ``embedding_truncated_hits``: returned hits whose vector was produced
       from the HEAD of their text, because the text was longer than the local
       embedder's sequence window. See :func:`embedding_covers_head_only` for
@@ -303,7 +307,7 @@ class RetrievalMeta:
     keyword_only_hits: int
     abstained: bool = False
     abstain_reason: str | None = None
-    rerank_failed: bool = False
+    rerank: RerankOutcome | None = None
     # Fase 4 graph-proximity source (task 561c6aca): whether the gated graph
     # stage ran, and how many NEW candidates it injected (notes no live branch
     # found). Both zero/false when the stage is off (the default), so an A/B
@@ -645,6 +649,18 @@ async def write_blob(
     return first_blob
 
 
+def resolve_rerank_budget_ms(requested: int | None) -> int:
+    """The rerank budget a call gets: what it asked for, else the deployment
+    default, never above the deployment ceiling and never negative. One
+    function so that a search running several retrievals can split ONE budget
+    between them instead of granting each the whole of it."""
+    from mycelium_core.config import get_settings as _get_settings
+
+    settings = _get_settings()
+    budget = settings.reranker_budget_ms if requested is None else requested
+    return max(0, min(budget, settings.reranker_budget_max_ms))
+
+
 async def retrieve_with_meta(
     session: AsyncSession,
     *,
@@ -662,6 +678,7 @@ async def retrieve_with_meta(
     created_by: uuid.UUID | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
+    rerank_budget_ms: int | None = None,
     humus: bool | None = None,
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
@@ -690,7 +707,12 @@ async def retrieve_with_meta(
     branch (Config C: atoms as if never written), used to prove a
     consolidation query is answered by no raw blob; it implies the humus
     branch off (the two knobs are mutually exclusive -- a branch over an
-    excluded set could only be empty)."""
+    excluded set could only be empty).
+
+    ``rerank_budget_ms`` is how long this call lets the cross-encoder run
+    (None = ``settings.reranker_budget_ms``), clamped to
+    ``settings.reranker_budget_max_ms``. What the rerank actually did comes
+    back in ``meta.rerank``."""
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
@@ -918,7 +940,8 @@ async def retrieve_with_meta(
     if use_rerank:
         stages.append(
             CrossEncoderRerankerStage(
-                top_k=settings.reranker_top_k,
+                budget_s=resolve_rerank_budget_ms(rerank_budget_ms) / 1000.0,
+                max_pairs=settings.reranker_max_pairs,
                 gate=RerankGate(
                     min_query_tokens=settings.reranker_min_query_tokens,
                     min_candidates=settings.reranker_min_candidates,
@@ -991,7 +1014,7 @@ async def retrieve_with_meta(
             ),
             abstained=abstained,
             abstain_reason=reason if abstained else None,
-            rerank_failed=bool(ctx.extras.get("rerank_failed")),
+            rerank=ctx.extras.get("rerank"),
             graph_ran=bool(graph_diag.get("ran", False)),
             graph_contributed=int(graph_diag.get("contributed", 0)),
         )

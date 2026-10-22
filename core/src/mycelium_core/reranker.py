@@ -19,13 +19,20 @@ import asyncio
 import importlib.util
 import logging
 import math
+import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from mycelium_core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Weight of the newest batch in the running cost estimate (see
+# ``LocalReranker._observe``). 0.3 lets a real change of regime dominate after
+# about three batches while one slow batch moves the estimate by under a third.
+_COST_SMOOTHING = 0.3
 
 
 def _sigmoid(x: float) -> float:
@@ -82,33 +89,71 @@ class RerankResult:
 
 @runtime_checkable
 class Reranker(Protocol):
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        """How long scoring ``pairs`` would take if submitted NOW, including
+        any work this provider has already queued, or ``None`` when the
+        provider cannot score at all (feature off, model not loaded, not yet
+        measured). The stage spends a time budget with it instead of a fixed
+        count of pairs, because the cost of one pair is not a constant: on the
+        production node (2026-09-14, task 03cdf674) the same model took 1.67 s
+        a pair in a batch of 10 and 2.42 s a pair in a batch of 50, and the
+        laptop was 2.2x faster than either. A count that was right for one of
+        those is wrong for the others.
+
+        ``None`` is a real answer and the stage reports it as such; returning
+        a guess instead would let a request load a model inline."""
+        ...
+
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         """``pairs`` is the document texts; the query is broadcast.
         Returns one score per document in the same order as ``pairs``,
         higher = better and IN [0, 1] (see ``RerankResult``). A provider
         whose model emits raw logits converts them; it does not hand the
-        logit out and hope the consumer knows."""
+        logit out and hope the consumer knows. Raises
+        ``RerankerUnavailable`` when it cannot score, never loads inline."""
         ...
 
 
+class RerankerUnavailable(RuntimeError):
+    """The provider cannot score right now: the feature is off, the optional
+    extra is missing, or the model has not been loaded off the request path.
+    Distinct from a scoring failure, which is a provider that should have
+    worked and did not; a caller is told which of the two happened."""
+
+
+def cost_units(query: str, pairs: Sequence[str]) -> int:
+    """The work a cross-encoder batch costs, in the unit the estimate is kept
+    in: characters, padded to the longest pair of the batch, because the batch
+    is padded to its longest sequence before the forward pass. Characters
+    rather than tokens so that estimating never needs the tokenizer, which is
+    loaded with the model. The proportionality is an approximation and the
+    estimate absorbs its error, since it is re-measured on every batch."""
+    if not pairs:
+        return 0
+    return len(pairs) * (len(query) + max(len(p) for p in pairs))
+
+
 class NoopReranker:
-    """Identity reranker used when the feature is gated off. It scores all
-    docs 0.0, but the ``CrossEncoderRerankerStage`` detects it and passes
-    candidates through UNCHANGED -- applying a flat 0.0 would let the
-    downstream ``OrderingStage`` re-sort on the created_at tiebreak and
-    destroy the upstream RRF order. The production default keeps it off."""
+    """Stands in when the feature is gated off. It cannot score: its estimate
+    is ``None`` and ``rerank`` raises, so the stage reports the request as
+    unavailable instead of passing the RRF order through as if it had been
+    reranked, which is what it did until 2026-10-22."""
 
     model_id = "noop"
 
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        return None
+
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
-        return RerankResult(scores=[0.0] * len(pairs), model_id=self.model_id)
+        raise RerankerUnavailable("the reranker is not enabled in this deployment")
 
 
 class LocalReranker:
-    """sentence-transformers CrossEncoder loaded once per process.
-    Lazily imported so the optional extra is not required for the
-    Noop path. The load and the predict both run in a worker thread
-    so the asyncio loop stays responsive even on cold start."""
+    """sentence-transformers CrossEncoder, loaded once per process by
+    ``prewarm`` and never by a request. Lazily imported so the optional extra
+    is not required for the Noop path. The load and every forward pass run on
+    a single thread of its own, so the asyncio loop stays responsive and the
+    model is never run concurrently with itself."""
 
     def __init__(
         self,
@@ -174,6 +219,19 @@ class LocalReranker:
         self._code_revision = code_revision
         self._model: object | None = None
         self._load_lock = asyncio.Lock()
+        # One thread of its own, not the loop's shared default pool: a forward
+        # pass holds a core for seconds on the production node, and in the
+        # shared pool it would queue behind (and in front of) every other
+        # blocking call the process makes. One worker also serialises the
+        # model, which is what the cost estimate below assumes: queued work
+        # is waited for, not run alongside.
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reranker")
+        # Measured seconds per cost unit (see ``cost_units``), None until the
+        # first measurement. Seeded by ``prewarm``, then moved by every batch.
+        self._seconds_per_unit: float | None = None
+        # Units submitted to the executor and not yet finished, so that an
+        # estimate made while another request is scoring includes the wait.
+        self._pending_units = 0
 
     @property
     def model_id(self) -> str:
@@ -201,25 +259,40 @@ class LocalReranker:
             )
         return self._model
 
-    async def _model_ready(self) -> object:
-        if self._model is not None:
-            return self._model
+    async def prewarm(self) -> None:
+        """Load the model and take the first cost measurement, OFF the request
+        path. This is the only way the model gets loaded: a request never
+        loads it, because on the production node the load took 114.6 s and
+        added ~2.7 GiB to a backend capped at 6 GiB (task 03cdf674), which is
+        a cost no single search may impose on the process. Until this has
+        finished the provider reports itself unavailable. Safe to call more
+        than once."""
         async with self._load_lock:
             if self._model is None:
-                return await asyncio.to_thread(self._load_sync)
-            return self._model
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(self._executor, self._load_sync)
+        if self._seconds_per_unit is None:
+            # One measured batch seeds the estimate, so that the first real
+            # request is admitted or refused on a number rather than a guess.
+            # Two pairs of roughly a note's length; every later batch moves
+            # the estimate towards what the real traffic costs.
+            sample = "the memory system and its abstention threshold " * 25
+            query = "which threshold does the reranker use"
+            await self.rerank(query, [sample, sample[: len(sample) // 2]])
 
-    async def prewarm(self) -> None:
-        """Force the in-memory load (off the request path). Safe to
-        call multiple times; subsequent calls are no-ops."""
-        await self._model_ready()
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        if self._model is None or self._seconds_per_unit is None:
+            return None
+        return self._seconds_per_unit * (self._pending_units + cost_units(query, pairs))
 
     async def rerank(  # pragma: no cover - network/model
         self, query: str, pairs: Sequence[str]
     ) -> RerankResult:
         if not pairs:
             return RerankResult(scores=[], model_id=self._model_name)
-        model = await self._model_ready()
+        model = self._model
+        if model is None:
+            raise RerankerUnavailable(f"{self._model_name} is not loaded; it loads at startup only")
 
         def _run() -> list[float]:
             # Raw logits asked for explicitly, squashed HERE. The checkpoint's
@@ -236,8 +309,37 @@ class LocalReranker:
             )
             return [_sigmoid(float(s)) for s in raw]
 
-        scores = await asyncio.to_thread(_run)
+        units = cost_units(query, pairs)
+        self._pending_units += units
+        try:
+            loop = asyncio.get_running_loop()
+
+            def _timed() -> tuple[list[float], float]:
+                # Timed inside the worker, so the measurement is the forward
+                # pass and not the time this batch spent queued behind another.
+                started = time.monotonic()
+                out = _run()
+                return out, time.monotonic() - started
+
+            scores, elapsed = await loop.run_in_executor(self._executor, _timed)
+        finally:
+            self._pending_units -= units
+        self._observe(units, elapsed)
         return RerankResult(scores=scores, model_id=self._model_name)
+
+    def _observe(self, units: int, elapsed: float) -> None:
+        """Move the estimate towards the batch just measured. An exponential
+        average, so the estimate follows a change of hardware, model or
+        document length within a few batches without being thrown by one slow
+        outlier; the weight of the newest batch is a smoothing choice, not a
+        property of any data."""
+        if units <= 0:
+            return
+        observed = elapsed / units
+        if self._seconds_per_unit is None:
+            self._seconds_per_unit = observed
+        else:
+            self._seconds_per_unit += _COST_SMOOTHING * (observed - self._seconds_per_unit)
 
 
 _FactoryFn = Callable[[], Reranker]

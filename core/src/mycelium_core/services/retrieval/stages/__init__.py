@@ -28,6 +28,8 @@ from mycelium_core.services.retrieval.stages.order_limit import (
 from mycelium_core.services.retrieval.stages.rerank import (
     CrossEncoderRerankerStage,
     RerankGate,
+    RerankOutcome,
+    combine_outcomes,
 )
 from mycelium_core.services.retrieval.stages.semantic import SemanticDenseStage
 from mycelium_core.services.retrieval.stages.trace import RetrievalTraceStage
@@ -47,8 +49,10 @@ __all__ = [
     "RRFFusionStage",
     "RelativeFloorStage",
     "RerankGate",
+    "RerankOutcome",
     "RetrievalTraceStage",
     "SemanticDenseStage",
+    "combine_outcomes",
     "humus_note_blob_exclusion",
     "ineffective_source_blob_exclusion",
     "proposed_note_blob_exclusion",

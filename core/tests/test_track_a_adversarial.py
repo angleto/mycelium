@@ -1,7 +1,8 @@
 """Adversarial verification of Track A retrieval observability (audit A-3/A-5).
 
-A-3: a reranker that fails at query time must DEGRADE to RRF order AND surface
-``rerank_failed`` in the meta (the degradation is not silent).
+A-3: a reranker that fails at query time, or cannot run at all, must DEGRADE to
+RRF order AND say which of the two happened in ``meta.rerank`` (the
+degradation is not silent).
 A-5: the unified search reports ``abstained`` only when it shaped an EMPTY
 result -- a thin-but-nonempty unified result is never mislabelled.
 """
@@ -17,12 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from mycelium_core.config import get_settings  # noqa: E402
 from mycelium_core.db import admin_session, tenant_session  # noqa: E402
 from mycelium_core.models.note import NoteKind  # noqa: E402
 from mycelium_core.reranker import RerankResult, set_reranker_override  # noqa: E402
 from mycelium_core.services import memory, task_search  # noqa: E402
 from mycelium_core.services import notes as nt  # noqa: E402
 from mycelium_core.services.auth import signup  # noqa: E402
+from mycelium_core.services.retrieval.stages import RerankOutcome  # noqa: E402
 
 
 def _email() -> str:
@@ -39,6 +42,9 @@ class _FailingReranker:
     """A cross-encoder that errors at predict time (model missing / OOM)."""
 
     model_id = "boom"
+
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        return 0.0
 
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         raise RuntimeError("reranker model unavailable")
@@ -72,8 +78,46 @@ async def test_rerank_failure_degrades_and_surfaces_in_meta() -> None:
             )
     finally:
         set_reranker_override(None)
-    assert meta.rerank_failed is True  # the degradation is observable, not silent
+    assert meta.rerank is RerankOutcome.FAILED  # the degradation is observable, not silent
     assert len(hits) >= 1  # results still returned (RRF order preserved)
+
+
+async def test_rerank_requested_where_it_is_off_says_unavailable() -> None:
+    """The production configuration end to end: the feature off, no override,
+    ``rerank=True`` on the call. Results come back in RRF order and the meta
+    says the rerank was unavailable.
+
+    Observed failing against the version that carried the defect (HEAD
+    59bc556b, 2026-10-22): there the same call returned the RRF order with
+    nothing in the meta to say so, because the per-call flag mounted the stage
+    and the stage passed the Noop provider's request through in silence."""
+    org, user = await _org()
+    token = "zebra quumix vortex"  # 3 tokens -> passes the rerank query-len gate
+    async with tenant_session(str(org), str(user)) as s:
+        for i in range(6):  # >= reranker_min_candidates (5)
+            await nt.create_note(
+                s,
+                org_id=org,
+                actor_id=user,
+                kind=NoteKind.text,
+                title=f"n{i}",
+                text=f"{token} note number {i}",
+            )
+    assert not get_settings().reranker_enabled  # the configuration under test
+    set_reranker_override(None)
+    async with tenant_session(str(org), str(user)) as s:
+        hits, meta = await memory.retrieve_with_meta(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=None,
+            query=token,
+            operation_id=f"rrkoff-{uuid.uuid4().hex}",
+            limit=10,
+            rerank=True,
+        )
+    assert meta.rerank is RerankOutcome.UNAVAILABLE
+    assert len(hits) >= 1
 
 
 class _ConstScoreReranker:
@@ -90,6 +134,9 @@ class _ConstScoreReranker:
 
     def __init__(self, score: float) -> None:
         self._score = score
+
+    def estimate_seconds(self, query: str, pairs: Sequence[str]) -> float | None:
+        return 0.0
 
     async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         return RerankResult(scores=[self._score] * len(pairs), model_id=self.model_id)

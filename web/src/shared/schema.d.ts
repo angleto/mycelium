@@ -14163,8 +14163,12 @@ export interface components {
          *     path, ``kinds=['blob']`` mirrors /memory/search, ``kinds=['note']``
          *     returns titled note hits (a note part blob resolved to its note).
          *     ``include_archived`` and ``include_deleted`` apply to ``task`` and
-         *     ``note`` hits. ``rerank`` opts into the cross-encoder reranker for
-         *     this call regardless of the env default (task 27579d6a).
+         *     ``note`` hits. ``rerank`` asks for the cross-encoder reranker for this
+         *     call regardless of the env default (task 27579d6a), for at most
+         *     ``rerank_budget_ms`` (default and ceiling are the deployment's). What it
+         *     did is reported in the recall meta, which this endpoint does not return
+         *     yet (see the router): until it does, a REST caller cannot tell a
+         *     reranked order from the plain one, and the MCP ``search`` tool can.
          */
         SearchIn: {
             /** Q */
@@ -14195,6 +14199,8 @@ export interface components {
              * @default false
              */
             rerank?: boolean;
+            /** Rerank Budget Ms */
+            rerank_budget_ms?: number | null;
             /**
              * Operation Id
              * @default search
