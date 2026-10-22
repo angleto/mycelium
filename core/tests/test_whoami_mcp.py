@@ -92,3 +92,11 @@ async def test_whoami_plain_principal_is_safe() -> None:
     assert me["scope"] is None
     assert me["memory_lane"]["channel"] == "agent"
     assert isinstance(me["open_tasks"], list)
+    # The hint carries the shape of an entry, not only the call (task 9f4a2fd9):
+    # a fact says where and when it was verified, a lesson is cue / lesson /
+    # evidence / confidence, no observed contrast means no entry, and a recalled
+    # fact from elsewhere is a hypothesis. Observed failing against 59bc556b,
+    # whose hint was the bare call signature.
+    hint = me["memory_lane"]["write_hint"]
+    for part in ("FACT", "cue:", "lesson:", "evidence:", "confidence:", "no entry", "hypothesis"):
+        assert part in hint, part

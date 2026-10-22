@@ -670,9 +670,23 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
             "memory_lane": {
                 "channel": "agent",
                 "recall": memory_recall,
+                # The call AND the shape of what goes in it. The lane takes free
+                # text and this recall hands it back blind, which is the shape
+                # that measured mixed-to-harmful as a baseline in Harness^2
+                # (arXiv 2610.14224: distilled strategies recalled into
+                # context, -6.6 points in one configuration of four). A
+                # convention rather than columns, because nothing would read
+                # the columns (note 6aa8090c section 8, task 9f4a2fd9).
                 "write_hint": (
                     "memory_write(text, operation_id, channel_key='agent', "
-                    "tag_ids=[<your 'agent/<handle>' tag>], namespace='agent')"
+                    "tag_ids=[<your 'agent/<handle>' tag>], namespace='agent'). "
+                    "The text is either a FACT stating where and when it was verified, "
+                    "or a LESSON written as 'cue: <the shape of situation it applies to> / "
+                    "lesson: <a checkable operation naming the component> / "
+                    "evidence: <the observed contrast it rests on> / "
+                    "confidence: <high|medium|low, and why>'. No observed contrast, no "
+                    "entry. A fact recalled from another project, machine or date is a "
+                    "hypothesis to re-verify before acting on it."
                 ),
             },
             "pointers": {
