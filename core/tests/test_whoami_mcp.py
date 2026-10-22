@@ -100,3 +100,60 @@ async def test_whoami_plain_principal_is_safe() -> None:
     hint = me["memory_lane"]["write_hint"]
     for part in ("FACT", "cue:", "lesson:", "evidence:", "confidence:", "no entry", "hypothesis"):
         assert part in hint, part
+
+
+async def test_whoami_recall_spans_every_project_and_labels_each_entry() -> None:
+    """The recall reaches the lane in every project and says where each entry
+    comes from (task a21157fc).
+
+    Observed failing against 59bc556b: there the recall asked for the perimeter
+    of blobs with NO project, so of the three entries below it returned only
+    the untagged one, never the two filed under a project -- the shape that, in
+    production on 2026-10-22, handed every session the same single blob and
+    never the lane's index."""
+    from _fake_embedder import FakeEmbedder
+
+    from mycelium_core.embedder import set_embedder_override
+    from mycelium_core.services import memory, taxonomy
+
+    async with admin_session() as s:
+        r = await signup(s, email=_email(), password="pw-strong-123", org_name="WHO3")
+    org, user = r.org_id, r.user_id
+    set_embedder_override(FakeEmbedder)
+    try:
+        async with tenant_session(str(org), str(user)) as s:
+            alpha = await taxonomy.create_project(s, org_id=org, actor_id=user, name="Alpha")
+            beta = await taxonomy.create_project(s, org_id=org, actor_id=user, name="Beta")
+            for project_id, tag_ids, text in (
+                (alpha.id, [], "agent memory index protocol operational state alpha"),
+                (beta.id, [], "agent memory index protocol operational state beta"),
+                # A NULL perimeter riding a project TAG, the way task blobs are
+                # filed by design: labelled by its tag, not as projectless.
+                (None, [beta.id], "agent memory index protocol operational state tagged"),
+            ):
+                await memory.write_blob(
+                    s,
+                    org_id=org,
+                    actor_id=user,
+                    project_id=project_id,
+                    text_body=text,
+                    operation_id=f"w-{uuid.uuid4().hex}",
+                    namespace="agent",
+                    channel_key="agent",
+                    tag_ids=tag_ids,
+                )
+        reset = _PRINCIPAL.set((user, org, None))
+        try:
+            me = await whoami("", "")
+        finally:
+            _PRINCIPAL.reset(reset)
+    finally:
+        set_embedder_override(None)
+
+    by_text = {e["blob"]["text"].rsplit(" ", 1)[-1]: e for e in me["memory_lane"]["recall"]}
+    assert set(by_text) == {"alpha", "beta", "tagged"}
+    assert by_text["alpha"]["from_project"] == "Alpha"
+    assert by_text["beta"]["from_project"] == "Beta"
+    assert by_text["tagged"]["from_project"] == "Beta"
+    assert all(len(e["written_on"]) == 10 for e in by_text.values())
+    assert "hypothesis" in me["memory_lane"]["recall_scope"]

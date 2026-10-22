@@ -621,6 +621,18 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
         # Recall the agent's own durable lane (channel 'agent'). Best-effort: a
         # bootstrap must never fail because memory is momentarily unavailable or
         # the channel is not yet seeded.
+        #
+        # Across EVERY project, each entry labelled with the project it comes
+        # from. Until 2026-10-22 this asked for ``project_id=None``, which is
+        # the perimeter of blobs belonging to no project, not "any project":
+        # measured that day in production, the perimeter held exactly one agent
+        # blob, so every session of the handle got the same one, and the lane's
+        # index (filed under its project) never reached a bootstrap at all.
+        # whoami takes no arguments and cannot know which project a session is
+        # about, so the honest recall is all of them with the provenance on
+        # each entry, and the reading rule is the caller's: an entry from
+        # another project or date is a hypothesis to re-verify (task a21157fc,
+        # protocol note 30e5717a section 2).
         memory_recall: list[dict[str, Any]] = []
         if not _scope_permits("memory_search"):
             withheld.append("memory_lane.recall: needs the scope that memory_search requires")
@@ -630,13 +642,16 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                     s,
                     org_id=org,
                     actor_id=user,
-                    project_id=None,
+                    project_id=memory_svc.ANY_PROJECT,
                     query=f"{handle or 'agent'} memory index protocol operational state",
                     operation_id=f"whoami:{token_id or user}",
                     limit=5,
                     channel_key="agent",
                 )
                 tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
+                project_names = await _project_names(
+                    s, {h.blob.project_id for h in hits if h.blob.project_id is not None}
+                )
                 # No ``rrf``: the recall arrives ordered, so the float says
                 # nothing the position does not, and a bootstrap payload is the
                 # one a caller cannot ask for less of -- whoami takes no
@@ -645,7 +660,11 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                     {
                         "blob": _blob(
                             h.blob, tagmap.get(h.blob.id), snippet_chars=_WHOAMI_SNIPPET_CHARS
-                        )
+                        ),
+                        "from_project": _recall_project(
+                            h.blob, tagmap.get(h.blob.id), project_names
+                        ),
+                        "written_on": h.blob.created_at.date().isoformat(),
                     }
                     for h in hits
                 ]
@@ -670,6 +689,11 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
             "memory_lane": {
                 "channel": "agent",
                 "recall": memory_recall,
+                "recall_scope": (
+                    "every project of this workspace; each entry says the project it "
+                    "comes from and the day it was written, and an entry from another "
+                    "project or an older day is a hypothesis to re-verify, not a fact"
+                ),
                 # The call AND the shape of what goes in it. The lane takes free
                 # text and this recall hands it back blind, which is the shape
                 # that measured mixed-to-harmful as a baseline in Harness^2
@@ -5056,6 +5080,33 @@ _RECALL_SNIPPET_CHARS = 500
 #: caller cannot ask for less on: ``whoami`` hard-wires ``limit=5`` and
 #: takes no arguments. A bootstrap wants an index, not five documents.
 _WHOAMI_SNIPPET_CHARS = 200
+
+
+async def _project_names(s: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Batched project id -> name for the whoami recall (a project id IS its
+    project tag's id)."""
+    if not ids:
+        return {}
+    rows = await s.execute(
+        select(Tag.id, Tag.name).where(Tag.id.in_(list(ids)), Tag.kind == TagKind.project)
+    )
+    return {tid: name for tid, name in rows.all()}
+
+
+def _recall_project(
+    b: MemoryBlob, tags: list[Tag] | None, names: dict[uuid.UUID, str]
+) -> str | None:
+    """The project a recalled entry belongs to: its perimeter when it has one,
+    else the project tag it carries. Both exist by design -- task blobs keep a
+    NULL perimeter and ride their project TAG (task_search) -- so reading only
+    the perimeter would label such an entry as belonging to no project, which
+    is the mislabelling this field exists to prevent. None means neither."""
+    if b.project_id is not None:
+        return names.get(b.project_id)
+    for g in tags or []:
+        if g.kind == TagKind.project:
+            return g.name
+    return None
 
 
 def _blob(
