@@ -2132,7 +2132,8 @@ export interface paths {
         /**
          * List Assigned Annotations
          * @description The "assigned to me" inbox: annotations assigned to ``handle``
-         *     (defaults to the calling user's identity), newest first. Open-only unless
+         *     (defaults to the calling identity: the assistant's under an agent token,
+         *     otherwise the user's), newest first. Open-only unless
          *     ``include_resolved=true``. An unknown handle yields an empty list.
          *     Declared before ``/{annotation_id}`` so the static path wins.
          */
