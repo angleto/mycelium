@@ -7108,7 +7108,7 @@ button.btn--danger:hover {
   margin: var(--sp-4) 0;
 }
 .anno-instr--instruction {
-  border-left: 3px solid var(--accent, #6b5bd6);
+  border-left: 3px solid var(--accent);
   padding-left: var(--sp-6);
 }
 .anno-instr__answers {
@@ -7130,17 +7130,17 @@ button.btn--danger:hover {
   margin-top: var(--sp-4);
 }
 .anno-instr__full {
-  margin: var(--sp-4) 0 0 var(--sp-12, 1rem);
+  margin: var(--sp-4) 0 0 var(--sp-12);
   white-space: pre-wrap;
 }
 .anno-instr__status {
   opacity: 0.75;
 }
 .anno-instr__status--accepted {
-  color: var(--ok, #2e7d32);
+  color: var(--ok);
 }
 .anno-instr__status--rejected {
-  color: var(--danger, #c62828);
+  color: var(--err);
 }
 .anno-pop__assign {
   margin-top: var(--sp-6);
