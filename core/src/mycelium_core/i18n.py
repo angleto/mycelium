@@ -292,6 +292,8 @@ class MessageCode(enum.StrEnum):
     SUGGESTION_NOT_PENDING = "annotation.suggestion_not_pending"
     SUGGESTION_STALE = "annotation.suggestion_stale"
     SUGGESTION_DECISION_INVALID = "annotation.suggestion_decision_invalid"
+    ANNOTATION_INSTRUCTION_INVALID = "annotation.instruction_invalid"
+    ANNOTATION_INSTRUCTION_RESERVED = "annotation.instruction_reserved"
     SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
     ANNOTATION_BODY_REQUIRED = "annotation.body_required"
     BODY_INVALID_ENCODING = "body.invalid_encoding"
@@ -881,6 +883,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The cited comment is not a person's decision to accept this "
             "suggestion ({reason}). Ask the person to reply on the document "
             "with a line 'accept <suggestion id>'."
+        ),
+        MessageCode.ANNOTATION_INSTRUCTION_INVALID: (
+            "The cited instruction cannot be answered by this suggestion ({reason}). "
+            "Cite an open comment on the same document."
+        ),
+        MessageCode.ANNOTATION_INSTRUCTION_RESERVED: (
+            "This comment is an instruction a person gave to an assistant, so only a "
+            "person can {action} it, from the app. Reply on it with what you did instead."
         ),
         MessageCode.SUGGESTION_TEXT_REQUIRED: ("A suggestion needs the original text it replaces."),
         MessageCode.DOMAIN_ERROR: "Domain error",

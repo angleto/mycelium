@@ -1022,7 +1022,16 @@ class AnnotationOut(BaseModel):
     # ``resolved_by_identity_id`` is then the agent that executed it.
     decided_by_identity_id: uuid.UUID | None = None
     decision_comment_id: uuid.UUID | None = None
+    # On a suggestion: the comment it carries out (migration 0024). An
+    # instruction is a comment a person assigned to an assistant.
+    instruction_id: uuid.UUID | None = None
     assigned_to_identity_id: uuid.UUID | None = None
+    # The assignee resolved like the author: handle, 'user' | 'ai_assistant',
+    # and the assistant's label. A person's comment assigned to an assistant
+    # is an instruction, which the card shows as such.
+    assignee_handle: str | None = None
+    assignee_kind: str | None = None
+    assignee_label: str | None = None
     resolved_at: datetime.datetime | None = None
     edited_at: datetime.datetime | None = None
     deleted_at: datetime.datetime | None = None
@@ -1077,6 +1086,9 @@ class AnnotationCommentIn(BaseModel):
     # domain either fails to locate or, worse, matches the wrong passage.
     anchor_domain: Literal["source", "rendered"] = "source"
     parent_id: uuid.UUID | None = None
+    # Assign it in the same transaction (bare handle, ``@handle`` or login
+    # email). Assigned to an assistant, a person's comment is an instruction.
+    assignee_handle: str | None = None
 
 
 class SuggestionIn(BaseModel):
@@ -1094,6 +1106,8 @@ class SuggestionIn(BaseModel):
     # joined by a space) and has to say so, because a quote read in the wrong
     # domain either fails to locate or, worse, matches the wrong passage.
     anchor_domain: Literal["source", "rendered"] = "source"
+    # The instruction (a comment on the same document) this edit carries out.
+    instruction_id: uuid.UUID | None = None
 
 
 class AnnotationEditIn(BaseModel):

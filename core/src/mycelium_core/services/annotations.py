@@ -246,6 +246,10 @@ async def _require_author_or_admin(
     """Edit/delete is the author's right; an admin can override. The
     actor's identity is the explicit one (an agent's ai_assistant
     identity, passed by the MCP layer) or the actor's user identity."""
+    # Before the author check, not after it: the actor's identity is whatever
+    # the caller passed, and a route that forgot to pass the assistant's would
+    # make an agent token look like the person who wrote the instruction.
+    await _guard_instruction(session, ann=ann, action="change")
     ident = actor_identity_id or await _user_identity_id(session, org_id=org_id, actor_id=actor_id)
     if ann.author_identity_id is not None and ann.author_identity_id == ident:
         return
@@ -299,6 +303,132 @@ def _splice(
 
 
 # --------------------------------------------------------------------------
+# instructions: a comment a person assigns to an assistant
+# --------------------------------------------------------------------------
+async def _resolve_assignee(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    identity_id: uuid.UUID | None,
+    handle: str | None,
+) -> uuid.UUID | None:
+    """The identity an annotation is assigned to, by id or by handle (bare,
+    ``@handle`` or login email), or None when neither is given. An unknown or
+    foreign identity raises ``IDENTITY_NOT_FOUND``."""
+    if identity_id is not None:
+        found = (
+            await session.execute(
+                select(Identity).where(Identity.id == identity_id, Identity.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if found is None:
+            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        # Same gate the handle branch inherits from the resolver: an explicit
+        # id must not be a way around it.
+        await identities_svc.require_bindable_identity(session, org_id=org_id, ident=found)
+        return identity_id
+    if handle:
+        ident = await identities_svc.lookup_by_handle(session, org_id=org_id, handle=handle)
+        if ident is None:
+            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        return ident.id
+    return None
+
+
+async def _is_instruction(session: AsyncSession, ann: Annotation) -> bool:
+    """Whether ``ann`` is an instruction: a comment whose author is a person
+    and whose assignee is an assistant.
+
+    There is no instruction kind. Assigning a comment already says that
+    someone has to act on it and who, which a kind would say less well, so
+    the instruction is read off the two identities instead of stored."""
+    if ann.kind != "comment" or ann.assigned_to_identity_id is None:
+        return False
+    if ann.author_identity_id is None:
+        return False
+    rows = await session.execute(
+        select(Identity.id, Identity.kind).where(
+            Identity.id.in_((ann.author_identity_id, ann.assigned_to_identity_id))
+        )
+    )
+    kinds: dict[uuid.UUID, IdentityKind] = {iid: kind for iid, kind in rows.all()}
+    return (
+        kinds.get(ann.author_identity_id) == IdentityKind.user
+        and kinds.get(ann.assigned_to_identity_id) == IdentityKind.ai_assistant
+    )
+
+
+async def _guard_instruction(session: AsyncSession, *, ann: Annotation, action: str) -> None:
+    """Refuse an assistant credential that would close or rewrite an
+    instruction.
+
+    The agent is the one the instruction is addressed to, and the instruction
+    is what its work is later checked against. If the agent could resolve it,
+    it would be closing its own work; if it could reassign, edit, delete,
+    restore or purge it, it could change or remove the yardstick. So the
+    person keeps those acts. The agent answers instead: suggestions that cite
+    the instruction, and a reply saying what it did or why it could not.
+
+    The test is the CREDENTIAL (``session_writes_as_assistant``), the same one
+    protected notes use, because it answers on REST as well as MCP. A person
+    working through an assistant is inside it on purpose: they close the
+    instruction from the app. Reopening stays open to everyone, since it
+    gives the person their instruction back rather than taking it away.
+
+    Callers: :func:`resolve`, :func:`assign`, :func:`purge`, and
+    :func:`_require_author_or_admin`, which covers the edit family,
+    :func:`soft_delete`, :func:`restore` and :func:`restore_revision`. A new
+    mutator of a comment must call it too."""
+    from mycelium_core.services.agent_tokens import session_writes_as_assistant
+
+    if not await _is_instruction(session, ann):
+        return
+    if await session_writes_as_assistant(session):
+        raise ForbiddenError(MessageCode.ANNOTATION_INSTRUCTION_RESERVED, action=action)
+
+
+async def _check_instruction_link(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    on: Annotation,
+    instruction_id: uuid.UUID,
+) -> None:
+    """Check that a suggestion on ``on``'s document may cite
+    ``instruction_id`` as the instruction it carries out.
+
+    The cited row must be a live, open comment on the same document (a note
+    counts as one document across its parts, so an instruction on one part
+    can be answered on another). It need not be assigned to the caller: the
+    link records which instruction an edit answers, and anyone may answer
+    one. What it guards against is a link a reviewer would be misled by --
+    an edit pinned to an instruction elsewhere, to another suggestion, or to
+    one the person already closed. A ``reason`` names the failed clause."""
+
+    def refuse(reason: str) -> DomainError:
+        return DomainError(MessageCode.ANNOTATION_INSTRUCTION_INVALID, reason=reason)
+
+    ins = (
+        await session.execute(
+            select(Annotation).where(Annotation.id == instruction_id, Annotation.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if ins is None or ins.kind != "comment":
+        raise refuse("not_a_comment")
+    if ins.deleted_at is not None:
+        raise refuse("deleted")
+    if ins.status != "open":
+        raise refuse("closed")
+    on_document = (
+        await session.execute(
+            select(Annotation.id).where(Annotation.id == ins.id, _same_document_clause(on))
+        )
+    ).scalar_one_or_none()
+    if on_document is None:
+        raise refuse("other_document")
+
+
+# --------------------------------------------------------------------------
 # create
 # --------------------------------------------------------------------------
 async def create_comment(
@@ -315,11 +445,20 @@ async def create_comment(
     anchor_domain: str = "source",
     parent_id: uuid.UUID | None = None,
     author_identity_id: uuid.UUID | None = None,
+    assignee_identity_id: uuid.UUID | None = None,
+    assignee_handle: str | None = None,
 ) -> Annotation:
     """A comment on a markdown document. A NULL ``anchor_quote`` is a
     whole-document comment (on a task description: a work-diary entry).
-    A ``parent_id`` makes it a reply (it inherits the parent's document)."""
+    A ``parent_id`` makes it a reply (it inherits the parent's document).
+
+    An assignee set here is the same as an :func:`assign` right after, in one
+    transaction. A comment a person assigns to an assistant is an
+    instruction (see :func:`_is_instruction`)."""
     await require_role(session, org_id, actor_id, Role.member)
+    assignee = await _resolve_assignee(
+        session, org_id=org_id, identity_id=assignee_identity_id, handle=assignee_handle
+    )
     if parent_id is not None:
         parent = await _get(session, org_id=org_id, annotation_id=parent_id)
         task_id, note_part_id = parent.task_id, parent.note_part_id
@@ -345,9 +484,13 @@ async def create_comment(
         parent_id=parent_id,
         status="open",
         author_identity_id=author,
+        assigned_to_identity_id=assignee,
     )
     session.add(ann)
     await session.flush()
+    diff: dict[str, Any] = {"kind": "comment", "doc_kind": doc_kind}
+    if assignee is not None:
+        diff["assigned_to_identity_id"] = str(assignee)
     await audit.log(
         session,
         org_id=org_id,
@@ -355,7 +498,7 @@ async def create_comment(
         entity="annotation",
         entity_id=ann.id,
         action="create",
-        diff={"kind": "comment", "doc_kind": doc_kind},
+        diff=diff,
     )
     await _log_annotation_revision(
         session,
@@ -383,18 +526,29 @@ async def propose_suggestion(
     anchor_suffix: str | None = None,
     anchor_domain: str = "source",
     author_identity_id: uuid.UUID | None = None,
+    instruction_id: uuid.UUID | None = None,
 ) -> Annotation:
     """A proposed edit (``original_text`` -> ``proposed_text``) on a
     markdown document, with an optional rationale (stored in ``body``).
     The struck original is also the anchor quote, so the SPA can paint it
     and accept can relocate it. Nothing touches the document body until
-    the suggestion is accepted."""
+    the suggestion is accepted.
+
+    ``instruction_id`` names the comment this suggestion carries out, checked
+    by :func:`_check_instruction_link`."""
     await require_role(session, org_id, actor_id, Role.member)
     if not original_text:
         raise DomainError(MessageCode.SUGGESTION_TEXT_REQUIRED)
     task_id, note_part_id = await _resolve_doc(
         session, org_id=org_id, doc_kind=doc_kind, doc_id=doc_id
     )
+    if instruction_id is not None:
+        await _check_instruction_link(
+            session,
+            org_id=org_id,
+            on=Annotation(doc_kind=doc_kind, task_id=task_id, note_part_id=note_part_id),
+            instruction_id=instruction_id,
+        )
     author = await _resolve_author(
         session, org_id=org_id, actor_id=actor_id, author_identity_id=author_identity_id
     )
@@ -421,9 +575,13 @@ async def propose_suggestion(
         proposed_text=proposed_text,
         status="open",
         author_identity_id=author,
+        instruction_id=instruction_id,
     )
     session.add(ann)
     await session.flush()
+    diff: dict[str, Any] = {"kind": "suggestion", "doc_kind": doc_kind}
+    if instruction_id is not None:
+        diff["instruction_id"] = str(instruction_id)
     await audit.log(
         session,
         org_id=org_id,
@@ -431,7 +589,7 @@ async def propose_suggestion(
         entity="annotation",
         entity_id=ann.id,
         action="create",
-        diff={"kind": "suggestion", "doc_kind": doc_kind},
+        diff=diff,
     )
     await _log_annotation_revision(
         session,
@@ -793,34 +951,18 @@ async def assign(
     this org. An unresolved/foreign identity raises ``IDENTITY_NOT_FOUND``.
     Optimistic-versioned + audited like every other annotation mutation."""
     await require_role(session, org_id, actor_id, Role.member)
-    await _get(session, org_id=org_id, annotation_id=annotation_id)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    await _guard_instruction(session, ann=ann, action="reassign")
     target: uuid.UUID | None
     if clear:
         target = None
-    elif assignee_identity_id is not None:
-        found = (
-            await session.execute(
-                select(Identity).where(
-                    Identity.id == assignee_identity_id, Identity.org_id == org_id
-                )
-            )
-        ).scalar_one_or_none()
-        if found is None:
-            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
-        # Same gate the handle branch below inherits from the resolver:
-        # an explicit id must not be a way around it.
-        await identities_svc.require_bindable_identity(session, org_id=org_id, ident=found)
-        target = assignee_identity_id
-    elif assignee_handle:
-        ident = await identities_svc.lookup_by_handle(
-            session, org_id=org_id, handle=assignee_handle
-        )
-        if ident is None:
-            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
-        target = ident.id
     else:
-        # No target and no explicit clear: nothing to do.
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        target = await _resolve_assignee(
+            session, org_id=org_id, identity_id=assignee_identity_id, handle=assignee_handle
+        )
+        if target is None:
+            # No target and no explicit clear: nothing to do.
+            raise DomainError(MessageCode.DOMAIN_ERROR)
     new_version = await optimistic_update(
         session,
         Annotation,
@@ -1039,6 +1181,7 @@ async def purge(
         include_deleted=True,
         include_ineffective_note=True,
     )
+    await _guard_instruction(session, ann=ann, action="purge")
     doc_kind = ann.doc_kind
     await session.execute(delete(Annotation).where(Annotation.id == annotation_id))
     await session.flush()
@@ -1062,9 +1205,11 @@ async def resolve(
     expected_version: int,
     resolved_by_identity_id: uuid.UUID | None = None,
 ) -> int:
-    """Mark a comment thread resolved (any member can resolve)."""
+    """Mark a comment thread resolved (any member can resolve), except an
+    instruction through an assistant (:func:`_guard_instruction`)."""
     await require_role(session, org_id, actor_id, Role.member)
-    await _get(session, org_id=org_id, annotation_id=annotation_id)
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    await _guard_instruction(session, ann=ann, action="resolve")
     by = resolved_by_identity_id or await _user_identity_id(
         session, org_id=org_id, actor_id=actor_id
     )

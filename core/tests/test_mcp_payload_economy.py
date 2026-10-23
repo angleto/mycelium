@@ -367,6 +367,7 @@ _NOT_AN_ENTITY_ID = {
     "entry_id",
     "executor_id",
     "identity_id",
+    "instruction_id",
     "invoice_id",
     "issuer_profile_id",
     "item_id",

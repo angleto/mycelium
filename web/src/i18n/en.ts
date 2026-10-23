@@ -2079,6 +2079,21 @@ export const en = {
     goToCardStart: 'Go to the start of this comment',
     goToCardEnd: 'Go to the end of this comment',
     repliesHidden: 'Replies hidden in the collapsed thread',
+    // Instructions: a person's comment assigned to an assistant.
+    assignTo: 'Assign to (optional)',
+    assignHint:
+      'Assigned to an assistant, this comment is an instruction: the assistant answers with suggestions, and you close it.',
+    assign: 'Assign',
+    assignedTo: 'Assigned to {{name}}',
+    instructionFor: 'Instruction for {{name}}',
+    noAnswers: 'no suggestion yet',
+    answersInstruction: 'Carries out:',
+    status: {
+      open: 'pending',
+      accepted: 'accepted',
+      rejected: 'rejected',
+      resolved: 'resolved',
+    },
   },
   notes: {
     nav: 'Notes',

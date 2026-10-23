@@ -8333,6 +8333,8 @@ export interface components {
             anchor_domain?: "source" | "rendered";
             /** Parent Id */
             parent_id?: string | null;
+            /** Assignee Handle */
+            assignee_handle?: string | null;
         };
         /** AnnotationEditIn */
         AnnotationEditIn: {
@@ -8398,8 +8400,16 @@ export interface components {
             decided_by_identity_id?: string | null;
             /** Decision Comment Id */
             decision_comment_id?: string | null;
+            /** Instruction Id */
+            instruction_id?: string | null;
             /** Assigned To Identity Id */
             assigned_to_identity_id?: string | null;
+            /** Assignee Handle */
+            assignee_handle?: string | null;
+            /** Assignee Kind */
+            assignee_kind?: string | null;
+            /** Assignee Label */
+            assignee_label?: string | null;
             /** Resolved At */
             resolved_at?: string | null;
             /** Edited At */
@@ -14404,6 +14414,8 @@ export interface components {
              * @enum {string}
              */
             anchor_domain?: "source" | "rendered";
+            /** Instruction Id */
+            instruction_id?: string | null;
         };
         /** SyncResultOut */
         SyncResultOut: {
@@ -20164,6 +20176,7 @@ export interface operations {
                 anchor_prefix?: string | null;
                 anchor_suffix?: string | null;
                 parent_id?: string | null;
+                assignee_handle?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -20243,6 +20256,7 @@ export interface operations {
                 rationale?: string;
                 anchor_prefix?: string | null;
                 anchor_suffix?: string | null;
+                instruction_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;

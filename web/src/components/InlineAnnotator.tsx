@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next'
 import * as annoApi from '../lib/annotationsApi'
 import type { AnnotationSurface, SurfaceSelection } from '../lib/annotationSurface'
 import { MarkdownView } from './Markdown'
+import { AssigneePicker } from './AssigneePicker'
+import { InstructionLinks } from './AnnotationInstruction'
 import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, DocKind } from '../lib/useAnnotations'
 
@@ -130,6 +132,9 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const [cBody, setCBody] = useState('')
   const [cProposed, setCProposed] = useState('')
   const [cWhy, setCWhy] = useState('')
+  const [cAssignee, setCAssignee] = useState<string | null>(null)
+  // The assign control on an existing comment.
+  const [assigning, setAssigning] = useState(false)
 
   // Inline edit / reply within the action popover.
   const [editing, setEditing] = useState(false)
@@ -143,6 +148,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
     setSel(null)
     setEditing(false)
     setReplying(false)
+    setAssigning(false)
     setErr('')
   }, [])
 
@@ -215,6 +221,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       setCBody('')
       setCProposed('')
       setCWhy('')
+      setCAssignee(null)
       setErr('')
       setActive(null)
       setCompose({ kind, sel: s })
@@ -262,6 +269,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             anchorPrefix: s.prefix,
             anchorSuffix: s.suffix,
             anchorDomain: surface.domain,
+            assigneeHandle: cAssignee,
           })
         : await annoApi.createSuggestion({
             docKind,
@@ -359,6 +367,25 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
     await reload()
   }
 
+  const doAssign = async (a: Annotation, handle: string | null) => {
+    const r = await annoApi.assign(a.id, handle, a.version)
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    setAssigning(false)
+    setErr('')
+    await reload()
+  }
+
+  const openAnnotation = (id: string) => {
+    setEditing(false)
+    setReplying(false)
+    setAssigning(false)
+    setErr('')
+    setActive({ id })
+  }
+
   const repliesOf = (id: string) => rows.filter((r) => r.parent_id === id && !r.deleted_at)
 
   // Render the floating overlay through a portal on <body> so the
@@ -388,14 +415,21 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
             “{compose.sel.text.slice(0, 80)}”
           </div>
           {compose.kind === 'comment' ? (
-            <textarea
-              className="anno-pop__input"
-              autoFocus
-              rows={3}
-              value={cBody}
-              onChange={(e) => setCBody(e.target.value)}
-              placeholder={t('annotations.commentPlaceholder', { defaultValue: 'Add a comment…' })}
-            />
+            <>
+              <textarea
+                className="anno-pop__input"
+                autoFocus
+                rows={3}
+                value={cBody}
+                onChange={(e) => setCBody(e.target.value)}
+                placeholder={t('annotations.commentPlaceholder', { defaultValue: 'Add a comment…' })}
+              />
+              <div className="anno-pop__assign">
+                <div className="anno-pop__assign-hint">{t('annotations.assignTo')}</div>
+                <AssigneePicker value={cAssignee} onChange={setCAssignee} />
+                <div className="anno-pop__assign-hint">{t('annotations.assignHint')}</div>
+              </div>
+            </>
           ) : (
             <>
               <textarea
@@ -459,6 +493,16 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                     “{current.anchor_quote.slice(0, 80)}”
                   </div>
                 )
+              )}
+
+              <InstructionLinks a={current} rows={rows} onOpen={openAnnotation} />
+              {assigning && (
+                <div className="anno-pop__assign">
+                  <AssigneePicker
+                    value={current.assignee_handle ?? null}
+                    onChange={(h) => void doAssign(current, h)}
+                  />
+                </div>
               )}
 
               {editing ? (
@@ -550,6 +594,16 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                     }}
                   >
                     {t('annotations.reply', { defaultValue: 'Reply' })}
+                  </button>
+                )}
+                {current.kind === 'comment' && current.status === 'open' && (
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    aria-pressed={assigning}
+                    onClick={() => setAssigning((v) => !v)}
+                  >
+                    {t('annotations.assign')}
                   </button>
                 )}
                 <button

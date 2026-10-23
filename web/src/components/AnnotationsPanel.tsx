@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import { RichEditor } from './RichEditor'
 import { MarkdownView } from './Markdown'
+import { AssigneePicker } from './AssigneePicker'
+import { InstructionLinks } from './AnnotationInstruction'
 import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, AnnotationPrefill, DocKind } from '../lib/useAnnotations'
 
@@ -190,6 +192,7 @@ export function AnnotationsPanel({
 
   const [body, setBody] = useState('')
   const [quote, setQuote] = useState('')
+  const [assignee, setAssignee] = useState<string | null>(null)
   const [showSuggest, setShowSuggest] = useState(false)
   const [sugOrig, setSugOrig] = useState('')
   const [sugProp, setSugProp] = useState('')
@@ -297,10 +300,12 @@ export function AnnotationsPanel({
       anchor_quote: quote || null,
       anchor_prefix: anchorPrefix || null,
       anchor_suffix: anchorSuffix || null,
+      assignee_handle: assignee,
     })
     if (ok) {
       setBody('')
       setQuote('')
+      setAssignee(null)
       setAnchorPrefix('')
       setAnchorSuffix('')
       await reload()
@@ -531,6 +536,9 @@ export function AnnotationsPanel({
             {a.original_text && <del className="anno-del">{a.original_text}</del>}{' '}
             {a.proposed_text && <ins className="anno-ins">{a.proposed_text}</ins>}
           </div>
+        )}
+        {!collapsed && (
+          <InstructionLinks a={a} rows={rows} onOpen={(id) => jumpCard(id, 'start')} />
         )}
 
         {editId === a.id ? (
@@ -810,6 +818,11 @@ export function AnnotationsPanel({
             defaultValue: 'Anchor to a passage (optional)',
           })}
         />
+        <div className="anno-pop__assign">
+          <div className="anno-pop__assign-hint">{t('annotations.assignTo')}</div>
+          <AssigneePicker value={assignee} onChange={setAssignee} />
+          <div className="anno-pop__assign-hint">{t('annotations.assignHint')}</div>
+        </div>
         <div className="anno-panel__composer-actions">
           <button type="button" className="btn--sm" onClick={() => void addComment()}>
             {t('annotations.comment', { defaultValue: 'Comment' })}

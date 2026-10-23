@@ -2552,6 +2552,7 @@ def _annotation_dict(a: Any) -> dict[str, Any]:
             str(a.decided_by_identity_id) if a.decided_by_identity_id else None
         ),
         "decision_comment_id": (str(a.decision_comment_id) if a.decision_comment_id else None),
+        "instruction_id": (str(a.instruction_id) if a.instruction_id else None),
         "version": a.version,
         "created_at": a.created_at.isoformat(),
     }
@@ -2566,13 +2567,20 @@ async def add_annotation(
     body: str,
     anchor_quote: str | None = None,
     parent_id: str | None = None,
+    assignee_handle: str | None = None,
 ) -> dict[str, Any]:
     """Add an inline comment to a markdown document. ``doc_kind`` is
     ``note_part`` (``doc_id`` = note-part id) or ``task_description``
     (``doc_id`` = task id). ``anchor_quote`` pins it to a passage; omit
     it for a whole-document / work-diary comment. ``parent_id`` makes it
-    a reply. Authorship is the calling identity (ai_assistant under an
-    agent token)."""
+    a reply. ``assignee_handle`` assigns it in the same call. Authorship is
+    the calling identity (ai_assistant under an agent token).
+
+    Answering an instruction you were assigned: reply here with
+    ``parent_id`` = the instruction, saying which suggestions carry it out,
+    or why you could not (a structural change a suggestion refuses, a
+    reference you could not find). Do not resolve the instruction: the
+    person does."""
     async with _tenant(token, org_id) as (s, org, user):
         author_id, _tok = await _resolve_agent_context(s, org)
         a = await annotations_svc.create_comment(
@@ -2585,6 +2593,7 @@ async def add_annotation(
             anchor_quote=anchor_quote,
             parent_id=uuid.UUID(parent_id) if parent_id else None,
             author_identity_id=author_id,
+            assignee_handle=assignee_handle,
         )
         return _annotation_dict(a)
 
@@ -2598,12 +2607,21 @@ async def propose_suggestion(
     original_text: str,
     proposed_text: str,
     rationale: str = "",
+    instruction_id: str | None = None,
 ) -> dict[str, Any]:
     """Propose an edit to a markdown document: replace ``original_text``
     with ``proposed_text`` (with an optional rationale). Nothing changes
     in the document until the suggestion is accepted. ``doc_kind`` is
     ``note_part`` or ``task_description``. The natural output of an LLM
     review pass.
+
+    ``instruction_id`` is the comment this edit carries out, when a person
+    asked for it: an open comment on the same document (any part of the same
+    note), usually one assigned to you (``list_assigned_annotations``).
+    Always pass it when answering an instruction. It is how the person, or a
+    verifier, reads each edit next to what was asked, and spots an
+    instruction left undone or an edit nobody asked for. A bad link is
+    refused with ``annotation.instruction_invalid`` and a ``reason``.
 
     ``original_text`` is MARKDOWN SOURCE: quote the body exactly as
     ``get_note_part`` / ``get_task`` handed it to you, markup included.
@@ -2633,6 +2651,7 @@ async def propose_suggestion(
             proposed_text=proposed_text,
             rationale=rationale,
             author_identity_id=author_id,
+            instruction_id=uuid.UUID(instruction_id) if instruction_id else None,
         )
         return _annotation_dict(a)
 
@@ -2789,7 +2808,21 @@ async def list_assigned_annotations(
 ) -> list[dict[str, Any]]:
     """The "assigned to me" inbox: annotations assigned to ``assignee_handle``
     (defaults to the calling identity), newest first. Open-only unless
-    ``include_resolved=true``. An unknown handle yields an empty list."""
+    ``include_resolved=true``. An unknown handle yields an empty list.
+
+    A comment a person assigned to you is an INSTRUCTION: what to change in
+    the passage it is anchored to (``anchor_quote``) or in the whole
+    document. To carry it out:
+
+    1. read the document and the instruction;
+    2. propose each edit with ``propose_suggestion(..., instruction_id=<the
+       comment id>)``, never by rewriting the document directly, so every
+       edit arrives as a diff the person accepts or rejects;
+    3. reply on the instruction (``add_annotation`` with ``parent_id``)
+       with the suggestions you made, or why you could not;
+    4. leave it open. Only the person resolves, reassigns, edits or deletes
+       an instruction; an assistant credential is refused with
+       ``annotation.instruction_reserved``."""
     from mycelium_core.services import identities as identities_svc
 
     async with _tenant(token, org_id) as (s, org, user):
@@ -2813,7 +2846,9 @@ async def list_assigned_annotations(
 async def resolve_annotation(
     token: str, org_id: str, annotation_id: str, expected_version: int
 ) -> dict[str, Any]:
-    """Mark a comment thread resolved."""
+    """Mark a comment thread resolved. An instruction (a comment a person
+    assigned to an assistant) is refused to an assistant credential with
+    ``annotation.instruction_reserved``: the person closes it."""
     async with _tenant(token, org_id) as (s, org, user):
         by, _tok = await _resolve_agent_context(s, org)
         v = await annotations_svc.resolve(
@@ -8530,6 +8565,7 @@ async def add_comment_instructions(
     doc_id: str,
     anchor_quote: str | None = None,
     parent_id: str | None = None,
+    assignee_handle: str | None = None,
 ) -> dict[str, Any]:
     """Recipe for a TOKEN-FREE inline comment: stream the comment text
     from a local file into ``annotation.body`` instead of spending it as
@@ -8554,6 +8590,8 @@ async def add_comment_instructions(
         params.append(f"anchor_quote={quote(anchor_quote)}")
     if parent_id is not None:
         params.append(f"parent_id={parent_id}")
+    if assignee_handle:
+        params.append(f"assignee_handle={quote(assignee_handle)}")
     url = f"{base}/api/annotations/comment/stream?" + "&".join(params)
     return _text_stream_recipe(
         url=url,
@@ -8572,6 +8610,7 @@ async def propose_suggestion_instructions(
     doc_id: str,
     original_text: str,
     rationale: str = "",
+    instruction_id: str | None = None,
 ) -> dict[str, Any]:
     """Recipe for a TOKEN-FREE suggestion: stream the PROPOSED replacement
     text (the large free-form field) from a local file as the request
@@ -8579,7 +8618,9 @@ async def propose_suggestion_instructions(
     param (the agent already holds it, capped to keep the URL short). An
     empty file is a deletion suggestion. Nothing changes in the document
     until the suggestion is accepted. ``doc_kind`` is ``note_part`` or
-    ``task_description``. The response carries the new annotation JSON."""
+    ``task_description``. ``instruction_id`` is the instruction this edit
+    carries out (see ``propose_suggestion``). The response carries the new
+    annotation JSON."""
     from urllib.parse import quote
 
     from mycelium_core.config import get_settings
@@ -8597,6 +8638,8 @@ async def propose_suggestion_instructions(
     ]
     if rationale:
         params.append(f"rationale={quote(rationale)}")
+    if instruction_id:
+        params.append(f"instruction_id={instruction_id}")
     url = f"{base}/api/annotations/suggestion/stream?" + "&".join(params)
     return _text_stream_recipe(
         url=url,

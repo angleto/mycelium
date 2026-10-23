@@ -51,6 +51,10 @@ export function createComment(args: {
    *  either fails to locate or matches the wrong passage. */
   anchorDomain?: AnchorDomain
   parentId?: string | null
+  /** Bare handle of the assignee. A person's comment assigned to an
+   *  assistant is an instruction: the assistant answers with suggestions
+   *  that cite it, and only a person closes it. */
+  assigneeHandle?: string | null
 }): Promise<ApiResult> {
   return call('/annotations/comment', 'POST', {
     doc_kind: args.docKind,
@@ -61,7 +65,19 @@ export function createComment(args: {
     anchor_suffix: args.anchorSuffix ?? null,
     anchor_domain: args.anchorDomain ?? 'source',
     parent_id: args.parentId ?? null,
+    assignee_handle: args.assigneeHandle || null,
   })
+}
+
+/** Assign an annotation to a handle, or clear it with `null`. */
+export function assign(id: string, handle: string | null, expectedVersion: number): Promise<ApiResult> {
+  return call(
+    `/annotations/${id}/assign`,
+    'POST',
+    handle
+      ? { expected_version: expectedVersion, assignee_handle: handle }
+      : { expected_version: expectedVersion, clear: true },
+  )
 }
 
 export function createSuggestion(args: {

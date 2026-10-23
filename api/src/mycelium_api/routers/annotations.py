@@ -100,6 +100,7 @@ def annotation_out(
     a: Annotation,
     author: tuple[str, str, str | None] | None = None,
     *,
+    assignee: tuple[str, str, str | None] | None = None,
     ui_collapsed: bool = False,
 ) -> AnnotationOut:
     """Map a row to the wire shape, collapsing the typed FKs back to the
@@ -110,6 +111,7 @@ def annotation_out(
     the default False = expanded matches "no row"."""
     doc_id = cast(uuid.UUID, a.task_id if a.doc_kind == "task_description" else a.note_part_id)
     handle, kind, label = author if author is not None else (None, None, None)
+    a_handle, a_kind, a_label = assignee if assignee is not None else (None, None, None)
     return AnnotationOut(
         id=a.id,
         doc_kind=a.doc_kind,
@@ -131,7 +133,11 @@ def annotation_out(
         resolved_by_identity_id=a.resolved_by_identity_id,
         decided_by_identity_id=a.decided_by_identity_id,
         decision_comment_id=a.decision_comment_id,
+        instruction_id=a.instruction_id,
         assigned_to_identity_id=a.assigned_to_identity_id,
+        assignee_handle=a_handle,
+        assignee_kind=a_kind,
+        assignee_label=a_label,
         resolved_at=a.resolved_at,
         edited_at=a.edited_at,
         deleted_at=a.deleted_at,
@@ -154,12 +160,16 @@ async def annotations_out(
     the caller's ``{annotation_id: collapsed}`` map (``get_ui_states_for_user``);
     ids absent from it — or a ``None`` map — serialise as expanded."""
     idmap = await _author_idents(
-        session, org_id, {a.author_identity_id for a in rows if a.author_identity_id}
+        session,
+        org_id,
+        {a.author_identity_id for a in rows if a.author_identity_id}
+        | {a.assigned_to_identity_id for a in rows if a.assigned_to_identity_id},
     )
     return [
         annotation_out(
             a,
             idmap.get(a.author_identity_id) if a.author_identity_id else None,
+            assignee=idmap.get(a.assigned_to_identity_id) if a.assigned_to_identity_id else None,
             ui_collapsed=ui.get(a.id, False) if ui else False,
         )
         for a in rows
@@ -272,6 +282,7 @@ async def create_comment(
         anchor_domain=body.anchor_domain,
         parent_id=body.parent_id,
         author_identity_id=author,
+        assignee_handle=body.assignee_handle,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 
@@ -287,6 +298,7 @@ async def create_comment_stream(
     anchor_prefix: Annotated[str | None, Query(max_length=2048)] = None,
     anchor_suffix: Annotated[str | None, Query(max_length=2048)] = None,
     parent_id: Annotated[uuid.UUID | None, Query()] = None,
+    assignee_handle: Annotated[str | None, Query(max_length=320)] = None,
 ) -> AnnotationOut:
     """Token-free comment: the comment text is the raw request body,
     streamed into ``annotation.body`` instead of riding a tool argument
@@ -312,6 +324,7 @@ async def create_comment_stream(
         anchor_suffix=anchor_suffix,
         parent_id=parent_id,
         author_identity_id=author,
+        assignee_handle=assignee_handle,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 
@@ -336,6 +349,7 @@ async def propose_suggestion(
         anchor_suffix=body.anchor_suffix,
         anchor_domain=body.anchor_domain,
         author_identity_id=author,
+        instruction_id=body.instruction_id,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 
@@ -351,6 +365,7 @@ async def propose_suggestion_stream(
     rationale: Annotated[str, Query(max_length=4096)] = "",
     anchor_prefix: Annotated[str | None, Query(max_length=2048)] = None,
     anchor_suffix: Annotated[str | None, Query(max_length=2048)] = None,
+    instruction_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> AnnotationOut:
     """Token-free suggestion: the PROPOSED replacement (the large
     free-form field) is the raw request body; the struck ``original_text``
@@ -373,6 +388,7 @@ async def propose_suggestion_stream(
         anchor_prefix=anchor_prefix,
         anchor_suffix=anchor_suffix,
         author_identity_id=author,
+        instruction_id=instruction_id,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 

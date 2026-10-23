@@ -2072,6 +2072,21 @@ export const it: Catalog = {
     goToCardStart: "Vai all'inizio del commento",
     goToCardEnd: 'Vai alla fine del commento',
     repliesHidden: 'Risposte nascoste nel thread compresso',
+    // Istruzioni: un commento di una persona assegnato a un assistente.
+    assignTo: 'Assegna a (facoltativo)',
+    assignHint:
+      "Assegnato a un assistente, questo commento è un'istruzione: l'assistente risponde con dei suggerimenti, e la chiudi tu.",
+    assign: 'Assegna',
+    assignedTo: 'Assegnato a {{name}}',
+    instructionFor: 'Istruzione per {{name}}',
+    noAnswers: 'nessun suggerimento ancora',
+    answersInstruction: 'Esegue:',
+    status: {
+      open: 'in attesa',
+      accepted: 'accettato',
+      rejected: 'rifiutato',
+      resolved: 'risolto',
+    },
   },
   notes: {
     nav: 'Note',

@@ -182,6 +182,17 @@ class Annotation(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         ForeignKey("comments.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # --- the instruction a suggestion carries out (migration 0024) -----
+    # A person leaves an instruction as a comment assigned to an agent; the
+    # agent answers it with suggestions that point back here, so a reviewer
+    # can read each edit next to the instruction that asked for it. Set only
+    # on a suggestion, at creation. NULL for a suggestion nobody asked for.
+    instruction_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("comments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # --- assignment (task 861b360b / 1f161485 #1) --------------------
     # The person responsible for acting on this annotation (Google-Docs
     # "assign to @someone"). NULL = unassigned. ``SET NULL`` on identity

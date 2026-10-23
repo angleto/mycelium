@@ -82,7 +82,7 @@ over-fetch the org table and filter in its head.
 | `reject_suggestion` | Reject a pending suggestion; the document body is untouched. |
 | `remove_dependency` | Remove a task dependency edge. |
 | `remove_task_relation` | Remove a symmetric task relation by its id (from |
-| `resolve_annotation` | Mark a comment thread resolved. |
+| `resolve_annotation` | Mark a comment thread resolved. An instruction (a comment a person |
 | `resolve_prefix` | Resolve a short UUID prefix (the 8-char id in a roadmap note or a |
 | `suggest_note_links` | Suggest the top-``k`` candidate notes to link from this note |
 | `unlink_note_task` | Remove a typed note↔task link (``subject``, ``artifact``, |
