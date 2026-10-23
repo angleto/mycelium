@@ -133,8 +133,6 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const [cProposed, setCProposed] = useState('')
   const [cWhy, setCWhy] = useState('')
   const [cAssignee, setCAssignee] = useState<string | null>(null)
-  // The assign control on an existing comment.
-  const [assigning, setAssigning] = useState(false)
 
   // Inline edit / reply within the action popover.
   const [editing, setEditing] = useState(false)
@@ -148,7 +146,6 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
     setSel(null)
     setEditing(false)
     setReplying(false)
-    setAssigning(false)
     setErr('')
   }, [])
 
@@ -373,7 +370,6 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       setErr(r.error ?? 'Error')
       return
     }
-    setAssigning(false)
     setErr('')
     await reload()
   }
@@ -381,7 +377,6 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const openAnnotation = (id: string) => {
     setEditing(false)
     setReplying(false)
-    setAssigning(false)
     setErr('')
     setActive({ id })
   }
@@ -495,15 +490,12 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                 )
               )}
 
-              <InstructionLinks a={current} rows={rows} onOpen={openAnnotation} />
-              {assigning && (
-                <div className="anno-pop__assign">
-                  <AssigneePicker
-                    value={current.assignee_handle ?? null}
-                    onChange={(h) => void doAssign(current, h)}
-                  />
-                </div>
-              )}
+              <InstructionLinks
+                a={current}
+                rows={rows}
+                onOpen={openAnnotation}
+                onAssign={(h) => doAssign(current, h)}
+              />
 
               {editing ? (
                 <textarea
@@ -594,16 +586,6 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                     }}
                   >
                     {t('annotations.reply', { defaultValue: 'Reply' })}
-                  </button>
-                )}
-                {current.kind === 'comment' && current.status === 'open' && (
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    aria-pressed={assigning}
-                    onClick={() => setAssigning((v) => !v)}
-                  >
-                    {t('annotations.assign')}
                   </button>
                 )}
                 <button

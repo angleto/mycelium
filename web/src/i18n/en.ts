@@ -2084,6 +2084,9 @@ export const en = {
     assignHint:
       'Assigned to an assistant, this comment is an instruction: the assistant answers with suggestions, and you close it.',
     assign: 'Assign',
+    changeAssignee: 'Change',
+    removeAssignee: 'Remove',
+    unassigned: 'Not assigned',
     assignedTo: 'Assigned to {{name}}',
     instructionFor: 'Instruction for {{name}}',
     noAnswers: 'no suggestion yet',

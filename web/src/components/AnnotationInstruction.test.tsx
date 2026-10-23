@@ -113,4 +113,33 @@ describe('InstructionLinks', () => {
     expect(host.textContent).toContain('Assigned to @marta')
     expect(host.textContent).not.toContain('Instruction')
   })
+
+  it('lets a wrong assignee be removed or changed from the assignee line', async () => {
+    const onAssign = vi.fn(async () => {})
+    act(() =>
+      root.render(<InstructionLinks a={instruction} rows={[instruction]} onAssign={onAssign} />),
+    )
+    const buttons = [...host.querySelectorAll('button')].map((b) => b.textContent)
+    expect(buttons).toEqual(['Change', 'Remove'])
+    const remove = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Remove')
+    await act(async () => remove?.click())
+    expect(onAssign).toHaveBeenCalledWith(null)
+
+    const change = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Change')
+    act(() => change?.click())
+    expect(host.querySelector('.assignpick')).not.toBeNull()
+  })
+
+  it('offers Assign on an open unassigned comment, and nothing on a closed one', () => {
+    const plain = row({ id: 'c-1', author_kind: 'user' })
+    act(() => root.render(<InstructionLinks a={plain} rows={[plain]} onAssign={async () => {}} />))
+    expect(host.textContent).toContain('Not assigned')
+    expect([...host.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Assign'])
+
+    const closed = row({ ...instruction, status: 'resolved' })
+    act(() =>
+      root.render(<InstructionLinks a={closed} rows={[closed]} onAssign={async () => {}} />),
+    )
+    expect(host.querySelectorAll('button')).toHaveLength(0)
+  })
 })

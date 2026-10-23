@@ -2077,6 +2077,9 @@ export const it: Catalog = {
     assignHint:
       "Assegnato a un assistente, questo commento è un'istruzione: l'assistente risponde con dei suggerimenti, e la chiudi tu.",
     assign: 'Assegna',
+    changeAssignee: 'Cambia',
+    removeAssignee: 'Rimuovi',
+    unassigned: 'Non assegnato',
     assignedTo: 'Assegnato a {{name}}',
     instructionFor: 'Istruzione per {{name}}',
     noAnswers: 'nessun suggerimento ancora',

@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AssigneePicker } from './AssigneePicker'
 import type { Annotation } from '../lib/useAnnotations'
 import { answersTo, isInstruction } from '../lib/annotationInstruction'
 
@@ -16,16 +18,65 @@ function excerpt(text: string | null | undefined, n = 60): string {
   return s.length > n ? `${s.slice(0, n)}…` : s
 }
 
+/** The assignee line's own controls: change it, remove it, or assign an
+ *  unassigned comment. A wrong assignee must be one click from undone, and
+ *  the place to undo it is where the assignee is shown. */
+function AssigneeActions({
+  a,
+  onAssign,
+}: {
+  a: Annotation
+  onAssign: (handle: string | null) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [picking, setPicking] = useState(false)
+  const assigned = !!a.assigned_to_identity_id
+  return (
+    <>
+      {' · '}
+      <button type="button" className="anno-instr__link" onClick={() => setPicking((v) => !v)}>
+        {assigned ? t('annotations.changeAssignee') : t('annotations.assign')}
+      </button>
+      {assigned && (
+        <>
+          {' · '}
+          <button type="button" className="anno-instr__link" onClick={() => void onAssign(null)}>
+            {t('annotations.removeAssignee')}
+          </button>
+        </>
+      )}
+      {picking && (
+        <div className="anno-pop__assign">
+          <AssigneePicker
+            value={a.assignee_handle ?? null}
+            onChange={(h) => {
+              setPicking(false)
+              void onAssign(h)
+            }}
+          />
+        </div>
+      )}
+    </>
+  )
+}
+
 export function InstructionLinks({
   a,
   rows,
   onOpen,
+  onAssign,
 }: {
   a: Annotation
   rows: Annotation[]
   onOpen?: (id: string) => void
+  /** Present where the viewer may change the assignment (an open comment). */
+  onAssign?: (handle: string | null) => Promise<void>
 }) {
   const { t } = useTranslation()
+  const actions =
+    onAssign && a.kind === 'comment' && a.status === 'open' ? (
+      <AssigneeActions a={a} onAssign={onAssign} />
+    ) : null
 
   if (a.kind === 'suggestion') {
     if (!a.instruction_id) return null
@@ -49,12 +100,20 @@ export function InstructionLinks({
     )
   }
 
-  if (!a.assigned_to_identity_id) return null
+  if (!a.assigned_to_identity_id) {
+    return actions ? (
+      <div className="anno-instr">
+        <span className="muted">{t('annotations.unassigned')}</span>
+        {actions}
+      </div>
+    ) : null
+  }
   const name = assigneeName(a)
   if (!isInstruction(a)) {
     return (
       <div className="anno-instr">
         <span className="muted">{t('annotations.assignedTo', { name })}</span>
+        {actions}
       </div>
     )
   }
@@ -62,6 +121,7 @@ export function InstructionLinks({
   return (
     <div className="anno-instr anno-instr--instruction">
       <strong>{t('annotations.instructionFor', { name })}</strong>
+      {actions}
       {answers.length === 0 ? (
         <span className="muted"> · {t('annotations.noAnswers')}</span>
       ) : (

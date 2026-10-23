@@ -334,6 +334,17 @@ export function AnnotationsPanel({
     }
   }
 
+  const assign = async (a: Annotation, handle: string | null) => {
+    const { ok } = await send(
+      `/annotations/${a.id}/assign`,
+      'POST',
+      handle
+        ? { expected_version: a.version, assignee_handle: handle }
+        : { expected_version: a.version, clear: true },
+    )
+    if (ok) await reload()
+  }
+
   const act = async (a: Annotation, verb: string) => {
     if (pending) return
     setPending(`${a.id}:${verb}`)
@@ -538,7 +549,12 @@ export function AnnotationsPanel({
           </div>
         )}
         {!collapsed && (
-          <InstructionLinks a={a} rows={rows} onOpen={(id) => jumpCard(id, 'start')} />
+          <InstructionLinks
+            a={a}
+            rows={rows}
+            onOpen={(id) => jumpCard(id, 'start')}
+            onAssign={(h) => assign(a, h)}
+          />
         )}
 
         {editId === a.id ? (
