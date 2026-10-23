@@ -2084,6 +2084,8 @@ export const en = {
     assignHint:
       'Assigned to an assistant, this comment is an instruction: the assistant answers with suggestions, and you close it.',
     assign: 'Assign',
+    resolveHint:
+      'Close this thread with its replies. It is hidden unless “Show resolved” is on; Reopen brings it back.',
     changeAssignee: 'Change',
     removeAssignee: 'Remove',
     unassigned: 'Not assigned',

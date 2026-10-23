@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AssigneePicker } from './AssigneePicker'
 import type { Annotation } from '../lib/useAnnotations'
-import { answersTo, isInstruction } from '../lib/annotationInstruction'
+import { answersTo, diffSpan, isInstruction } from '../lib/annotationInstruction'
 
 // The instruction and its answering suggestions, as a reviewer reads them
 // (see lib/annotationInstruction for what an instruction is).
@@ -16,6 +16,44 @@ function assigneeName(a: Annotation): string {
 function excerpt(text: string | null | undefined, n = 60): string {
   const s = (text ?? '').replace(/\s+/g, ' ').trim()
   return s.length > n ? `${s.slice(0, n)}…` : s
+}
+
+/** One suggestion that carries the instruction out: the edit itself in one
+ *  line, and the whole of it a click away, in place. Expanding here rather
+ *  than jumping to the suggestion's card, because an accepted suggestion's
+ *  card is hidden whenever resolved items are, and a jump to nothing is a
+ *  click that does nothing. */
+function AnswerItem({ sug }: { sug: Annotation }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const d = diffSpan(sug.original_text ?? '', sug.proposed_text ?? '')
+  return (
+    <li className="anno-instr__answer">
+      <button
+        type="button"
+        className="anno-instr__link"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span> {d.before}
+        {d.removed && <del className="anno-del">{d.removed}</del>}
+        {d.added && <ins className="anno-ins">{d.added}</ins>}
+        {d.after}
+      </button>{' '}
+      <span className={`anno-instr__status anno-instr__status--${sug.status}`}>
+        {t(`annotations.status.${sug.status}`, { defaultValue: sug.status })}
+      </span>
+      {open && (
+        <div className="anno-instr__full">
+          <div className="anno__diff">
+            {sug.original_text && <del className="anno-del">{sug.original_text}</del>}{' '}
+            {sug.proposed_text && <ins className="anno-ins">{sug.proposed_text}</ins>}
+          </div>
+          {sug.body && <div className="muted">{sug.body}</div>}
+        </div>
+      )}
+    </li>
+  )
 }
 
 /** The assignee line's own controls: change it, remove it, or assign an
@@ -126,21 +164,8 @@ export function InstructionLinks({
         <span className="muted"> · {t('annotations.noAnswers')}</span>
       ) : (
         <ul className="anno-instr__answers">
-          {answers.map((s) => (
-            <li key={s.id}>
-              <button
-                type="button"
-                className="anno-instr__link"
-                onClick={() => onOpen?.(s.id)}
-                title={`${s.original_text ?? ''} → ${s.proposed_text ?? ''}`}
-              >
-                <del className="anno-del">{excerpt(s.original_text, 30)}</del>{' '}
-                <ins className="anno-ins">{excerpt(s.proposed_text, 30)}</ins>
-              </button>{' '}
-              <span className={`anno-instr__status anno-instr__status--${s.status}`}>
-                {t(`annotations.status.${s.status}`, { defaultValue: s.status })}
-              </span>
-            </li>
+          {answers.map((sug) => (
+            <AnswerItem key={sug.id} sug={sug} />
           ))}
         </ul>
       )}

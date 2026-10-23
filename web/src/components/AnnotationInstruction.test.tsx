@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { InstructionLinks } from './AnnotationInstruction'
-import { isInstruction } from '../lib/annotationInstruction'
+import { diffSpan, isInstruction, visibleRoots } from '../lib/annotationInstruction'
 import type { Annotation } from '../lib/useAnnotations'
 import i18n from '../i18n'
 
@@ -69,21 +69,46 @@ describe('isInstruction', () => {
   })
 })
 
+describe('diffSpan', () => {
+  it('keeps only the part that changes, with a little context', () => {
+    const o =
+      'The server checks that it points to a comment that exists, is not deleted, and sits on the same document'
+    const p =
+      'The server checks that it points to a comment that exists, is not deleted, is still open, and sits on the same document'
+    const d = diffSpan(o, p)
+    expect(d.removed).toBe('')
+    expect(d.added).toBe('is still open, ')
+    expect(d.before.startsWith('…')).toBe(true)
+    expect(d.after.endsWith('…')).toBe(true)
+  })
+})
+
+describe('visibleRoots', () => {
+  it('lets a resolved thread hide even when one of its replies is still open', () => {
+    const resolvedRoot = row({ id: 'r', status: 'resolved' })
+    const openReply = row({ id: 'q', parent_id: 'r', status: 'open' })
+    const openRoot = row({ id: 'o' })
+    const all = [resolvedRoot, openReply, openRoot]
+    expect(visibleRoots(all, false).map((r) => r.id)).toEqual(['o'])
+    expect(visibleRoots(all, true).map((r) => r.id)).toEqual(['r', 'o'])
+  })
+})
+
 describe('InstructionLinks', () => {
-  it('lists on the instruction only the suggestions that carry it out, and opens one', () => {
-    const onOpen = vi.fn()
+  it('lists on the instruction only the suggestions that carry it out, and expands one in place', () => {
     act(() =>
-      root.render(
-        <InstructionLinks a={instruction} rows={[instruction, answer, unrelated]} onOpen={onOpen} />,
-      ),
+      root.render(<InstructionLinks a={instruction} rows={[instruction, answer, unrelated]} />),
     )
     expect(host.textContent).toContain('Instruction for Claude')
     const items = host.querySelectorAll('.anno-instr__answers li')
     expect(items).toHaveLength(1)
-    expect(items[0].textContent).toContain('friday 30 October')
+    expect(items[0].querySelector('ins')?.textContent).toBe(' 30 October')
     expect(items[0].textContent).toContain('accepted')
+    expect(items[0].querySelector('.anno-instr__full')).toBeNull()
+    // In place, not a jump: an accepted suggestion's own card is hidden
+    // whenever resolved items are, so a jump would land nowhere.
     act(() => (items[0].querySelector('button') as HTMLButtonElement).click())
-    expect(onOpen).toHaveBeenCalledWith('sug-1')
+    expect(items[0].querySelector('.anno-instr__full')?.textContent).toContain('friday 30 October')
   })
 
   it('says so when nobody has answered the instruction yet', () => {

@@ -6,6 +6,7 @@ import { RichEditor } from './RichEditor'
 import { MarkdownView } from './Markdown'
 import { AssigneePicker } from './AssigneePicker'
 import { InstructionLinks } from './AnnotationInstruction'
+import { visibleRoots } from '../lib/annotationInstruction'
 import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, AnnotationPrefill, DocKind } from '../lib/useAnnotations'
 
@@ -381,11 +382,12 @@ export function AnnotationsPanel({
   // Action button (accept/reject/resolve/reopen) with an in-flight spinner.
   // Disables every act button on the card while one is running, and shows
   // the spinner on the one that was clicked, so the click clearly "took".
-  const actBtn = (a: Annotation, verb: string, label: string, ghost = false) => {
+  const actBtn = (a: Annotation, verb: string, label: string, ghost = false, title?: string) => {
     const busy = pending === `${a.id}:${verb}`
     return (
       <button
         type="button"
+        title={title}
         className={`btn--sm${ghost ? ' btn--ghost' : ''}`}
         disabled={pending !== null}
         aria-busy={busy}
@@ -443,20 +445,11 @@ export function AnnotationsPanel({
     else if (code === 'concurrency.stale_version') await onStaleConflict()
   }
 
-  // A root stays visible when it (or any of its replies) is still open,
-  // so unchecking "show resolved" never hides live discussion under a
-  // resolved parent.
-  const roots = rows.filter(
-    (r) =>
-      !r.parent_id &&
-      (includeResolved ||
-        r.status === 'open' ||
-        rows.some((x) => x.parent_id === r.id && x.status === 'open')),
-  )
-  const repliesOf = (id: string) =>
-    rows.filter(
-      (r) => r.parent_id === id && (includeResolved || r.status === 'open'),
-    )
+  // The thread follows its root (see visibleRoots): a resolved root hides
+  // with its replies, and every reply of a visible root shows, whatever its
+  // own status.
+  const roots = visibleRoots(rows, includeResolved)
+  const repliesOf = (id: string) => rows.filter((r) => r.parent_id === id)
 
   const renderCard = (a: Annotation, isReply: boolean) => {
     const open = a.status === 'open'
@@ -712,9 +705,18 @@ export function AnnotationsPanel({
                 {actBtn(a, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
               </>
             ))}
-          {!isSuggestion && open &&
-            actBtn(a, 'resolve', t('annotations.resolve', { defaultValue: 'Resolve' }), true)}
-          {!isSuggestion && !open &&
+          {/* Resolve and Reopen act on the thread, so only its root has them. */}
+          {!isReply &&
+            !isSuggestion &&
+            open &&
+            actBtn(
+              a,
+              'resolve',
+              t('annotations.resolve', { defaultValue: 'Resolve' }),
+              true,
+              t('annotations.resolveHint'),
+            )}
+          {!isReply && !isSuggestion && !open &&
             actBtn(a, 'reopen', t('annotations.reopen', { defaultValue: 'Reopen' }), true)}
           {!isReply && !isSuggestion && (
             <button

@@ -7126,6 +7126,13 @@ button.btn--danger:hover {
   text-align: left;
   text-decoration: underline dotted;
 }
+.anno-instr__answer + .anno-instr__answer {
+  margin-top: var(--sp-4);
+}
+.anno-instr__full {
+  margin: var(--sp-4) 0 0 var(--sp-12, 1rem);
+  white-space: pre-wrap;
+}
 .anno-instr__status {
   opacity: 0.75;
 }

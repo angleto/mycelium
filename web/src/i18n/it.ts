@@ -2077,6 +2077,8 @@ export const it: Catalog = {
     assignHint:
       "Assegnato a un assistente, questo commento è un'istruzione: l'assistente risponde con dei suggerimenti, e la chiudi tu.",
     assign: 'Assegna',
+    resolveHint:
+      'Chiude questo thread con le sue risposte. Resta nascosto se “Mostra risolti” è spento; Riapri lo riporta.',
     changeAssignee: 'Cambia',
     removeAssignee: 'Rimuovi',
     unassigned: 'Non assegnato',
