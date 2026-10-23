@@ -84,6 +84,13 @@ async def test_an_instruction_over_rest_is_answered_by_the_agent_and_closed_by_t
         assert r.status_code == 200, r.text
         assert r.json()["instruction_id"] == ins["id"]
 
+        # The agent finds it in its own inbox, with no handle passed: the
+        # calling identity is the assistant, not the token's owner.
+        inbox = (await c.get("/annotations/assigned", headers=_h(agent, org))).json()
+        assert [a["id"] for a in inbox] == [ins["id"]]
+        mine = (await c.get("/annotations/assigned", headers=_h(person, org))).json()
+        assert mine == []
+
         # The agent cannot close or reassign the instruction it was given...
         r = await c.post(
             f"/annotations/{ins['id']}/resolve",

@@ -396,11 +396,13 @@ async def propose_suggestion_stream(
 @router.get("/assigned", response_model=list[AnnotationOut])
 async def list_assigned_annotations(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
     handle: Annotated[str | None, Query()] = None,
     include_resolved: Annotated[bool, Query()] = False,
 ) -> list[AnnotationOut]:
     """The "assigned to me" inbox: annotations assigned to ``handle``
-    (defaults to the calling user's identity), newest first. Open-only unless
+    (defaults to the calling identity: the assistant's under an agent token,
+    otherwise the user's), newest first. Open-only unless
     ``include_resolved=true``. An unknown handle yields an empty list.
     Declared before ``/{annotation_id}`` so the static path wins."""
     if handle:
@@ -414,11 +416,18 @@ async def list_assigned_annotations(
             return []
         ident_id = ident.id
     else:
+        # An agent token's own identity, as for authorship: an instruction is
+        # assigned to the assistant, so an inbox keyed on the token's owner
+        # would never show it.
+        agent_ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
         ident_id = (
-            await identities_svc.ensure_for_user(
-                ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
-            )
-        ).id
+            agent_ident
+            or (
+                await identities_svc.ensure_for_user(
+                    ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
+                )
+            ).id
+        )
     rows = await svc.list_assigned(
         ctx.session,
         org_id=ctx.org_id,

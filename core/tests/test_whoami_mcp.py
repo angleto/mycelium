@@ -172,3 +172,61 @@ def test_a_perimeter_whose_project_is_gone_is_named_not_dropped() -> None:
     blob = MemoryBlob(project_id=gone)
     assert _recall_projects(blob, None, {}) == [f"unknown project {str(gone)[:8]}"]
     assert _recall_projects(MemoryBlob(project_id=None), None, {}) == []
+
+
+async def test_the_assigned_inbox_of_an_agent_token_is_the_assistants() -> None:
+    """``list_assigned_annotations`` with no handle answers for the CALLING
+    identity, which under an agent token is the assistant (task 0d323273).
+
+    Observed failing on 2.4.2 in production: an instruction assigned to the
+    assistant was missing from its inbox, because the default resolved to the
+    identity of the person who owns the token."""
+    from mycelium_core.services import annotations
+    from mycelium_mcp.server import list_assigned_annotations
+
+    async with admin_session() as s:
+        r = await signup(s, email=_email(), password="pw-strong-123", org_name="INBOX")
+    org, user = r.org_id, r.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        assistant = AiAssistant(
+            org_id=org,
+            user_id=user,
+            label="Claude",
+            handle=f"claude-{uuid.uuid4().hex[:8]}",
+            scope=["comments:read"],
+            is_active=True,
+        )
+        s.add(assistant)
+        await s.flush()
+        ident = await identities.ensure_for_ai_assistant(s, org_id=org, assistant_id=assistant.id)
+        tok = AgentToken(
+            org_id=org,
+            user_id=user,
+            name="t",
+            prefix=f"mycelium_at_{secrets.token_hex(4)}",
+            token_hash=secrets.token_bytes(32),
+            scope="mcp",
+            assistant_id=assistant.id,
+        )
+        s.add(tok)
+        await s.flush()
+        token_id = tok.id
+        task = await tasks.create_task(
+            s, org_id=org, actor_id=user, title="t", description="ship on friday"
+        )
+        ins = await annotations.create_comment(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind="task_description",
+            doc_id=task.id,
+            body="make the day concrete",
+            assignee_identity_id=ident.id,
+        )
+
+    reset = _PRINCIPAL.set((user, org, token_id))
+    try:
+        inbox = await list_assigned_annotations("", "")
+    finally:
+        _PRINCIPAL.reset(reset)
+    assert [a["id"] for a in inbox] == [str(ins.id)]

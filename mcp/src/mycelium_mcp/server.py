@@ -2835,7 +2835,14 @@ async def list_assigned_annotations(
                 return []
             ident_id = ident_row.id
         else:
-            ident_id = (await identities_svc.ensure_for_user(s, org_id=org, user_id=user)).id
+            # The calling identity is the ASSISTANT under an agent token, not
+            # the person who owns the token: an instruction is assigned to the
+            # assistant, and an inbox keyed on the owner came back empty.
+            agent_ident, _tok = await _resolve_agent_context(s, org)
+            ident_id = (
+                agent_ident
+                or (await identities_svc.ensure_for_user(s, org_id=org, user_id=user)).id
+            )
         rows = await annotations_svc.list_assigned(
             s, org_id=org, assignee_identity_id=ident_id, include_resolved=include_resolved
         )
