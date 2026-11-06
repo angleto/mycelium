@@ -170,7 +170,7 @@ async def test_a_record_written_before_the_check_is_refused_at_transmit() -> Non
             org_id=org_id,
             actor_id=user_id,
             label="Principale",
-            legal_name="HahnBanach SRL",
+            legal_name="Esempio Servizi SRL",
             vat_number="01234567890",
             address="Via Roma",
             civic_number="1",

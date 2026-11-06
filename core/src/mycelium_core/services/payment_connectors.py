@@ -1488,7 +1488,7 @@ async def _mark_paid_if_needed(
     not a deferral -- no later step looks again -- so the fact was LOST, and a
     shadow promoted and filed, or a draft transmitted by hand, came out
     unpaid although Stripe had collected it (measured 2026-10-16: 173 shadows
-    of the hahnbanach connector, every one paid on Stripe, all unpaid here).
+    of one production connector, every one paid on Stripe, all unpaid here).
     ``mark_paid`` keeps the outbound webhook for the moment the document is
     filed, which is what the dry-run skip was really protecting.
     """

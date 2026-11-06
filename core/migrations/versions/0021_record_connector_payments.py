@@ -4,7 +4,7 @@ Until this release a payment connector recorded a payment only on a document
 that was already filed: a dry-run shadow and a draft were skipped, and a skip
 was not a deferral -- nothing looked again. Every shadow therefore read
 "unpaid" although the provider had collected the money (measured 2026-10-16:
-174 shadows of the hahnbanach connector, every one built from a Stripe
+174 shadows of one production connector, every one built from a Stripe
 ``invoice.paid``), and a shadow promoted and filed, or a draft composed in
 draft mode and transmitted by hand, would have come out unpaid too. The
 service now records the payment whatever the document's state; this records

@@ -56,12 +56,12 @@ async function seedInvoice(): Promise<void> {
     await ctx.post('/clients', {
       headers,
       data: {
-        name: `E2E Cylock ${Date.now()}`,
+        name: `E2E Acme ${Date.now()}`,
         legal_name: 'EXAMPLE S.R.L.',
         country_code: 'IT',
         vat_number: '02223334448',
         tax_code: '02223334448',
-        address: 'Via Fonte Buono 19/B',
+        address: 'Via Esempio 1',
         postal_code: '00142',
         city: 'Roma',
         province: 'RM',

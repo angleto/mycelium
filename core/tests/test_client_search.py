@@ -114,7 +114,7 @@ async def test_recent_orders_by_activity_not_alphabetically() -> None:
             org_id=org_id,
             actor_id=user_id,
             label="Principale",
-            legal_name="HahnBanach SRL",
+            legal_name="Esempio Servizi SRL",
             vat_number="01234567890",
             address="Via Roma",
             civic_number="1",

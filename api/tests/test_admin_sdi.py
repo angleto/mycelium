@@ -91,8 +91,8 @@ async def test_the_transmitter_fiscal_code_is_configurable_from_the_platform() -
         # filing under an identity nobody chose.
         assert await svc.get_sdi_intermediary_id_codice(s) == ""
 
-        await svc.set_sdi_intermediary_id_codice(s, "  ltengl79m31i356x ")
-        assert await svc.get_sdi_intermediary_id_codice(s) == "LTENGL79M31I356X"
+        await svc.set_sdi_intermediary_id_codice(s, "  vrdgpp80a01l219m ")
+        assert await svc.get_sdi_intermediary_id_codice(s) == "VRDGPP80A01L219M"
 
         # Shape is enforced: FatturaPA wants a fiscal code, not free text.
         for bad in ("1234", "NOT A CODE", "1234567890123"):
@@ -102,11 +102,11 @@ async def test_the_transmitter_fiscal_code_is_configurable_from_the_platform() -
         # A company's code is 11 digits and legitimate, so it cannot be
         # refused -- but it is the exact shape that is wrong for a physical
         # person, so it comes back as a warning instead of silence.
-        await svc.set_sdi_intermediary_id_codice(s, "13438810015")
-        assert svc.sdi_intermediary_warning("13438810015") == (
+        await svc.set_sdi_intermediary_id_codice(s, "01112223334")
+        assert svc.sdi_intermediary_warning("01112223334") == (
             "physical_person_must_use_16_char_cf"
         )
-        assert svc.sdi_intermediary_warning("LTENGL79M31I356X") is None
+        assert svc.sdi_intermediary_warning("VRDGPP80A01L219M") is None
 
         # Clearing leaves the channel unconfigured, which transmit refuses.
         await svc.set_sdi_intermediary_id_codice(s, "")

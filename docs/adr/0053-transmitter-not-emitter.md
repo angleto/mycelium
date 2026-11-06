@@ -135,7 +135,7 @@ A deployment can hold the wrong value there for months without knowing, because
 the self-transmission branch takes a different path (it emits the cedente's own
 `tax_code`) and only the intermediary branch — transmitting for a DIFFERENT
 tenant — exposes it. A shadow document produced by the dry-run feature is what
-surfaced it: cedente HahnBanach, trasmittente the channel holder, `IdCodice`
+surfaced it: the cedente a second tenant (a company), trasmittente the channel holder, `IdCodice`
 carrying an 11-digit P.IVA belonging to a physical person, whose codice fiscale
 is the 16-character form.
 

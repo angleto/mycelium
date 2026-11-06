@@ -95,7 +95,7 @@ async def _org_and_issuer() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
             org_id=r.org_id,
             actor_id=r.user_id,
             label="Principale",
-            legal_name="HahnBanach SRL",
+            legal_name="Esempio Servizi SRL",
             vat_number="01234567890",
             address="Via Roma",
             civic_number="1",

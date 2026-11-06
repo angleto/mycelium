@@ -379,8 +379,8 @@ def test_persona_fisica_emits_nome_cognome() -> None:
         city="Roma",
         province="RM",
         country="IT",
-        first_name="Angelo",
-        last_name="Leto",
+        first_name="Giuseppe",
+        last_name="Verdi",
     )
     client = ClientProfile(
         legal_name="Mario Rossi",
@@ -423,7 +423,7 @@ def test_persona_fisica_emits_nome_cognome() -> None:
     xml = _build_xml(invoice, issuer, client, [line], "202600003")
     assert validate_fatturapa(xml) == []
     # Both cedente and cessionario use Anagrafica/Nome+Cognome, not Denominazione.
-    assert "<Nome>Angelo</Nome><Cognome>Leto</Cognome>" in xml
+    assert "<Nome>Giuseppe</Nome><Cognome>Verdi</Cognome>" in xml
     assert "<Nome>Mario</Nome><Cognome>Rossi</Cognome>" in xml
     assert "<Denominazione>" not in xml
 

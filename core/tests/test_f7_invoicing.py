@@ -796,20 +796,20 @@ async def test_self_transmission_survives_a_channel_identified_by_codice_fiscale
 
     issuer = IssuerProfile(
         country_code="IT",
-        vat_number="13438810015",
-        tax_code="LTENGL79M31I356X",
+        vat_number="01112223334",
+        tax_code="VRDGPP80A01L219M",
         legal_name=None,
-        first_name="Angelo",
-        last_name="Leto",
+        first_name="Giuseppe",
+        last_name="Verdi",
         tax_regime="RF19",
-        address="Via Botticelli",
+        address="Via Esempio 2",
         postal_code="10154",
         city="Torino",
         province="TO",
         country="IT",
     )
-    by_cf = IntermediaryIdentity(country_code="IT", fiscal_code="LTENGL79M31I356X")
-    by_vat = IntermediaryIdentity(country_code="IT", fiscal_code="13438810015")
+    by_cf = IntermediaryIdentity(country_code="IT", fiscal_code="VRDGPP80A01L219M")
+    by_vat = IntermediaryIdentity(country_code="IT", fiscal_code="01112223334")
     # Either identifier names the same person, so either is self-transmission.
     assert inv._payload_intermediary(issuer, by_cf) is None
     assert inv._payload_intermediary(issuer, by_vat) is None
