@@ -21,6 +21,30 @@ on:
         default: ""
 
 jobs:
+  # Secret scan over the whole history, not only the tested commit: a key
+  # committed and then deleted is still published. Rules and the inspected
+  # false positives live in .gitleaks.toml. The binary is pinned and checked
+  # against the release checksum rather than pulled through a marketplace
+  # action, so what runs here is exactly what was run locally.
+  secrets:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" gitleaks
+      - name: Scan history
+        run: ./gitleaks git --no-banner --redact --config .gitleaks.toml .
+
   quality:
     runs-on: ubuntu-latest
     steps:

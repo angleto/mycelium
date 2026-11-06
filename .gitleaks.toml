@@ -1,0 +1,53 @@
+# Secret-scan configuration: gitleaks' default rules, plus allowlists for
+# findings that were inspected and are not credentials.
+#
+# Every allowlist below is narrow on purpose: it names the exact values (or the
+# exact expression) and, where they live in tests, requires BOTH the path and
+# the value to match. A blanket path allowlist over the test suites was
+# rejected: it would also hide a real key pasted into a test, which is the
+# case a scanner exists for.
+#
+# Measured on 2026-11-06 over the full history (1144 commits, every ref):
+# 977 findings, all `generic-api-key`: 972 sign-up passwords of throwaway test
+# users (5 distinct values), 1 idempotency key in a test, 3 occurrences of a
+# localStorage key name, 1 attribute expression. With this file the same scan
+# reports 0.
+#
+# What this does not cover: a new fixture password with a different value is
+# reported again. That is intended: add it here after reading it.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Sign-up passwords and an idempotency key of throwaway test fixtures"
+condition = "AND"
+paths = [
+  '''(^|/)tests?/''',
+  '''(^|/)e2e/''',
+  '''(^|/)test_[^/]*\.py$''',
+  '''(^|/)conftest\.py$''',
+]
+regexTarget = "secret"
+regexes = [
+  '''^pw-strong-123$''',
+  '''^new-strong-456$''',
+  '''^z-strong-789$''',
+  '''^wrong-pass-xx$''',
+  '''^tem-pass$''',
+  '''^t17g2-compose$''',
+]
+
+[[allowlists]]
+description = "localStorage key name for the recents list, not a secret"
+condition = "AND"
+paths = ['''^web/src/lib/recents\.ts$''']
+regexTarget = "secret"
+regexes = ['''^mycelium\.recents\.v1$''']
+
+[[allowlists]]
+description = "Attribute access on the connector's signing secrets, not a literal"
+condition = "AND"
+paths = ['''^core/src/mycelium_core/services/payment_connectors\.py$''']
+regexTarget = "line"
+regexes = ['''current=self\.signing_secret, previous=self\.previous_signing_secret''']
