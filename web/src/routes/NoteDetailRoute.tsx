@@ -24,6 +24,7 @@ import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { CopyIdButton } from '../components/CopyIdButton'
+import { FocusHereButton } from '../components/FocusHereButton'
 import { useEditSession } from '../lib/useEditSession'
 import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useStaleWatch } from '../lib/useStaleWatch'
@@ -655,6 +656,7 @@ export function NoteDetailRoute({
             label={t('notes.copyId')}
             copiedLabel={t('notes.idCopied')}
           />
+          <FocusHereButton tags={note.tags} />
           <button
             type="button"
             className="btn--sm"

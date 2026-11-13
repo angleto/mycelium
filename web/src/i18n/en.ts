@@ -353,6 +353,12 @@ export const en = {
     all: 'All projects',
     allClients: 'All clients',
     allOfClient: 'Whole client',
+    clear: 'Leave focus and show all clients',
+    here: 'Focus',
+    hereOn: 'In focus',
+    hereTitle: 'Show only {{client}} › {{project}} across the app',
+    hereTitleClient: 'Show only {{client}} across the app',
+    hereLeaveTitle: 'This is the current focus. Click to show all clients again',
   },
   settings: {
     theme: 'Theme',

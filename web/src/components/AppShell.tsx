@@ -50,8 +50,10 @@ function ProjectFocus() {
     clientId,
     projectId,
     clientName,
+    active,
     setClient,
     setProject,
+    clear,
     setClientProjectIds,
     setProjectName,
   } = useFocus()
@@ -81,12 +83,19 @@ function ProjectFocus() {
     }
   }, [session?.workspaceId])
 
-  // Archived projects never appear in the focus picker. /clients and
-  // /projects both exclude them server-side now; this list opts back in
-  // (see the fetch) for the name lookup below, so the picker filters them
-  // out here.
-  const visibleProjects = projects.filter((p) => p.status !== 'archived')
-  const ofClient = visibleProjects.filter((p) => p.client_tag_id === clientId)
+  // Archived projects are not offered for picking: this list opts back in
+  // to them (see the fetch) only for the name lookup below. The one
+  // exception is the project already in focus, which stays an option even
+  // when archived -- focus can be set from an item on an archived project
+  // -- because a <select> whose value matches no option displays its FIRST
+  // one, and the control would read "Whole client" while every view is
+  // narrowed to one project. Until the list has loaded, the same holds for
+  // any focused project: it gets a placeholder option (below).
+  const ofClient = projects.filter(
+    (p) =>
+      p.client_tag_id === clientId &&
+      (p.status !== 'archived' || p.id === projectId),
+  )
   // Keep the provider's effective allow-list in sync with the data.
   // Archived projects don't expand the focus scope.
   useEffect(() => {
@@ -107,7 +116,7 @@ function ProjectFocus() {
   }, [projectId, projects, setProjectName])
 
   return (
-    <div className="focus">
+    <div className={`focus${active ? ' is-active' : ''}`}>
       <span className="focus__lbl">{t('focus.label')}</span>
       {/* A search, not a dropdown: one client per paying customer means this
           control is over an unbounded set, and enumerating it stops working
@@ -119,18 +128,38 @@ function ProjectFocus() {
           on reload. It is remembered WITH the id, in this workspace's focus
           record, so a name and an id from two different tenants can no longer
           be rendered together (task 805a569c). */}
-      <ClientSearch
-        currentName={clientId ? (clientName || '…') : ''}
-        allLabel={t('focus.allClients')}
-        placeholder={t('focus.allClients')}
-        onChange={setClient}
-      />
+      {/* Leaving focus is a button beside the field, not a row inside the
+          search: as a row it was reachable only by opening a list whose
+          purpose is to pick a client, i.e. the way out was hidden inside
+          the way in. Disabled rather than hidden when there is no focus, so
+          the field does not change width under the pointer and the empty
+          box's "All clients" placeholder still names the state. */}
+      <div className="focus__client">
+        <ClientSearch
+          currentName={clientId ? (clientName || '…') : ''}
+          placeholder={t('focus.allClients')}
+          onChange={setClient}
+        />
+        <button
+          type="button"
+          className="btn--ghost btn--sm focus__clear"
+          disabled={!active}
+          title={t('focus.clear')}
+          aria-label={t('focus.clear')}
+          onClick={clear}
+        >
+          <span aria-hidden="true">✕</span>
+        </button>
+      </div>
       {clientId && (
         <select
           value={projectId}
           onChange={(e) => setProject(e.target.value)}
         >
           <option value="">{t('focus.allOfClient')}</option>
+          {projectId && !ofClient.some((p) => p.id === projectId) && (
+            <option value={projectId}>…</option>
+          )}
           {ofClient.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}

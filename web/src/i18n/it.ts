@@ -352,6 +352,12 @@ export const it: Catalog = {
     all: 'Tutti i progetti',
     allClients: 'Tutti i clienti',
     allOfClient: 'Tutto il cliente',
+    clear: 'Esci dal focus e mostra tutti i clienti',
+    here: 'Focus',
+    hereOn: 'In focus',
+    hereTitle: "Mostra solo {{client}} › {{project}} in tutta l'app",
+    hereTitleClient: "Mostra solo {{client}} in tutta l'app",
+    hereLeaveTitle: 'È il focus attuale. Clic per tornare a tutti i clienti',
   },
   settings: {
     theme: 'Tema',

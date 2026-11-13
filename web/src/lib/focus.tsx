@@ -122,6 +122,12 @@ type FocusCtx = {
   active: boolean
   setClient: (id: string, name: string) => void
   setProject: (id: string) => void
+  // Client and project in ONE write, for "focus on this task/note": two
+  // calls would be two renders, and the first (setClient) is defined to
+  // drop the project, so the views would flash the whole client first.
+  setFocus: (clientId: string, clientName: string, projectId: string) => void
+  // Back to every client: the one way out of focus mode.
+  clear: () => void
   setClientProjectIds: (ids: string[]) => void
   setProjectName: (name: string) => void
 }
@@ -136,6 +142,8 @@ const Ctx = createContext<FocusCtx>({
   active: false,
   setClient: () => {},
   setProject: () => {},
+  setFocus: () => {},
+  clear: () => {},
   setClientProjectIds: () => {},
   setProjectName: () => {},
 })
@@ -177,6 +185,12 @@ function FocusState({ wsId, children }: { wsId: string; children: ReactNode }) {
     (id: string) => write({ ...rec, projectId: id }),
     [write, rec],
   )
+  const setFocus = useCallback(
+    (cid: string, cname: string, pid: string) =>
+      write(cid ? { clientId: cid, clientName: cname, projectId: pid } : EMPTY),
+    [write],
+  )
+  const clear = useCallback(() => write(EMPTY), [write])
 
   const value = useMemo<FocusCtx>(() => {
     const focusIds = projectId
@@ -199,6 +213,8 @@ function FocusState({ wsId, children }: { wsId: string; children: ReactNode }) {
       active: !!clientId || !!projectId,
       setClient,
       setProject,
+      setFocus,
+      clear,
       setClientProjectIds: setCPIds,
       setProjectName: setPName,
     }
@@ -210,6 +226,8 @@ function FocusState({ wsId, children }: { wsId: string; children: ReactNode }) {
     clientProjectIds,
     setClient,
     setProject,
+    setFocus,
+    clear,
   ])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

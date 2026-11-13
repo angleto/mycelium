@@ -317,6 +317,52 @@ a:hover {
 .focus select {
   width: 100%;
 }
+/* The client field and its way out share one line; the field takes all the
+   width the button leaves. The search's own 12rem floor is for forms, here
+   the sidebar decides. */
+.focus__client {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-4);
+}
+.focus__client .csearch {
+  flex: 1;
+  min-width: 0;
+}
+.focus__client .csearch__input {
+  width: 100%;
+  min-width: 0;
+}
+/* Stretched to the field's height so the pair reads as one control. Its two
+   states have to be told apart at a glance, and the global disabled dimming
+   is too faint on a ghost button for that: off, it fades well back; on, it
+   takes the same accent as the focused field it clears. */
+.focus__clear {
+  flex-shrink: 0;
+}
+.focus__clear:disabled {
+  opacity: 0.3;
+}
+.focus.is-active .focus__clear {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Focus mode is a state the whole app is in, so it is shown where it is
+   set: the label and the field take the accent while a client or project
+   is focused, and are plain when every client is shown. */
+.focus.is-active .focus__lbl {
+  color: var(--accent);
+}
+.focus.is-active .csearch__input,
+.focus.is-active select {
+  border-color: var(--accent);
+}
+/* "Focus on this" in a task or note header, pressed while it IS the focus. */
+.focushere.is-on {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  border-color: var(--accent);
+}
 
 /* ---- workspace switcher (top of the sidebar) ----
    An anchored menu, not a <select>: the rows carry a role tag, an
