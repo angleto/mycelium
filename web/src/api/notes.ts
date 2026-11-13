@@ -7,7 +7,7 @@
 // helper below matches one way a screen uses the list, so a screen asks for
 // what it shows.
 import { api, errMessage, workspaceHeader } from './client'
-import type { components, operations } from '../shared/schema'
+import type { components, operations } from '../shared'
 
 export type NoteRow = components['schemas']['NoteListOut']
 export type NotesPage = components['schemas']['NotesPage']
