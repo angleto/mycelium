@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 // Ported from bitvision_phoenix/frontend/src/app/settings/ai-assistants
@@ -10,18 +10,15 @@ import { useTranslation } from 'react-i18next'
 // edit / rotate-secret / revoke (is_active toggle) / delete, secret
 // shown ONCE on create / rotate.
 
+import { ScopePicker } from './ScopePicker'
+import { selectedKeys } from '../lib/scopeSelection'
 import {
-  CATEGORY_ORDER,
   type Assistant,
   type AssistantCreated,
   type ConnectorInfo,
   type Scope,
   aiApi,
 } from '../lib/aiAssistants'
-
-function categoryColor(cat: Scope['category']): string {
-  return cat === 'danger' ? '#c0392b' : cat === 'write' ? '#d68910' : '#28a745'
-}
 
 export function AiAssistantsSettings() {
   const { t } = useTranslation()
@@ -338,7 +335,28 @@ function AssistantCard({
       <div className="airow__meta muted">
         <code>{assistant.token_prefix ?? '—'}…</code>{' '}
         {t('aiAssistants.scopesCount', { n: assistant.scope.length })}
+        {assistant.token_expires_at && (
+          <>
+            {' · '}
+            {t('aiAssistants.tokenExpires', {
+              date: new Date(assistant.token_expires_at).toLocaleDateString(),
+            })}
+          </>
+        )}
       </div>
+      {/* Who holds the token, for an assistant an OAuth consent created: the
+          client and the host its codes go to, and when it was approved. The
+          one question a person reviewing this list has to answer before
+          deciding whether to revoke. */}
+      {assistant.oauth && (
+        <div className="airow__meta muted">
+          {t('aiAssistants.oauthProvenance', {
+            client: assistant.oauth.client_name,
+            target: assistant.oauth.redirect_target,
+            date: new Date(assistant.oauth.approved_at).toLocaleDateString(),
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -392,52 +410,12 @@ function AssistantForm({
     }
   }, [mode, assistant, t])
 
-  const grouped = useMemo(() => {
-    if (!catalog) return null
-    const out = new Map<Scope['category'], Scope[]>()
-    for (const cat of CATEGORY_ORDER) out.set(cat, [])
-    for (const e of catalog) out.get(e.category)?.push(e)
-    return out
-  }, [catalog])
-
-  const selectedCount = useMemo(
-    () => Object.values(perms).filter(Boolean).length,
-    [perms],
-  )
-
-  function togglePermission(entry: Scope, next: boolean) {
-    if (next && entry.category === 'danger') {
-      if (
-        !window.confirm(
-          t('aiAssistants.dangerousScopeConfirm', { label: entry.label }),
-        )
-      )
-        return
-    }
-    setPerms((prev) => ({ ...prev, [entry.key]: next }));
-  }
-  function selectAll() {
-    if (!catalog) return
-    const dangerCount = catalog.filter((e) => e.category === 'danger').length
-    if (dangerCount > 0) {
-      if (!window.confirm(t('aiAssistants.selectAllConfirm', { dangerCount })))
-        return
-    }
-    setPerms(Object.fromEntries(catalog.map((e) => [e.key, true])))
-  }
-  function clearAll() {
-    if (!catalog) return
-    setPerms(Object.fromEntries(catalog.map((e) => [e.key, false])))
-  }
-
   async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      const selected = (catalog ?? [])
-        .filter((p) => perms[p.key])
-        .map((p) => p.key)
+      const selected = selectedKeys(catalog ?? [], perms)
       if (selected.length === 0) throw new Error(t('aiAssistants.atLeastOnePerm'))
       const body = {
         label,
@@ -512,66 +490,7 @@ function AssistantForm({
         </label>
       </div>
 
-      <fieldset className="aiform__perms">
-        <legend>
-          <span className="aiform__perms-title">
-            <strong>{t('aiAssistants.permissions')}</strong>
-            {catalog && (
-              <span className="muted">
-                {t('aiAssistants.scopesSelected', {
-                  selected: selectedCount,
-                  total: catalog.length,
-                })}
-              </span>
-            )}
-          </span>
-          {catalog && (
-            <span className="aiform__perms-actions">
-              <button type="button" className="btn--ghost btn--sm" onClick={() => void selectAll()}>
-                {t('aiAssistants.selectAllScopes')}
-              </button>
-              <button type="button" className="btn--ghost btn--sm" onClick={clearAll}>
-                {t('aiAssistants.clearAllScopes')}
-              </button>
-            </span>
-          )}
-        </legend>
-        {!grouped && <p className="hint">…</p>}
-        {grouped &&
-          CATEGORY_ORDER.map((cat) => {
-            const entries = grouped.get(cat) ?? []
-            if (entries.length === 0) return null
-            const style: CSSProperties = {
-              borderLeft: `3px solid ${categoryColor(cat)}`,
-              background: cat === 'danger' ? 'rgba(192,57,43,0.05)' : undefined,
-            }
-            return (
-              <div key={cat} className="aiform__perms-group" style={style}>
-                <div className="aiform__perms-cat muted">
-                  {t(`aiAssistants.scopeCategory_${cat}`)}
-                </div>
-                {entries.map((entry) => (
-                  <label key={entry.key} className="aiform__perm">
-                    <input
-                      type="checkbox"
-                      checked={!!perms[entry.key]}
-                      onChange={(e) => togglePermission(entry, e.target.checked)}
-                    />
-                    <div>
-                      <div>
-                        <strong>{entry.label}</strong>{' '}
-                        <code className="aiform__perm-key">{entry.key}</code>
-                      </div>
-                      {entry.description && (
-                        <div className="hint">{entry.description}</div>
-                      )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )
-          })}
-      </fieldset>
+      <ScopePicker catalog={catalog} perms={perms} onChange={setPerms} />
 
       <div className="row aiform__actions">
         <button type="button" className="btn--ghost" onClick={onCancel} disabled={busy}>

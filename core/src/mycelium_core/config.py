@@ -12,6 +12,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from mycelium_core.oauth.redirects import validate_scheme_allowlist
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -431,6 +433,41 @@ class Settings(BaseSettings):
     login_lockout_seconds: int = 900
     # Base URL the verification/reset links point at (the SPA).
     frontend_base_url: str = "http://localhost:5173"
+    # The externally visible origin of this deployment as an OAuth issuer
+    # and MCP resource ("https://mycelium.example"). Empty means "derive it
+    # from the request": X-Forwarded-Proto / X-Forwarded-Host, then Host.
+    # Set it where the proxy chain does not forward those faithfully, since
+    # every URL the OAuth metadata, the consent redirect and the MCP 401
+    # challenge publish is built from it (``mycelium_core.public_origin``).
+    public_base_url: str = ""
+
+    # OAuth client strategies (ADR-0069, ``mycelium_core.oauth``). Each way of
+    # identifying an MCP host can be switched off on its own; a strategy that
+    # is off is absent from the discovery document AND refuses its client ids.
+    # The AI-assistant UUID + secret pair (the original connector flow).
+    oauth_assistant_secret_clients_enabled: bool = True
+    # Public clients registered in ``oauth_clients``, by hand or dynamically.
+    oauth_registered_clients_enabled: bool = True
+    # The open RFC 7591 endpoint that writes them. Off leaves hand-registered
+    # clients working and removes ``registration_endpoint`` from the metadata.
+    oauth_dynamic_registration_enabled: bool = True
+    # Client ID Metadata Documents: an https URL as client id, fetched with the
+    # defences in ``mycelium_core.oauth.cimd``. The only strategy that makes
+    # outbound requests, which is the reason to be able to turn it off.
+    oauth_client_metadata_documents_enabled: bool = True
+    # Dynamic registration and client metadata documents run only when
+    # MYCELIUM_PUBLIC_BASE_URL and MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES are both
+    # set, in any environment (``mycelium_core.oauth.production``). This is the
+    # one way to run them without: for a dev stack or a test suite with no
+    # proxy chain, where callers' origins cannot be attributed and the issuer
+    # follows the request's Host. Ignored, with an error at startup, when
+    # MYCELIUM_ENV is production.
+    oauth_unattributed_origins_ok: bool = False
+    # Private-use redirect URI schemes for native apps (RFC 8252 §7.1), e.g.
+    # '["cursor","vscode"]'. Empty by default: allowing a scheme trusts
+    # whichever app claims it on the device. javascript/data/file/about/blob/
+    # vbscript/http/https are refused here at startup.
+    oauth_private_use_redirect_schemes: list[str] = Field(default_factory=list)
 
     # CORS. Comma-separated allowed origins for the browser SPA when it
     # is served from a different origin than the API (production splits
@@ -903,6 +940,16 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError("attachment_store='s3' requires: " + ", ".join(sorted(missing)))
+        return self
+
+    @model_validator(mode="after")
+    def _validate_oauth_redirect_schemes(self) -> Settings:
+        """Refuse to start with a private-use redirect allowlist that names a
+        scheme no configuration may enable (``oauth.redirects``), and store it
+        normalised, so the policy and the configuration cannot disagree."""
+        self.oauth_private_use_redirect_schemes = sorted(
+            validate_scheme_allowlist(self.oauth_private_use_redirect_schemes)
+        )
         return self
 
     @model_validator(mode="after")

@@ -31,6 +31,7 @@ from mycelium_worker import (
     garden,
     google_calendar,
     note_search_backfill,
+    oauth_sweep,
     payment_connectors,
     reminders,
     revisions,
@@ -57,6 +58,9 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
      - reminders + notification-dispatch tick (FR-12);
      - task-lease sweep: reclaims the possession of agent sessions that
        died mid-task, which before it existed left a task held forever;
+     - OAuth sweep (ADR-0069): deletes dynamic client registrations nobody
+       completed and long-expired authorization requests, the rows the
+       open registration and authorize endpoints write;
      - task-search embedding backfill (timed-out re-embed safety net);
      - note-search pointer backfill (back-catalogue indexing);
      - revisions snapshot/retention/summary sweeps;
@@ -79,6 +83,7 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
         email_responder.run_forever,
         reminders.run_forever,
         task_leases.run_forever,
+        oauth_sweep.run_forever,
         task_search_backfill.run_forever,
         note_search_backfill.run_forever,
         revisions.run_forever,

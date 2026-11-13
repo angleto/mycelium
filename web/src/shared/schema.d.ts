@@ -3256,6 +3256,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/oauth/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Consent Describe
+         * @description What the person is being asked to approve. Authenticated, and not
+         *     scoped to the caller's workspace: the request belongs to nobody until it
+         *     is answered, and the client may be a dynamic registration with no
+         *     workspace at all, or an https URL no table holds. Everything shown is the
+         *     snapshot taken when the client was resolved at /authorize, so this does
+         *     no resolution and no network I/O. Anything that is not a live request is
+         *     a 404.
+         */
+        get: operations["consent_describe_oauth_consent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/consent/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consent Approve
+         * @description Answer yes. The workspace is the one the person is in (the request's
+         *     tenant context), never one the body or the client names; the scope is
+         *     checked against the same role rule as creating an assistant by hand.
+         *     Mints the authorization code, not the credential: the client collects
+         *     that at ``/token``.
+         */
+        post: operations["consent_approve_oauth_consent_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/consent/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consent Deny
+         * @description Answer no. The client is told, through its own redirect, rather than
+         *     left waiting for one that never comes.
+         */
+        post: operations["consent_deny_oauth_consent_deny_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clients */
+        get: operations["list_clients_oauth_clients_get"];
+        put?: never;
+        /**
+         * Create Client
+         * @description Register a public client by hand. Same redirect-URI policy as Dynamic
+         *     Client Registration: one policy, whoever writes the row.
+         */
+        post: operations["create_client_oauth_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/clients/{client_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Client
+         * @description Remove a hand-registered client: its author or the workspace owner.
+         *     Credentials earlier consents created are NOT revoked by this; they are
+         *     assistants in their own right.
+         */
+        delete: operations["delete_client_oauth_clients__client_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dispatch/requests": {
         parameters: {
             query?: never;
@@ -8235,6 +8350,29 @@ export interface components {
             raw_secret: string;
         };
         /**
+         * AiAssistantOAuthOut
+         * @description Where an assistant created by an OAuth consent came from (ADR-0069):
+         *     the client that holds its bearer and where that client's codes go, so a
+         *     person can tell who holds the token and decide whether to revoke it.
+         */
+        AiAssistantOAuthOut: {
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name: string;
+            /** Client Registration */
+            client_registration: string;
+            /** Redirect Target */
+            redirect_target: string;
+            /** Approved By Id */
+            approved_by_id: string | null;
+            /**
+             * Approved At
+             * Format: date-time
+             */
+            approved_at: string;
+        };
+        /**
          * AiAssistantOut
          * @description Metadata; no secret ever ships in this shape.
          */
@@ -8273,6 +8411,9 @@ export interface components {
             token_prefix?: string | null;
             /** @default workspace */
             workspace_binding?: components["schemas"]["WorkspaceBinding"];
+            /** Token Expires At */
+            token_expires_at?: string | null;
+            oauth?: components["schemas"]["AiAssistantOAuthOut"] | null;
         };
         /** AiAssistantPatchIn */
         AiAssistantPatchIn: {
@@ -12921,6 +13062,94 @@ export interface components {
          * @enum {string}
          */
         NotificationStatus: "pending" | "sent" | "failed";
+        /** OAuthClientCreateIn */
+        OAuthClientCreateIn: {
+            /** Client Name */
+            client_name: string;
+            /** Redirect Uris */
+            redirect_uris: string[];
+        };
+        /**
+         * OAuthClientOut
+         * @description A hand-registered public client. ``client_id`` is what a person
+         *     pastes into an MCP host as the OAuth client ID; there is no secret.
+         */
+        OAuthClientOut: {
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name: string;
+            /** Redirect Uris */
+            redirect_uris: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By Id */
+            created_by_id: string | null;
+        };
+        /**
+         * OAuthConsentAnswerOut
+         * @description Where the browser goes next: the client's redirect URI with either
+         *     ``code`` and ``state`` or ``error=access_denied`` and ``state``. The SPA
+         *     navigates to it; it never parses it.
+         */
+        OAuthConsentAnswerOut: {
+            /** Redirect Url */
+            redirect_url: string;
+        };
+        /** OAuthConsentApproveIn */
+        OAuthConsentApproveIn: {
+            /** Request */
+            request: string;
+            /** Label */
+            label: string;
+            /** Scope */
+            scope: string[];
+        };
+        /** OAuthConsentDenyIn */
+        OAuthConsentDenyIn: {
+            /** Request */
+            request: string;
+        };
+        /**
+         * OAuthConsentOut
+         * @description What a person is asked to approve on the consent page.
+         *
+         *     ``redirect_target`` (scheme and host, e.g. ``https://claude.ai`` or
+         *     ``cursor://anysphere.cursor-mcp``) is the anti-phishing cue and the page
+         *     shows it more prominently than the name: ``client_name`` is whatever the
+         *     registrant chose to call itself, the target is where the credential will
+         *     actually go. Both come from the server's rows, never from the page's URL.
+         *
+         *     ``suggested_scope`` preselects the picker: the client's requested scope
+         *     when it names only catalogue keys, else the read-only default.
+         */
+        OAuthConsentOut: {
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name: string;
+            /**
+             * Registration
+             * @enum {string}
+             */
+            registration: "dynamic" | "manual" | "metadata_document";
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Redirect Target */
+            redirect_target: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Requested Scope */
+            requested_scope: string | null;
+            /** Suggested Scope */
+            suggested_scope: string[];
+        };
         /** OAuthStartOut */
         OAuthStartOut: {
             /** Authorize Url */
@@ -23070,6 +23299,214 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ActorOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consent_describe_oauth_consent_get: {
+        parameters: {
+            query: {
+                request: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthConsentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consent_approve_oauth_consent_approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthConsentApproveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthConsentAnswerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consent_deny_oauth_consent_deny_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthConsentDenyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthConsentAnswerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clients_oauth_clients_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthClientOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_client_oauth_clients_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthClientCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthClientOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_client_oauth_clients__client_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                client_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

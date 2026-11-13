@@ -13,6 +13,7 @@
 
 import { authFetch } from '../api/client'
 import { errMessage } from '../api/client'
+import type { components } from '../shared'
 
 export type ScopeCategory = 'read' | 'write' | 'danger'
 
@@ -25,19 +26,11 @@ export type Scope = {
 
 export type ConnectorInfo = { mcp_url: string; instructions_md: string }
 
-export type Assistant = {
-  id: string
-  label: string
-  provider: string | null
-  model_id: string | null
-  notes: string | null
-  scope: string[]
-  is_active: boolean
-  version: number
-  created_at: string
-  updated_at: string
-  token_prefix: string | null
-}
+/** An assistant as the server describes it. From the generated schema, so
+ *  a field the server adds (the OAuth provenance, the token's expiry) cannot
+ *  be missing here while the page needs it. */
+export type Assistant = components['schemas']['AiAssistantOut']
+export type AssistantOAuth = components['schemas']['AiAssistantOAuthOut']
 
 /** Returned exactly once, at create or rotate. ``raw_secret`` is the only
  *  moment the value exists outside the server; nothing re-reads it. */
@@ -122,4 +115,53 @@ export const deviceApi = {
       method: 'POST',
       body: JSON.stringify({ user_code: userCode }),
     }),
+}
+
+/** A public OAuth client's authorization request, as the consent page shows
+ *  it, and the hand-registered clients of a workspace (ADR-0069). Types
+ *  come from the server's schema: the page that discloses and the server
+ *  that mints must not be able to disagree about what is being shown. */
+export type OAuthConsent = components['schemas']['OAuthConsentOut']
+export type OAuthClient = components['schemas']['OAuthClientOut']
+type OAuthConsentAnswer = components['schemas']['OAuthConsentAnswerOut']
+
+export const oauthApi = {
+  consent: (requestId: string) =>
+    call<OAuthConsent>(`/oauth/consent?request=${encodeURIComponent(requestId)}`),
+  /** Returns where the browser goes next: the client's redirect URI with a
+   *  code. The page navigates there; it never parses it. */
+  approve: (requestId: string, label: string, scope: string[]) =>
+    call<OAuthConsentAnswer>('/oauth/consent/approve', {
+      method: 'POST',
+      body: JSON.stringify({ request: requestId, label, scope }),
+    }),
+  deny: (requestId: string) =>
+    call<OAuthConsentAnswer>('/oauth/consent/deny', {
+      method: 'POST',
+      body: JSON.stringify({ request: requestId }),
+    }),
+  listClients: () => call<OAuthClient[]>('/oauth/clients'),
+  createClient: (clientName: string, redirectUris: string[]) =>
+    call<OAuthClient>('/oauth/clients', {
+      method: 'POST',
+      body: JSON.stringify({ client_name: clientName, redirect_uris: redirectUris }),
+    }),
+  removeClient: (clientId: string) =>
+    call<void>(`/oauth/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' }),
+}
+
+/** One URI per line, blanks dropped. The server validates each. */
+export function parseRedirectUris(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+}
+
+/** The URL a person pastes into an MCP application: this deployment's
+ *  origin plus ``/mcp/``. Both ``/mcp`` and ``/mcp/`` are served without a
+ *  redirect; the slashed form is what the page shows so the two places it
+ *  appears cannot differ. */
+export function mcpServerUrl(origin: string): string {
+  return `${origin.replace(/\/+$/, '')}/mcp/`
 }

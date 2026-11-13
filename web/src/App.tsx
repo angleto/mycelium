@@ -37,6 +37,8 @@ import { SettingsAccountRoute } from './routes/SettingsAccountRoute'
 import { SettingsWorkspaceRoute } from './routes/SettingsWorkspaceRoute'
 import { SettingsExtensionRoute } from './routes/SettingsExtensionRoute'
 import { SettingsPlatformRoute } from './routes/SettingsPlatformRoute'
+import { SettingsConnectionsRoute } from './routes/SettingsConnectionsRoute'
+import { OAuthConsentRoute } from './routes/OAuthConsentRoute'
 import { PrefixOrUuid, PrefixResolver } from './routes/PrefixResolver'
 
 function App() {
@@ -107,6 +109,7 @@ function App() {
                   credential. One page, so the disclosure of what is
                   being granted cannot differ between the two paths. */}
               <Route path="extension" element={<SettingsExtensionRoute />} />
+              <Route path="connections" element={<SettingsConnectionsRoute />} />
             </Route>
             {/* The workspace surface moved into Settings; the old
                 top-level route stays as a redirect. */}
@@ -115,6 +118,11 @@ function App() {
               element={<Navigate to="/settings/workspace" replace />}
             />
             <Route path="/admin/users" element={<AdminUsersRoute />} />
+            {/* Where /authorize sends an MCP host's user (ADR-0069). Inside
+                the guard, so a signed-out person logs in and comes back to
+                the same ?request=, and inside the shell, so the workspace
+                switcher is there to pick where the assistant is created. */}
+            <Route path="/oauth/consent" element={<OAuthConsentRoute />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/notes" replace />} />

@@ -12,6 +12,10 @@ import { useAdminMode } from '../auth/useSession'
 //                machine) nor of the workspace (which does not care where
 //                you read it from), so it is its own scope rather than a
 //                drawer inside one of the others.
+//   Connections — the agents and MCP hosts let into this workspace: the
+//                server URL to paste, AI assistants, OAuth clients. Per
+//                workspace like the next tab, but a task people come to do,
+//                so it is a tab of its own (ADR-0069).
 //   Workspace  — this tenant. Different in the next workspace you open.
 //   Platform   — the deployment. Admin-only, one value for everybody.
 //
@@ -42,6 +46,9 @@ export function SettingsLayout() {
         </NavLink>
         <NavLink to="/settings/extension" className={cls}>
           {t('setnav.extension')}
+        </NavLink>
+        <NavLink to="/settings/connections" className={cls}>
+          {t('setnav.connections')}
         </NavLink>
         <NavLink to="/settings/workspace" className={cls}>
           {t('setnav.workspace')}

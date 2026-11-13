@@ -1,123 +1,89 @@
-"""MCP OAuth 2.1 + PKCE shim, ported from bitvision_phoenix
-(``bvmcp.oauth_shim``).
+"""OAuth 2.1 for MCP hosts: the HTTP adapter (ADR-0069).
 
-Mycelium's MCP transport at ``/mcp`` already accepts a static
-``Authorization: Bearer mycelium_at_…`` (the agent_token system). Claude
-Desktop's "Add custom connector" flow doesn't speak that: when the
-operator pastes the server URL + client_id + client_secret, Claude
-performs a standard OAuth 2.1 Authorization Code + PKCE handshake.
-Without the metadata + authorize + token endpoints the dance dies at
-``/.well-known/oauth-authorization-server`` (which today returns the
-SPA HTML, since nginx falls back to the SPA for unknown paths).
+Mycelium is both the authorization server and the protected resource (the
+MCP transport at ``/mcp``), so everything a host needs to connect lives here
+on the API host. This module only translates HTTP: what an OAuth client sent
+goes to ``mycelium_core.oauth``, and what comes back is rendered as OAuth's
+own ``{"error", "error_description"}`` body or a redirect. It does not know
+which kinds of client exist.
 
-This module is the thin wrapper that makes Claude.ai / Claude
-Desktop and every spec-compliant MCP host happy. Three endpoints +
-one metadata pair:
+The three layers it calls, each replaceable without the others:
+
+* client RESOLUTION (``oauth.resolution`` and ``oauth.strategies``): an
+  ordered registry of strategies -- registered public clients (dynamic or by
+  hand), Client ID Metadata Documents, and AI-assistant UUID + secret -- each
+  switchable in ``Settings``. The discovery document is generated from the
+  ones switched on.
+* AUTHORIZATION (``oauth.flow``): one path for every strategy. Consent
+  clients go to the SPA's consent page (``routers/oauth_consent.py``);
+  pre-authorized ones get a code at once.
+* ISSUANCE (``oauth.issuance``): the installed ``CredentialIssuer`` builds
+  the token response.
+
+Endpoints:
 
 * ``GET /.well-known/oauth-authorization-server`` (RFC 8414) and
-  ``GET /.well-known/oauth-protected-resource[/<suffix>]`` (RFC 9728)
-  advertise the auth + resource metadata. Both live on the API host
-  because we are auth server *and* resource server.
-* ``GET /authorize`` — accepts the standard authorization-code
-  request, mints a code via ``services.oauth_codes.mint`` (Postgres-
-  backed so any replica can redeem it), 302s back to
-  ``redirect_uri?code=…&state=…``. No consent page: the human
-  approval already happened in ``/settings → AI assistants`` when
-  the operator minted the credential.
-* ``POST /token`` — calls ``services.oauth_codes.consume`` to pop
-  the bound challenge, runs PKCE verification locally, validates the
-  submitted ``client_secret`` against the existing agent_token
-  system, returns ``access_token = <client_secret>`` so subsequent
-  MCP calls reuse the same bearer flow the ``/mcp`` middleware
-  already understands.
+  ``GET /.well-known/oauth-protected-resource[/<suffix>]`` (RFC 9728).
+* ``POST /oauth/register`` (RFC 7591), served by whichever active strategy
+  offers registration (``ClientRegistry.registration``); 404 while none does.
+* ``GET /oauth/authorize`` and ``POST /oauth/token``.
 
-The server is intentionally not a full OAuth provider: no refresh
-tokens (the static client_secret IS the long-lived credential), no
-dynamic client registration (clients are pre-issued as AI assistants
-in Mycelium), no introspection. Anything beyond the Claude.ai flow falls
-through to a 4xx with an OAuth-shaped error body.
+Not provided, deliberately: refresh grants, token introspection and
+revocation endpoints (revocation is per assistant, in the settings), client
+secrets for public clients, and CORS (hosts register and exchange from a
+server). The per-origin bounds on the open endpoints answer with the
+server's domain error, as the device grant does.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
-import secrets
-import uuid
 from typing import Annotated, Any
-from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from mycelium_core.db import admin_session
-from mycelium_core.services import agent_tokens as agent_tokens_svc
-from mycelium_core.services import oauth_codes as codes_svc
+from mycelium_api.deps import _resolve_issuer_client_ip
+from mycelium_core import public_origin
+from mycelium_core.config import get_settings
+from mycelium_core.oauth import flow, issuance
+from mycelium_core.oauth.origin import origin_bucket
+from mycelium_core.oauth.resolution import RegistrationError
+from mycelium_core.oauth.strategies import default_registry
 
-logger = logging.getLogger("mycelium.oauth_shim")
+logger = logging.getLogger("mycelium.oauth")
 
-# Two routers: the well-known ones live at the host root (RFC 8414 /
-# 9728 are explicit about the path); the authorize/token pair lives
-# at /api/oauth/* so nginx's existing /api/ proxy block carries them.
-# The well-known router carries no prefix and is mounted with the
-# include_router(..., prefix="") form in app.py.
+# Two routers: the well-known ones live at the host root (RFC 8414 / 9728 are
+# explicit about the path); the rest lives at /api/oauth/* so nginx's /api/
+# proxy block carries it.
 well_known_router = APIRouter(tags=["oauth"], include_in_schema=False)
 oauth_router = APIRouter(prefix="/oauth", tags=["oauth"], include_in_schema=False)
 
+_NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+
 
 def _issuer(request: Request) -> str:
-    """Return the externally-visible base URL. Honors X-Forwarded-*
-    when the deployment publishes them; falls back to the Host header.
-    An override via ``MYCELIUM_PUBLIC_BASE_URL`` env wins for setups where
-    the host header is unreliable."""
-    import os
-
-    override = os.getenv("MYCELIUM_PUBLIC_BASE_URL", "").strip()
-    if override:
-        return override.rstrip("/")
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get(
-        "host", request.url.netloc
+    """The externally visible base URL. One implementation, in core, shared
+    with the MCP transport's 401 challenge so the two can never name
+    different hosts (see ``mycelium_core.public_origin``)."""
+    return public_origin.issuer(
+        request.headers, scheme=request.url.scheme, netloc=request.url.netloc
     )
-    return f"{proto}://{host}"
 
 
-def _verify_pkce(code_verifier: str, code_challenge: str, method: str) -> bool:
-    if method.upper() != "S256":
-        return False
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    expected = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return secrets.compare_digest(expected, code_challenge)
+def _origin(request: Request) -> str | None:
+    """The bucket the open endpoints count this caller against: the address
+    the server resolved (never one the client declared), IPv6 per /64."""
+    return origin_bucket(_resolve_issuer_client_ip(request))
 
 
-def _oauth_error(
-    *,
-    status_code: int,
-    error: str,
-    description: str | None = None,
-) -> JSONResponse:
+def _oauth_error(*, status_code: int, error: str, description: str | None = None) -> JSONResponse:
     payload: dict[str, Any] = {"error": error}
     if description:
         payload["error_description"] = description
-    logger.info(
-        "oauth_shim error: status=%s error=%s description=%s",
-        status_code,
-        error,
-        description,
-    )
+    logger.info("oauth error: status=%s error=%s description=%s", status_code, error, description)
     return JSONResponse(payload, status_code=status_code)
-
-
-def _is_acceptable_redirect(uri: str) -> bool:
-    """Accept https:// callbacks and localhost loopbacks. ``http://``
-    on a non-loopback host is rejected — the secret travels through
-    the redirect-URI host's TLS terminator in the code response, so a
-    cleartext callback would leak it. Claude Desktop registers
-    https://claude.ai/api/.../callback so the strict policy works."""
-    if uri.startswith("https://"):
-        return True
-    return uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1")
 
 
 def _basic_auth_creds(authorization: str | None) -> tuple[str, str] | None:
@@ -133,49 +99,30 @@ def _basic_auth_creds(authorization: str | None) -> tuple[str, str] | None:
     return cid, sec
 
 
-# ----- metadata endpoints -------------------------------------------------
+# ----- metadata ---------------------------------------------------------------
 
 
 @well_known_router.get("/.well-known/oauth-authorization-server")
 async def authorization_server_metadata(request: Request) -> JSONResponse:
-    """RFC 8414. The authorize + token endpoints sit under /api/oauth
-    because nginx already proxies /api/* to the backend; the issuer
-    is the host root so MCP clients can compose the URLs from it.
-
-    """
-    iss = _issuer(request)
-    return JSONResponse(
-        {
-            "issuer": iss,
-            "authorization_endpoint": f"{iss}/api/oauth/authorize",
-            "token_endpoint": f"{iss}/api/oauth/token",
-            "response_types_supported": ["code"],
-            "grant_types_supported": ["authorization_code"],
-            "code_challenge_methods_supported": ["S256"],
-            "token_endpoint_auth_methods_supported": [
-                "client_secret_post",
-                "client_secret_basic",
-            ],
-            "scopes_supported": [],
-            "service_documentation": iss,
-            "client_uri": iss,
-        }
-    )
+    """RFC 8414, generated from the client strategies switched on: the
+    registration endpoint only while dynamic registration is, the metadata-
+    document flag only while that strategy is, the auth methods as the union
+    of the active strategies'."""
+    return JSONResponse(default_registry().metadata(_issuer(request), get_settings()))
 
 
 @well_known_router.get("/.well-known/oauth-protected-resource")
 @well_known_router.get("/.well-known/oauth-protected-resource/{suffix:path}")
 async def protected_resource_metadata(request: Request, suffix: str = "") -> JSONResponse:
-    """RFC 9728. The MCP Authorization spec constructs the well-known
-    URL by inserting ``/.well-known/oauth-protected-resource`` between
-    the host and the resource path: a resource at ``https://host/mcp``
-    exposes its metadata at
-    ``https://host/.well-known/oauth-protected-resource/mcp``. We
-    serve both the path-suffixed variant and the bare one and let the
-    captured suffix flow back into the ``resource`` field."""
+    """RFC 9728. The MCP Authorization spec constructs the well-known URL by
+    inserting ``/.well-known/oauth-protected-resource`` between the host and
+    the resource path: a resource at ``https://host/mcp`` exposes its metadata
+    at ``https://host/.well-known/oauth-protected-resource/mcp``. Both the
+    suffixed and the bare variant are served, the suffix flowing back into
+    ``resource``."""
     iss = _issuer(request)
     suffix_clean = (suffix or "").strip("/")
-    resource_url = f"{iss}/{suffix_clean}" if suffix_clean else f"{iss}/mcp"
+    resource_url = f"{iss}/{suffix_clean}" if suffix_clean else public_origin.mcp_resource(iss)
     return JSONResponse(
         {
             "resource": resource_url,
@@ -187,93 +134,62 @@ async def protected_resource_metadata(request: Request, suffix: str = "") -> JSO
     )
 
 
-# ----- authorize + token --------------------------------------------------
+# ----- registration -----------------------------------------------------------
+
+
+@oauth_router.post("/register")
+async def register_endpoint(request: Request) -> Response:
+    """RFC 7591 Dynamic Client Registration, for public clients only.
+
+    Unauthenticated by design: a host registering itself has nothing yet,
+    and what it gets -- a ``client_id`` -- grants nothing until a logged-in
+    person approves a request on the consent page. Bounded per network origin
+    and globally (``oauth_clients.check_registration_rate``); unused rows are
+    swept after a day."""
+    settings = get_settings()
+    # Whichever active strategy offers registration answers it; the endpoint
+    # does not know which one that is.
+    registrar = default_registry().registration(settings)
+    if registrar is None:
+        return _oauth_error(
+            status_code=404,
+            error="invalid_request",
+            description="dynamic client registration is not enabled",
+        )
+    try:
+        body: object = await request.json()
+    except Exception:
+        body = None
+    outcome = await registrar.register_client(body=body, origin=_origin(request), settings=settings)
+    if isinstance(outcome, RegistrationError):
+        return _oauth_error(status_code=400, error=outcome.error, description=outcome.description)
+    return JSONResponse(outcome, status_code=201, headers=_NO_STORE)
+
+
+# ----- authorize + token --------------------------------------------------------
+
+
+def _render(outcome: flow.Redirect | flow.OAuthFailure) -> Response:
+    if isinstance(outcome, flow.Redirect):
+        return RedirectResponse(outcome.location, status_code=302)
+    return _oauth_error(
+        status_code=outcome.status, error=outcome.error, description=outcome.description
+    )
 
 
 @oauth_router.get("/authorize")
 async def authorize_endpoint(request: Request) -> Response:
-    """Authorization code request. We don't render a consent page —
-    the operator already chose this assistant's scope in
-    ``/settings → AI assistants``. Bind the PKCE challenge to a fresh
-    code and 302 back to the redirect_uri.
-
-    ``client_id`` is the AI assistant's UUID; the value the SPA shows
-    in the Credentials reveal card next to the secret."""
-    params = request.query_params
-    response_type = params.get("response_type", "")
-    client_id = params.get("client_id", "").strip()
-    redirect_uri = params.get("redirect_uri", "").strip()
-    code_challenge = params.get("code_challenge", "").strip()
-    code_challenge_method = params.get("code_challenge_method", "S256").strip()
-    state = params.get("state", "")
-
-    if response_type != "code":
-        return _oauth_error(
-            status_code=400,
-            error="unsupported_response_type",
-            description="only response_type=code is supported",
-        )
-    try:
-        client_uuid = uuid.UUID(client_id)
-    except (ValueError, AttributeError):
-        return _oauth_error(
-            status_code=400,
-            error="invalid_request",
-            description="client_id must be the AI assistant UUID",
-        )
-    if not redirect_uri or not _is_acceptable_redirect(redirect_uri):
-        return _oauth_error(
-            status_code=400,
-            error="invalid_request",
-            description="redirect_uri missing or not https / loopback",
-        )
-    if not code_challenge:
-        return _oauth_error(
-            status_code=400,
-            error="invalid_request",
-            description="code_challenge required (PKCE)",
-        )
-    if code_challenge_method.upper() != "S256":
-        return _oauth_error(
-            status_code=400,
-            error="invalid_request",
-            description="code_challenge_method must be S256",
-        )
-
-    # We DON'T validate the assistant's existence here. ai_assistants
-    # is RLS-scoped on app.current_org; /authorize runs pre-tenant
-    # (the user hasn't picked a workspace, the GUC is empty), so a
-    # direct SELECT returns 0 rows and we'd reject every real
-    # client_id. Wrapping the lookup in a SECURITY DEFINER function
-    # that bypasses RLS requires the function owner to have either
-    # BYPASSRLS or superuser; that depends on how the deploy's DB
-    # role was provisioned and isn't guaranteed.
-    #
-    # The real auth gate is /token: it validates client_secret
-    # against the existing agent_token system (which uses the proven
-    # SECURITY DEFINER ``authenticate_agent_token`` from migration
-    # 0059) and verifies that the bound assistant_id matches the
-    # client_id from the body. Without that pair, the code is
-    # useless: PKCE binds the code to a single client_secret holder.
-    # Letting /authorize mint a code for any well-formed UUID
-    # widens the surface for nothing (the code expires in 10 min
-    # and can only be redeemed once).
-
-    async with admin_session() as session:
-        code = await codes_svc.mint(
-            session,
-            client_id=str(client_uuid),
-            redirect_uri=redirect_uri,
-            code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method,
-        )
-
-    target_qs = {"code": code}
-    if state:
-        target_qs["state"] = state
-    sep = "&" if "?" in redirect_uri else "?"
-    target = f"{redirect_uri}{sep}{urlencode(target_qs)}"
-    return RedirectResponse(target, status_code=302)
+    """Authorization code request. Consent clients are sent to the consent
+    page with nothing minted; pre-authorized clients get a code at once
+    (``oauth.flow``)."""
+    outcome = await flow.authorize(
+        request.query_params,
+        issuer=_issuer(request),
+        origin_ip=_origin(request),
+        settings=get_settings(),
+        registry=default_registry(),
+    )
+    return _render(outcome)
 
 
 @oauth_router.post("/token")
@@ -281,15 +197,8 @@ async def token_endpoint(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
-    """Exchange a code for an access token.
-
-    The access token we return is literally the assistant's
-    ``client_secret`` (the raw ``mycelium_at_…``) — the MCP HTTP
-    middleware resolves it via ``agent_tokens.authenticate`` on every
-    MCP call. Reusing the static credential as the access_token
-    keeps the bearer life-cycle (rotate, revoke, scope changes) on
-    the existing AI assistant row; we don't mint a second short-lived
-    token whose revocation we'd have to track separately."""
+    """Exchange a code for a token. The response is built by the installed
+    credential issuer (``oauth.issuance``)."""
     content_type = request.headers.get("content-type", "")
     body: dict[str, Any] = {}
     if "application/json" in content_type:
@@ -305,159 +214,40 @@ async def token_endpoint(
             body = {k: str(v) for k, v in form.items()}
         except Exception:
             return _oauth_error(
-                status_code=400,
-                error="invalid_request",
-                description="form body required",
+                status_code=400, error="invalid_request", description="form body required"
             )
 
-    grant_type = str(body.get("grant_type", ""))
-    code = str(body.get("code", "")).strip()
-    redirect_uri = str(body.get("redirect_uri", "")).strip()
-    code_verifier = str(body.get("code_verifier", "")).strip()
-    form_client_id = str(body.get("client_id", "")).strip()
-    form_client_secret = str(body.get("client_secret", "")).strip()
-
+    client_id = str(body.get("client_id", "")).strip()
+    client_secret = str(body.get("client_secret", "")).strip()
     basic = _basic_auth_creds(authorization)
     if basic is not None:
-        if not form_client_id:
-            form_client_id = basic[0]
-        if not form_client_secret:
-            form_client_secret = basic[1]
+        client_id = client_id or basic[0]
+        client_secret = client_secret or basic[1]
 
-    # Debug trail for the OAuth handshake (#48). Logs the SHAPE of
-    # the request (keys, lengths, prefixes) without exposing the full
-    # client_secret — enough to triage "client_secret rejected" vs
-    # "client_id mismatch" vs "code expired" without re-running the
-    # flow each time.
+    # The SHAPE of the request, never its secrets: enough to tell "client
+    # unknown" from "code expired" from "verifier wrong" in the log.
     logger.info(
-        "token request: ct=%s keys=%s grant=%s code=%s redirect=%s cid=%s cs=%s cv=%s basic=%s",
+        "token request: ct=%s keys=%s grant=%s cid=%s basic=%s",
         content_type,
         sorted(body.keys()),
-        grant_type,
-        f"{code[:6]}..." if code else "<empty>",
-        redirect_uri,
-        form_client_id,
-        f"{form_client_secret[:8]}...({len(form_client_secret)})"
-        if form_client_secret
-        else "<empty>",
-        f"{code_verifier[:6]}...({len(code_verifier)})" if code_verifier else "<empty>",
+        body.get("grant_type"),
+        client_id[:80],
         "yes" if basic else "no",
     )
-
-    if grant_type != "authorization_code":
-        return _oauth_error(
-            status_code=400,
-            error="unsupported_grant_type",
-            description="only authorization_code is supported",
-        )
-    if not code or not code_verifier or not form_client_id or not form_client_secret:
-        return _oauth_error(
-            status_code=400,
-            error="invalid_request",
-            description="code, code_verifier, client_id and client_secret are required",
-        )
-
-    async with admin_session() as session:
-        entry = await codes_svc.consume(session, code=code)
-    if entry is None:
-        return _oauth_error(
-            status_code=400, error="invalid_grant", description="code unknown or expired"
-        )
-    if not secrets.compare_digest(entry.client_id, form_client_id):
-        return _oauth_error(
-            status_code=400, error="invalid_grant", description="client_id mismatch"
-        )
-    if redirect_uri and not secrets.compare_digest(entry.redirect_uri, redirect_uri):
-        return _oauth_error(
-            status_code=400, error="invalid_grant", description="redirect_uri mismatch"
-        )
-    if not _verify_pkce(code_verifier, entry.code_challenge, entry.code_challenge_method):
-        return _oauth_error(
-            status_code=400, error="invalid_grant", description="PKCE verification failed"
-        )
-
-    # Validate client_secret against the agent_token system. The
-    # secret must (a) be a valid agent token, AND (b) be bound to the
-    # AI assistant whose UUID equals client_id. The second check
-    # prevents using one assistant's secret with a different
-    # assistant's client_id to bypass the (future) per-assistant
-    # scope enforcement.
-    if not agent_tokens_svc.is_agent_token(form_client_secret):
-        return _oauth_error(
-            status_code=401,
-            error="invalid_client",
-            description="client_secret is not a Mycelium agent token",
-        )
-    principal = await agent_tokens_svc.authenticate(form_client_secret)
-    if principal is None:
-        # Drill into the agent_tokens row via the SECURITY DEFINER
-        # ``oauth_token_diag`` function (migration 0064) so we can
-        # tell WHY authenticate returned None. authenticate_agent_token
-        # lumps "no row" + "revoked" + "expired" + "assistant inactive"
-        # into a single empty result, which leaves the operator
-        # guessing.
-        import hashlib
-
-        from sqlalchemy import text as _t
-
-        diag = "diagnostic unavailable"
-        try:
-            secret_hash = hashlib.sha256(form_client_secret.encode("utf-8")).digest()
-            async with admin_session() as _s:
-                row = (
-                    await _s.execute(
-                        _t(
-                            "SELECT out_exists, out_revoked_at, out_expires_at, "
-                            "out_assistant_id, out_assistant_active "
-                            "FROM oauth_token_diag(:h)"
-                        ),
-                        {"h": secret_hash},
-                    )
-                ).first()
-            if row is None or not row[0]:
-                diag = "no agent_tokens row matches the hash"
-            else:
-                diag = (
-                    f"row exists: revoked_at={row[1]} expires_at={row[2]} "
-                    f"assistant_id={row[3]} assistant_active={row[4]}"
-                )
-        except Exception as exc:  # diagnostic best-effort
-            diag = f"diagnostic query failed: {exc}"
-        logger.warning(
-            "token /token: authenticate returned None for secret prefix=%s len=%s -- %s",
-            form_client_secret[:8],
-            len(form_client_secret),
-            diag,
-        )
-        return _oauth_error(
-            status_code=401, error="invalid_client", description="client_secret rejected"
-        )
-    if principal.assistant_id is None or str(principal.assistant_id) != form_client_id:
-        logger.warning(
-            "token /token: assistant_id mismatch; form_client_id=%s principal.assistant_id=%s",
-            form_client_id,
-            principal.assistant_id,
-        )
-        return _oauth_error(
-            status_code=401,
-            error="invalid_client",
-            description="client_secret is not bound to that client_id",
-        )
-
-    return JSONResponse(
-        {
-            "access_token": form_client_secret,
-            "token_type": "Bearer",
-            # The bearer is a long-lived static secret. We surface a
-            # nominal expiry so well-behaved clients refresh through
-            # the connector if we ever switch to short-lived JWTs,
-            # but in practice the secret is valid until the operator
-            # rotates or revokes it from /settings.
-            "expires_in": 31536000,
-            "scope": " ".join(sorted(principal.assistant_scope or [])),
-        },
-        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    outcome = await flow.exchange(
+        body,
+        client_id=client_id,
+        client_secret=client_secret,
+        issuer=_issuer(request),
+        settings=get_settings(),
+        registry=default_registry(),
+        credential_issuer=issuance.credential_issuer(),
     )
+    if isinstance(outcome, flow.OAuthFailure):
+        return _oauth_error(
+            status_code=outcome.status, error=outcome.error, description=outcome.description
+        )
+    return JSONResponse(outcome.body(), headers=_NO_STORE)
 
 
 __all__ = ["oauth_router", "well_known_router"]

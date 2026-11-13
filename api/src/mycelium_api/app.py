@@ -52,6 +52,7 @@ from mycelium_api.routers import (
     notes,
     notifications,
     oauth,
+    oauth_consent,
     oauth_google,
     payment_connectors,
     public_invoices,
@@ -86,6 +87,7 @@ from mycelium_core.errors import (
 from mycelium_core.i18n import DEFAULT_LOCALE, render
 from mycelium_core.llm_ollama import OllamaLLM
 from mycelium_core.notification_channel import set_sender_override
+from mycelium_core.oauth.production import startup_problems
 from mycelium_core.readiness import not_ready_because
 from mycelium_core.schema_revision import verify_schema_revision
 from mycelium_core.services.mailer import build_system_mailer, set_mailer
@@ -184,6 +186,36 @@ async def _unhandled(request: Request, exc: Exception) -> Response:
         },
         headers={correlation.HEADER: correlation_id},
     )
+
+
+class _McpExactPath:
+    """Route ``/mcp`` to the MCP app itself rather than to a redirect.
+
+    The MCP app is a Starlette ``Mount``, and a mount only matches BELOW its
+    prefix: ``/mcp/`` and ``/mcp/anything``, never ``/mcp``. A request for
+    the bare path therefore fell through to the router's trailing-slash
+    redirect and was answered ``307 -> /mcp/``. That is the URL people paste
+    into an MCP host, and several hosts do not follow a redirect on POST
+    (they would have to resend the body), so the connection failed before
+    authentication had even been attempted. Measured in production
+    (2026-11-13) before this existed.
+
+    Rewriting exactly ``/mcp`` to ``/mcp/`` before routing, rather than
+    adding a route for it: the mount is then the single thing that serves
+    MCP, with its own middleware and lifespan, and no second entry point can
+    drift from it. Raw ASGI, so streaming responses are not buffered. Only
+    the exact path is touched; ``/mcpx`` and ``/mcp/...`` pass unchanged."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+            scope = dict(scope)
+            scope["path"] = "/mcp/"
+            if scope.get("raw_path") is not None:
+                scope["raw_path"] = b"/mcp/"
+        await self.app(scope, receive, send)
 
 
 def _wire_local_llm_override(settings: Settings) -> bool:
@@ -294,10 +326,20 @@ def _make_lifespan(mcp_app: Any) -> Any:
     return _lifespan
 
 
+def _report_oauth_production_gaps(settings: Settings) -> None:
+    """Say, once at startup, when the open OAuth strategies are switched off
+    or the opt-out is refused, and why (``mycelium_core.oauth.production``).
+    Errors, not warnings: MCP hosts that register themselves cannot connect
+    until it is fixed."""
+    for problem in startup_problems(settings):
+        logging.getLogger("mycelium.oauth").error(problem)
+
+
 def create_app() -> FastAPI:
     from mycelium_mcp.server_http import make_mcp_app
 
     mcp_app = make_mcp_app()
+    _report_oauth_production_gaps(get_settings())
     app = FastAPI(
         title="Mycelium API",
         version="0.0.0",
@@ -348,6 +390,7 @@ def create_app() -> FastAPI:
     # anything else can fail and every response carries it back. Raw
     # ASGI: a BaseHTTPMiddleware would buffer the streaming endpoints.
     app.add_middleware(correlation.CorrelationMiddleware)
+    app.add_middleware(_McpExactPath)
 
     # Cross-origin SPA (production serves the SPA and the API on
     # different hosts: mycelium.xeno.garden vs api.mycelium.xeno.garden). Enabled
@@ -408,6 +451,9 @@ def create_app() -> FastAPI:
     # why nginx must proxy /.well-known/oauth-* to the backend.
     app.include_router(oauth.oauth_router)
     app.include_router(oauth.well_known_router)
+    # The person's half of the public-client flow (consent, hand-registered
+    # clients), HUMAN_ONLY and in the SPA's schema, unlike the client half.
+    app.include_router(oauth_consent.router)
     app.include_router(dispatch.router)
     app.include_router(time_tracking.router)
     app.include_router(budgets.router)

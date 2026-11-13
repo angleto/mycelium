@@ -607,6 +607,13 @@ def test_the_release_that_ships_0022_through_the_real_env_py(
     # with a duplicate column). The later ones are stepped down for real
     # first, then back up at the end.
     command.downgrade(cfg, "0022")
+    # The forced tables of the schema being replayed, read at 0022 rather than
+    # at head: a later migration that creates a forced table of its own (0026,
+    # ``oauth_clients``) is not there while 0022 runs, so counting it would
+    # demand ALTERs on a table that does not exist yet. Read after the
+    # downgrade, the expectation is exactly the one the release faced.
+    with _conn(transaction=True) as conn:
+        before = forced_tables(conn)
     command.stamp(cfg, "0021")
     try:
         monkeypatch.setattr(m, "role_bypasses_rls", lambda _c: False)

@@ -7354,6 +7354,27 @@ button.btn--danger:hover {
   overflow-wrap: anywhere;
 }
 
+/* The OAuth consent page (ADR-0069). The redirect host is the one thing on
+   the card a registrant cannot fake, so it is the largest: a person
+   deciding has to read where the credential goes before what it is called. */
+.oauthconsent__host {
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  padding: var(--sp-8) var(--sp-12);
+  margin: var(--sp-4) 0 var(--sp-8);
+  overflow-wrap: anywhere;
+}
+.aioauth {
+  margin-top: var(--sp-24);
+  padding-top: var(--sp-16);
+  border-top: 1px solid var(--border);
+}
+
 /* Possession on a board (ADR-0063), as opposed to on one task's page.
    Two renderings and not one: past its deadline a hold is not a hold,
    the server hands the task to whoever asks next, and the sweep only

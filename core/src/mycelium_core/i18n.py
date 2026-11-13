@@ -44,6 +44,10 @@ class MessageCode(enum.StrEnum):
     AUTH_DEVICE_EXPIRED = "auth.device_expired"
     AUTH_DEVICE_DENIED = "auth.device_denied"
     AUTH_DEVICE_TOO_MANY = "auth.device_too_many"
+    OAUTH_REQUEST_INVALID = "oauth.request_invalid"
+    OAUTH_TOO_MANY_PENDING = "oauth.too_many_pending"
+    OAUTH_CLIENT_NOT_FOUND = "oauth.client_not_found"
+    OAUTH_REDIRECT_URI_INVALID = "oauth.redirect_uri_invalid"
     RBAC_NO_MEMBERSHIP = "rbac.no_membership"
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
     MEMBER_NOT_FOUND = "member.not_found"
@@ -353,6 +357,20 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_DEVICE_TOO_MANY: (
             "Too many connection requests are waiting from this address. "
             "Answer one, or wait for them to expire."
+        ),
+        MessageCode.OAUTH_REQUEST_INVALID: (
+            "This authorization request is no longer open. Start the connection "
+            "again from the application that sent you here."
+        ),
+        MessageCode.OAUTH_TOO_MANY_PENDING: (
+            "Too many OAuth registrations or authorization requests are waiting. "
+            "Complete one, or try again later."
+        ),
+        MessageCode.OAUTH_CLIENT_NOT_FOUND: "OAuth client not found",
+        MessageCode.OAUTH_REDIRECT_URI_INVALID: (
+            "Redirect URI not accepted: {uri}. Use https://, http:// on "
+            "127.0.0.1, localhost or [::1], or a native-app scheme the server "
+            "allows, without a fragment or user info (at most 10)."
         ),
         MessageCode.RBAC_NO_MEMBERSHIP: "Not a member of this workspace",
         MessageCode.RBAC_ROLE_INSUFFICIENT: (

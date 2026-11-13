@@ -20,6 +20,7 @@ from mycelium_worker import (
     fuel_retention,
     garden,
     main,
+    oauth_sweep,
     reminders,
     task_leases,
 )
@@ -63,6 +64,10 @@ def test_always_on_jobs_present_regardless_of_garden(monkeypatch: pytest.MonkeyP
         # out -- and it would be invisible, because every lease test
         # passes against a service call the worker never makes.
         task_leases.run_forever,
+        # ADR-0069: Dynamic Client Registration is open to the internet;
+        # the only thing that removes registrations nobody completed, and
+        # authorization requests nobody answered, is this sweep.
+        oauth_sweep.run_forever,
     )
     for enabled in (False, True):
         jobs = _jobs_with(garden_loop_enabled=enabled, monkeypatch=monkeypatch)

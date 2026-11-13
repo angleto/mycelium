@@ -524,8 +524,28 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/.well-known/oauth-authorization-server"): PUBLIC,
     ("GET", "/.well-known/oauth-protected-resource"): PUBLIC,
     ("GET", "/.well-known/oauth-protected-resource/{suffix:path}"): PUBLIC,
+    # The client half of OAuth (ADR-0069) is PUBLIC because the caller is an
+    # MCP host that holds nothing yet. What protects each one instead:
+    # ``register`` writes a client that grants nothing on its own and is
+    # bounded per network origin and globally, with unused rows swept;
+    # ``authorize`` opens a request that grants nothing until a logged-in
+    # person approves it on the consent page (same bounds); ``token`` yields a
+    # credential only for a code a person approved, presented with the PKCE
+    # verifier and the redirect URI it was issued for, or for the legacy
+    # client secret.
+    ("POST", "/oauth/register"): PUBLIC,
     ("GET", "/oauth/authorize"): PUBLIC,
     ("POST", "/oauth/token"): PUBLIC,
+    # The person half: answering a consent MINTS A CREDENTIAL, so it is
+    # fenced off from credentials for the device grant's reason -- one that
+    # could approve could launder itself into a wider one. Reading a
+    # request and administering hand-registered clients go with it.
+    ("GET", "/oauth/consent"): HUMAN_ONLY,
+    ("POST", "/oauth/consent/approve"): HUMAN_ONLY,
+    ("POST", "/oauth/consent/deny"): HUMAN_ONLY,
+    ("GET", "/oauth/clients"): HUMAN_ONLY,
+    ("POST", "/oauth/clients"): HUMAN_ONLY,
+    ("DELETE", "/oauth/clients/{client_id}"): HUMAN_ONLY,
     # --- oauth_google ---
     ("GET", "/oauth/google/callback"): PUBLIC,
     ("GET", "/oauth/google/start"): HUMAN_ONLY,

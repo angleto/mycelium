@@ -15,6 +15,12 @@ os.environ.setdefault("MYCELIUM_JWT_SECRET", "test-only-secret-min-32-bytes-aaaa
 os.environ.setdefault("MYCELIUM_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 # Dedicated pepper for the issuer-API-key keyed hash (>=32 chars); test-only.
 os.environ.setdefault("MYCELIUM_ISSUER_KEY_PEPPER", "test-only-issuer-key-pepper-aaaaaaaaaaaa")
+# The suite has no proxy chain to anchor and drives the issuer through
+# X-Forwarded-Host, so it runs the open OAuth strategies through their explicit
+# opt-out rather than with MYCELIUM_PUBLIC_BASE_URL / trusted proxies (which
+# would change what other suites assert). Tests of the gate itself set these
+# variables explicitly (api/tests/test_oauth_open_endpoints_gate.py).
+os.environ.setdefault("MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK", "true")
 
 import pathlib
 from collections.abc import AsyncIterator, Iterator

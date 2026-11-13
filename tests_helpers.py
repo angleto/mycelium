@@ -11,9 +11,12 @@ packages would otherwise duplicate.
 
 from __future__ import annotations
 
+import json as _json
+import secrets
 import uuid
 from collections.abc import Sequence
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,3 +94,33 @@ async def seed_ai_assistant_identity(
         )
     ).scalar_one()
     return identity
+
+
+def streamed_response(
+    status_code: int,
+    *,
+    content: bytes = b"",
+    json: object = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """An ``httpx.Response`` for a ``MockTransport`` that behaves like one off
+    the network: its body is an unread stream of the RAW bytes, readable with
+    ``aiter_raw``. ``httpx.Response(content=...)`` is not that -- it is
+    already read, and its ``content`` is decoded -- so a fake built with it
+    cannot exercise code that must count bytes on the wire (the client
+    metadata document fetcher reads raw for exactly that reason)."""
+    out_headers = dict(headers or {})
+    if json is not None:
+        content = _json.dumps(json).encode()
+        out_headers.setdefault("Content-Type", "application/json")
+    return httpx.Response(status_code, headers=out_headers, stream=httpx.ByteStream(content))
+
+
+def random_ula48() -> str:
+    """A random IPv6 /48 prefix under fd00::/8 (unique local addresses), e.g.
+    ``fd3a:91c2:7e04``. The OAuth open endpoints count callers per /48
+    (``mycelium_core.oauth.origin``), so a test client given its own /48 has
+    its own budget, and a suite can run any number of times on one database
+    without one run spending the next one's."""
+    a, b, c = secrets.randbelow(0xFF), secrets.randbelow(0xFFFF), secrets.randbelow(0xFFFF)
+    return f"fd{a:02x}:{b:x}:{c:x}"

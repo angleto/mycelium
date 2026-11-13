@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
+import { Link } from 'react-router-dom'
 import { AttachmentSettings } from '../components/AttachmentSettings'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { GmailConnect } from '../components/GmailConnect'
@@ -20,8 +20,7 @@ import { canWriteWorkspace } from '../lib/workspaceChoice'
 //
 // Everything under the configuration group is stored in the workspace's
 // settings bag (or in org-scoped rows) and is therefore SHARED with
-// every member: the mail account the workspace syncs, its AI assistants
-// and their scopes, its invoicing issuers, its estimate presets, its
+// every member: the mail account the workspace syncs, its invoicing issuers, its estimate presets, its
 // retrieval thresholds, its attachment cap. Retrieval and attachments
 // used to be reachable only by a platform admin in sudo mode even
 // though the server has always gated them on the workspace OWNER —
@@ -43,7 +42,11 @@ export function SettingsWorkspaceRoute() {
         <p className="hint">{t('wsmgr.configHint')}</p>
         {!canWrite && <p className="hint">{t('members.manageHint')}</p>}
         <GmailConnect />
-        <AiAssistantsSettings />
+        {/* AI assistants and MCP connections moved to their own tab; the
+            pointer stays for whoever still looks for them here. */}
+        <p className="hint">
+          <Link to="/settings/connections">{t('connections.movedHere')}</Link>
+        </p>
         <IssuerProfiles />
         <EstimatePresets />
         <RetrievalSettings />

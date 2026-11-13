@@ -12,6 +12,7 @@ from mycelium_core.models.adjudication import (
 from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
+from mycelium_core.models.ai_assistant_oauth_grant import AiAssistantOAuthGrant
 from mycelium_core.models.annotation import (
     ANNOTATION_DOC_KINDS,
     ANNOTATION_KINDS,
@@ -129,6 +130,8 @@ from mycelium_core.models.notification import (
     RecurrenceFreq,
     TaskRecurrence,
 )
+from mycelium_core.models.oauth_authorization_request import OAuthAuthorizationRequest
+from mycelium_core.models.oauth_client import ClientRegistration, OAuthClient
 from mycelium_core.models.org_embedder_provider import EmbedderProviderKind, OrgEmbedderProvider
 from mycelium_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
 from mycelium_core.models.organization import Organization
@@ -200,6 +203,7 @@ __all__ = [
     "AgentRunStatus",
     "AgentToken",
     "AgentWorker",
+    "AiAssistantOAuthGrant",
     "Annotation",
     "AnnotationUIState",
     "ApiIdempotency",
@@ -219,6 +223,7 @@ __all__ = [
     "ClassificationPersonalPrior",
     "ClassificationPersonalPriorSnapshot",
     "ClientProfile",
+    "ClientRegistration",
     "ConservationAdhesion",
     "ConservationStatus",
     "ConstraintKind",
@@ -285,6 +290,8 @@ __all__ = [
     "NotificationChannelKind",
     "NotificationPref",
     "NotificationStatus",
+    "OAuthAuthorizationRequest",
+    "OAuthClient",
     "OrgEmbedderProvider",
     "OrgLLMProvider",
     "Organization",

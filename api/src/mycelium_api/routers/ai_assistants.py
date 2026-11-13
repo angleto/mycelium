@@ -10,6 +10,7 @@ assistants even within the same workspace).
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated
 
@@ -20,6 +21,7 @@ from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
     AiAssistantCreatedOut,
     AiAssistantCreateIn,
+    AiAssistantOAuthOut,
     AiAssistantOut,
     AiAssistantPatchIn,
     ConnectorInfoOut,
@@ -28,6 +30,8 @@ from mycelium_api.schemas import (
 from mycelium_core.mcp_scopes import SCOPE_CATALOG
 from mycelium_core.models.agent_token import AgentToken, WorkspaceBinding
 from mycelium_core.models.ai_assistant import AiAssistant
+from mycelium_core.models.ai_assistant_oauth_grant import AiAssistantOAuthGrant
+from mycelium_core.oauth.redirects import redirect_target
 from mycelium_core.services import ai_assistants as svc
 
 router = APIRouter(prefix="/ai-assistants", tags=["ai-assistants"])
@@ -70,7 +74,7 @@ async def scope_catalog(
 
 async def _latest_token(
     ctx: TenantCtx, assistant_id: uuid.UUID
-) -> tuple[str | None, WorkspaceBinding]:
+) -> tuple[str | None, WorkspaceBinding, datetime.datetime | None]:
     """The live credential behind this assistant: the first chars of its
     secret (so the UI can tell one rotation from another) and what it
     reaches. Both come from the same row, in one query, because they are
@@ -78,7 +82,7 @@ async def _latest_token(
     come to disagree."""
     row = (
         await ctx.session.execute(
-            select(AgentToken.prefix, AgentToken.workspace_binding)
+            select(AgentToken.prefix, AgentToken.workspace_binding, AgentToken.expires_at)
             .where(
                 AgentToken.assistant_id == assistant_id,
                 AgentToken.revoked_at.is_(None),
@@ -88,14 +92,37 @@ async def _latest_token(
         )
     ).first()
     if row is None:
-        return None, WorkspaceBinding.workspace
-    return row[0], row[1]
+        return None, WorkspaceBinding.workspace, None
+    return row[0], row[1], row[2]
+
+
+async def _oauth_of(ctx: TenantCtx, assistant_id: uuid.UUID) -> AiAssistantOAuthOut | None:
+    """The OAuth provenance of an assistant, if a consent created it. Read
+    through the workspace's row-level policy like the assistant itself."""
+    grant = await ctx.session.get(AiAssistantOAuthGrant, assistant_id)
+    if grant is None:
+        return None
+    return AiAssistantOAuthOut(
+        client_id=grant.client_id,
+        client_name=grant.client_name,
+        client_registration=grant.client_registration,
+        redirect_target=redirect_target(grant.redirect_uri),
+        approved_by_id=grant.approved_by_id,
+        approved_at=grant.approved_at,
+    )
+
+
+async def _full_out(ctx: TenantCtx, a: AiAssistant) -> AiAssistantOut:
+    prefix, binding, expires = await _latest_token(ctx, a.id)
+    return _out(a, prefix, binding, expires, await _oauth_of(ctx, a.id))
 
 
 def _out(
     a: AiAssistant,
     token_prefix: str | None,
     workspace_binding: WorkspaceBinding = WorkspaceBinding.workspace,
+    token_expires_at: datetime.datetime | None = None,
+    oauth: AiAssistantOAuthOut | None = None,
 ) -> AiAssistantOut:
     return AiAssistantOut(
         id=a.id,
@@ -111,6 +138,8 @@ def _out(
         updated_at=a.updated_at,
         token_prefix=token_prefix,
         workspace_binding=workspace_binding,
+        token_expires_at=token_expires_at,
+        oauth=oauth,
     )
 
 
@@ -121,8 +150,7 @@ async def list_assistants(
     rows = await svc.list_assistants(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     out: list[AiAssistantOut] = []
     for a in rows:
-        prefix, binding = await _latest_token(ctx, a.id)
-        out.append(_out(a, prefix, binding))
+        out.append(await _full_out(ctx, a))
     return out
 
 
@@ -144,7 +172,9 @@ async def create_assistant(
         workspace_binding=body.workspace_binding,
     )
     return AiAssistantCreatedOut(
-        assistant=_out(res.assistant, res.token_prefix, body.workspace_binding),
+        assistant=_out(
+            res.assistant, res.token_prefix, body.workspace_binding, res.token_expires_at
+        ),
         raw_secret=res.raw_secret,
     )
 
@@ -160,8 +190,7 @@ async def get_assistant(
         user_id=ctx.user_id,
         assistant_id=assistant_id,
     )
-    prefix, binding = await _latest_token(ctx, row.id)
-    return _out(row, prefix, binding)
+    return await _full_out(ctx, row)
 
 
 @router.patch("/{assistant_id}", response_model=AiAssistantOut)
@@ -190,8 +219,7 @@ async def patch_assistant(
         user_id=ctx.user_id,
         assistant_id=assistant_id,
     )
-    prefix, binding = await _latest_token(ctx, row.id)
-    return _out(row, prefix, binding)
+    return await _full_out(ctx, row)
 
 
 @router.delete("/{assistant_id}", status_code=status.HTTP_204_NO_CONTENT)

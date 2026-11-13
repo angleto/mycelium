@@ -106,6 +106,27 @@ async def _require_mint_role(
     )
 
 
+async def check_grantable(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    scope: Sequence[str],
+) -> list[str]:
+    """Validate a scope and check that this person may create an assistant
+    holding it, without creating anything. Returns the cleaned scope.
+
+    For a decision taken now whose credential is created later: the OAuth
+    consent page approves first and the client collects afterwards, and the
+    person must be told "you cannot grant this" when they press the button,
+    not have the client fail minutes later. ``create_assistant`` checks
+    again when it runs, against the role as it is THEN, so a role taken away
+    in between still stops the mint."""
+    eff_scope = _validate_scope(scope)
+    await _require_mint_role(session, org_id, actor_id, eff_scope)
+    return eff_scope
+
+
 async def _binding_of(session: AsyncSession, *, assistant_id: uuid.UUID) -> WorkspaceBinding:
     """The tenancy of the credential that currently stands for this
     assistant. Read from the live token rather than remembered on the
@@ -405,6 +426,7 @@ async def rotate_secret(
 
 __all__ = [
     "AssistantWithSecret",
+    "check_grantable",
     "create_assistant",
     "delete_assistant",
     "get_assistant",

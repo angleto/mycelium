@@ -3540,6 +3540,19 @@ class AiAssistantPatchIn(BaseModel):
     runtime: AssistantRuntime | None = Field(default=None)
 
 
+class AiAssistantOAuthOut(BaseModel):
+    """Where an assistant created by an OAuth consent came from (ADR-0069):
+    the client that holds its bearer and where that client's codes go, so a
+    person can tell who holds the token and decide whether to revoke it."""
+
+    client_id: str
+    client_name: str
+    client_registration: str
+    redirect_target: str
+    approved_by_id: uuid.UUID | None
+    approved_at: datetime.datetime
+
+
 class AiAssistantOut(BaseModel):
     """Metadata; no secret ever ships in this shape."""
 
@@ -3561,6 +3574,10 @@ class AiAssistantOut(BaseModel):
     # Read from that same live token, so Settings can say what the
     # secret reaches rather than inferring it from the provider label.
     workspace_binding: WorkspaceBinding = WorkspaceBinding.workspace
+    # When that live token stops working; NULL for one with no expiry.
+    token_expires_at: datetime.datetime | None = None
+    # Set for an assistant an OAuth consent created; NULL otherwise.
+    oauth: AiAssistantOAuthOut | None = None
 
 
 class AiAssistantCreatedOut(BaseModel):
@@ -3744,3 +3761,64 @@ class DevicePendingOut(BaseModel):
 
 class DeviceAnswerIn(BaseModel):
     user_code: str = Field(min_length=1, max_length=32)
+
+
+# ---------- OAuth public clients and their consent (ADR-0069)
+class OAuthConsentOut(BaseModel):
+    """What a person is asked to approve on the consent page.
+
+    ``redirect_target`` (scheme and host, e.g. ``https://claude.ai`` or
+    ``cursor://anysphere.cursor-mcp``) is the anti-phishing cue and the page
+    shows it more prominently than the name: ``client_name`` is whatever the
+    registrant chose to call itself, the target is where the credential will
+    actually go. Both come from the server's rows, never from the page's URL.
+
+    ``suggested_scope`` preselects the picker: the client's requested scope
+    when it names only catalogue keys, else the read-only default."""
+
+    client_id: str
+    client_name: str
+    # Where the client came from: registered dynamically, by hand, or a
+    # Client ID Metadata Document. The first and last were vouched for by
+    # nobody in the workspace, and the page says so.
+    registration: Literal["dynamic", "manual", "metadata_document"]
+    redirect_uri: str
+    redirect_target: str
+    expires_at: datetime.datetime
+    requested_scope: str | None
+    suggested_scope: list[str]
+
+
+class OAuthConsentApproveIn(BaseModel):
+    request: str = Field(min_length=16, max_length=128)
+    # At least one non-blank character: the label is the assistant's name.
+    label: str = Field(min_length=1, max_length=255, pattern=r"\S")
+    scope: list[str] = Field(max_length=200)
+
+
+class OAuthConsentDenyIn(BaseModel):
+    request: str = Field(min_length=16, max_length=128)
+
+
+class OAuthConsentAnswerOut(BaseModel):
+    """Where the browser goes next: the client's redirect URI with either
+    ``code`` and ``state`` or ``error=access_denied`` and ``state``. The SPA
+    navigates to it; it never parses it."""
+
+    redirect_url: str
+
+
+class OAuthClientCreateIn(BaseModel):
+    client_name: str = Field(min_length=1, max_length=100, pattern=r"\S")
+    redirect_uris: list[str] = Field(min_length=1, max_length=10)
+
+
+class OAuthClientOut(BaseModel):
+    """A hand-registered public client. ``client_id`` is what a person
+    pastes into an MCP host as the OAuth client ID; there is no secret."""
+
+    client_id: str
+    client_name: str
+    redirect_uris: list[str]
+    created_at: datetime.datetime
+    created_by_id: uuid.UUID | None

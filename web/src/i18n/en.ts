@@ -288,6 +288,8 @@ export const en = {
     clear: 'Unassign',
   },
   aiAssistants: {
+    tokenExpires: 'token expires {{date}}',
+    oauthProvenance: 'Connected through OAuth by {{client}} ({{target}}), approved {{date}}',
     pageTitle: 'AI assistants',
     intro:
       'Configure AI clients (Claude Desktop, Cursor, custom MCP bots) that can act on your behalf against Mycelium.',
@@ -859,6 +861,67 @@ export const en = {
     configHint:
       'Shared by everyone in this workspace, and different in every other one.',
   },
+  oauthConsent: {
+    defaultLabel: '{{name}} via {{host}}',
+    title: 'Connect an application',
+    asking: '“{{name}}” is asking to act on your behalf in Mycelium.',
+    sendsTo: 'If you approve, the access will be sent to:',
+    redirectHostLabel: 'Where the access is sent',
+    hostWarning:
+      'The name above is chosen by whoever registered the application and can say anything. The address is where the access actually goes: approve only if you recognise it.',
+    selfRegistered:
+      'This application identified itself; nobody in your workspace registered or vouched for it.',
+    workspace: 'Workspace',
+    expiresAt: 'Request expires at',
+    workspaceHint:
+      'The connection is created in this workspace. Switch workspace from the header first if you meant another one.',
+    labelLabel: 'Name of this connection',
+    revokeHint: 'The connection appears under AI assistants, where you can revoke it at any time.',
+    approve: 'Approve',
+    deny: 'Deny',
+    noRequest:
+      'There is no open request to answer here. Start the connection again from the application that sent you.',
+  },
+  oauthClients: {
+    title: 'OAuth clients registered by hand',
+    intro:
+      'Most MCP applications only need the connector URL above and register themselves. If one asks for an OAuth client ID, register it here and paste the ID; leave the client secret empty.',
+    nameLabel: 'Application name',
+    urisLabel: 'Redirect URIs, one per line',
+    urisPlaceholder: 'https://app.example/oauth/callback',
+    urisHint:
+      'https://, or http:// on 127.0.0.1, localhost or [::1] (any port), or a native-app scheme the server operator has allowed. No fragment, at most 10.',
+    create: 'Register client',
+    createdHint: 'Paste this client ID into the application:',
+    clientId: 'OAuth client ID',
+    noSecret: 'There is no client secret: leave that field empty.',
+    empty: 'No clients registered by hand in this workspace.',
+    remove: 'Remove',
+    removeConfirm: 'Remove the OAuth client “{{name}}”?',
+    removeHint:
+      'Removing a client stops new connections through it. Connections already approved stay under AI assistants until you revoke them there.',
+  },
+  connections: {
+    title: 'Connections',
+    workspaceIs: 'Workspace: {{name}}',
+    perWorkspace:
+      'AI assistants and OAuth clients belong to this workspace. Switch workspace in the header to see another one’s.',
+    serverTitle: 'Connect an MCP application',
+    serverIntro: 'Paste this server URL into the application (Claude, ChatGPT, Cursor, VS Code…):',
+    serverUrlLabel: 'MCP server URL',
+    modesIntro: 'The application then identifies itself in one of these ways:',
+    modeDynamic:
+      'Automatic registration: most applications need nothing else. They register themselves and send you to a page where you approve them.',
+    modeMetadata:
+      'Client metadata document: some applications identify themselves by a URL instead of registering. Nothing to do here either.',
+    modeClientId:
+      'OAuth client ID: if the application asks for one, register it below under “OAuth clients registered by hand” and paste the ID, leaving the secret empty.',
+    modeSecret:
+      'Assistant secret: for applications that only accept a fixed token, create an AI assistant below and paste its client ID and secret.',
+    consentHint:
+      'In the first three ways nothing is granted until you approve the request on the consent page, where you choose the name and what the application may do.',
+    movedHere: 'AI assistants and MCP connections are now under Settings → Connections.',
+  },
   ext: {
     title: 'Mycelium in your browser',
     intro:
@@ -933,6 +996,7 @@ export const en = {
   setnav: {
     account: 'Account',
     extension: 'Browser extension',
+    connections: 'Connections',
     workspace: 'Workspace',
     platform: 'Platform',
     platformHint:
