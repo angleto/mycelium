@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from sqlalchemy import select
 
 from mycelium_api import idempotency as idem
-from mycelium_api import route_scopes
 from mycelium_api.deps import (
     TenantCtx,
     current_claims,
@@ -930,9 +929,8 @@ async def patch_task(
         # moving the field into the PATCH body does not hand a tasks-only
         # assistant a door onto the taxonomy (task c19f2f63 pattern,
         # route_scopes.scope_permits). Filing into an existing client or
-        # project is tags:assign; tags:write also passes while the
-        # transitional set stands, and nothing else does.
-        require_agent_scope(claims, route_scopes.TAG_ASSIGN_ANY)
+        # project is tags:assign, and nothing else passes.
+        require_agent_scope(claims, "tags:assign")
     # ``X-Edit-Session-Id`` flips the recovery-history channel to ``web``
     # so consecutive autosaves under the same session coalesce into one
     # open revision. Without the header, every PATCH is a sealed

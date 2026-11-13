@@ -7,12 +7,12 @@ rescope the vocabulary every entity carries". A client that needed the
 small power had to be granted the large one, which is not a permission
 system, it is a hint.
 
-Both splits ship a TRANSITIONAL any-of set so an assistant granted the
-wide key before the split keeps working. The risk that creates is that
-the split becomes decorative: everything still works with the wide key,
-so nothing ever moves off it, and the narrow key is never granted. The
-sets carry a removal date; these tests are what makes collapsing them
-safe, because they pin what the narrow key must and must not reach.
+Both splits shipped with a TRANSITIONAL any-of set so an assistant
+granted the wide key before the split kept working. Migration 0025
+granted the narrow key to every assistant holding the wide one, and the
+sets are gone (task e2ef53be): each operation now costs its narrow key
+alone, on both surfaces. These tests pin what the narrow key must and
+must not reach, and that the wide key no longer reaches it.
 
 No database: these are assertions about the two maps and the two gates.
 """
@@ -29,8 +29,6 @@ from mycelium_api.main import app
 from mycelium_api.route_scopes import (
     META,
     ROUTE_SCOPES,
-    TAG_ASSIGN_ANY,
-    TASK_STATE_ANY,
     scope_permits,
 )
 from mycelium_core.errors import ForbiddenError
@@ -87,12 +85,16 @@ def test_filing_a_task_no_longer_costs_the_power_to_rename_a_client(
         assert not scope_permits(*wide, ["tags:assign"]), wide
 
 
-def test_a_grant_made_before_the_split_still_works() -> None:
-    # The whole reason the sets are any-of. Remove this guarantee and the
-    # split is a breaking change for every assistant already out there.
-    assert scope_permits(*ADVANCE_A_TASK, ["workflows:write"])
+def test_the_wide_key_alone_no_longer_reaches_the_narrow_operations() -> None:
+    """The bridge is gone: an assistant must hold the narrow key itself.
+    Migration 0025 gave it to every assistant that held the wide one, so
+    nobody lost an operation; what is gone is the wide key's reach."""
+    assert not scope_permits(*ADVANCE_A_TASK, ["workflows:write"])
     for route in FILE_A_TASK:
-        assert scope_permits(*route, ["tags:write"]), route
+        assert not scope_permits(*route, ["tags:write"]), route
+    assert required_keys("set_task_state") == frozenset({"tasks:state"})
+    for tool in ("add_task_tag", "remove_task_tag", "move_task_to_project", "set_task_client"):
+        assert required_keys(tool) == frozenset({"tags:assign"}), tool
 
 
 def test_neither_key_lets_anything_else_through() -> None:
@@ -110,30 +112,22 @@ def test_neither_key_lets_anything_else_through() -> None:
         assert reached == allowed, f"{key} reaches {sorted(reached - allowed)}"
 
 
-def test_the_403_asks_for_the_narrow_key_not_the_wide_one() -> None:
-    """A transitional set exists so an old WIDE grant keeps working. If the
-    refusal named the wide key, every caller that hit it would go and ask
-    for the wide key -- pushing grants in the exact direction the split was
-    made to reverse. ``require_agent_scope`` picks the lowest sorted member;
-    that this IS the narrow key is a property of how the sets are named, so
-    it is asserted rather than assumed."""
-    for any_of, narrow in ((TASK_STATE_ANY, "tasks:state"), (TAG_ASSIGN_ANY, "tags:assign")):
+def test_the_403_asks_for_the_narrow_key() -> None:
+    """The refusal names the key to ask for, and that key is the narrow
+    one: a caller that read the wide key here would push grants back in
+    the direction the split was made to reverse."""
+    for narrow in ("tasks:state", "tags:assign"):
         with pytest.raises(ForbiddenError) as caught:
-            require_agent_scope({"assistant_scope": ["tasks:read"]}, any_of)
+            require_agent_scope({"assistant_scope": ["tasks:read"]}, narrow)
         assert caught.value.params["scope"] == narrow
-
-    # And holding either member is enough, which is what "any of" means.
-    for any_of in (TASK_STATE_ANY, TAG_ASSIGN_ANY):
-        for held in sorted(any_of):
-            require_agent_scope({"assistant_scope": [held]}, any_of)
+        require_agent_scope({"assistant_scope": [narrow]}, narrow)
 
 
-def test_a_human_or_bare_token_is_untouched_by_any_of() -> None:
-    # ``assistant_scope`` None means a human session or a bare agent
-    # token: the gate must stay a no-op, or the split becomes an outage
-    # for everyone who is not a scoped assistant.
-    require_agent_scope({}, TAG_ASSIGN_ANY)
-    require_agent_scope({"assistant_scope": None}, TASK_STATE_ANY)
+def test_a_human_session_is_untouched() -> None:
+    # ``assistant_scope`` None: the handler-level check is a no-op for a
+    # caller with no scope list.
+    require_agent_scope({}, "tags:assign")
+    require_agent_scope({"assistant_scope": None}, "tasks:state")
 
 
 def test_rest_and_mcp_split_the_same_way() -> None:
@@ -145,12 +139,14 @@ def test_rest_and_mcp_split_the_same_way() -> None:
         (("POST", "/tasks/{task_id}/tags"), "add_task_tag"),
         (("DELETE", "/tasks/{task_id}/tags/{tag_id}"), "remove_task_tag"),
     ):
-        assert ROUTE_SCOPES[route] == required_keys(tool), f"{route} and MCP {tool} disagree"
+        rest = ROUTE_SCOPES[route]
+        rest_keys = rest if isinstance(rest, frozenset) else frozenset({rest})
+        assert rest_keys == required_keys(tool), f"{route} and MCP {tool} disagree"
 
     # The two MCP tools with no single REST twin (the REST equivalent is a
     # PATCH body field, gated in the handler) split the same way.
     for tool in ("move_task_to_project", "set_task_client"):
-        assert required_keys(tool) == TAG_ASSIGN_ANY, tool
+        assert required_keys(tool) == frozenset({"tags:assign"}), tool
 
 
 def test_meta_is_callable_under_any_scope_including_none_granted() -> None:

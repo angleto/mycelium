@@ -41,27 +41,6 @@ from mycelium_core.mcp_scopes import HUMAN_ONLY, SurfaceGate
 # = UNMAPPED (denied, fail-closed).
 UNMAPPED: object = object()
 
-# --------------------------------------------------------------------------
-# Transitional any-of sets (2026-09-03). REMOVE BY 2026-12-01.
-#
-# Two keys were doing two jobs each, and a client that needed the small one
-# had to be granted the large one:
-#
-#   workflows:write  advance ONE task  +  create/edit/delete the state
-#                                         machine EVERY task runs on
-#   tags:write       file into an      +  invent, rename and rescope the
-#                    existing project     vocabulary itself
-#
-# Splitting them is the point (``tasks:state`` and ``tags:assign`` in
-# SCOPE_CATALOG). These sets exist only so an assistant granted the wide key
-# BEFORE the split keeps working after it: holding either passes.
-#
-# To remove: re-grant the narrow key to every assistant that holds the wide
-# one and relies on these tools, then collapse each set to its narrow key.
-# Left in place, the split is decorative -- everything still works with the
-# wide key, so nothing ever moves off it.
-TASK_STATE_ANY: frozenset[str] = frozenset({"tasks:state", "workflows:write"})
-TAG_ASSIGN_ANY: frozenset[str] = frozenset({"tags:assign", "tags:write"})
 
 # tool name -> the scope key it requires; None for META (always allowed); or
 # a frozenset meaning ANY ONE of those keys is enough, which is the shape
@@ -305,16 +284,16 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "list_clients": "tags:read",
     "list_projects": "tags:read",
     "list_tags": "tags:read",
-    "add_task_tag": TAG_ASSIGN_ANY,
+    "add_task_tag": "tags:assign",
     "create_client": "tags:write",
     "create_project": "tags:write",
     "create_tag": "tags:write",
-    "move_task_to_project": TAG_ASSIGN_ANY,
-    "remove_task_tag": TAG_ASSIGN_ANY,
+    "move_task_to_project": "tags:assign",
+    "remove_task_tag": "tags:assign",
     "set_tag_scope": "tags:write",
     # A TASK's client/project doors stay with the tag taxonomy, like the
     # add_task_tag / move_task_to_project pair they extend.
-    "set_task_client": TAG_ASSIGN_ANY,
+    "set_task_client": "tags:assign",
     "update_client": "tags:write",
     "update_project": "tags:write",
     "update_tag": "tags:write",
@@ -402,7 +381,7 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "delete_workflow": "workflows:write",
     "set_default_workflow": "workflows:write",
     "set_project_workflow": "workflows:write",
-    "set_task_state": TASK_STATE_ANY,
+    "set_task_state": "tasks:state",
     "update_workflow": "workflows:write",
 }
 

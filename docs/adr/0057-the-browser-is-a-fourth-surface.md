@@ -102,9 +102,11 @@ that exists creates without one; what it buys is a client that cannot tell a
 create which never arrived from one whose answer was lost.
 
 **Two permissions are split so the grant can be small**: `tasks:state` out of
-`workflows:write`, and `tags:assign` out of `tags:write`, each with a
+`workflows:write`, and `tags:assign` out of `tags:write`. Each shipped with a
 transitional any-of set on both the REST and the MCP maps so a credential
-granted the wide key before the split keeps working. The extension holds
+granted the wide key before the split kept working; migration 0025 granted
+the narrow key wherever the wide one was held and the sets were removed on
+2026-11-13 (amendment below). The extension holds
 eleven keys and cannot read the account, enumerate other workspaces, create
 or rename clients and projects, edit workflows, or delete anything.
 
@@ -151,9 +153,10 @@ Chrome profile, since `chrome.storage.local` is an unencrypted database in
 the profile directory; a compromised update of the extension itself; and a
 browser already compromised at connect time.
 
-Two transitional any-of sets now exist, dated and with a removal date of
-2026-12-01. Left in place the splits are decorative, because everything keeps
-working with the wide key and nothing ever moves off it.
+Two transitional any-of sets existed, dated and with a removal date of
+2026-12-01. Left in place the splits were decorative, because everything kept
+working with the wide key and nothing ever moved off it. Nothing watched the
+date either, so it would have passed silently.
 
 ## Alternatives rejected
 
@@ -402,3 +405,15 @@ row stays where it was.
 The same reach, several secrets, and a consent screen that would have had to
 explain a fan-out nobody asked for. Revoking would then be N acts, and the
 one people forget is the one that matters.
+
+## Amendment (2026-11-13, task e2ef53be): the transitional sets are gone
+
+The any-of sets carried a removal date and no mechanism, so the date would
+have passed without anything failing. They were removed by doing what their
+own comment prescribed rather than by a test that fails on a calendar day:
+migration 0025 grants `tasks:state` to every assistant holding
+`workflows:write` without it, and `tags:assign` to every assistant holding
+`tags:write` without it. That is exactly the reach the sets gave them, so no
+assistant gained or lost an operation. The sets are collapsed to their narrow
+key on both maps in the same change, and the wide keys no longer reach the
+narrow operations.

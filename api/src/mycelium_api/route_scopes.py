@@ -161,34 +161,6 @@ LINK_WRITE_ANY: frozenset[str] = frozenset({"notes:write", "tasks:write"})
 # call follows.
 ANNOTATION_WRITE_ANY: frozenset[str] = frozenset({"annotations:write", "comments:write"})
 
-# Any-of value, third family, and this one is TRANSITIONAL (2026-09-03).
-# REMOVE BY 2026-12-01.
-#
-# Two keys were each doing two jobs, so a caller that needed the small power
-# had to be granted the large one:
-#
-#   workflows:write  advance ONE task  +  create / edit / DELETE the state
-#                                         machine every task in the workspace
-#                                         runs on, and repoint a project at
-#                                         another one
-#   tags:write       file a task into  +  invent, rename and rescope the
-#                    an existing         vocabulary every entity carries
-#                    client / project
-#
-# A browser extension whose job is "mark this done" must not hold the power
-# to delete a workflow, and one that files a page into a project the user
-# already made must not be able to rename that user's clients. Those are
-# different resources, so they are different keys: ``tasks:state`` and
-# ``tags:assign``.
-#
-# These sets exist ONLY so an assistant granted the wide key before the split
-# keeps working: holding either passes. To remove them, re-grant the narrow
-# key where it is relied on, then collapse each set to its narrow member.
-# Left in place the split is decorative, because nothing ever moves off the
-# wide key. The same two sets exist in ``mcp.tool_scopes``; the pair must be
-# collapsed on both surfaces in the same change.
-TASK_STATE_ANY: frozenset[str] = frozenset({"tasks:state", "workflows:write"})
-TAG_ASSIGN_ANY: frozenset[str] = frozenset({"tags:assign", "tags:write"})
 
 # (METHOD, path template) -> scope key | PUBLIC | HUMAN_ONLY | any-of frozenset
 ROUTE_SCOPES: dict[tuple[str, str], object] = {
@@ -664,10 +636,10 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/tasks/{task_id}/revisions/{rev_id}"): "tasks:read",
     ("PATCH", "/tasks/{task_id}/revisions/{rev_id}"): "tasks:write",
     ("POST", "/tasks/{task_id}/revisions/{rev_id}/restore"): "tasks:write",
-    ("POST", "/tasks/{task_id}/state"): TASK_STATE_ANY,
+    ("POST", "/tasks/{task_id}/state"): "tasks:state",
     ("GET", "/tasks/{task_id}/states"): "workflows:read",
-    ("POST", "/tasks/{task_id}/tags"): TAG_ASSIGN_ANY,
-    ("DELETE", "/tasks/{task_id}/tags/{tag_id}"): TAG_ASSIGN_ANY,
+    ("POST", "/tasks/{task_id}/tags"): "tags:assign",
+    ("DELETE", "/tasks/{task_id}/tags/{tag_id}"): "tags:assign",
     ("POST", "/tasks/{task_id}/unarchive"): "tasks:write",
     # --- telegram ---
     ("DELETE", "/telegram/link"): HUMAN_ONLY,

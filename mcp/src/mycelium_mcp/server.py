@@ -307,7 +307,7 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
     - the tool is absent from both maps -> FAIL-CLOSED, denied (a drift-guard
       test keeps them jointly total so this never bites a real tool).
     - otherwise the granted list must contain the tool's required key, or
-      ANY ONE of them where the entry is a transitional any-of set.
+      ANY ONE of them where the entry is an any-of set.
 
     ``arguments`` distinguishes two contexts for an argument-dependent tool
     (``DYNAMIC_TOOL_SCOPES``):

@@ -215,13 +215,8 @@ def require_agent_scope(claims: dict[str, Any], scope_key: str | frozenset[str])
     raises.
 
     A frozenset means ANY ONE of those keys is enough, matching the value
-    shape ``route_scopes`` uses. The 403 has to name ONE key to ask for,
-    and it must be the narrow one: a transitional set exists so an old
-    wide grant keeps working, so telling the caller to go and get the wide
-    key would push grants in exactly the direction the split was made to
-    reverse. The lowest sorted member is used because a set has no order,
-    and that it IS the narrow key for every declared set is asserted by a
-    test rather than assumed here."""
+    shape ``route_scopes`` uses. The 403 has to name ONE key to ask for; the
+    lowest sorted member is used because a set has no order."""
     scope = claims.get("assistant_scope")
     if scope is None:
         return
