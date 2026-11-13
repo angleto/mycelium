@@ -3,11 +3,9 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { TagChip } from './TagChip'
-import { TaskTimer } from './TaskTimer'
 import { IdentityBadge } from './IdentityBadge'
-import { CopyIdButton } from './CopyIdButton'
-import { PeekButton } from './PeekButton'
 import { LeaseBadge } from './LeaseBadge'
+import { TaskQuickActions } from './TaskQuickActions'
 import type { Possession, components } from '../shared'
 import { formatDueDate } from '../lib/time'
 
@@ -209,16 +207,7 @@ export function TaskKanban({
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <CopyIdButton
-                          id={tk.id}
-                          variant="icon"
-                          label={t('tasks.copyId')}
-                          copiedLabel={t('tasks.idCopied')}
-                        />
-                        <PeekButton
-                          target={{ kind: 'task', id: tk.id, title: tk.title }}
-                        />
-                        <TaskTimer taskId={tk.id} />
+                        <TaskQuickActions id={tk.id} title={tk.title} />
                       </div>
                     </div>
                     <div className="kanban__meta">

@@ -4011,9 +4011,38 @@ button.btn--danger:hover {
 .recentlist {
   margin: 0;
 }
-.recentrow {
+/* Two lines: title and meta on the first, the quick actions under them on
+   the second, right-aligned so they sit where the list and the kanban put
+   theirs. Qualified with `.list li` because that rule sets the row's
+   alignment and wrapping at higher specificity, and a bare `.recentrow`
+   loses to it: the row then centres its lines and sizes them to their
+   content, so the title never gets the width it is supposed to truncate in. */
+.list li.recentrow {
+  flex-direction: column;
   flex-wrap: nowrap;
+  align-items: stretch;
+  gap: var(--sp-4);
   padding: var(--sp-6) var(--sp-8);
+}
+.recentrow__line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+.recentrow__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-4);
+}
+/* `.list li button` pushes the first button of a row right with an auto
+   margin and spaces the rest with margins of its own; here the alignment
+   comes from the container and the spacing from its gap, so neither may
+   add to it. */
+.recentrow .recentrow__actions button {
+  margin-left: 0;
 }
 .recentrow__title {
   flex: 1;

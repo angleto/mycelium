@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { IdentityBadge } from './IdentityBadge'
+import { TaskQuickActions } from './TaskQuickActions'
 import { relTime } from '../lib/time'
 import { usePersistedFlag } from '../lib/persistedFlag'
 import type { components } from '../shared'
@@ -101,37 +102,46 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
               const score = tk.importance * tk.urgency
               return (
                 <li key={tk.id} className="recentrow">
-                  <Link to={`/tasks/${tk.id}`} className="recentrow__title">
-                    {tk.assignee_kind ? (
-                      <IdentityBadge
-                        kind={tk.assignee_kind}
-                        handle={tk.assignee_handle ?? null}
-                      />
-                    ) : tk.created_by_kind === 'ai_assistant' ||
-                      tk.created_by_kind === 'mcp_token' ? (
-                      <IdentityBadge
-                        kind={tk.created_by_kind}
-                        handle={tk.created_by_handle ?? null}
-                        label={tk.created_by_label ?? null}
-                        title={t('tasks.aiCreatedTitle', {
-                          handle:
-                            tk.created_by_label ?? tk.created_by_handle ?? '',
-                        })}
-                      />
-                    ) : tk.executor_kind === 'llm_agent' ? (
-                      <span className="aibadge" title={t('tasks.aiTitle')}>
-                        {t('tasks.aiBadge')}
+                  <div className="recentrow__line">
+                    <Link to={`/tasks/${tk.id}`} className="recentrow__title">
+                      {tk.assignee_kind ? (
+                        <IdentityBadge
+                          kind={tk.assignee_kind}
+                          handle={tk.assignee_handle ?? null}
+                        />
+                      ) : tk.created_by_kind === 'ai_assistant' ||
+                        tk.created_by_kind === 'mcp_token' ? (
+                        <IdentityBadge
+                          kind={tk.created_by_kind}
+                          handle={tk.created_by_handle ?? null}
+                          label={tk.created_by_label ?? null}
+                          title={t('tasks.aiCreatedTitle', {
+                            handle:
+                              tk.created_by_label ?? tk.created_by_handle ?? '',
+                          })}
+                        />
+                      ) : tk.executor_kind === 'llm_agent' ? (
+                        <span className="aibadge" title={t('tasks.aiTitle')}>
+                          {t('tasks.aiBadge')}
+                        </span>
+                      ) : null}
+                      {tk.title}
+                    </Link>
+                    <span className="recentrow__meta">
+                      <span className="muted">{tk.state}</span>
+                      <PriorityChip priority={tk.priority} score={score} />
+                      <span className="muted recentrow__when" title={tk.updated_at}>
+                        {relTime(tk.updated_at, i18n.language)}
                       </span>
-                    ) : null}
-                    {tk.title}
-                  </Link>
-                  <span className="recentrow__meta">
-                    <span className="muted">{tk.state}</span>
-                    <PriorityChip priority={tk.priority} score={score} />
-                    <span className="muted recentrow__when" title={tk.updated_at}>
-                      {relTime(tk.updated_at, i18n.language)}
                     </span>
-                  </span>
+                  </div>
+                  {/* The actions take a line of their own: on the line above
+                      they would compete with the title for the only width a
+                      one-line row has, and the title is what the row is read
+                      for. */}
+                  <div className="recentrow__actions">
+                    <TaskQuickActions id={tk.id} title={tk.title} />
+                  </div>
                 </li>
               )
             })}
