@@ -167,7 +167,8 @@ _PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None] | None] = C
 
 # The bound assistant's granted scope list, published by the HTTP bearer
 # middleware alongside ``_PRINCIPAL`` (task c19f2f63, enabler B). ``None`` for a
-# bare token / the stdio / human-bearer paths = legacy full access. Kept as a
+# bare token (every scope key, never a HUMAN_ONLY tool: see ``_scope_permits``)
+# and for the stdio path with a person's JWT (everything). Kept as a
 # separate ContextVar (not folded into ``_PRINCIPAL``) so the many existing
 # 3-tuple readers/setters -- tests, eval_scenarios -- are untouched, and so the
 # gateway scope gate filters ~250 tools from memory with no DB round-trip.
@@ -291,8 +292,13 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
     enabler B). Pure/in-memory: reads the scope list published into
     ``_PRINCIPAL_SCOPE`` by the HTTP bearer middleware.
 
-    - ``_PRINCIPAL_SCOPE`` is None -> a bare token / the stdio / human-bearer
-      path: legacy full access, everything allowed.
+    - ``_PRINCIPAL_SCOPE`` is None and ``_PRINCIPAL`` is None -> the stdio
+      transport with a person's JWT: everything allowed.
+    - ``_PRINCIPAL_SCOPE`` is None and ``_PRINCIPAL`` is set -> an HTTP agent
+      token with no assistant bound (what ``mycelium auth login`` stores): every
+      scope key, but never a ``HUMAN_ONLY`` tool. The file it lives in is
+      readable by every agent session on the machine, so it is not a person
+      whoever minted it (task f34a0292).
     - the tool maps to ``None`` in ``TOOL_SCOPES`` -> META (whoami/help/ping):
       always allowed so an agent can bootstrap and discover its own scope.
     - the tool maps to ``HUMAN_ONLY`` -> denied, and NOT because the scope is
@@ -313,6 +319,8 @@ def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> b
       closed. Static tools ignore ``arguments`` entirely."""
     scope = _PRINCIPAL_SCOPE.get()
     if scope is None:
+        if _PRINCIPAL.get() is not None and TOOL_SCOPES.get(tool_name) is HUMAN_ONLY:
+            return False  # an agent credential is never a person
         return True
     dyn = DYNAMIC_TOOL_SCOPES.get(tool_name)
     if dyn is not None:

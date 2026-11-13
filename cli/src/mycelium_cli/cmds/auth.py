@@ -8,6 +8,7 @@ from typing import Any
 
 import typer
 
+from mycelium_cli.cmds._common import login_jwt
 from mycelium_cli.cmds.mfa import app as mfa_app
 from mycelium_cli.config import Profile, load_config, save_config
 from mycelium_cli.credentials import (
@@ -19,8 +20,6 @@ from mycelium_cli.credentials import (
 )
 from mycelium_cli.http import (
     CLIError,
-    MfaRequired,
-    anon_client,
     authed_client,
     jwt_client,
     raise_for_response,
@@ -71,7 +70,7 @@ def login(
     """
     email = email or typer.prompt("Email")
     password = password or typer.prompt("Password", hide_input=True)
-    jwt = _login(base_url, email=email, password=password)
+    jwt = login_jwt(base_url, email=email, password=password)
 
     # Resolve identity and the workspace this PAT will be bound to.
     with jwt_client(base_url, jwt) as c:
@@ -224,25 +223,6 @@ def status(profile: str = typer.Option("default", "--profile")) -> None:
     )
     if not ok:
         raise typer.Exit(1)
-
-
-def _login(base_url: str, *, email: str, password: str) -> str:
-    """Return a JWT, prompting for MFA only if the server demands it."""
-    with anon_client(base_url) as c:
-        try:
-            resp = c.post("/auth/login", json={"email": email, "password": password})
-            raise_for_response(resp)
-            return str(resp.json()["token"])
-        except MfaRequired:
-            pass
-        # MFA flow: combined endpoint, no separate "challenge".
-        code = typer.prompt("TOTP code", hide_input=False).strip()
-        resp = c.post(
-            "/auth/login-mfa",
-            json={"email": email, "password": password, "totp_code": code},
-        )
-        raise_for_response(resp)
-        return str(resp.json()["token"])
 
 
 def _pick_workspace(workspaces: list[dict[str, Any]], hint: str | None) -> dict[str, Any]:

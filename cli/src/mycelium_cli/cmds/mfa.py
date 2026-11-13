@@ -19,7 +19,7 @@ import sys
 
 import typer
 
-from mycelium_cli.cmds._common import client, get_json
+from mycelium_cli.cmds._common import get_json, person_client
 from mycelium_cli.ui import emit_json, json_mode, out, success
 
 app = typer.Typer(no_args_is_help=True, help="Multi-factor (TOTP) enrolment + disable.")
@@ -28,7 +28,7 @@ app = typer.Typer(no_args_is_help=True, help="Multi-factor (TOTP) enrolment + di
 @app.command()
 def status() -> None:
     """Show whether MFA is enabled and how many backup codes remain."""
-    with client() as c:
+    with person_client() as c:
         st = get_json(c.get("/mfa/status"))
     if json_mode():
         emit_json(st)
@@ -52,7 +52,7 @@ def setup(
     ),
 ) -> None:
     """Begin TOTP enrolment: shows the otpauth URI and an ASCII QR code."""
-    with client() as c:
+    with person_client() as c:
         body = get_json(c.post("/mfa/setup"))
     if json_mode():
         emit_json(body)
@@ -74,7 +74,7 @@ def activate(
     code: str = typer.Argument(..., help="6-digit code from your authenticator."),
 ) -> None:
     """Confirm a TOTP code; enables MFA and prints one-shot backup codes."""
-    with client() as c:
+    with person_client() as c:
         body = get_json(c.post("/mfa/activate", json={"totp_code": code}))
     if json_mode():
         emit_json(body)
@@ -97,7 +97,7 @@ def disable(
     ),
 ) -> None:
     """Disable MFA. Requires a valid TOTP or backup code."""
-    with client() as c:
+    with person_client() as c:
         resp = c.post("/mfa/disable", json={"code": code})
         if resp.status_code not in (200, 204):
             get_json(resp)

@@ -14,6 +14,7 @@ Two things are under test:
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -23,7 +24,7 @@ import mycelium_mcp.gateway as gw
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.mcp_scopes import DEFAULT_SCOPES, HUMAN_ONLY, SCOPE_CATALOG, VALID_SCOPE_KEYS
 from mycelium_mcp.gateway import describe_tools, execute_tool, search_tools
-from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits
+from mycelium_mcp.server import _PRINCIPAL, _PRINCIPAL_SCOPE, _scope_permits
 from mycelium_mcp.server import mcp as _registry
 from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, required_keys
 
@@ -217,12 +218,34 @@ def test_meta_tools_are_exactly_the_bootstrap_trio() -> None:
 
 
 def test_no_scope_list_keeps_full_access() -> None:
-    """Bare agent tokens, stdio and human bearers have no scope list and must
-    behave exactly as before enforcement existed."""
+    """The stdio transport with a person's JWT has no principal and no scope
+    list, and reaches everything, the HUMAN_ONLY tools included."""
+    assert _PRINCIPAL.get() is None
     assert _PRINCIPAL_SCOPE.get() is None
     assert _scope_permits("create_task")
     assert _scope_permits("memory_erase")
     assert _scope_permits("a_tool_that_does_not_exist")
+    assert _scope_permits("accept_suggestion")
+
+
+def test_bare_agent_token_never_reaches_a_human_only_tool() -> None:
+    """Over HTTP every bearer is an agent token. One with no assistant bound
+    (no scope list) keeps every scope key, but it is a stored credential any
+    agent session can read, so it is never a person: the HUMAN_ONLY tools are
+    refused AND left out of the catalogue (the listing check, arguments=None,
+    goes through the same function)."""
+    human_only = sorted(n for n, k in TOOL_SCOPES.items() if k is HUMAN_ONLY)
+    assert human_only, "the test needs at least one HUMAN_ONLY tool to mean anything"
+    tok = _PRINCIPAL.set((uuid.uuid4(), uuid.uuid4(), uuid.uuid4()))
+    try:
+        assert _PRINCIPAL_SCOPE.get() is None
+        assert _scope_permits("create_task", {})
+        assert _scope_permits("memory_erase", {})
+        for name in human_only:
+            assert not _scope_permits(name, {}), name
+            assert not _scope_permits(name), name
+    finally:
+        _PRINCIPAL.reset(tok)
 
 
 def test_scoped_assistant_is_confined_to_its_keys() -> None:

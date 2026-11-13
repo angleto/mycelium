@@ -28,8 +28,23 @@ drift-guard test asserts the map covers the live route table exactly, so a
 newly added route fails CI instead of silently becoming unreachable (or, if
 the default were open, silently becoming a hole).
 
-Only a BOUND assistant carrying a scope list is ever restricted: bare agent
-tokens and human session JWTs are unaffected, exactly as on the MCP side.
+Two kinds of caller, decided by the CREDENTIAL and not by what it carries:
+
+- a person's session (the SPA's login JWT): reaches every route, HUMAN_ONLY
+  included -- those routes exist for it;
+- an agent credential (an ``mycelium_at_`` token, with or without an
+  assistant bound, or a capability minted by one): never reaches a HUMAN_ONLY
+  route. With an assistant bound it is further confined to its scope list
+  (``scope_permits``); without one it holds every scope key
+  (``agent_permits``).
+
+A token with no assistant is what ``mycelium auth login`` stores on disk, and
+it used to count as a person. It is not one: every agent session on that
+machine can read the file, so "this request comes from a person" cannot be
+read off it. The CLI's person-only commands authenticate afresh with the
+password instead. The one HUMAN_ONLY route an agent credential still reaches
+is revoking ITSELF (see ``deps.enforce_route_scope``), which only removes
+authority.
 
 Cross-surface classification decisions (the workflow that built this map
 flagged these as "do not leave undecided"; recorded here so they are not
@@ -843,9 +858,10 @@ def required_scope(method: str, path: str) -> object:
 def scope_permits(method: str, path: str, scope: list[str] | None) -> bool:
     """Whether a caller holding ``scope`` may invoke this route.
 
-    ``scope is None`` means a human session or a bare agent token: no per-route
-    restriction, unchanged behaviour. Otherwise the route must be PUBLIC or map
-    to a key the assistant holds; HUMAN_ONLY and unmapped routes are denied."""
+    ``scope is None`` means no scope list at all, which only a person's session
+    has: no per-route restriction. An agent credential is judged by
+    ``agent_permits``. Otherwise the route must be PUBLIC or map to a key the
+    assistant holds; HUMAN_ONLY and unmapped routes are denied."""
     if scope is None:
         return True
     req = required_scope(method, path)
@@ -862,12 +878,24 @@ def scope_permits(method: str, path: str, scope: list[str] | None) -> bool:
     return req in scope
 
 
+def agent_permits(method: str, path: str, scope: list[str] | None) -> bool:
+    """Whether an AGENT credential may invoke this route.
+
+    ``scope is None`` is a token with no assistant bound: it holds every scope
+    key and is refused only what is reserved to a person. A scope list is the
+    assistant case and answers exactly as ``scope_permits``."""
+    if scope is None:
+        return required_scope(method, path) is not HUMAN_ONLY
+    return scope_permits(method, path, scope)
+
+
 __all__ = [
     "HUMAN_ONLY",
     "META",
     "PUBLIC",
     "ROUTE_SCOPES",
     "UNMAPPED",
+    "agent_permits",
     "bind_operations",
     "required_scope",
     "scope_permits",

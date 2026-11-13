@@ -76,8 +76,10 @@ mechanical part.
 
 - A credential that is a person's own bearer can write a decision. An agent
   handed a person's session token over the stdio surface publishes `human_api`
-  with no subject and is indistinguishable from the person. That is the same
-  limit `HUMAN_ONLY` already has for an unscoped credential, not a new one.
+  with no subject and is indistinguishable from the person. Until 2026-11-13
+  the same was true of an agent token with no assistant bound, which is what
+  `mycelium auth login` stores on disk; the amendment below closes that case
+  and leaves only the session token handed over by hand.
 - The `accept` line is matched on its words, not on its meaning. A person who
   writes `accept` followed by an id has accepted it. The grammar is strict, so
   "do not accept X" does not match, but it is not natural-language
@@ -95,3 +97,39 @@ mechanical part.
   approving each other is still no person deciding.
 - **A pending-approval object that the person confirms with a click.** It is
   the UI accept again, with a second state machine to keep in step with it.
+
+## Amendment (2026-11-13, task f34a0292): a stored token is never a person
+
+`HUMAN_ONLY` used to be decided on whether the credential carried a scope
+list. A token with no assistant bound carries none, so it was treated like a
+person's session and reached every route and tool reserved to one: minting
+tokens and assistants, approving devices, changing roles and MFA, accepting a
+suggestion. That token is not a leftover. `mycelium auth login` mints it and
+stores it in a file every agent session on the machine can read, so "this
+request comes from a person" cannot be read off it, for the same reason this
+ADR already gives for not deciding on identity: every agent session shares it.
+
+The decision is now taken on the kind of credential.
+
+- A person's session (the login JWT, on REST or on the stdio transport)
+  reaches everything, as before.
+- Every agent credential, with or without an assistant, and a capability
+  minted by one, is refused every `HUMAN_ONLY` route and tool and does not see
+  the tools in the catalogue. Without an assistant it still holds every scope
+  key, so ordinary work through the CLI is unchanged.
+- One exception: a token may revoke itself, which only removes authority and is
+  what `mycelium auth logout --revoke` does. Revoking another token stays a
+  person's act.
+- The CLI's person-only commands (`auth mfa *`, `workspace list`) ask for the
+  password, run on the session it opens and close it afterwards. No flag or
+  environment variable supplies the password, because a password stored once
+  is readable by every agent session too.
+
+ADR-0045 kept bare tokens at full access to limit the blast radius while the
+scope gate covered only the invoice tools. The gate has covered every surface
+since 2026-09-15, so that reason no longer holds.
+
+Not covered here, and left as follow-ups: `session_writes_as_assistant` still
+reads a bare token on REST as a person for protected notes and instructions,
+and `mycelium auth login` and the SPA's MCP panel still mint bare tokens rather
+than binding them to an assistant with a scope list.

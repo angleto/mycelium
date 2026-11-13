@@ -19,7 +19,14 @@ from httpx import ASGITransport, AsyncClient
 from mycelium_api import route_scopes
 from mycelium_api.app import create_app
 from mycelium_api.main import app
-from mycelium_api.route_scopes import HUMAN_ONLY, META, PUBLIC, ROUTE_SCOPES, scope_permits
+from mycelium_api.route_scopes import (
+    HUMAN_ONLY,
+    META,
+    PUBLIC,
+    ROUTE_SCOPES,
+    agent_permits,
+    scope_permits,
+)
 from mycelium_core.mcp_scopes import VALID_SCOPE_KEYS
 from mycelium_mcp.tool_scopes import TOOL_SCOPES
 
@@ -173,11 +180,32 @@ def test_comment_writes_reach_the_same_rows_on_both_surfaces() -> None:
 
 
 def test_no_scope_is_unrestricted() -> None:
-    """Human sessions and bare agent tokens carry no scope list and must behave
-    exactly as before this feature existed."""
+    """A human session carries no scope list and reaches every route, the
+    HUMAN_ONLY ones included: they exist for it."""
     assert scope_permits("POST", "/tasks", None)
     assert scope_permits("PATCH", "/ai-assistants/{assistant_id}", None)
     assert scope_permits("GET", "/a/route/that/does/not/exist", None)
+
+
+def test_bare_agent_credential_holds_every_key_but_never_human_only() -> None:
+    """A stored agent token with no scope list is not a person, whoever minted
+    it: every agent session on the machine can read it. So it keeps every
+    scope key and loses exactly the routes reserved to a person."""
+    assert agent_permits("POST", "/tasks", None)
+    assert agent_permits("DELETE", "/tasks/{task_id}", None)
+    assert not agent_permits("POST", "/agent-tokens", None)
+    assert not agent_permits("PATCH", "/ai-assistants/{assistant_id}", None)
+    assert not agent_permits("POST", "/auth/device/approve", None)
+    assert not agent_permits("PATCH", "/admin/users/{user_id}", None)
+    assert not agent_permits("POST", "/mfa/disable", None)
+
+
+def test_scoped_agent_credential_matches_scope_permits() -> None:
+    """With a scope list the two predicates are one: nothing changes for an
+    assistant."""
+    for method, path in [("GET", "/tasks"), ("POST", "/tasks"), ("POST", "/agent-tokens")]:
+        for scope in (["tasks:read"], sorted(VALID_SCOPE_KEYS), []):
+            assert agent_permits(method, path, scope) == scope_permits(method, path, scope)
 
 
 def test_scoped_assistant_is_confined() -> None:
@@ -277,21 +305,77 @@ async def test_scoped_assistant_token_is_confined_over_http() -> None:
         assert r.json()["code"] == "agent.scope_denied"
 
 
-async def test_bare_agent_token_keeps_full_access() -> None:
-    """Regression: only a BOUND assistant carrying a scope list is confined.
-    The CLI's bare PAT must be unaffected."""
+async def _bare_token(
+    c: AsyncClient, owner: dict[str, str], name: str
+) -> tuple[str, dict[str, str]]:
+    """Mint a bare agent token the way ``mycelium auth login`` does."""
+    mint = (
+        await c.post("/agent-tokens", headers=owner, json={"name": name, "scope": "cli"})
+    ).json()
+    return str(mint["id"]), {
+        "Authorization": f"Bearer {mint['raw']}",
+        "X-Workspace-Id": owner["X-Workspace-Id"],
+        "X-Workspace-Role": "owner",
+    }
+
+
+async def test_bare_agent_token_keeps_its_work_but_not_human_only_routes() -> None:
+    """The CLI's stored PAT keeps ordinary work and loses the routes reserved
+    to a person: an agent session holding it could otherwise mint credentials,
+    widen assistants, approve devices and change MFA on the owner's account."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         owner = await _signup_owner(c)
-        mint = (
-            await c.post("/agent-tokens", headers=owner, json={"name": "cli", "scope": "cli"})
-        ).json()
-        pat_headers = {
-            "Authorization": f"Bearer {mint['raw']}",
-            "X-Workspace-Id": owner["X-Workspace-Id"],
-        }
-        r = await c.post("/tasks", headers=pat_headers, json={"title": "allowed"})
+        _tid, pat = await _bare_token(c, owner, "cli")
+
+        r = await c.post("/tasks", headers=pat, json={"title": "allowed"})
         assert r.status_code in (200, 201), r.text
+
+        r = await c.post("/agent-tokens", headers=pat, json={"name": "x", "scope": "cli"})
+        assert r.status_code == 403, r.text
+        assert r.json()["code"] == "agent.scope_denied"
+
+        r = await c.post(
+            "/ai-assistants",
+            headers=pat,
+            json={"label": "W", "handle": f"w{uuid.uuid4().hex[:8]}", "scope": ["tasks:read"]},
+        )
+        assert r.status_code == 403, r.text
+
+        r = await c.get("/workspaces", headers=pat)
+        assert r.status_code == 403, r.text
+
+        r = await c.post("/mfa/setup", headers=pat)
+        assert r.status_code == 403, r.text
+
+        # The person's own session is unaffected.
+        r = await c.get("/workspaces", headers=owner)
+        assert r.status_code == 200, r.text
+
+
+async def test_an_agent_token_may_revoke_itself_and_nothing_else() -> None:
+    """Revoking itself only removes authority, and ``mycelium auth logout
+    --revoke`` depends on it. Revoking ANOTHER credential is administering
+    credentials, which stays a person's act."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        tid_a, pat_a = await _bare_token(c, owner, "a")
+        tid_b, _pat_b = await _bare_token(c, owner, "b")
+
+        r = await c.delete(f"/agent-tokens/{tid_b}", headers=pat_a)
+        assert r.status_code == 403, r.text
+
+        r = await c.delete(f"/agent-tokens/{tid_a}", headers=pat_a)
+        assert r.status_code == 204, r.text
+
+        r = await c.get("/tasks", headers=pat_a)
+        assert r.status_code == 401, r.text
+
+        # B was never touched.
+        listed = (await c.get("/agent-tokens", headers=owner)).json()
+        by_id = {str(t["id"]): t for t in listed}
+        assert by_id[tid_b]["revoked_at"] is None
 
 
 async def test_gate_covers_route_that_bypasses_tenant_ctx() -> None:

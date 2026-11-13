@@ -77,8 +77,8 @@ async def enforce_route_scope(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)] = None,
 ) -> None:
-    """Confine a scoped assistant to the routes its scope covers (task
-    c19f2f63, enabler B).
+    """Confine an agent credential to the routes it may reach (task
+    c19f2f63, enabler B; task f34a0292).
 
     Registered as an APPLICATION-level dependency, so it runs before any
     route's own dependencies and covers every route uniformly -- including
@@ -86,8 +86,10 @@ async def enforce_route_scope(
     Without it the MCP tool gate is bypassable by simply not speaking MCP:
     the same ``mycelium_at_`` token authenticates here too.
 
-    No-op for everything that is not a *scoped* assistant token, so human
-    sessions, bare agent tokens and capability tokens are unaffected."""
+    A person's session passes untouched. Every agent credential -- a token
+    with an assistant, a token without one, a capability minted by either --
+    is judged by ``route_scopes.agent_permits``, so none of them reaches a
+    route reserved to a person. The exception is revoking itself."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         return
     token = credentials.credentials
@@ -121,15 +123,36 @@ async def enforce_route_scope(
         # must not turn a bad bearer on a public route into a new 401.
         return
     request.state.claims = claims
-    scope = claims.get("assistant_scope")
-    if scope is None:
-        return  # bare token (no bound assistant) -> no per-route restriction
+    _confine_agent(request, claims.get("assistant_scope"), own_token_id=claims.get("tid"))
+
+
+def _confine_agent(request: Request, scope: list[str] | None, *, own_token_id: str | None) -> None:
+    """Refuse the matched route to an agent credential that may not reach it.
+
+    ``own_token_id`` is the agent token presenting itself, or None for a
+    capability, which has no token of its own to revoke."""
     route = request.scope.get("route")
     path = getattr(route, "path", None)
     if path is None:
         return  # unmatched -> 404 handling; nothing to gate
-    if not route_scopes.scope_permits(request.method, path, scope):
+    if _is_self_revocation(request, path, own_token_id):
+        return
+    if not route_scopes.agent_permits(request.method, path, scope):
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
+
+
+def _is_self_revocation(request: Request, path: str, own_token_id: str | None) -> bool:
+    """A credential revoking ITSELF.
+
+    Allowed to every agent token although the route is reserved to a
+    person: it can only remove authority, never add any, and ``mycelium auth
+    logout --revoke`` is exactly this call. Revoking a DIFFERENT token is
+    administering credentials and stays a person's act."""
+    if own_token_id is None or request.method.upper() != "DELETE":
+        return False
+    if path != "/agent-tokens/{token_id}":
+        return False
+    return str(request.path_params.get("token_id", "")) == str(own_token_id)
 
 
 async def _gate_minted_capability(request: Request, token: str) -> None:
@@ -173,15 +196,10 @@ async def _gate_minted_capability(request: Request, token: str) -> None:
         # delegates no longer exists. Reading them the same way is how a
         # revoked agent token would keep acting through what it handed out.
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
-    scope = authority.scope
-    if scope is None:
-        return  # a bare token: no per-route restriction to inherit
-    route = request.scope.get("route")
-    path = getattr(route, "path", None)
-    if path is None:
-        return
-    if not route_scopes.scope_permits(request.method, path, scope):
-        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
+    # The minter is an agent credential, so the grant is one too: confined
+    # to the minter's scope list, and never to a route reserved to a person,
+    # whether or not the minter has an assistant bound.
+    _confine_agent(request, authority.scope, own_token_id=None)
 
 
 def require_agent_scope(claims: dict[str, Any], scope_key: str | frozenset[str]) -> None:

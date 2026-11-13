@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import typer
 
-from mycelium_cli.cmds._common import active_profile, client, get_json, short_id
+from mycelium_cli.cmds._common import active_profile, get_json, person_client, short_id
 from mycelium_cli.ui import emit_json, emit_table, info, json_mode, out
 
 app = typer.Typer(no_args_is_help=True, help="Workspaces visible to your account.")
@@ -19,7 +19,7 @@ app = typer.Typer(no_args_is_help=True, help="Workspaces visible to your account
 @app.command("list")
 def list_() -> None:
     """List workspaces the authenticated user is a member of."""
-    with client() as c:
+    with person_client() as c:
         rows = get_json(c.get("/workspaces"))
     if json_mode():
         emit_json(rows)
