@@ -993,11 +993,23 @@ async def sweep_expired(
     unheld task in a working state is visible, pullable by anybody, and
     honest about what happened; a task the sweep marched backwards is
     none of those.
+
+    Every release it makes is written to the activity log, like every other
+    release (ADR-0063): it is the one nobody asked for, so it is the one a
+    person most needs to find afterwards. No actor, because nobody acted;
+    the session's ``system`` kind says who did. The row names the worker
+    that stopped answering and the deadline it missed.
     """
     at = now or _now()
     rows = (
         await session.execute(
-            select(TaskLease.id, TaskLease.task_id)
+            select(
+                TaskLease.id,
+                TaskLease.task_id,
+                TaskLease.org_id,
+                TaskLease.holder_worker_id,
+                TaskLease.expires_at,
+            )
             .where(TaskLease.released_at.is_(None), TaskLease.expires_at <= at)
             .order_by(TaskLease.expires_at.asc())
             .limit(limit)
@@ -1005,15 +1017,37 @@ async def sweep_expired(
     ).all()
     if not rows:
         return []
-    ids = [r[0] for r in rows]
-    await session.execute(
-        update(TaskLease)
-        .where(TaskLease.id.in_(ids), TaskLease.released_at.is_(None))
-        .values(
-            released_at=at,
-            release_reason=LeaseRelease.expired.value,
-            version=TaskLease.version + 1,
-        )
+    ids = [r.id for r in rows]
+    released = set(
+        (
+            await session.execute(
+                update(TaskLease)
+                .where(TaskLease.id.in_(ids), TaskLease.released_at.is_(None))
+                .values(
+                    released_at=at,
+                    release_reason=LeaseRelease.expired.value,
+                    version=TaskLease.version + 1,
+                )
+                .returning(TaskLease.id)
+            )
+        ).scalars()
     )
     await session.flush()
-    return [r[1] for r in rows]
+    for r in rows:
+        if r.id not in released:
+            continue  # released by its holder between the read and the write
+        await audit.log(
+            session,
+            org_id=r.org_id,
+            actor_id=None,
+            entity="task_lease",
+            entity_id=r.id,
+            action="release",
+            diff={
+                "task_id": str(r.task_id),
+                "reason": LeaseRelease.expired.value,
+                "holder_worker_id": str(r.holder_worker_id) if r.holder_worker_id else None,
+                "expired_at": r.expires_at.isoformat(),
+            },
+        )
+    return [r.task_id for r in rows if r.id in released]

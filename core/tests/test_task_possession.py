@@ -43,6 +43,7 @@ from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import agent_workers as workers_svc
@@ -448,6 +449,53 @@ async def test_an_expired_lease_is_reclaimed_and_the_old_holder_is_fenced_out(
                 worker_id=dead_w,
                 fence=dead_fence,
             )
+
+
+async def test_the_sweep_writes_every_release_into_the_activity_log(
+    _embedder: None,
+) -> None:
+    """ADR-0063 promises that every acquire and release is in the activity
+    log. The sweep is the one release nobody asked for, so it is the one a
+    person most needs to find afterwards: which session died, holding what,
+    and when its deadline passed."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    dead_w = await _worker(org, user, "dead")
+
+    async with tenant_session(str(org), str(user)) as s:
+        dead = await leases_svc.acquire(
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=dead_w, ttl_seconds=60
+        )
+        lease_id = dead.id
+        deadline = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+        dead.expires_at = deadline
+
+    async with tenant_session(str(org), str(user), actor_kind="system") as s:
+        assert await leases_svc.sweep_expired(s) == [task_id]
+
+    async with tenant_session(str(org), str(user)) as s:
+        rows = (
+            (
+                await s.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity == "task_lease",
+                        ActivityLog.entity_id == lease_id,
+                        ActivityLog.action == "release",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.actor_kind == "system"
+    assert row.actor_id is None
+    assert row.diff is not None
+    assert row.diff["task_id"] == str(task_id)
+    assert row.diff["reason"] == LeaseRelease.expired.value
+    assert row.diff["holder_worker_id"] == str(dead_w)
+    assert dt.datetime.fromisoformat(row.diff["expired_at"]) == deadline
 
 
 async def test_a_task_nobody_holds_is_still_movable_by_anybody(_embedder: None) -> None:
