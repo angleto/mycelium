@@ -2194,29 +2194,41 @@ button.btn--danger:hover {
   height: auto;
   max-height: 86vh;
 }
-/* The two read-only controls a row carries: take the id, read the row
-   where it is. Discreet by default — a list of twenty rows must not read
-   as a list of forty buttons — and opaque once the row or the control is
-   under the pointer or the focus ring. Never display:none until hover:
-   a control that only exists on hover does not exist on a touch screen. */
+/* The quiet controls a row carries: take the id, read the row where it is,
+   narrow the app to its client and project. Discreet by default -- a list
+   of twenty rows must not read as a list of sixty buttons -- and opaque once
+   the row or the control is under the pointer or the focus ring. Never
+   display:none until hover: a control that only exists on hover does not
+   exist on a touch screen. The focus toggle is the exception once it is ON:
+   then it carries information (this row IS the current focus) and is shown
+   at full strength, in the accent, without waiting for the pointer. */
 .copyid,
-.peek {
+.peek,
+.focushere--icon {
   padding: var(--sp-2) var(--sp-6);
   line-height: 1;
   opacity: 0.4;
 }
 .taskrow:hover .copyid,
 .taskrow:hover .peek,
+.taskrow:hover .focushere--icon,
 .kanban__card:hover .copyid,
 .kanban__card:hover .peek,
+.kanban__card:hover .focushere--icon,
+.recentrow:hover .copyid,
+.recentrow:hover .peek,
+.recentrow:hover .focushere--icon,
 .noteitem:hover .copyid,
 .noteitem:hover .peek {
   opacity: 0.75;
 }
 .copyid:hover,
 .peek:hover,
+.focushere--icon:hover,
 .copyid:focus-visible,
-.peek:focus-visible {
+.peek:focus-visible,
+.focushere--icon:focus-visible,
+.focushere--icon.is-on {
   opacity: 1;
 }
 

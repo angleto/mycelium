@@ -40,12 +40,13 @@ function Clear() {
 }
 
 type Tags = Parameters<typeof FocusHereButton>[0]['tags']
+type Variant = Parameters<typeof FocusHereButton>[0]['variant']
 
-function mount(tags: Tags) {
+function mount(tags: Tags, variant?: Variant) {
   act(() =>
     root.render(
       <FocusProvider>
-        <FocusHereButton tags={tags} />
+        <FocusHereButton tags={tags} variant={variant} />
         <Probe />
         <Clear />
       </FocusProvider>,
@@ -131,6 +132,22 @@ describe('FocusHereButton', () => {
     expect(button()).toBeNull()
     mount(undefined)
     expect(button()).toBeNull()
+  })
+})
+
+describe('FocusHereButton, row form', () => {
+  it('keeps one accessible name across states and lets aria-pressed carry the state', () => {
+    // A toggle whose name changes is announced as a different button after
+    // every click; the row form has no visible text, so its name is the
+    // aria-label alone and has to stay put.
+    mount([CLIENT, PROJECT], 'icon')
+    const before = button()?.getAttribute('aria-label')
+    expect(before).toBe('Focus')
+    expect(button()?.textContent?.trim()).toBe('◎')
+    click(button())
+    expect(button()?.getAttribute('aria-label')).toBe(before)
+    expect(button()?.getAttribute('aria-pressed')).toBe('true')
+    expect(probe()).toBe(`${CLIENT.id}|Acme|${PROJECT.id}`)
   })
 })
 

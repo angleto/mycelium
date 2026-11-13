@@ -140,7 +140,7 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
                       one-line row has, and the title is what the row is read
                       for. */}
                   <div className="recentrow__actions">
-                    <TaskQuickActions id={tk.id} title={tk.title} />
+                    <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
                   </div>
                 </li>
               )

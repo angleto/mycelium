@@ -18,7 +18,21 @@ type TagBrief = components['schemas']['TagBrief']
 // already exactly this item's pair it shows as on, and pressing it again
 // leaves focus. Without that state the button would look the same whether
 // or not it had done anything, and a second click would be a silent no-op.
-export function FocusHereButton({ tags }: { tags: TagBrief[] | undefined }) {
+//
+// `icon` is the row form (task list, kanban card, recent row): the glyph
+// alone, next to the copy and peek icons it sits with. With no visible text
+// the name comes from aria-label, and it is the plain "Focus" in both
+// states: a toggle's name stays put and aria-pressed says whether it is on,
+// otherwise a screen reader announces a different button after each click.
+// What the click will do, and to which client, is in the tooltip, which
+// assistive technology reads as the description.
+export function FocusHereButton({
+  tags,
+  variant = 'label',
+}: {
+  tags: TagBrief[] | undefined
+  variant?: 'label' | 'icon'
+}) {
   const { t } = useTranslation()
   const { clientId, projectId, setFocus, clear } = useFocus()
   const client = tags?.find((g) => g.kind === 'client')
@@ -35,14 +49,16 @@ export function FocusHereButton({ tags }: { tags: TagBrief[] | undefined }) {
   return (
     <button
       type="button"
-      className={`btn--ghost btn--sm focushere${on ? ' is-on' : ''}`}
+      className={`btn--ghost btn--sm focushere${variant === 'icon' ? ' focushere--icon' : ''}${on ? ' is-on' : ''}`}
       aria-pressed={on}
       title={title}
+      aria-label={variant === 'icon' ? t('focus.here') : undefined}
       onClick={() =>
         on ? clear() : setFocus(client.id, client.name, project?.id ?? '')
       }
     >
-      <span aria-hidden="true">◎</span> {on ? t('focus.hereOn') : t('focus.here')}
+      <span aria-hidden="true">◎</span>
+      {variant === 'label' && ` ${on ? t('focus.hereOn') : t('focus.here')}`}
     </button>
   )
 }

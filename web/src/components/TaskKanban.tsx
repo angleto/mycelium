@@ -207,7 +207,7 @@ export function TaskKanban({
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <TaskQuickActions id={tk.id} title={tk.title} />
+                        <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
                       </div>
                     </div>
                     <div className="kanban__meta">

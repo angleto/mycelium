@@ -1495,7 +1495,7 @@ export function TasksRoute() {
                   ) : (
                     <span className="muted">{tk.state}</span>
                   )}
-                  <TaskQuickActions id={tk.id} title={tk.title} />
+                  <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
                 </span>
               </li>
             )
