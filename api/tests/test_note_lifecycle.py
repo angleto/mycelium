@@ -53,8 +53,8 @@ async def test_note_edit_archive_delete() -> None:
             json={"expected_version": cur["version"]},
         )
         assert r.status_code == 200
-        assert [x["id"] for x in (await c.get("/notes", headers=h)).json()] == []
-        arch = (await c.get("/notes?include_archived=true", headers=h)).json()
+        assert [x["id"] for x in (await c.get("/notes", headers=h)).json()["items"]] == []
+        arch = (await c.get("/notes?include_archived=true", headers=h)).json()["items"]
         row = next(x for x in arch if x["id"] == nid)
         assert row["is_archived"] is True
 
@@ -64,7 +64,7 @@ async def test_note_edit_archive_delete() -> None:
             json={"expected_version": row["version"]},
         )
         assert r.status_code == 200
-        cur = next(x for x in (await c.get("/notes", headers=h)).json() if x["id"] == nid)
+        cur = next(x for x in (await c.get("/notes", headers=h)).json()["items"] if x["id"] == nid)
 
         # Soft delete -> only with the flag; restore brings it back.
         r = await c.post(
@@ -73,8 +73,8 @@ async def test_note_edit_archive_delete() -> None:
             json={"expected_version": cur["version"]},
         )
         assert r.status_code == 200
-        assert [x["id"] for x in (await c.get("/notes", headers=h)).json()] == []
-        deleted = (await c.get("/notes?include_deleted=true", headers=h)).json()
+        assert [x["id"] for x in (await c.get("/notes", headers=h)).json()["items"]] == []
+        deleted = (await c.get("/notes?include_deleted=true", headers=h)).json()["items"]
         drow = next(x for x in deleted if x["id"] == nid)
         assert drow["deleted_at"] is not None
 
@@ -84,4 +84,4 @@ async def test_note_edit_archive_delete() -> None:
             json={"expected_version": drow["version"]},
         )
         assert r.status_code == 200
-        assert any(x["id"] == nid for x in (await c.get("/notes", headers=h)).json())
+        assert any(x["id"] == nid for x in (await c.get("/notes", headers=h)).json()["items"])

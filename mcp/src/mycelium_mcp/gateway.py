@@ -42,6 +42,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from mycelium_core import __version__
+from mycelium_core import operations as ops
 from mycelium_core.db import tenant_session
 from mycelium_core.embedder import (
     EmbedSide,
@@ -54,6 +55,7 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
+from mycelium_mcp.op_tools import TOOL_OPERATIONS
 from mycelium_mcp.server import _INSTRUCTIONS_BODY, _PRINCIPAL, _scope_permits
 from mycelium_mcp.server import mcp as _registry
 from mycelium_mcp.tool_scopes import TOOL_SCOPES, UNMAPPED, required_scope_for_call
@@ -487,6 +489,10 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # Session bootstrap / self-identity (whoami): a read-only "who am I / what
     # may I do / my durable memory" tool; its own small bucket.
     ("identity", ("whoami", "agent_home")),
+    # A tool bound to a registry operation takes its domain from the
+    # declaration (``_domain_for``); this rule only names the bucket, so
+    # the coverage document orders it, and catches an unbound garden_* name.
+    ("garden", ("garden",)),
     # Navigation/relations must come next: link/relation/resolve tools
     # also contain "note"/"task" in their names, so they would otherwise
     # be swallowed by the notes/tasks rules below.
@@ -544,6 +550,10 @@ _index_lock = asyncio.Lock()
 
 
 def _domain_for(name: str) -> str:
+    # Declared, not guessed, for a tool bound to the operation registry.
+    op_id = TOOL_OPERATIONS.get(name)
+    if op_id is not None:
+        return ops.get(op_id).domain
     low = name.lower()
     for domain, kws in _DOMAIN_RULES:
         if any(kw in low for kw in kws):

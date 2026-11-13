@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,6 +8,7 @@ import {
   searchNotesByText,
   workspaceHeader,
 } from '../api/client'
+import { notesPage } from '../api/notes'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { NoteListItem } from '../components/NoteListItem'
@@ -26,6 +27,10 @@ const KINDS: Kind[] = ['text', 'voice', 'conversation']
 // modal and the canonical-command box. Opening a note navigates to the
 // full-page editor (/notes/:id, NoteDetailRoute) — the edit surface is
 // no longer a modal. The create modal is the only modal left here.
+/** Rows per page of the notes list: what one screen shows, not the
+ * workspace. */
+const PAGE_SIZE = 50
+
 export function NotesRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -40,9 +45,31 @@ export function NotesRoute() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [notes, setNotes] = useState<Note[]>([])
+  // The list is read a page at a time; ``nextCursor`` is the page after
+  // the ones shown, null once the last one is in.
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tags, setTags] = useState<Tag[]>([])
   const [fTag, setFTag] = useState('')
+  // The focus, as the tags a note must carry at least one of: the
+  // project, or a client's projects plus the client itself. Sent to the
+  // server so a focused page is a full page of focused notes.
+  const focusTags = useMemo(
+    () =>
+      focusActive
+        ? [...focusIds, ...(!focusProject && focusClient ? [focusClient] : [])]
+        : [],
+    [focusActive, focusIds, focusProject, focusClient],
+  )
+  const focusKey = focusTags.join(',')
+  const listQuery = useMemo(
+    () => ({
+      ...(fTag ? { tag_id: fTag } : {}),
+      ...(focusKey ? { any_tag_ids: focusKey.split(',') } : {}),
+    }),
+    [fTag, focusKey],
+  )
   // Free-text search: an instant client-side filter over the loaded
   // notes plus a debounced server search (``searchHits``) covering the
   // whole corpus.
@@ -74,19 +101,15 @@ export function NotesRoute() {
   const projects = tags.filter((x) => x.kind === 'project')
 
   const loadNotes = useCallback(async () => {
-    const { data } = await api.GET('/notes', {
-      params: {
-        header: workspaceHeader(),
-        query: { ...(fTag ? { tag_id: fTag } : {}) },
-      },
-    })
-    if (data) setNotes(data)
+    const page = await notesPage({ limit: PAGE_SIZE, ...listQuery })
+    setNotes(page.items)
+    setNextCursor(page.next_cursor ?? null)
     const query = q.trim()
     if (query) {
-      const hits = await searchNotesByText(query, fTag || undefined)
+      const hits = await searchNotesByText(query, fTag || undefined, undefined, listQuery.any_tag_ids)
       setSearchHits(hits)
     }
-  }, [fTag, q])
+  }, [fTag, q, listQuery])
 
   useEffect(() => {
     let active = true
@@ -94,17 +117,13 @@ export function NotesRoute() {
       setLoading(true)
       try {
         const [n, g, tk] = await Promise.all([
-          api.GET('/notes', {
-            params: {
-              header: workspaceHeader(),
-              query: { ...(fTag ? { tag_id: fTag } : {}) },
-            },
-          }),
+          notesPage({ limit: PAGE_SIZE, ...listQuery }),
           api.GET('/tags', { params: { header: workspaceHeader() } }),
           api.GET('/tasks', { params: { header: workspaceHeader() } }),
         ])
         if (!active) return
-        if (n.data) setNotes(n.data)
+        setNotes(n.items)
+        setNextCursor(n.next_cursor ?? null)
         if (g.data) setTags(g.data)
         if (tk.data)
           setLinkTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
@@ -115,7 +134,20 @@ export function NotesRoute() {
     return () => {
       active = false
     }
-  }, [activeId, fTag])
+  }, [activeId, listQuery])
+
+  // The next page of the list, appended to the rows already shown.
+  async function loadMore() {
+    if (!nextCursor) return
+    setLoadingMore(true)
+    try {
+      const page = await notesPage({ limit: PAGE_SIZE, cursor: nextCursor, ...listQuery })
+      setNotes((prev) => [...prev, ...page.items])
+      setNextCursor(page.next_cursor ?? null)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Debounced server-side search (250ms, abortable).
   useEffect(() => {
@@ -137,6 +169,7 @@ export function NotesRoute() {
             query,
             fTag || undefined,
             ac.signal,
+            listQuery.any_tag_ids,
           )
           if (ac.signal.aborted) return
           setSearchHits(hits)
@@ -151,27 +184,11 @@ export function NotesRoute() {
       window.clearTimeout(handle)
       ac.abort()
     }
-  }, [q, fTag])
+  }, [q, fTag, listQuery])
 
-  // Focus (client/project) filters the list client-side, reactively.
-  const candidates = searchHits ?? notes
-  const shownNotes = focusActive
-    ? candidates.filter((n) => {
-        if (n.project_id != null && focusIds.includes(n.project_id))
-          return true
-        const tagIds = (n.tags ?? []).map((g) => g.id)
-        if (tagIds.some((id) => focusIds.includes(id))) return true
-        if (
-          !focusProject &&
-          focusClient &&
-          (n.tags ?? []).some(
-            (g) => g.kind === 'client' && g.id === focusClient,
-          )
-        )
-          return true
-        return false
-      })
-    : candidates
+  // The focus is applied by the server (``any_tag_ids``) to the list and
+  // to the search alike, so what arrives is already in scope.
+  const shownNotes = searchHits ?? notes
 
   // Instant client-side narrowing, but ONLY while the debounced server
   // search is still in flight. Once ``searchHits`` lands, the server has
@@ -484,6 +501,18 @@ export function NotesRoute() {
             />
           ))}
         </ul>
+      )}
+      {!loading && searchHits === null && nextCursor && (
+        <p className="row">
+          <button
+            type="button"
+            className="btn--ghost"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore ? t('common.loading') : t('notes.loadMore')}
+          </button>
+        </p>
       )}
 
       <h2>{t('notes.cmdTitle')}</h2>

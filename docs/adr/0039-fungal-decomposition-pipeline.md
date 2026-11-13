@@ -33,15 +33,18 @@ depend on.
 3. Persists the synthesis as a **new note** (`kind=text`) with
    `humus_kind='distillation'`, `humus_flag=true`, carried into the
    source's project (the junction project, migration 0016).
-4. Flags the **source** `humus_flag=true`: it has been decomposed and
-   the walk may now surface it as fertiliser.
+4. Leaves the **source** alone. Since 2026-11-12 the distillation is born
+   `proposed` and the source becomes humus (`humus_flag=true`) only when a
+   person approves the distillation, if the source is still inert then;
+   rejecting it takes the mark back off. See the amendment in ADR-0043.
 5. Links source → distillation with a `hypha_of` `note_note_link`
    (parent = source/origin, child = the distillation grown from it;
    `atom_of` was renamed by migration `0022_note_link_split_atom_of`,
    ADR-0040 D3).
 
 **Idempotent** on `(source_note_id, humus_kind='distillation')`: a
-second call returns the existing distillation untouched. Member role
+second call returns the existing distillation untouched. A rejected
+distillation (in the bin) does not count: a new request writes a new one. Member role
 required; the LLM call is metered.
 
 ### Humus schema (the contract ADR-0034 / ADR-0035 depend on)

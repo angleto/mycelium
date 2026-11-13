@@ -61,6 +61,7 @@ async def test_distill_note_creates_humus_and_is_idempotent(_llm: None) -> None:
         assert first["source_note_id"] == nid
         assert first["distilled_note_id"]
         assert first["model_id"] == "fake-llm"
+        assert first["review_state"] == "proposed"
 
         # Idempotent: a second call returns the existing distillation
         # untouched, not a second note.
@@ -70,7 +71,15 @@ async def test_distill_note_creates_humus_and_is_idempotent(_llm: None) -> None:
         assert second["created"] is False
         assert second["distilled_note_id"] == first["distilled_note_id"]
 
-        # The distillation is a real, retrievable note in the workspace.
-        d = await c.get(f"/notes/{first['distilled_note_id']}", headers=h)
+        # Asking for a summary is not approving it: the distillation waits in
+        # the review inbox, invisible to ordinary reads, until the person
+        # approves it, and only then is it a retrievable note.
+        did = first["distilled_note_id"]
+        assert (await c.get(f"/notes/{did}", headers=h)).status_code == 404
+        pending = (await c.get("/garden/review/pending", headers=h)).json()
+        assert did in [p["note_id"] for p in pending]
+        ok = await c.post("/garden/review/approve", headers=h, json={"note_id": did})
+        assert ok.status_code == 200
+        d = await c.get(f"/notes/{did}", headers=h)
         assert d.status_code == 200
         assert d.json()["title"].startswith("Distillation")

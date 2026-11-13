@@ -27,7 +27,7 @@ from mycelium_core.models.invoice import (
     PaymentStatus,
     SdiStatus,
 )
-from mycelium_core.models.note import NoteKind, NoteStatus, TurnRole
+from mycelium_core.models.note import NoteKind, TurnRole
 from mycelium_core.models.notification import (
     NotificationChannelKind,
     NotificationStatus,
@@ -43,6 +43,21 @@ from mycelium_core.models.task import (
 )
 from mycelium_core.models.task_handoff import HandoffStatus
 from mycelium_core.models.time_entry import TimeSource
+
+# The note models live in core (ADR-0068): the note operations serve them on
+# both surfaces. Re-exported here for the routers and tests that import them.
+from mycelium_core.operations.notes_views import (
+    NoteListOut as NoteListOut,
+)
+from mycelium_core.operations.notes_views import (
+    NoteOut as NoteOut,
+)
+from mycelium_core.operations.notes_views import (
+    NotePartOut as NotePartOut,
+)
+from mycelium_core.operations.notes_views import (
+    TagBrief as TagBrief,
+)
 
 
 class SignupIn(BaseModel):
@@ -492,13 +507,6 @@ class TagOut(BaseModel):
 
 class TagScopeIn(BaseModel):
     target_ids: list[uuid.UUID] = []
-
-
-class TagBrief(BaseModel):
-    id: uuid.UUID
-    kind: TagKind
-    name: str
-    color: str | None
 
 
 class ClientCreateIn(BaseModel):
@@ -1263,399 +1271,6 @@ class GraphEdge(BaseModel):
 class GraphOut(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
-
-
-# --- Garden graph (note↔note weighted + PageRank centrality) -------
-# Tasks 4467acb4 (note_edge_strength v1) + 8c0a8f08 (PageRank Phase 1).
-# Both surfaces share one round-trip so the SPA mindmap doesn't have
-# to coordinate two parallel fetches just to render one frame.
-
-
-class GardenGraphEdge(BaseModel):
-    """One undirected weighted edge between two notes. ``src`` and
-    ``dst`` are canonically ordered (sorted by string repr) so two
-    rows with the same endpoints never appear in different positions
-    across requests. ``weight`` ∈ [0, 1] is the soft-OR of the
-    per-kind contributions and the Adamic-Adar tag overlap; the
-    third source (co-activity) is documented in ADR-0031 and
-    deferred to Phase 2."""
-
-    src: uuid.UUID
-    dst: uuid.UUID
-    weight: float
-
-
-class GardenGraphOut(BaseModel):
-    """Response of GET /garden/graph: edges + centrality in one
-    payload. ``centrality`` is a ``{note_id: pagerank}`` map summing
-    to 1 across the workspace; an empty workspace returns ``[]`` and
-    ``{}`` respectively.
-
-    Phase 2 (task d8664631): ``betweenness`` is the cluster-bridge
-    centrality served from the worker-materialised snapshot (empty
-    until the first refresh; ``analytics_computed_at`` is its age).
-    ``recency`` is the separate freshness axis (``exp(-age/tau)`` per
-    note, computed live) consumers combine with centrality to counter
-    the cold start of new, not-yet-linked notes."""
-
-    edges: list[GardenGraphEdge]
-    centrality: dict[uuid.UUID, float]
-    betweenness: dict[uuid.UUID, float] = Field(default_factory=dict)
-    recency: dict[uuid.UUID, float] = Field(default_factory=dict)
-    analytics_computed_at: datetime.datetime | None = None
-
-
-class GardenClustersOut(BaseModel):
-    """Response of GET /garden/clusters (task 8c0a8f08): the Leiden
-    community index per note plus the partition's global modularity.
-    ``clusters`` is ``{note_id: community_index}`` (0-based, dense);
-    ``modularity`` is the structure thermometer (ADR-0035), or null when
-    the optional clustering extra is not installed (graceful degrade).
-    ``count`` is the number of distinct communities."""
-
-    clusters: dict[uuid.UUID, int]
-    modularity: float | None
-    count: int
-
-
-# --- Garden walk (task 5bf31b63) ----------------------------------------
-# Two regimes packed in one shape: ``focused`` (PPR seeded) returns
-# the top-K notes by induced mass and the step is their rank; ``free_
-# wander`` (Node2Vec) returns the actual trajectory and the step is
-# the hop index. The SPA renders them as the "pollinator trail" with
-# the same component.
-
-
-class GardenWalkStep(BaseModel):
-    note_id: uuid.UUID
-    step: int
-    weight: float
-    # Provenance marker (ADR-0034): "humus" when the node is a flagged
-    # humus note (the free wander biases toward high-centrality humus),
-    # else None. The mindmap renders a leaf marker on humus steps.
-    provenance: str | None = None
-
-
-class GardenWalkOut(BaseModel):
-    seed: uuid.UUID
-    mode: str  # "focused" | "free_wander"
-    steps: list[GardenWalkStep]
-
-
-# --- Link suggestions (task c7d0bb4c) --------------------------------
-# Returned by GET /garden/link-suggestions/{note_id}. ``score`` ∈
-# [0, 1], soft-OR of Adamic-Adar (rare-tag overlap) and PPR-induced
-# mass, damped by candidate degree to avoid hub bias. ``signals``
-# carries the per-feature contribution so the SPA can render a
-# tooltip and ADR-0037's audit log can persist the breakdown.
-
-
-class GardenLinkSuggestion(BaseModel):
-    note_id: uuid.UUID
-    score: float
-    rationale: str
-    signals: dict[str, float]
-
-
-class GardenLinkSuggestionsOut(BaseModel):
-    source_note_id: uuid.UUID
-    suggestions: list[GardenLinkSuggestion]
-
-
-# --- garden_classify proposal engine (ADR-0032) ----------------------
-# classify is read-only: it proposes {tags, links, maturity, cluster}
-# each with a confidence + rationale; ``signals_used`` names the signals
-# that fired (transparency). ``apply`` is the mutating, reversible
-# counterpart that records a classification_feedback event (ADR-0037).
-
-
-class GardenTagSuggestionOut(BaseModel):
-    tag_id: uuid.UUID
-    confidence: float
-    rationale: str
-
-
-class GardenLinkCandidateOut(BaseModel):
-    target_id: uuid.UUID
-    link_kind: str
-    confidence: float
-    rationale: str
-
-
-class GardenMaturitySuggestionOut(BaseModel):
-    value: str  # "mature" in v1 (the value axis only proposes upward)
-    confidence: float
-    rationale: str
-    auto_apply: bool
-
-
-class GardenClusterSuggestionOut(BaseModel):
-    leiden_id: int | None
-    modularity: float | None
-    confidence: float
-
-
-class GardenClassifyOut(BaseModel):
-    """Response of GET /garden/classify/{node_id} (ADR-0032 / ADR-0042). A
-    block is null/empty when its signal was not requested or produced nothing;
-    ``signals_used`` names the signals that actually fired (and records
-    ``leiden_extra_absent`` when clustering degraded gracefully).
-
-    ``source`` (ADR-0042 D4/D6) tells the SPA whether these are the persisted
-    on-create suggestions (``precomputed``) or a fresh live recompute
-    (``live``); ``generated_at`` dates them so the panel can show freshness and
-    offer a refresh."""
-
-    node_id: uuid.UUID
-    node_kind: str
-    tags: list[GardenTagSuggestionOut]
-    links: list[GardenLinkCandidateOut]
-    maturity: GardenMaturitySuggestionOut | None
-    cluster: GardenClusterSuggestionOut | None
-    signals_used: list[str]
-    model_version: str
-    generated_at: datetime.datetime
-    source: Literal["precomputed", "live"] = "live"
-
-
-class GardenHealthMetricOut(BaseModel):
-    """One sensor reading (ADR-0035, "show, never judge"): the value, its
-    health floor when it has one, and -- only when ``value`` is null --
-    the reason there is no reading yet (data source not built / blocked
-    upstream), never a faked number."""
-
-    value: float | None = None
-    floor: float | None = None
-    reason: str | None = None
-
-
-class GardenHealthSnapshotOut(BaseModel):
-    day: datetime.date
-    metrics: dict[str, GardenHealthMetricOut]
-
-
-class GardenHealthOut(BaseModel):
-    """Response of GET /garden/health: current sensor readings plus the
-    recent daily snapshots (newest first) for the sparkline."""
-
-    generated_at: datetime.datetime
-    metrics: dict[str, GardenHealthMetricOut]
-    trend: list[GardenHealthSnapshotOut]
-
-
-class GardenHealthEventOut(BaseModel):
-    """One entry of the "what changed" timeline (ADR-0035 §84): a factual
-    record correlating a sensor shift with a cause -- a classifier bump
-    or a bulk corpus edit. ``detail`` is a small kind-specific bag:
-    ``{"version": ...}`` for ``classifier_version``; ``{"action",
-    "count"}`` for ``corpus_edit``. "Show, never judge": it states that
-    something happened, never whether it was good."""
-
-    at: datetime.datetime
-    kind: Literal["classifier_version", "corpus_edit"]
-    detail: dict[str, Any]
-
-
-class GardenEventOut(BaseModel):
-    """One ``event_outbox`` row on the workspace event stream (ADR-0036
-    audit panel): the verbatim coordinated read/propose/commit/reject/
-    snapshot event. ``applied_state`` is null until the adjudicator decides
-    a propose. "Show, never judge": the event, not a verdict."""
-
-    id: uuid.UUID
-    actor_id: uuid.UUID
-    actor_kind: Literal["human", "agent", "system"]
-    kind: Literal["read", "propose", "commit", "reject", "snapshot"]
-    node_kind: str | None = None
-    node_id: uuid.UUID | None = None
-    parent_event_id: uuid.UUID | None = None
-    payload: dict[str, Any]
-    ts: datetime.datetime
-    applied_at: datetime.datetime | None = None
-    applied_state: str | None = None
-
-
-class GardenApplyIn(BaseModel):
-    """Apply (or decline) one suggestion. ``accept``/``override`` mutate
-    via the existing services; ``reject``/``ignore`` only record the
-    decision. ``auto`` is reserved for the worker and is not accepted on
-    this surface (a client cannot forge a system promotion)."""
-
-    node_id: uuid.UUID
-    suggestion_type: Literal["tag", "link", "maturity", "cluster"]
-    suggestion_value: dict[str, Any]
-    action: Literal["accept", "reject", "override", "ignore"]
-    override_value: dict[str, Any] | None = None
-    model_version: str | None = None
-    signals_snapshot: dict[str, Any] | None = None
-
-
-class GardenApplyOut(BaseModel):
-    feedback_id: uuid.UUID
-    node_id: uuid.UUID
-    suggestion_type: str
-    action: str
-    applied: bool  # True when the action mutated (accept / override)
-
-
-class GardenReviewPendingItem(BaseModel):
-    """One AUTONOMOUSLY-generated humus note awaiting human review (ADR-0043
-    review inbox). ``origin_model_id`` is the transparency requirement: the
-    reviewer sees the producing model before approving/rejecting."""
-
-    note_id: uuid.UUID
-    title: str | None = None
-    humus_kind: str | None = None
-    origin_model_id: str | None = None
-    preview: str
-    created_at: datetime.datetime
-    # Echo this back as ``expected_version`` on approve/reject: the TOCTOU
-    # guard that ensures the reviewer blesses the content they saw.
-    version: int
-
-
-class GardenReviewRejectedItem(BaseModel):
-    """One proposal a human DECLINED: the review bin's row. ``rejected_at``
-    is when it was declined; ``version`` is the pin to echo back to the
-    restore that undoes the rejection."""
-
-    note_id: uuid.UUID
-    title: str | None = None
-    humus_kind: str | None = None
-    origin_model_id: str | None = None
-    preview: str
-    created_at: datetime.datetime
-    # Echo this back as ``expected_version`` on the restore that undoes the
-    # rejection.
-    version: int
-    rejected_at: datetime.datetime
-
-
-class GardenCandidateNode(BaseModel):
-    """A NODE distillation candidate (task 4995a32f): inert material that
-    could be compacted into a denser atom. ``kind`` is distill|pattern|
-    season; ``note_ids`` are the source(s) to feed to the matching
-    decomposition tool."""
-
-    kind: str
-    note_ids: list[uuid.UUID]
-    title: str
-    reason: str
-    score: float
-    preview: str
-
-
-class GardenCandidateEdge(BaseModel):
-    """An EDGE curation candidate (task 4995a32f): distillation as graph
-    maintenance. ``op`` is add (a strong tag/co-activity pair with no
-    manual link) or prune (a ``related`` link whose basis has decayed)."""
-
-    op: str
-    src_note_id: uuid.UUID
-    dst_note_id: uuid.UUID
-    link_kind: str
-    src_title: str
-    dst_title: str
-    reason: str
-    score: float
-
-
-class GardenCandidatesOut(BaseModel):
-    """Distillation candidates: nodes to compact + edges to add/prune.
-    Pure read; nothing is distilled until the caller acts on a candidate."""
-
-    nodes: list[GardenCandidateNode]
-    edges: list[GardenCandidateEdge]
-
-
-class GardenReviewActionIn(BaseModel):
-    """Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
-    an optional note recorded on a reject (ignored by approve).
-    ``expected_version`` is the version the reviewer READ (served by the
-    pending listing): when set, the action fails with ``stale_version`` if
-    the node changed in between (TOCTOU guard, task 2e36e732)."""
-
-    note_id: uuid.UUID
-    reason: str | None = None
-    expected_version: int | None = None
-
-
-class GardenReviewActionOut(BaseModel):
-    note_id: uuid.UUID
-    review_state: str | None  # 'approved' after approve; null after a reject
-    origin_model_id: str | None = None
-    rejected: bool  # True when the action soft-deleted the node
-    version: int  # post-action version (callers can chain guarded actions)
-
-
-class GardenRestoreSourceOut(BaseModel):
-    """Fase P (task 561c6aca): outcome of "ripristina originale" on a humus
-    atom -- the sources revived and the atom retired (the ``hypha_of`` chain
-    is the stack; nothing is ever hard-deleted)."""
-
-    atom_note_id: uuid.UUID
-    source_ids: list[uuid.UUID]
-    restored_source_ids: list[uuid.UUID]
-    atom_retired: bool
-
-
-class GardenAcceptRatioOut(BaseModel):
-    """Per-model reliability of AUTONOMOUSLY-generated proposals (ADR-0043
-    D4): how often a human approved vs rejected this model's output. ``ratio``
-    is null when there are no decisions yet (no signal, not 0%)."""
-
-    model_id: str
-    approved: int
-    rejected: int
-    ratio: float | None = None
-
-
-class GardenLearningRollbackIn(BaseModel):
-    """Rewind the caller's own learned priors to their state at ``to``
-    (ADR-0037 "Snapshots and rollback")."""
-
-    to: datetime.datetime
-
-
-class GardenFeatureDeltaOut(BaseModel):
-    """One feature's prior value before vs after (rollback diff / drift)."""
-
-    feature_key: str
-    before: float
-    after: float
-    delta: float
-
-
-class GardenLearningRollbackOut(BaseModel):
-    """Result of a rollback: the restored window + a one-line diff
-    (ADR-0037: "the system was slightly more biased toward tag X")."""
-
-    rolled_back_to: datetime.datetime
-    snapshot_at: datetime.datetime | None
-    replayed_events: int
-    features_changed: int
-    top_change: GardenFeatureDeltaOut | None
-    summary: str
-
-
-class GardenRejectHotspotOut(BaseModel):
-    """A suggestion feature the caller keeps declining (ADR-0037 reject-
-    hotspot view). ``feature_key`` is type-prefixed; the SPA resolves the
-    human label from its tag/note context."""
-
-    suggestion_type: str
-    feature_key: str
-    declines: int
-    last_declined_at: datetime.datetime
-
-
-class GardenLearningTelemetryOut(BaseModel):
-    """Read-only learning telemetry for the sensors dashboard (ADR-0037):
-    the reject-hotspots and the prior-drift bars, the caller's own history
-    only. "Show, never judge"."""
-
-    reject_hotspots: list[GardenRejectHotspotOut]
-    drift: list[GardenFeatureDeltaOut]
 
 
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
@@ -2845,31 +2460,6 @@ class AnnotationReplaceIn(BaseModel):
     count: int = Field(default=0, ge=0)
 
 
-class NotePartOut(BaseModel):
-    """One ordered markdown block of a note (task 71c9d670 Phase 2a).
-    ``ui_collapsed`` is the caller's current collapse state for this
-    part; missing/no row → ``false`` (default expanded). Populated
-    on GET /notes/{id} only; bulk listings omit it to stay light.
-
-    ``body_sha256`` is the digest the conditional-write gate accepts
-    (``PATCH .../body/patch``, and the ``X-Body-SHA256`` header on the
-    raw download). Served rather than left to the client so the two
-    sides cannot hash byte-differently -- a trailing newline or a
-    normalisation step is enough to make a correct client look like a
-    drifted one."""
-
-    id: uuid.UUID
-    note_id: uuid.UUID
-    ord: int
-    title: str | None = None
-    body: str
-    body_sha256: str
-    lang: str | None = None
-    merged_from_note_id: uuid.UUID | None = None
-    version: int
-    ui_collapsed: bool = False
-
-
 class NotePartTrashOut(BaseModel):
     """A trashed note part, restorable by id (migration 0089). Same
     content shape as ``NotePartOut`` minus the live-only fields, plus
@@ -2949,95 +2539,6 @@ class NoteMergeIn(BaseModel):
     source_note_id: uuid.UUID
     target_note_id: uuid.UUID
     strategy: str = Field(default="append", pattern="^(append)$")
-
-
-class _NoteCommon(BaseModel):
-    """Fields shared by the list and the single-note projections.
-
-    Not a response model itself. It exists so ``NoteListOut`` is a
-    strict subset of ``NoteOut`` by construction, rather than by two
-    field lists that drift apart on the next added column.
-    """
-
-    id: uuid.UUID
-    project_id: uuid.UUID | None
-    # Set when the note is a task's "work note" (the SPA detects it to
-    # open it from the task and bill its timer to the task).
-    task_id: uuid.UUID | None = None
-    # Title of the linked task (``task_id``), denormalized so the note's
-    # "work note" banner can show *which* task time is billed to without
-    # a second round-trip. Resolved regardless of the task's lifecycle
-    # state (archived / soft-deleted), so the banner never blanks out for
-    # a note linked to a closed task. None when the note has no task.
-    task_title: str | None = None
-    kind: NoteKind
-    status: NoteStatus
-    title: str | None
-    summary: str | None
-    audio_ref: str | None
-    audio_seconds: int | None = None
-    is_archived: bool = False
-    # Fase P (task 561c6aca): finished prose the distiller never compacts.
-    protected: bool = False
-    deleted_at: datetime.datetime | None = None
-    tags: list[TagBrief] = []
-    version: int
-    # docs/adr/0029 P1: garden lifecycle. ``maturity`` defaults to
-    # ``seed`` (the migration backfilled every existing note). When
-    # ``promoted_at`` is set the note is read-only at the service
-    # layer (transplanted to a task).
-    maturity: str = "seed"
-    # Typed, unlike ``maturity`` above: the column is a native enum and
-    # the SPA gets a union instead of a bare string, matching how
-    # ``TaskOut.necessity`` is declared.
-    index_scope: IndexScope = IndexScope.org
-    promoted_at: datetime.datetime | None = None
-    # Humus atom subtype (distillation/pattern/season); None for ordinary
-    # notes. Lets the SPA show the "sorgente/ripristina" affordance
-    # (Fase P) only on atoms.
-    humus_kind: str | None = None
-    # docs/adr/0029 P1: every task generated from this note
-    # (kind ∈ {derived_from, promoted_from}), in emission order. The
-    # SPA renders an "N tasks" chip on the note row from this list;
-    # ``task_id`` above stays the SPA-canonical "primary".
-    derived_task_ids: list[uuid.UUID] = Field(default_factory=list)
-    # Task 1e07437e: total count of typed links into this note across
-    # every kind (subject, artifact, derived_from, promoted_from), so
-    # the SPA chip reflects all linked tasks -- not just the two
-    # "fruit" kinds that ``derived_task_ids`` covers.
-    linked_task_count: int = 0
-
-
-class NoteListOut(_NoteCommon):
-    """The list projection: metadata plus a bounded one-line preview.
-
-    Deliberately WITHOUT ``transcript``. A note body is unbounded, so
-    serializing it per row makes ``GET /notes`` cost O(total content of
-    the org) in bytes instead of O(rows shown) -- in production that
-    was a multi-MB response for a screen that renders one line per
-    note. Callers that need the body read ``GET /notes/{id}``; callers
-    that need to MATCH on it pass ``q``, which filters server-side over
-    part bodies (``services.notes.list_notes``) instead of shipping
-    every body so the client can filter locally.
-    """
-
-    # First non-empty line of the body, capped server-side
-    # (``services.notes._previews_by_note``). Enough for a row label or
-    # a card subtitle, which is all the list surfaces ever did with the
-    # full body. None when the note has no text yet.
-    preview: str | None = None
-
-
-class NoteOut(_NoteCommon):
-    """The single-note projection: everything, body included."""
-
-    transcript: str | None
-    # Task 71c9d670 Phase 2a: the note's ordered markdown blocks
-    # (note_part). Populated on GET /notes/{id} (single-note path);
-    # the other single-note paths leave it empty to stay light. Empty
-    # when no parts exist yet (a freshly created note, or one whose
-    # transcript was never split).
-    parts: list[NotePartOut] = Field(default_factory=list)
 
 
 class NoteSetMaturityIn(BaseModel):
@@ -3202,6 +2703,9 @@ class DistillationOut(BaseModel):
     distilled_note_id: uuid.UUID
     model_id: str
     created: bool
+    # ``proposed`` while the distillation waits in the review inbox; ordinary
+    # note reads do not serve it until the person approves it.
+    review_state: str | None
 
 
 class CommandIn(BaseModel):

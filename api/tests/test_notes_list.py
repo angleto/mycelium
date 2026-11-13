@@ -46,7 +46,7 @@ async def test_notes_list_and_auto_title() -> None:
         assert n2["title"] == "Keep me"
 
         # List endpoint returns them (newest first).
-        lst = (await c.get("/notes", headers=h)).json()
+        lst = (await c.get("/notes", headers=h)).json()["items"]
         ids = [x["id"] for x in lst]
         assert n1["id"] in ids
         assert n2["id"] in ids
@@ -99,7 +99,7 @@ async def test_notes_list_q_search() -> None:
 
         async def search(q: str) -> set[str]:
             r = await c.get("/notes", headers=h, params={"q": q})
-            return {x["id"] for x in r.json()}
+            return {x["id"] for x in r.json()["items"]}
 
         # One marker term reaches title, body AND tag-name notes, never
         # the unrelated one.
@@ -119,3 +119,104 @@ async def test_notes_list_q_search() -> None:
 
         # Empty q is a no-op (the normal list, not zero rows).
         assert n_none in await search("")
+
+
+# ── one page at a time (ADR-0068) ───────────────────────────────────────────
+
+
+async def _workspace(c: AsyncClient) -> dict[str, str]:
+    a = (
+        await c.post(
+            "/auth/signup",
+            json={"email": _email(), "password": "pw-strong-123", "workspace_name": "W"},
+        )
+    ).json()
+    return {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+
+
+async def _note(c: AsyncClient, h: dict[str, str], title: str) -> str:
+    r = await c.post("/notes", headers=h, json={"kind": "text", "title": title, "text": title})
+    assert r.status_code == 200, r.text
+    return str(r.json()["id"])
+
+
+async def test_the_cursor_walks_disjoint_pages_to_the_end() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _workspace(c)
+        made = [await _note(c, h, f"n{i}") for i in range(5)]
+        seen: list[str] = []
+        cursor = None
+        for _ in range(10):
+            params = {"limit": 2, **({"cursor": cursor} if cursor else {})}
+            page = (await c.get("/notes", headers=h, params=params)).json()
+            seen += [x["id"] for x in page["items"]]
+            cursor = page["next_cursor"]
+            if not cursor:
+                break
+        assert sorted(seen) == sorted(made)
+        assert len(seen) == len(set(seen)) == 5
+        assert seen == list(reversed(made)), "newest first"
+
+
+async def test_the_bin_finds_a_note_deleted_long_before_the_newest_page() -> None:
+    """The bin used to take the newest page of every state and keep the
+    deleted rows, so an old deletion fell off it. Asked by state, it is the
+    first row of its own page."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _workspace(c)
+        old = await _note(c, h, "old")
+        for i in range(3):
+            await _note(c, h, f"newer {i}")
+        cur = (await c.get(f"/notes/{old}", headers=h)).json()
+        r = await c.post(
+            f"/notes/{old}/delete", headers=h, json={"expected_version": cur["version"]}
+        )
+        assert r.status_code < 300, r.text
+        everything = (
+            await c.get("/notes", headers=h, params={"include_deleted": True, "limit": 3})
+        ).json()
+        assert old not in [x["id"] for x in everything["items"]], "the old shape would miss it"
+        binned = (await c.get("/notes", headers=h, params={"only": "deleted", "limit": 3})).json()
+        assert [x["id"] for x in binned["items"]] == [old]
+
+
+async def test_notes_are_read_by_id_whatever_their_age() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _workspace(c)
+        a = await _note(c, h, "a")
+        b = await _note(c, h, "b")
+        await _note(c, h, "c")
+        page = (await c.get("/notes", headers=h, params={"ids": [a, b]})).json()
+        assert sorted(x["id"] for x in page["items"]) == sorted([a, b])
+
+
+async def test_a_malformed_cursor_is_a_coded_refusal() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _workspace(c)
+        r = await c.get("/notes", headers=h, params={"cursor": "not-a-cursor"})
+        assert r.status_code == 422
+        assert "operation.invalid_argument" in r.text
+
+
+async def test_a_focus_is_a_full_page_of_focused_notes() -> None:
+    """The notes page used to filter its focus over the page it had loaded,
+    so a focus whose notes were older than that page showed nothing. The
+    server filters now: any of the focus's tags, before paging."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _workspace(c)
+        # Creating a project is an owner's act, taken with "act as owner".
+        owner = {**h, "X-Workspace-Role": "owner"}
+        created = await c.post(
+            "/projects", headers=owner, json={"name": f"P{uuid.uuid4().hex[:6]}"}
+        )
+        assert created.status_code == 200, created.text
+        proj = created.json()
+        old = await _note(c, h, "in focus, old")
+        r = await c.post(f"/notes/{old}/tags", headers=h, json={"tag_id": proj["id"]})
+        assert r.status_code < 300, r.text
+        for i in range(3):
+            await _note(c, h, f"out of focus {i}")
+        page = (
+            await c.get("/notes", headers=h, params={"any_tag_ids": [proj["id"]], "limit": 2})
+        ).json()
+        assert [x["id"] for x in page["items"]] == [old]

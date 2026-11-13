@@ -278,6 +278,8 @@ class MessageCode(enum.StrEnum):
     NOTE_BODY_MULTIPART = "note.body.multipart"
     GARDEN_SUGGESTION_TYPE_INVALID = "garden.suggestion_type_invalid"
     GARDEN_ACTION_INVALID = "garden.action_invalid"
+    GARDEN_REVIEW_DECISION_INVALID = "garden.review_decision_invalid"
+    OPERATION_INVALID_ARGUMENT = "operation.invalid_argument"
     EVENT_QUOTA_EXCEEDED = "event.quota_exceeded"
     EVENT_NODE_NOT_INERT = "event.node_not_inert"
     IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
@@ -835,6 +837,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Invalid suggestion type '{suggestion_type}'. Allowed: {valid}."
         ),
         MessageCode.GARDEN_ACTION_INVALID: "Invalid apply action '{action}'. Allowed: {valid}.",
+        MessageCode.GARDEN_REVIEW_DECISION_INVALID: (
+            "The cited comment is not a person's decision to {verb} this generated note "
+            "({reason}). Ask the person to comment on one of its source notes with a "
+            "line '{verb} <note id>'."
+        ),
+        MessageCode.OPERATION_INVALID_ARGUMENT: ("Invalid arguments for {operation}: {detail}"),
         MessageCode.EVENT_QUOTA_EXCEEDED: (
             "Event quota exceeded for this actor: {limit} per {window}. Try again later."
         ),

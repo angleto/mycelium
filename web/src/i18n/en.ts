@@ -2195,6 +2195,7 @@ export const en = {
     linkTaskPrompt: 'Link a task to bill time from this note:',
     linkTaskPick: 'Select a task…',
     untitled: 'Untitled note',
+    loadMore: 'Load more notes',
     converting: 'Deriving...',
     convertedShort: 'Derived',
     converted: 'Task derived from note',

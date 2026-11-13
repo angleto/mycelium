@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { notesByIds } from '../api/notes'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../shared'
 import { GardenIcon, type GardenIconName } from './GardenIcon'
@@ -77,28 +78,32 @@ export function GardenSuggestionsPanel({
     let active = true
     void (async () => {
       setLoading(true)
-      const [cls, tags, targets] = await Promise.all([
+      const [cls, tags, taskTargets] = await Promise.all([
         api.GET('/garden/classify/{node_id}', {
           params: { path: { node_id: nodeId }, header: workspaceHeader() },
         }),
         api.GET('/tags', { params: { header: workspaceHeader() } }),
         nodeKind === 'task'
           ? api.GET('/tasks', { params: { header: workspaceHeader() } })
-          : api.GET('/notes', { params: { header: workspaceHeader() } }),
+          : Promise.resolve(null),
       ])
+      // A note's link targets are labelled by asking for those notes, not
+      // by loading the list and hoping they are in its first page.
+      const targets =
+        nodeKind === 'task'
+          ? (taskTargets?.data ?? [])
+          : await notesByIds((cls.data?.links ?? []).map((l) => l.target_id))
       if (!active) return
       if (cls.error) setErr(errMessage(cls.error))
       else setData(cls.data ?? null)
       if (tags.data) {
         setTagsById(Object.fromEntries(tags.data.map((x) => [x.id, x.name])))
       }
-      if (targets.data) {
-        setTargetsById(
-          Object.fromEntries(
-            targets.data.map((x) => [x.id, x.title?.trim() || t('gardenSuggest.unknownTarget')]),
-          ),
-        )
-      }
+      setTargetsById(
+        Object.fromEntries(
+          targets.map((x) => [x.id, x.title?.trim() || t('gardenSuggest.unknownTarget')]),
+        ),
+      )
       setLoading(false)
     })()
     return () => {

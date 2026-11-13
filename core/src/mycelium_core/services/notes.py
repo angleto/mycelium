@@ -175,6 +175,8 @@ async def list_notes(
     order_by: str | None = None,
     order_desc: bool = False,
     after: tuple[dt.datetime, uuid.UUID] | None = None,
+    only: str | None = None,
+    any_tag_ids: Sequence[uuid.UUID] | None = None,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
@@ -192,6 +194,18 @@ async def list_notes(
     # autonomously-generated proposal awaiting review is never listed here
     # (only the review inbox surfaces it), and the bin needs ``include_deleted``.
     # The archive is the separate presentation axis and keeps its own opt-in.
+    # ``only`` is the trash and archive views: the rows in that state and
+    # nothing else, filtered here so a page of them is a page of them. The
+    # bin used to ask for everything and keep the deleted rows afterwards,
+    # which lost every deleted note older than the newest page.
+    if only == "deleted":
+        include_deleted = True
+        stmt = stmt.where(Note.deleted_at.is_not(None))
+    elif only == "archived":
+        include_archived = True
+        stmt = stmt.where(Note.is_archived.is_(True), Note.deleted_at.is_(None))
+    elif only is not None:
+        raise ValueError(f"unknown note state filter {only!r}")
     stmt = stmt.where(effective_note_clause(include_deleted=include_deleted))
     if not include_archived:
         stmt = stmt.where(Note.is_archived.is_(False))
@@ -207,6 +221,13 @@ async def list_notes(
         stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == project_id)))
     if tag_id is not None:
         stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id)))
+    if any_tag_ids:
+        # A focus: the notes carrying at least one of these tags (a client's
+        # projects and the client itself, or one project). Applied here so a
+        # focused page is a full page, not a page filtered afterwards.
+        stmt = stmt.where(
+            Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id.in_(list(any_tag_ids))))
+        )
     if q is not None:
         for term in (w for w in q.split() if w.strip()):
             like = f"%{term}%"

@@ -1,40 +1,56 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { findNotes } from '../api/notes'
 import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 
-// Searchable scrolling picker over a notes list. Mirror of
-// TaskPickList for the note side of LinkedNotesPanel. Filtering is
-// pure substring on title (case-insensitive); notes without a title
-// fall back to the first non-empty transcript line so a blank-title
-// voice note is still locatable.
+/** How many candidates one keystroke asks for, and how long typing must
+ * pause before it asks. */
+const CANDIDATES = 30
+const DEBOUNCE_MS = 200
+
+// Searchable picker over the workspace's notes, the note side of
+// TaskPickList. It asks the server for the notes matching what is typed
+// (title, any part, a tag name), so a note is findable however old it is;
+// it used to filter a list its parent had loaded, which held the newest
+// 200 notes and nothing older. ``exclude`` drops notes already chosen.
 export function NotePickList({
-  notes,
+  exclude = [],
   value,
   onPick,
   placeholder,
 }: {
-  notes: Note[]
+  exclude?: string[]
   value: string | null
   onPick: (id: string) => void
   placeholder?: string
 }) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
+  const [found, setFound] = useState<Note[]>([])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    const handle = window.setTimeout(() => {
+      void findNotes(q, CANDIDATES, ac.signal)
+        .then((rows) => {
+          if (!ac.signal.aborted) setFound(rows)
+        })
+        .catch(() => {
+          /* aborted by the next keystroke, or offline: keep the last list */
+        })
+    }, DEBOUNCE_MS)
+    return () => {
+      ac.abort()
+      window.clearTimeout(handle)
+    }
+  }, [q])
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    const labelOf = (n: Note) =>
-      (n.title?.trim() ||
-        (n.preview ?? '').trim() ||
-        '')
-        .toString()
-        .toLowerCase()
-    let list = notes.filter((n) => !n.deleted_at && !n.is_archived)
-    if (needle) list = list.filter((n) => labelOf(n).includes(needle))
-    return list.slice(0, 200)
-  }, [notes, q])
+    const skip = new Set(exclude)
+    return found.filter((n) => !n.deleted_at && !n.is_archived && !skip.has(n.id))
+  }, [found, exclude])
 
   return (
     <div className="taskpicklist">

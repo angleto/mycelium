@@ -48,8 +48,11 @@ async def test_list_ships_preview_not_body_detail_keeps_body() -> None:
         nid = n["id"]
 
         # LIST: no body at all, only the first non-empty line.
-        row = next(x for x in (await c.get("/notes", headers=h)).json() if x["id"] == nid)
-        assert "transcript" not in row
+        row = next(x for x in (await c.get("/notes", headers=h)).json()["items"] if x["id"] == nid)
+        # The row has a ``transcript`` field since REST and MCP list through
+        # one operation (ADR-0068), and it stays empty unless a caller asks
+        # for the bodies with ``include_transcript``.
+        assert row["transcript"] is None
         assert row["preview"] == "prima riga"
 
         # DETAIL: the full body is returned.
@@ -73,7 +76,9 @@ async def test_preview_skips_leading_blank_parts_and_is_capped() -> None:
             )
         ).json()
 
-        row = next(x for x in (await c.get("/notes", headers=h)).json() if x["id"] == n["id"])
+        row = next(
+            x for x in (await c.get("/notes", headers=h)).json()["items"] if x["id"] == n["id"]
+        )
         preview = row["preview"]
         assert preview is not None
         assert preview.startswith("xxx")
@@ -93,7 +98,9 @@ async def test_empty_note_has_null_preview() -> None:
             )
         ).json()
 
-        row = next(x for x in (await c.get("/notes", headers=h)).json() if x["id"] == n["id"])
+        row = next(
+            x for x in (await c.get("/notes", headers=h)).json()["items"] if x["id"] == n["id"]
+        )
         # null-vs-empty stays distinguishable, like the body path did.
         assert row["preview"] is None
 
@@ -114,5 +121,5 @@ async def test_body_match_still_reachable_server_side_via_q() -> None:
             )
         ).json()
 
-        hits = (await c.get("/notes", headers=h, params={"q": "zarabaz"})).json()
+        hits = (await c.get("/notes", headers=h, params={"q": "zarabaz"})).json()["items"]
         assert [x["id"] for x in hits] == [n["id"]]

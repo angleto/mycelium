@@ -379,7 +379,7 @@ async def test_merge_notes_appends_source_parts_and_soft_deletes_source() -> Non
         # deleted_at != None depending on the service's contract; the
         # important assertion is that it no longer appears in the
         # workspace list.
-        listed = (await c.get("/notes", headers=h)).json()
+        listed = (await c.get("/notes", headers=h)).json()["items"]
         assert all(n["id"] != src for n in listed)
 
 

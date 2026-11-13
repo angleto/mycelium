@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { notesPage } from '../api/notes'
 import { useSession } from '../auth/useSession'
 import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { TagChip } from '../components/TagChip'
@@ -14,6 +15,9 @@ type Mode = 'deleted' | 'archived'
 // Recycle bin: soft-deleted tasks (undelete = restore, clears
 // deleted_at) and archived tasks (unarchive). Both are reversible
 // server-side; this is the UI to reverse them.
+/** Notes per page in each tab of the bin. */
+const PAGE_SIZE = 50
+
 export function TrashRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -21,7 +25,16 @@ export function TrashRoute() {
   const { ws } = useMyWorkspace()
   const canEmpty = ws?.my_role === 'owner' || ws?.my_role === 'admin'
   const [tasks, setTasks] = useState<Task[]>([])
-  const [notes, setNotes] = useState<NoteT[]>([])
+  // The notes in the bin and in the archive, each read a page at a time
+  // and asked of the server by state. The bin used to take the list's 200
+  // newest notes of every state and keep the deleted ones, so a note
+  // deleted before those 200 never showed up here.
+  const [nDeleted, setNDeleted] = useState<NoteT[]>([])
+  const [nArchived, setNArchived] = useState<NoteT[]>([])
+  const [more, setMore] = useState<Record<Mode, string | null>>({
+    deleted: null,
+    archived: null,
+  })
   const [mode, setMode] = useState<Mode>('deleted')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -29,29 +42,35 @@ export function TrashRoute() {
   const load = useCallback(async () => {
     setErr(null)
     const q = { include_deleted: true, include_archived: true }
-    const [tk, nt] = await Promise.all([
+    const [tk, del, arc] = await Promise.all([
       api.GET('/tasks', { params: { header: workspaceHeader(), query: q } }),
-      api.GET('/notes', { params: { header: workspaceHeader(), query: q } }),
+      notesPage({ only: 'deleted', limit: PAGE_SIZE }),
+      notesPage({ only: 'archived', limit: PAGE_SIZE }),
     ])
     if (tk.error || !tk.data) {
       setErr(errMessage(tk.error))
       return
     }
     setTasks(tk.data)
-    if (nt.data) setNotes(nt.data)
+    setNDeleted(del.items)
+    setNArchived(arc.items)
+    setMore({ deleted: del.next_cursor ?? null, archived: arc.next_cursor ?? null })
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const q = { include_deleted: true, include_archived: true }
-      const [tk, nt] = await Promise.all([
+      const [tk, del, arc] = await Promise.all([
         api.GET('/tasks', { params: { header: workspaceHeader(), query: q } }),
-        api.GET('/notes', { params: { header: workspaceHeader(), query: q } }),
+        notesPage({ only: 'deleted', limit: PAGE_SIZE }),
+        notesPage({ only: 'archived', limit: PAGE_SIZE }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
-      if (nt.data) setNotes(nt.data)
+      setNDeleted(del.items)
+      setNArchived(arc.items)
+      setMore({ deleted: del.next_cursor ?? null, archived: arc.next_cursor ?? null })
     })()
     return () => {
       active = false
@@ -119,11 +138,17 @@ export function TrashRoute() {
   const deleted = tasks.filter((t) => t.deleted_at != null)
   const archived = tasks.filter((t) => t.is_archived && t.deleted_at == null)
   const shown = mode === 'deleted' ? deleted : archived
-  const nDeleted = notes.filter((n) => n.deleted_at != null)
-  const nArchived = notes.filter(
-    (n) => n.is_archived && n.deleted_at == null,
-  )
   const shownNotes = mode === 'deleted' ? nDeleted : nArchived
+
+  // The next page of the notes in the current tab.
+  async function loadMoreNotes() {
+    const cursor = more[mode]
+    if (!cursor) return
+    const page = await notesPage({ only: mode, limit: PAGE_SIZE, cursor })
+    if (mode === 'deleted') setNDeleted((prev) => [...prev, ...page.items])
+    else setNArchived((prev) => [...prev, ...page.items])
+    setMore((prev) => ({ ...prev, [mode]: page.next_cursor ?? null }))
+  }
 
   return (
     <section className="card">
@@ -134,14 +159,16 @@ export function TrashRoute() {
           className={mode === 'deleted' ? 'btn--sm' : 'btn--ghost btn--sm'}
           onClick={() => setMode('deleted')}
         >
-          {t('trash.deleted')} ({deleted.length + nDeleted.length})
+          {t('trash.deleted')} ({deleted.length + nDeleted.length}
+          {more.deleted ? '+' : ''})
         </button>
         <button
           type="button"
           className={mode === 'archived' ? 'btn--sm' : 'btn--ghost btn--sm'}
           onClick={() => setMode('archived')}
         >
-          {t('trash.archived')} ({archived.length + nArchived.length})
+          {t('trash.archived')} ({archived.length + nArchived.length}
+          {more.archived ? '+' : ''})
         </button>
         {canEmpty &&
           mode === 'deleted' &&
@@ -219,6 +246,17 @@ export function TrashRoute() {
               </li>
             ))}
           </ul>
+          {more[mode] && (
+            <p className="row">
+              <button
+                type="button"
+                className="btn--ghost"
+                onClick={() => void loadMoreNotes()}
+              >
+                {t('notes.loadMore')}
+              </button>
+            </p>
+          )}
         </>
       )}
     </section>

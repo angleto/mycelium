@@ -10,6 +10,7 @@ import {
   otherEndpoint,
 } from '../shared'
 import { NotePickList } from './NotePickList'
+import { notesByIds } from '../api/notes'
 
 type NoteLinkOut = components['schemas']['NoteLinkOut']
 type Note = components['schemas']['NoteListOut']
@@ -23,6 +24,20 @@ type Note = components['schemas']['NoteListOut']
 // canonicalises an undirected edge to parent < child and a panel that
 // listed only the parent side showed such an edge on one of its two
 // notes and not on the other.
+/** The notes at the other end of this note's links, each once. */
+function neighbourIds(
+  outgoing: NoteLinkOut[],
+  incoming: NoteLinkOut[],
+  noteId: string,
+): string[] {
+  const ids = new Set<string>()
+  for (const l of [...outgoing, ...incoming]) {
+    if (l.parent_note_id !== noteId) ids.add(l.parent_note_id)
+    if (l.child_note_id !== noteId) ids.add(l.child_note_id)
+  }
+  return [...ids]
+}
+
 export function NoteLinksPanel({ noteId }: { noteId: string }) {
   const { t } = useTranslation()
   const [outgoing, setOutgoing] = useState<NoteLinkOut[]>([])
@@ -44,26 +59,30 @@ export function NoteLinksPanel({ noteId }: { noteId: string }) {
       return
     }
     if (data) {
-      setOutgoing(data.outgoing ?? [])
-      setIncoming(data.incoming ?? [])
+      const out = data.outgoing ?? []
+      const inc = data.incoming ?? []
+      setOutgoing(out)
+      setIncoming(inc)
+      setNotes(await notesByIds(neighbourIds(out, inc, noteId)))
     }
   }, [noteId])
 
   useEffect(() => {
     let active = true
     void (async () => {
-      const [linksRes, nt] = await Promise.all([
-        api.GET('/notes/{note_id}/links', {
-          params: { header: workspaceHeader(), path: { note_id: noteId } },
-        }),
-        api.GET('/notes', { params: { header: workspaceHeader() } }),
-      ])
+      // The neighbours are labelled by asking for them by id: the list's
+      // first page holds the newest notes, not necessarily these.
+      const linksRes = await api.GET('/notes/{note_id}/links', {
+        params: { header: workspaceHeader(), path: { note_id: noteId } },
+      })
+      if (!active || !linksRes.data) return
+      const out = linksRes.data.outgoing ?? []
+      const inc = linksRes.data.incoming ?? []
+      const labelled = await notesByIds(neighbourIds(out, inc, noteId))
       if (!active) return
-      if (linksRes.data) {
-        setOutgoing(linksRes.data.outgoing ?? [])
-        setIncoming(linksRes.data.incoming ?? [])
-      }
-      if (nt.data) setNotes(nt.data)
+      setOutgoing(out)
+      setIncoming(inc)
+      setNotes(labelled)
     })()
     return () => {
       active = false
@@ -265,9 +284,7 @@ export function NoteLinksPanel({ noteId }: { noteId: string }) {
                   </div>
                 )}
                 <NotePickList
-                  notes={notes.filter(
-                    (n) => n.id !== noteId && !excluded.has(n.id),
-                  )}
+                  exclude={[noteId, ...excluded]}
                   value={null}
                   onPick={(id) => void addLink(kind, id)}
                   placeholder={t('noteLinks.pickerPh')}

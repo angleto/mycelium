@@ -182,7 +182,6 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "set_email_default_tags": "email:write",
     "set_email_ingest_to_memory": "email:write",
     "sync_email_account": "email:write",
-    "list_events": "events:read",
     "executors_list": "executors:read",
     "executor_create": "executors:write",
     "executor_delete": "executors:write",
@@ -219,23 +218,14 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     "memory_migrate": "memory:write",
     "memory_recompute_tiers": "memory:write",
     "memory_write": "memory:write",
-    "garden_classify": "notes:read",
-    "garden_review_pending": "notes:read",
-    "garden_review_rejected": "notes:read",
-    "get_note": "notes:read",
     "get_note_part": "notes:read",
     "get_note_part_body_capability": "notes:read",
     "get_note_revision": "notes:read",
-    "graph_walk": "notes:read",
-    "list_distillation_candidates": "notes:read",
     "list_note_links": "notes:read",
-    "list_note_parts": "notes:read",
     "list_note_revisions": "notes:read",
     "list_note_task_links": "notes:read",
-    "list_notes": "notes:read",
     "list_trashed_note_parts": "notes:read",
     "list_turns": "notes:read",
-    "suggest_note_links": "notes:read",
     "add_note_part": "notes:write",
     "add_note_part_instructions": "notes:write",
     "add_note_tag": "notes:write",
@@ -263,14 +253,23 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     # delete_comment (soft, restorable) stays on comments:write.
     "purge_comment": "delete:comments",
     "email_to_note": "notes:write",
-    "garden_apply": "notes:write",
-    "garden_review_approve": "notes:write",
-    "garden_review_reject": "notes:write",
+    # Reviewing generated text is a person's act, like disposing of a
+    # suggestion. Approving makes a model's summary effective and, for a
+    # distillation, marks its source humus; at ``notes:write`` an agent could
+    # approve the summary it had just asked for. The models writing these are
+    # not yet validated on fidelity, so the person whose notes are being
+    # summarised looks first. Asking for one (``distill_note``) and reading
+    # the inbox (``garden_review_pending``) stay open.
+    # Carrying out a review a PERSON already wrote down, not taking one: the
+    # service refuses unless the cited comment sits on a source of the node,
+    # was written with that person's own credential after the node, and
+    # names it on an approve/reject line. So an agent holding this key still
+    # cannot decide anything on its own; it is the suggestion pattern
+    # (accept_suggestion_on_decision) applied to generated notes.
     "get_or_create_task_note": "notes:write",
     "link_notes": "notes:write",
     "merge_notes": "notes:write",
     "move_note_to_project": "notes:write",
-    "note_restore_source": "notes:write",
     "patch_note_part_body_capability": "notes:write",
     "prepend_note_part": "notes:write",
     "protect_note": "notes:write",

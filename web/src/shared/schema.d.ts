@@ -4588,7 +4588,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Notes */
+        /**
+         * List Notes
+         * @description List notes, newest first, one page at a time: pass ``next_cursor``
+         *     back as ``cursor`` for the next disjoint page. ``q`` filters the whole
+         *     corpus server-side before paging, so it finds a note however old; for
+         *     semantic or cross-kind retrieval use ``search``. ``ids`` reads given
+         *     notes; ``task_id`` the notes linked to a task. ``only`` is the bin or
+         *     the archive. Each row has a one-line ``preview``, not the body. Date
+         *     filters take an ISO instant or a bare date, read as a day in your
+         *     timezone; ``order_by`` other than the default returns one page.
+         */
         get: operations["list_notes_notes_get"];
         put?: never;
         /** Create Note */
@@ -4625,12 +4635,14 @@ export interface paths {
         };
         /**
          * Get Note
-         * @description Read one note with its ordered ``parts``.
+         * @description Read one note with its ordered ``parts`` (markdown blocks). Each part
+         *     carries its ``version`` and ``body_sha256``, the two values a guarded
+         *     edit echoes, and who wrote it when.
          *
-         *     ``include_transcript=false`` drops the derived flat body, which is
-         *     the join of those same part bodies: a client that reads ``parts``
-         *     otherwise receives the note twice. Default true, because the SPA
-         *     reads the field.
+         *     For a long note pass ``include_part_bodies=false``: ``outline`` then
+         *     lists each part's id, title, size, first line and digest, with no
+         *     bodies, and you fetch only the parts you need. ``transcript`` is the
+         *     join of the part bodies: a reader of ``parts`` does not need it.
          */
         get: operations["get_note_notes__note_id__get"];
         put?: never;
@@ -4654,8 +4666,9 @@ export interface paths {
         /**
          * Distill Note
          * @description Fungal decomposition (ADR-0034, task 4a718dc4): distil the note's
-         *     body into a reusable atom note and flag both as humus so the LLM
-         *     walk can surface them as fertiliser. Idempotent: a note already
+         *     body into a reusable atom note. The atom is born proposed: it waits in
+         *     the review inbox (``/garden/review/pending``) and the source is left as
+         *     it is until the person approves it. Idempotent: a note already
          *     distilled returns its existing distillation untouched (``created``
          *     False). Member role required; metered LLM call inside the service.
          */
@@ -4801,9 +4814,9 @@ export interface paths {
         };
         /**
          * List Note Parts
-         * @description List the ordered parts of a note, with the caller's per-part
-         *     collapse state. Useful when the SPA refetches just the parts
-         *     after a reorder without reloading the whole note.
+         * @description A note's parts in order. With ``include_body=false`` each part is its
+         *     outline (title, size, first line, digest, no body): the table of
+         *     contents of a long note, to pick the part to read or edit.
          */
         get: operations["list_note_parts_notes__note_id__parts_get"];
         put?: never;
@@ -5698,9 +5711,9 @@ export interface paths {
         };
         /**
          * Garden Health
-         * @description Structural symbiosis sensors (ADR-0035): the current live readings
-         *     plus the recent daily snapshots (newest first) for the sparkline.
-         *     "Show, never judge" -- values + floors, never a verdict.
+         * @description The garden's structural sensors (ADR-0035): the current readings and
+         *     the last 30 daily snapshots, newest first. Values and floors, never a
+         *     verdict.
          */
         get: operations["garden_health_garden_health_get"];
         put?: never;
@@ -5720,10 +5733,8 @@ export interface paths {
         };
         /**
          * Garden Health Timeseries
-         * @description Daily garden-health snapshots over the last ``days`` (newest first),
-         *     for the per-metric drill-down chart (task b820d223). Reads the persisted
-         *     ``garden_health_daily`` rows only, no live recompute -- a longer,
-         *     cheaper window than the 30-day trend bundled into ``GET /garden/health``.
+         * @description Daily sensor snapshots over the last ``days``, newest first. Reads the
+         *     persisted snapshots only, no live recompute.
          */
         get: operations["garden_health_timeseries_garden_health_timeseries_get"];
         put?: never;
@@ -5743,12 +5754,8 @@ export interface paths {
         };
         /**
          * Garden Health Events
-         * @description The "what changed" timeline (ADR-0035 §84, task d0bada67): discrete
-         *     events that plausibly explain a shift in the sensors -- a classifier
-         *     bump or a bulk corpus edit -- so a reading is interpreted, not
-         *     guessed. Newest first. Derived live from the existing audit +
-         *     feedback streams (no separate event store), workspace-scoped by RLS.
-         *     "Show, never judge": facts, never a verdict.
+         * @description What changed (ADR-0035): the discrete events that plausibly explain a
+         *     shift in the sensors, a classifier bump or a bulk edit, newest first.
          */
         get: operations["garden_health_events_garden_health_events_get"];
         put?: never;
@@ -5768,10 +5775,10 @@ export interface paths {
         };
         /**
          * Garden Audit
-         * @description The workspace event stream (ADR-0036 audit panel): the coordinated
-         *     read/propose/commit/reject/snapshot events, newest first, RLS-scoped.
-         *     ``days`` bounds the window (replay-from-cursor for subscribers).
-         *     "Show, never judge": the verbatim events, never a verdict.
+         * @description The workspace coordination event stream (ADR-0036): the read, propose,
+         *     commit, reject and snapshot events people and agents emit, newest first.
+         *     There is no subscription: poll, passing the largest ``ts`` seen back as
+         *     ``since``; a page of exactly ``limit`` rows may have more behind it.
          */
         get: operations["garden_audit_garden_audit_get"];
         put?: never;
@@ -5791,27 +5798,9 @@ export interface paths {
         };
         /**
          * Garden Graph
-         * @description Materialise the workspace note-graph in one round-trip:
-         *
-         *     - ``edges``: undirected ``(src, dst, weight)`` rows with the
-         *       ``note_edge_strength`` aggregation (soft-OR of per-kind base
-         *       contributions + Adamic-Adar tag overlap + co-activity from the
-         *       worker-materialised ``note_coactivity``, task f0a15247).
-         *     - ``centrality``: ``{note_id: pagerank}`` over the manual
-         *       directed link graph (damping=0.85, power iteration). The map
-         *       sums to 1.0 across the workspace.
-         *     - ``recency``: separate freshness axis per note (``exp(-age/tau)``),
-         *       live, for cold-start compensation (task d8664631).
-         *     - ``betweenness``: cluster-bridge centrality from the worker's
-         *       materialised snapshot (O(V·E) Brandes is offline-only). Empty
-         *       until the first snapshot; ``analytics_computed_at`` labels its
-         *       age so the client can tell "no bridges" from "not computed yet".
-         *
-         *     Edges / PageRank / recency are computed on demand (no cache):
-         *     bounded cost (O(L), O(iter · L), O(N)) and the post-edit reload
-         *     must see fresh weights. Serving them snapshot-first is the planned
-         *     flip once latency/volume demand it (the snapshot already stores
-         *     them).
+         * @description The workspace note graph in one answer: weighted undirected edges,
+         *     PageRank centrality, live recency, and the betweenness of the last
+         *     snapshot (``analytics_computed_at`` is its age; empty until the first).
          */
         get: operations["garden_graph_garden_graph_get"];
         put?: never;
@@ -5831,18 +5820,57 @@ export interface paths {
         };
         /**
          * Garden Clusters
-         * @description Leiden communities over the weighted note graph (task 8c0a8f08).
-         *
-         *     Separate from ``/graph`` on purpose: clustering is heavier than the
-         *     edge/PageRank pass and the SPA only needs it when the user toggles
-         *     cluster-colouring on, so it is not paid on every mindmap load.
-         *     Returns ``{note_id: community_index}`` plus the global modularity
-         *     (ADR-0035 structure thermometer). When the optional ``clustering``
-         *     extra (python-igraph + leidenalg) is absent the result is an empty
-         *     map with ``modularity=null`` — the mindmap simply renders no cluster
-         *     colours rather than erroring.
+         * @description Leiden communities over the weighted note graph: the community index
+         *     of every note and the partition's modularity. An empty map and a null
+         *     modularity when the clustering extra is not installed.
          */
         get: operations["garden_clusters_garden_clusters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/walk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Walk
+         * @description Three graph walks rooted at ``seed``: ``focused`` (personalised
+         *     PageRank, top ``budget`` by mass), ``free_wander`` (a Node2Vec walk of
+         *     length ``budget`` biased by ``p`` and ``q``), ``bounded`` (best-first,
+         *     cost independent of the workspace size).
+         */
+        get: operations["garden_walk_garden_walk_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-suggestions/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Link Suggestions
+         * @description The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared
+         *     tags mixed with personalised-PageRank mass, already-linked pairs
+         *     excluded. Nothing is created: a person or an agent confirms a link with
+         *     link_notes. Empty when there is no signal.
+         */
+        get: operations["garden_link_suggestions_garden_link_suggestions__note_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5860,18 +5888,13 @@ export interface paths {
         };
         /**
          * Garden Classify
-         * @description The proposal engine (ADR-0032 / ADR-0042): a structured enrichment
-         *     proposal ``{tags, links, maturity, cluster}`` for a note or task, each
-         *     with confidence + rationale, plus ``signals_used`` for transparency.
-         *     **Read-only** — nothing is mutated; the user (or an agent) applies a
-         *     suggestion via ``POST /garden/apply``.
-         *
-         *     Serves the persisted on-create suggestions when fresh (``source =
-         *     precomputed``); otherwise — or when ``refresh`` is set — recomputes live
-         *     (``source = live``). The cache is populated by the on-create queue, so a
-         *     read never writes. Tasks are classifiable only when the unified-task-graph
-         *     flag is on (404 otherwise). Unknown ``kinds`` tokens are dropped; an
-         *     all-unknown set falls back to all.
+         * @description The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and
+         *     cluster proposed for a note (or a task, when the unified task graph is
+         *     on), each with a confidence and a rationale, plus ``signals_used``.
+         *     Read-only: act on a proposal with garden_apply. Serves the suggestions
+         *     persisted at creation when they exist (``source = precomputed``) and
+         *     recomputes otherwise or on ``refresh`` (``source = live``). Unknown
+         *     ``kinds`` are dropped; an all-unknown set means all.
          */
         get: operations["garden_classify_garden_classify__node_id__get"];
         put?: never;
@@ -5893,11 +5916,12 @@ export interface paths {
         put?: never;
         /**
          * Garden Apply
-         * @description Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
-         *     ADR-0037). ``accept``/``override`` perform the mutation via the
-         *     existing idempotent services; ``reject``/``ignore`` mutate nothing.
-         *     Either way an append-only ``classification_feedback`` event is
-         *     written — the audit trail behind the learning loop and rollback.
+         * @description Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037).
+         *     ``accept`` and ``override`` perform the change through the ordinary
+         *     idempotent services; ``reject`` and ``ignore`` change nothing. Every
+         *     action records a classification_feedback event, the trail behind the
+         *     learning loop and its rollback. ``auto`` is the worker's and is refused
+         *     here, so a client cannot forge a system promotion.
          */
         post: operations["garden_apply_garden_apply_post"];
         delete?: never;
@@ -5915,14 +5939,21 @@ export interface paths {
         };
         /**
          * Garden Candidates
-         * @description Distillation candidates (task 4995a32f): "are there distillations to
-         *     do?". Distillation is graph maintenance, so this returns both NODE
-         *     candidates (inert notes/clusters/quarters to compact into atoms) and
-         *     EDGE candidates (links to add via tag/co-activity affinity, or prune
-         *     when their basis has decayed). A pure read, no LLM; the caller acts on a
-         *     candidate with distill_note / extract_cluster_pattern / synthesize_season
-         *     or by creating/removing a link, then reviews. RLS-scoped; ``project_id``
-         *     from the tenant context narrows the perimeter.
+         * @description Is there distillation to do? Distillation is graph maintenance, so
+         *     this returns two families, read-only and without an LLM call.
+         *
+         *     NODE candidates compact inert material into a denser atom: ``distill``
+         *     (one inert note), ``pattern`` (a Leiden cluster of archived notes),
+         *     ``season`` (a quarter's archived notes). Act with distill_note,
+         *     extract_cluster_pattern or synthesize_season.
+         *
+         *     EDGE candidates curate the links: ``link_add`` (a strong pair with no
+         *     link), ``link_prune`` (a related link whose basis has decayed),
+         *     ``link_direct`` (search keeps crossing the pair one way; never applied
+         *     automatically).
+         *
+         *     Every atom produced from these waits in garden_review_pending until a
+         *     person approves it.
          */
         get: operations["garden_candidates_garden_candidates_get"];
         put?: never;
@@ -5942,10 +5973,9 @@ export interface paths {
         };
         /**
          * Garden Review Pending
-         * @description The review inbox (ADR-0043): AUTONOMOUSLY-generated humus notes awaiting
-         *     human approval (``review_state='proposed'``), newest first, each with the
-         *     model that produced it (``origin_model_id``) so the reviewer sees WHICH
-         *     model wrote the summary. A pure read; RLS-scoped.
+         * @description The review inbox (ADR-0043): generated notes awaiting a person's
+         *     approval, newest first, each with the model that wrote it
+         *     (``origin_model_id``) and the ``version`` to echo when acting on it.
          */
         get: operations["garden_review_pending_garden_review_pending_get"];
         put?: never;
@@ -5965,12 +5995,9 @@ export interface paths {
         };
         /**
          * Garden Review Rejected
-         * @description The review BIN (ADR-0043): proposals a human declined, most recently
-         *     declined first. Rejecting soft-deletes the node while leaving it
-         *     ``proposed``, a pair of states no other listing shows -- the inbox wants
-         *     the live ones, the trash refuses proposals -- so this is what makes an
-         *     undo reachable. The undo itself is ``POST /notes/{note_id}/restore``,
-         *     echoing ``version``. A pure read; RLS-scoped.
+         * @description The review bin (ADR-0043): proposals a person declined, most recently
+         *     declined first. No other listing shows them, so this is how a rejection
+         *     is found again; undo one by restoring the note, echoing ``version``.
          */
         get: operations["garden_review_rejected_garden_review_rejected_get"];
         put?: never;
@@ -5992,9 +6019,12 @@ export interface paths {
         put?: never;
         /**
          * Garden Review Approve
-         * @description Approve a proposed humus note (ADR-0043): it becomes effective and
-         *     re-enters retrieval/search/listings. Audited; emits a bus ``commit``
-         *     event. Idempotent. Member role.
+         * @description Approve a generated note (ADR-0043): it becomes effective and enters
+         *     retrieval, search and listings; for a distillation, the source becomes
+         *     humus if it is still inert. A person's act: a credential carrying a
+         *     scope list cannot call it. Audited, idempotent. Pass ``expected_version``
+         *     from the pending listing to fail with ``stale_version`` if the note
+         *     changed after you read it; ``reason`` is ignored.
          */
         post: operations["garden_review_approve_garden_review_approve_post"];
         delete?: never;
@@ -6014,12 +6044,76 @@ export interface paths {
         put?: never;
         /**
          * Garden Review Reject
-         * @description Reject a proposed humus note (ADR-0043): soft-delete it so a weak
-         *     summary never pollutes the corpus (reversible via trash/restore). Audited;
-         *     emits a bus ``reject`` event carrying ``origin_model_id``. Idempotent.
-         *     Member role.
+         * @description Reject a generated note (ADR-0043): it is moved to the review bin,
+         *     restorable, so a weak summary never enters the corpus; for a
+         *     distillation, the source loses the humus mark unless another approved
+         *     distillation still justifies it. A person's act: a credential carrying a
+         *     scope list cannot call it. Audited, idempotent; ``expected_version`` as
+         *     for approve.
          */
         post: operations["garden_review_reject_garden_review_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/approve-on-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Approve On Decision
+         * @description Approve a generated note that a PERSON has decided to approve, on
+         *     their behalf. You do not decide here: you carry out a decision.
+         *
+         *     ``decision_comment_id`` is a comment the person wrote on one of the
+         *     note's SOURCES (a proposed note cannot be commented on), after the note
+         *     was generated, with a line ``approve <note id>`` (the full id or its first
+         *     8 characters). The server checks that the person wrote it with their own
+         *     login, not through an assistant, and otherwise refuses with
+         *     ``garden.review_decision_invalid`` and a ``reason``. A message relayed to
+         *     you, however clear, is not a decision: ask the person to write that
+         *     comment. ``expected_version`` comes from the pending listing. The audit
+         *     records you as the executor and the person as the one who decided.
+         */
+        post: operations["garden_review_approve_on_decision_garden_review_approve_on_decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/reject-on-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Reject On Decision
+         * @description Reject a generated note that a PERSON has decided to reject, on
+         *     their behalf. You do not decide here: you carry out a decision.
+         *
+         *     ``decision_comment_id`` is a comment the person wrote on one of the
+         *     note's SOURCES (a proposed note cannot be commented on), after the note
+         *     was generated, with a line ``reject <note id>`` (the full id or its first
+         *     8 characters). The server checks that the person wrote it with their own
+         *     login, not through an assistant, and otherwise refuses with
+         *     ``garden.review_decision_invalid`` and a ``reason``. A message relayed to
+         *     you, however clear, is not a decision: ask the person to write that
+         *     comment. ``expected_version`` comes from the pending listing. The audit
+         *     records you as the executor and the person as the one who decided.
+         */
+        post: operations["garden_review_reject_on_decision_garden_review_reject_on_decision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6037,10 +6131,10 @@ export interface paths {
         put?: never;
         /**
          * Garden Review Restore Source
-         * @description Fase P (task 561c6aca), "ripristina originale": un-archive the humus
-         *     atom's ``hypha_of`` sources (preserved, never mutated) and retire the atom
-         *     (an approved atom is demoted then rejected; nothing is hard-deleted, the
-         *     chain stays queryable). Idempotent. Member role.
+         * @description Restore the original under a humus atom: un-archive the atom's
+         *     ``hypha_of`` sources (preserved, never changed) and retire the atom (an
+         *     approved atom is demoted, then rejected). Nothing is hard-deleted and
+         *     the provenance chain stays queryable. Idempotent.
          */
         post: operations["garden_review_restore_source_garden_review_restore_source_post"];
         delete?: never;
@@ -6058,10 +6152,9 @@ export interface paths {
         };
         /**
          * Garden Review Accept Ratio
-         * @description Per-model accept ratio of the garden's AUTONOMOUSLY-generated proposals
-         *     (ADR-0043 D4): the earned-autonomy reliability signal, most-decided model
-         *     first. Derived from the durable approve/reject bus events; a pure read.
-         *     "Show, never judge": counts + ratio, never a verdict.
+         * @description How often a person approved, rather than rejected, each model's
+         *     generated notes (ADR-0043 D4), most-decided model first. ``ratio`` is
+         *     null when nothing was decided yet: no signal, not 0%.
          */
         get: operations["garden_review_accept_ratio_garden_review_accept_ratio_get"];
         put?: never;
@@ -6083,12 +6176,11 @@ export interface paths {
         put?: never;
         /**
          * Garden Learning Rollback
-         * @description Rewind the caller's own learned priors to their state at ``to``
-         *     (ADR-0037 "Snapshots and rollback"): restores the closest daily
-         *     snapshot at-or-before the cut, replays the feedback delta on top, and
-         *     writes a fresh checkpoint — decay-aware and fully reproducible. Returns
-         *     a one-line diff of the largest-moved feature. Per-user: a member can
-         *     only rewind their own priors (``ctx.user_id``).
+         * @description Rewind the caller's learned priors to their state at ``to`` (ADR-0037):
+         *     the closest daily snapshot at or before it, plus the feedback since,
+         *     written as a fresh checkpoint, so the rewind itself can be rewound. Only
+         *     the caller's own priors; no note is touched. Returns the feature that
+         *     moved most.
          */
         post: operations["garden_learning_rollback_garden_learning_rollback_post"];
         delete?: never;
@@ -6106,75 +6198,13 @@ export interface paths {
         };
         /**
          * Garden Learning Telemetry
-         * @description The caller's learning telemetry for the sensors dashboard (ADR-0037):
-         *
-         *     - ``reject_hotspots``: the suggestion features they decline most, so
-         *       they can mute at the source.
-         *     - ``drift``: which priors moved the most over ``drift_days`` (vs the
-         *       snapshot that old; empty until a snapshot that old exists).
-         *
-         *     Read-only, the caller's own history only (ADR-0037 privacy: no
-         *     cross-user comparison). "Show, never judge".
+         * @description What the classifier learned from the caller (ADR-0037): the
+         *     suggestion features they decline most (``reject_hotspots``, so they can
+         *     be muted at the source) and the priors that moved most over
+         *     ``drift_days`` (empty until a snapshot that old exists). The caller's own
+         *     history only.
          */
         get: operations["garden_learning_telemetry_garden_learning_telemetry_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/garden/walk": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Garden Walk
-         * @description Three graph walks rooted at ``seed``.
-         *
-         *     ``focused`` runs personalised PageRank teleporting on ``seed`` and
-         *     returns the top ``budget`` nodes by induced mass. Use when the
-         *     user wants "neighbourhood of attention".
-         *
-         *     ``free_wander`` runs a Node2Vec second-order biased random walk
-         *     of length ``budget`` from ``seed`` with parameters ``p`` (return
-         *     bias) and ``q`` (in-out bias). Use for cross-domain exploration
-         *     in the mindmap pollinator-trail animation.
-         *
-         *     ``bounded`` runs the best-first thresholded traversal (Fase 1, task
-         *     561c6aca): DB work O(budget), independent of the org's graph size;
-         *     ``step`` is the hop distance, ``weight`` the best path weight.
-         */
-        get: operations["garden_walk_garden_walk_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/garden/link-suggestions/{note_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Garden Link Suggestions
-         * @description Top-K candidate notes to link from ``note_id`` (task c7d0bb4c).
-         *
-         *     The score mixes Adamic-Adar tag overlap and PPR-induced mass;
-         *     already-linked pairs are excluded. The SPA renders them as
-         *     'suggested links' chips; nothing is created without explicit
-         *     user confirmation.
-         */
-        get: operations["garden_link_suggestions_garden_link_suggestions__note_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9449,6 +9479,8 @@ export interface components {
             model_id: string;
             /** Created */
             created: boolean;
+            /** Review State */
+            review_state: string | null;
         };
         /**
          * DocumentType
@@ -10417,6 +10449,8 @@ export interface components {
              * Format: uuid
              */
             note_id: string;
+            /** Title */
+            title?: string | null;
             /** Score */
             score: number;
             /** Rationale */
@@ -10465,6 +10499,20 @@ export interface components {
              * Format: date-time
              */
             last_declined_at: string;
+        };
+        /**
+         * GardenRestoreSourceIn
+         * @description Restore the sources of one humus atom. ``reason`` is recorded on the
+         *     atom's retirement.
+         */
+        GardenRestoreSourceIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * GardenRestoreSourceOut
@@ -10519,6 +10567,48 @@ export interface components {
             rejected: boolean;
             /** Version */
             version: number;
+        };
+        /**
+         * GardenReviewDecisionIn
+         * @description Carry out a review a person wrote down (ADR-0043, 2026-11-12
+         *     amendment). ``decision_comment_id`` is the person's comment on one of
+         *     the note's SOURCES with a line ``approve <id>`` or ``reject <id>``;
+         *     ``expected_version`` is the version the pending listing served.
+         */
+        GardenReviewDecisionIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Decision Comment Id
+             * Format: uuid
+             */
+            decision_comment_id: string;
+        };
+        /** GardenReviewDecisionOut */
+        GardenReviewDecisionOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Review State */
+            review_state: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Rejected */
+            rejected: boolean;
+            /** Version */
+            version: number;
+            /**
+             * Decision Comment Id
+             * Format: uuid
+             */
+            decision_comment_id: string;
         };
         /**
          * GardenReviewPendingItem
@@ -12238,8 +12328,16 @@ export interface components {
              * @default 0
              */
             linked_task_count?: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Review State */
+            review_state?: string | null;
             /** Preview */
             preview?: string | null;
+            /** Transcript */
+            transcript?: string | null;
         };
         /**
          * NoteMergeIn
@@ -12328,10 +12426,18 @@ export interface components {
              * @default 0
              */
             linked_task_count?: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Review State */
+            review_state?: string | null;
             /** Transcript */
             transcript: string | null;
             /** Parts */
             parts?: components["schemas"]["NotePartOut"][];
+            /** Outline */
+            outline?: components["schemas"]["NotePartRow"][] | null;
         };
         /**
          * NotePartAppendIn
@@ -12432,6 +12538,12 @@ export interface components {
              * @default false
              */
             ui_collapsed?: boolean;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * NotePartPatchIn
@@ -12505,6 +12617,55 @@ export interface components {
             count?: number;
             /** Operation Id */
             operation_id?: string | null;
+        };
+        /**
+         * NotePartRow
+         * @description One part as a list row: the full block, or its outline when the
+         *     body was not asked for. In an outline ``body`` is null and ``head``
+         *     is the first non-empty line; ``bytes`` (UTF-8 length) and
+         *     ``body_sha256`` are always there, so a reader can tell a part changed
+         *     without reading it.
+         */
+        NotePartRow: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Ord */
+            ord: number;
+            /** Title */
+            title?: string | null;
+            /** Lang */
+            lang?: string | null;
+            /** Body */
+            body?: string | null;
+            /** Head */
+            head?: string | null;
+            /** Bytes */
+            bytes: number;
+            /** Body Sha256 */
+            body_sha256: string;
+            /** Merged From Note Id */
+            merged_from_note_id?: string | null;
+            /** Version */
+            version: number;
+            /**
+             * Ui Collapsed
+             * @default false
+             */
+            ui_collapsed?: boolean;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * NotePartTrashOut
@@ -12674,6 +12835,21 @@ export interface components {
              * @default []
              */
             task_links?: components["schemas"]["NoteTaskLinkOut"][];
+        };
+        /**
+         * NotesPage
+         * @description One page of notes. ``next_cursor`` is null on the last page.
+         */
+        NotesPage: {
+            /** Items */
+            items: components["schemas"]["NoteListOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
         };
         /**
          * NotificationChannelKind
@@ -26055,11 +26231,37 @@ export interface operations {
     list_notes_notes_get: {
         parameters: {
             query?: {
-                include_archived?: boolean;
-                include_deleted?: boolean;
+                /** @description Free text over the whole corpus, matched server-side before paging: each word must appear in the title, a part, or a tag name. */
+                q?: string | null;
+                /** @description Only these notes (at most 200). */
+                ids?: string[] | null;
                 project_id?: string | null;
                 tag_id?: string | null;
-                q?: string | null;
+                /** @description Only the notes carrying at least one of these tags: a focus on a client (its projects and the client tag) or on one project. */
+                any_tag_ids?: string[] | null;
+                /** @description Only the notes linked to this task. */
+                task_id?: string | null;
+                /** @description With task_id: only these link kinds (subject, artifact, ...). */
+                link_kinds?: string[] | null;
+                /** @description One lifecycle stage, e.g. dormant. */
+                maturity?: string | null;
+                maturities?: string[] | null;
+                include_archived?: boolean;
+                include_deleted?: boolean;
+                /** @description Only the notes in the bin (deleted) or only the archived ones; overrides the two include flags. */
+                only?: ("deleted" | "archived") | null;
+                /** @description Also return each note's whole body (unbounded). */
+                include_transcript?: boolean;
+                /** @description ISO instant or bare date (your timezone's day start). */
+                created_after?: string | null;
+                created_before?: string | null;
+                updated_since?: string | null;
+                /** @description Default newest first. Another order returns one page, no cursor. */
+                order_by?: ("created_at" | "updated_at" | "title") | null;
+                order_desc?: boolean;
+                limit?: number;
+                /** @description The next_cursor of the previous page, for the next one. */
+                cursor?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -26078,7 +26280,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NoteListOut"][];
+                    "application/json": components["schemas"]["NotesPage"];
                 };
             };
             /** @description Validation Error */
@@ -26168,7 +26370,10 @@ export interface operations {
     get_note_notes__note_id__get: {
         parameters: {
             query?: {
+                /** @description Also return the body as one string (the join of the part bodies). A reader of ``parts`` gets the note twice with it. */
                 include_transcript?: boolean;
+                /** @description False returns ``outline`` (each part's id, title, size, first line and digest) instead of ``parts``: read a long note's shape first, then fetch the parts you need. */
+                include_part_bodies?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -26659,7 +26864,10 @@ export interface operations {
     };
     list_note_parts_notes__note_id__parts_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description False returns each part's outline instead of its body. */
+                include_body?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
@@ -26679,7 +26887,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotePartOut"][];
+                    "application/json": components["schemas"]["NotePartRow"][];
                 };
             };
             /** @description Validation Error */
@@ -28492,6 +28700,7 @@ export interface operations {
     garden_health_timeseries_garden_health_timeseries_get: {
         parameters: {
             query?: {
+                /** @description How many days back, newest first. */
                 days?: number;
             };
             header: {
@@ -28528,6 +28737,7 @@ export interface operations {
     garden_health_events_garden_health_events_get: {
         parameters: {
             query?: {
+                /** @description How many days back, newest first. */
                 days?: number;
             };
             header: {
@@ -28565,7 +28775,10 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description Only events from the last N days. */
                 days?: number | null;
+                /** @description ISO-8601 cursor: events at or after it (a timestamp without a zone is read as UTC). Delivery is at-least-once, so dedupe by id. Takes precedence over days. */
+                since?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -28653,6 +28866,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenClustersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_walk_garden_walk_get: {
+        parameters: {
+            query: {
+                /** @description Note id to seed the walk on */
+                seed: string;
+                /** @description focused = PPR seeded; free_wander = Node2Vec walk; bounded = best-first thresholded (size-independent) */
+                mode?: "focused" | "free_wander" | "bounded";
+                budget?: number;
+                p?: number;
+                q?: number;
+                seed_rng?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenWalkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_suggestions_garden_link_suggestions__note_id__get: {
+        parameters: {
+            query?: {
+                k?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenLinkSuggestionsOut"];
                 };
             };
             /** @description Validation Error */
@@ -28930,6 +29224,82 @@ export interface operations {
             };
         };
     };
+    garden_review_approve_on_decision_garden_review_approve_on_decision_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_reject_on_decision_garden_review_reject_on_decision_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     garden_review_restore_source_garden_review_restore_source_post: {
         parameters: {
             query?: never;
@@ -28944,7 +29314,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GardenReviewActionIn"];
+                "application/json": components["schemas"]["GardenRestoreSourceIn"];
             };
         };
         responses: {
@@ -29065,87 +29435,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenLearningTelemetryOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    garden_walk_garden_walk_get: {
-        parameters: {
-            query: {
-                /** @description Note id to seed the walk on */
-                seed: string;
-                /** @description focused = PPR seeded; free_wander = Node2Vec walk; bounded = best-first thresholded (size-independent) */
-                mode?: "focused" | "free_wander" | "bounded";
-                budget?: number;
-                p?: number;
-                q?: number;
-                seed_rng?: number | null;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GardenWalkOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    garden_link_suggestions_garden_link_suggestions__note_id__get: {
-        parameters: {
-            query?: {
-                k?: number;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                note_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GardenLinkSuggestionsOut"];
                 };
             };
             /** @description Validation Error */

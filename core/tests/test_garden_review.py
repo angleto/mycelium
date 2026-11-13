@@ -3,8 +3,8 @@ task e87daff4).
 
 Asserts the gate's invariants end-to-end:
 
-- a summary the garden generates AUTONOMOUSLY (``autonomous=True``) under the
-  review gate is born ``review_state='proposed'`` and is INVISIBLE on every
+- every summary the garden generates is born ``review_state='proposed'``,
+  whoever asked for it, and is INVISIBLE on every
   retrieval/listing surface (the walk, search, list_notes, get_note, the
   @-lookup picker, the free-wander humus set) until a human approves it;
 - the producing model is on the artifact (``origin_model_id``), not only in
@@ -12,10 +12,10 @@ Asserts the gate's invariants end-to-end:
 - approve -> effective (re-enters every surface) + a bus ``commit`` event +
   an audit row; reject -> soft-delete (never pollutes) + a bus ``reject``
   event carrying ``origin_model_id`` + an audit row, and the humus signature
-  reopens for regeneration;
-- with the gate OFF, or for a USER-initiated generation (the default
-  ``autonomous=False``), the note is effective immediately -- byte-identical
-  to pre-ADR-0043 behaviour.
+  reopens for regeneration.
+
+What approving or rejecting a distillation does to its SOURCE is asserted in
+``test_humus_on_approval.py``.
 """
 
 from __future__ import annotations
@@ -67,12 +67,6 @@ def _wire() -> Iterator[None]:
         set_embedder_override(None)
 
 
-@pytest.fixture
-def _gate_on(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setattr(get_settings(), "garden_review_gate_enabled", True)
-    yield
-
-
 async def _seed_billing(s: object, org: uuid.UUID, user: uuid.UUID) -> None:
     await billing.grant_credits(s, org_id=org, actor_id=user, amount=Decimal(1000))  # type: ignore[arg-type]
     await billing.upsert_rate_card(
@@ -102,11 +96,8 @@ async def _archived(s: object, org: uuid.UUID, user: uuid.UUID, *, title: str, b
     return n
 
 
-async def _make_proposed_pattern(
-    s: object, org: uuid.UUID, user: uuid.UUID, *, autonomous: bool = True
-) -> decomp.HumusResult:
-    """Three archived sources -> one ``pattern`` humus synthesis, generated as
-    the autonomous sweep would (``autonomous=True``)."""
+async def _make_proposed_pattern(s: object, org: uuid.UUID, user: uuid.UUID) -> decomp.HumusResult:
+    """Three archived sources -> one ``pattern`` humus synthesis."""
     a = await _archived(s, org, user, title="a", body="soil compost forecast synthesis alpha")
     b = await _archived(s, org, user, title="b", body="soil compost forecast synthesis beta")
     c = await _archived(s, org, user, title="c", body="soil compost forecast synthesis gamma")
@@ -115,57 +106,44 @@ async def _make_proposed_pattern(
         org_id=org,
         actor_id=user,
         source_note_ids=[a.id, b.id, c.id],
-        autonomous=autonomous,
     )
 
 
 # ── D1/D3: born proposed, model on the artifact ────────────────────────────
 
 
-async def test_autonomous_generation_is_born_proposed_with_model(
-    _wire: None, _gate_on: None
-) -> None:
+async def test_generation_is_born_proposed_with_model(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
         res = await _make_proposed_pattern(s, org, user)
         note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
-        # Withheld from retrieval (proposed), humus as today, model stamped.
+        # Withheld from retrieval (proposed), humus, model stamped.
         assert note.review_state == "proposed"
         assert note.humus_flag is True
         assert note.humus_kind == "pattern"
         assert note.origin_model_id == res.model_id == "fake-llm"
 
 
-async def test_user_initiated_is_effective_and_stamps_model(_wire: None, _gate_on: None) -> None:
-    """Even with the gate ON, a USER-initiated synthesis (autonomous=False, the
-    default) is effective immediately -- the gate keys on the trigger, not on
-    'an LLM wrote it'. The model is still stamped (transparency)."""
+async def test_the_review_gate_setting_does_not_open_the_gate(
+    _wire: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``garden_review_gate_enabled`` is off in production. It once decided
+    whether a synthesis went live unseen; for humus it no longer decides
+    anything, and turning it off must not let a summary through."""
+    monkeypatch.setattr(get_settings(), "garden_review_gate_enabled", False)
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
-        res = await _make_proposed_pattern(s, org, user, autonomous=False)
+        res = await _make_proposed_pattern(s, org, user)
         note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
-        assert note.review_state is None
-        assert note.origin_model_id == "fake-llm"
-
-
-async def test_gate_off_autonomous_is_effective(_wire: None) -> None:
-    """Flag OFF: even an autonomous generation is effective (no 'proposed'
-    note is ever created) -- byte-identical to pre-ADR-0043 behaviour."""
-    org, user = await _org()
-    async with tenant_session(str(org), str(user)) as s:
-        await _seed_billing(s, org, user)
-        res = await _make_proposed_pattern(s, org, user, autonomous=True)
-        note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
-        assert note.review_state is None
-        assert note.origin_model_id == "fake-llm"  # transparency is unconditional
+        assert note.review_state == "proposed"
 
 
 # ── D2: invisible on every listing surface until approved ──────────────────
 
 
-async def test_proposed_note_hidden_from_listings_then_visible(_wire: None, _gate_on: None) -> None:
+async def test_proposed_note_hidden_from_listings_then_visible(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
@@ -209,7 +187,7 @@ async def test_proposed_note_hidden_from_listings_then_visible(_wire: None, _gat
         assert nid not in {p.note_id for p in await review.list_pending(s, org_id=org)}
 
 
-async def test_proposed_humus_absent_from_walk_then_present(_wire: None, _gate_on: None) -> None:
+async def test_proposed_humus_absent_from_walk_then_present(_wire: None) -> None:
     """The retrieval walk (memory.retrieve): the only humus note is the
     proposal, so no hit carries provenance 'humus' until it is approved."""
     org, user = await _org()
@@ -249,7 +227,7 @@ async def test_proposed_humus_absent_from_walk_then_present(_wire: None, _gate_o
 # ── D3: approve / reject audited + on the bus ──────────────────────────────
 
 
-async def test_approve_emits_commit_event_and_audit(_wire: None, _gate_on: None) -> None:
+async def test_approve_emits_commit_event_and_audit(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
@@ -276,7 +254,7 @@ async def test_approve_emits_commit_event_and_audit(_wire: None, _gate_on: None)
         assert log.diff["review_state"] == {"old": "proposed", "new": "approved"}
 
 
-async def test_reject_soft_deletes_emits_event_and_reopens(_wire: None, _gate_on: None) -> None:
+async def test_reject_soft_deletes_emits_event_and_reopens(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
@@ -319,7 +297,7 @@ async def test_reject_soft_deletes_emits_event_and_reopens(_wire: None, _gate_on
 # ── idempotency + error surface ────────────────────────────────────────────
 
 
-async def test_approve_and_reject_are_idempotent(_wire: None, _gate_on: None) -> None:
+async def test_approve_and_reject_are_idempotent(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
@@ -343,7 +321,7 @@ async def test_approve_and_reject_are_idempotent(_wire: None, _gate_on: None) ->
         assert len(commits) == 1
 
 
-async def test_review_of_non_proposed_note_is_404(_wire: None, _gate_on: None) -> None:
+async def test_review_of_non_proposed_note_is_404(_wire: None) -> None:
     """A plain (never-proposed) note is not a pending proposal: approving or
     rejecting it 404s, so the review surface can't touch ordinary notes."""
     org, user = await _org()
@@ -629,7 +607,7 @@ async def test_garden_health_surfaces_the_accept_ratio_sensor() -> None:
 # ── TOCTOU guard: expected_version on approve/reject (task 2e36e732) ────────
 
 
-async def test_approve_with_stale_version_conflicts(_wire: None, _gate_on: None) -> None:
+async def test_approve_with_stale_version_conflicts(_wire: None) -> None:
     """The reviewer reads v, the note changes (any edit bumps the counter),
     the approve pinned to v must fail with ``stale_version``: the human never
     blesses content they have not seen."""
@@ -656,9 +634,7 @@ async def test_approve_with_stale_version_conflicts(_wire: None, _gate_on: None)
         assert fresh.review_state == "approved"
 
 
-async def test_approve_bumps_version_and_second_pinned_approve_is_stale(
-    _wire: None, _gate_on: None
-) -> None:
+async def test_approve_bumps_version_and_second_pinned_approve_is_stale(_wire: None) -> None:
     """Concurrent double-approve semantics pinned: with the same read version,
     exactly one transition wins (and bumps the counter); the second pinned
     approve gets ``stale_version``. An UNPINNED retry stays idempotent."""
@@ -685,7 +661,7 @@ async def test_approve_bumps_version_and_second_pinned_approve_is_stale(
         assert again.version == seen + 1
 
 
-async def test_reject_with_stale_version_conflicts(_wire: None, _gate_on: None) -> None:
+async def test_reject_with_stale_version_conflicts(_wire: None) -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
@@ -707,7 +683,7 @@ async def test_reject_with_stale_version_conflicts(_wire: None, _gate_on: None) 
         assert rejected.version == seen + 2  # interposed bump + reject bump
 
 
-async def test_list_pending_serves_the_version_pin(_wire: None, _gate_on: None) -> None:
+async def test_list_pending_serves_the_version_pin(_wire: None) -> None:
     """The inbox row carries the version the reviewer must echo back."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:

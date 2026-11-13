@@ -12,10 +12,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { allNotes } from '../api/notes'
 import { MarkdownView } from '../components/Markdown'
 import { GardenMindmap } from '../components/GardenMindmap'
 import { CopyIdButton } from '../components/CopyIdButton'
@@ -91,6 +92,7 @@ function loadActiveTab(workspaceId: string | null): Tab {
 }
 
 export function GardenRoute() {
+  const navigate = useNavigate()
   const { t } = useTranslation()
   const [notes, setNotes] = useState<Note[]>([])
   const [allTasks, setAllTasks] = useState<TaskBrief[]>([])
@@ -127,15 +129,15 @@ export function GardenRoute() {
     active: focusActive,
   } = useFocus()
 
+  // The map shows the whole workspace, so it reads every page. It used to
+  // read the list's single answer, which held the newest 200 notes: past
+  // that, older notes were missing from the map.
   const reload = useCallback(async () => {
-    const { data, error } = await api.GET('/notes', {
-      params: { header: workspaceHeader() },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
+    try {
+      setNotes(await allNotes())
+    } catch (e) {
+      setErr(errMessage(e))
     }
-    setNotes(data ?? [])
   }, [])
 
   useEffect(() => {
@@ -143,12 +145,15 @@ export function GardenRoute() {
     void (async () => {
       try {
         const [n, tk] = await Promise.all([
-          api.GET('/notes', { params: { header: workspaceHeader() } }),
+          allNotes().then(
+            (rows) => ({ rows, error: null as unknown }),
+            (error: unknown) => ({ rows: null, error }),
+          ),
           api.GET('/tasks', { params: { header: workspaceHeader() } }),
         ])
         if (!active) return
-        if (n.error) setErr(errMessage(n.error))
-        else setNotes(n.data ?? [])
+        if (n.rows === null) setErr(errMessage(n.error))
+        else setNotes(n.rows)
         if (tk.data)
           setAllTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
       } finally {
@@ -295,8 +300,9 @@ export function GardenRoute() {
 
   // Fungal decomposition (ADR-0034): distil a composting note into a
   // reusable atom. Idempotent server-side, so re-clicking lands on the
-  // existing distillation. On success the plant modal opens on the
-  // distilled note (the freshly grown hypha), not the source.
+  // existing distillation. A new distillation is a proposal: ordinary note
+  // reads do not serve it until the person approves it, so it opens in the
+  // review inbox. One that is already approved opens in the plant modal.
   async function onDistill(noteId: string) {
     setBusy(true)
     setErr('')
@@ -306,6 +312,10 @@ export function GardenRoute() {
     setBusy(false)
     if (error || !data) {
       setErr(errMessage(error))
+      return
+    }
+    if (data.review_state === 'proposed') {
+      navigate('/garden/review')
       return
     }
     await reload()

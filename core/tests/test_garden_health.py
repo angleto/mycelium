@@ -34,6 +34,7 @@ from mycelium_core.models.note_tag import NoteTag  # noqa: E402
 from mycelium_core.models.tag import TagKind  # noqa: E402
 from mycelium_core.services import decomposition as decomp  # noqa: E402
 from mycelium_core.services import garden_health as health_svc  # noqa: E402
+from mycelium_core.services import garden_review as review_svc  # noqa: E402
 from mycelium_core.services import note_links, taxonomy  # noqa: E402
 from mycelium_core.services import notes as notes_svc  # noqa: E402
 from mycelium_core.services.auth import signup  # noqa: E402
@@ -337,6 +338,15 @@ async def test_recall_at_k_is_blocked_with_reason() -> None:
     assert health.recall_at_k.reason
 
 
+async def _distill_approved(s: object, org: uuid.UUID, user: uuid.UUID, note_id: uuid.UUID) -> None:
+    """Distil and approve: a distillation is humus produced only once a
+    person has approved it, and the lag sensor counts nothing before that."""
+    res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=note_id)  # type: ignore[arg-type]
+    await review_svc.approve_node(  # type: ignore[arg-type]
+        s, org_id=org, actor_id=user, note_id=res.distilled_note_id
+    )
+
+
 async def test_fungal_lag_measures_archive_to_distillation(_wire_llm: None) -> None:
     """WS-C6: fungal_lag is the real median seconds from a source's first
     archiving to its first distillation -- not the old hardcoded 'blocked'
@@ -367,7 +377,7 @@ async def test_fungal_lag_measures_archive_to_distillation(_wire_llm: None) -> N
             )
         )
         await s.flush()
-        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await _distill_approved(s, org, user, source.id)
         health = await health_svc.compute_health(s, org_id=org)
     assert health.fungal_lag.reason is None
     assert health.fungal_lag.value is not None
@@ -390,7 +400,7 @@ async def test_fungal_lag_reason_when_distillation_from_live_source(_wire_llm: N
             title="live",
             text="a non-trivial body the LLM will distill on the first pass",
         )
-        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await _distill_approved(s, org, user, source.id)
         health = await health_svc.compute_health(s, org_id=org)
     assert health.fungal_lag.value is None
     assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
@@ -423,7 +433,7 @@ async def test_fungal_lag_ignores_a_distillation_awaiting_review(_wire_llm: None
             )
         )
         await s.flush()
-        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await _distill_approved(s, org, user, source.id)
         assert (await health_svc.compute_health(s, org_id=org)).fungal_lag.value is not None
         await s.execute(
             update(Note)
@@ -464,7 +474,7 @@ async def test_fungal_lag_when_the_source_is_binned_reports_no_archived_source(
             )
         )
         await s.flush()
-        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await _distill_approved(s, org, user, source.id)
         assert (await health_svc.compute_health(s, org_id=org)).fungal_lag.value is not None
         await _trash(s, org, user, source.id)
         health = await health_svc.compute_health(s, org_id=org)

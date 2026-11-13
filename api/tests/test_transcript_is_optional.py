@@ -82,3 +82,19 @@ async def test_merge_offers_the_same_choice() -> None:
         ).json()
         assert merged["transcript"] is None
         assert len(merged["parts"]) == 2
+
+
+async def test_the_rest_read_answers_the_outline_on_request() -> None:
+    """The route gained the MCP tool's outline when both became one
+    operation (ADR-0068); the default answer is unchanged."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        nid = await _note_with_body(c, h)
+        full = (await c.get(f"/notes/{nid}", headers=h)).json()
+        assert full["parts"] and full["outline"] is None and full["transcript"] == _BODY
+        short = (await c.get(f"/notes/{nid}?include_part_bodies=false", headers=h)).json()
+        assert short["parts"] == [] and short["transcript"] is None
+        assert [p["body"] for p in short["outline"]] == [None]
+        assert short["outline"][0]["head"] == "Titolo"
+        assert short["outline"][0]["bytes"] == len(_BODY.encode())

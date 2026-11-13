@@ -74,7 +74,6 @@ from mycelium_core.services import attachments as attachments_svc
 from mycelium_core.services import billing as billing_svc
 from mycelium_core.services import budgets as budgets_svc
 from mycelium_core.services import calendar as calendars
-from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import coordination as coordination_svc
 from mycelium_core.services import decomposition as decomposition_svc
 from mycelium_core.services import dependencies, scheduler, tasks, taxonomy, text_patch
@@ -82,15 +81,11 @@ from mycelium_core.services import dispatch_loop as dispatch_loop_svc
 from mycelium_core.services import email as email_svc
 from mycelium_core.services import embedding_migration as embedding_svc
 from mycelium_core.services import entity_revisions as revisions_svc
-from mycelium_core.services import event_bus as event_bus_svc
 from mycelium_core.services import executors as executors_svc
 from mycelium_core.services import focus_context as focus_context_svc
-from mycelium_core.services import garden_classify as garden_classify_svc
-from mycelium_core.services import garden_review as garden_review_svc
 from mycelium_core.services import invoice as invoice_svc
 from mycelium_core.services import invoice_format as invoice_format_svc
 from mycelium_core.services import kg as kg_svc
-from mycelium_core.services import link_prediction as link_prediction_svc
 from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
@@ -5460,49 +5455,6 @@ async def graph_focus_context(
 
 
 @mcp.tool()
-async def graph_walk(
-    token: str,
-    org_id: str,
-    seed: str,
-    mode: str = "focused",
-    budget: int = 24,
-) -> list[dict[str, Any]]:
-    """Traverse the note graph ("micelio") rooted at ``seed`` and return the
-    walked notes as a reading set (WS-B2).
-
-    ``mode='focused'`` returns the seed's personalised-PageRank neighbourhood
-    ordered by induced mass (its "neighbourhood of attention").
-    ``mode='free_wander'`` runs a Node2Vec biased random walk that drifts
-    across the graph for cross-domain serendipity (humus-biased, ADR-0034).
-    ``mode='bounded'`` runs the best-first thresholded traversal (Fase 1,
-    task 561c6aca): same reading-set shape, cost independent of the org's
-    graph size -- ``step`` is the hop distance, ``weight`` the best path
-    weight. Each step carries ``title`` + ``snippet`` + ``provenance`` so you
-    can navigate multi-hop WITHOUT a lookup per node. For a QUERY-aware
-    reading set use ``graph_focus_context`` instead. Read-only; no LLM."""
-    async with _tenant(token, org_id) as (s, org, user):
-        steps = await focus_context_svc.walk_context(
-            s,
-            org_id=org,
-            actor_id=user,
-            seed_id=uuid.UUID(seed),
-            mode=mode,
-            budget=budget,
-        )
-        return [
-            {
-                "note_id": str(w.note_id),
-                "step": w.step,
-                "weight": w.weight,
-                "title": w.title,
-                "snippet": w.snippet,
-                "provenance": w.provenance,
-            }
-            for w in steps
-        ]
-
-
-@mcp.tool()
 async def kg_extract(token: str, org_id: str, note_id: str) -> dict[str, Any]:
     """Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts)
     from a note's body using the org's metered LLM (ADR-0044). Entities are
@@ -6305,158 +6257,6 @@ async def create_note(
 
 
 @mcp.tool()
-async def list_notes(
-    token: str,
-    org_id: str,
-    project_id: str | None = None,
-    tag_id: str | None = None,
-    task_id: str | None = None,
-    link_kinds: list[str] | None = None,
-    maturity: str | None = None,
-    maturities: list[str] | None = None,
-    q: str | None = None,
-    include_archived: bool = False,
-    include_deleted: bool = False,
-    include_transcript: bool = False,
-    fields: list[str] | None = None,
-    limit: int = 50,
-    cursor: str | None = None,
-    created_after: str | None = None,
-    created_before: str | None = None,
-    updated_since: str | None = None,
-    order_by: str | None = None,
-    order_desc: bool = False,
-) -> dict[str, Any]:
-    """List notes (newest first); for the @note picker. Returns the paginated
-    envelope ``{items, next_cursor, truncated}`` (pass ``next_cursor`` back as
-    ``cursor`` for the next disjoint page; keyset on the default order, so no
-    dupes/gaps). Each row carries
-    maturity / review_state / summary / is_archived / created_at /
-    updated_at, so a note's lifecycle is readable without a second
-    ``get_note``. ``task_id`` returns the notes linked to that task
-    (optionally narrowed by ``link_kinds``) ENRICHED in one call, replacing
-    list_note_task_links + per-note get_note. ``maturity`` / ``maturities``
-    filter by lifecycle stage (e.g. list the 'dormant' notes). Optional
-    project/tag focus and archive/trash views. ``q`` is a case-insensitive
-    free-text filter applied server-side over the WHOLE corpus (note title,
-    part bodies, part titles and tag names, ANDed) BEFORE ``limit``, so it
-    is a reliable lexical find rather than a re-rank of the newest page; for
-    semantic or cross-kind retrieval use ``search``. Date filters (ISO; a
-    bare date is your-timezone day): ``created_after`` / ``created_before`` /
-    ``updated_since``. ``order_by`` one of created_at|updated_at|title
-    (+ ``order_desc``); default newest-first. ``include_transcript``
-    opt-in (default False) keeps picker payloads small; ``fields``
-    keeps only the named columns (``id`` always kept); ``limit`` caps
-    rows at the DB level (default 50; raise it to page further)."""
-    want_maturities = [m for m in ([maturity] if maturity else []) + (maturities or [])]
-    after: tuple[dt.datetime, uuid.UUID] | None = None
-    if cursor:
-        cc, ci = _decode_cursor(cursor)
-        after = (dt.datetime.fromisoformat(cc), uuid.UUID(ci))
-        order_by, order_desc = None, False
-    async with _tenant(token, org_id) as (s, org, user):
-        note_ids: list[uuid.UUID] | None = None
-        if task_id is not None:
-            note_ids = await note_links_svc.notes_for_task(
-                s,
-                org_id=org,
-                task_id=uuid.UUID(task_id),
-                kinds=tuple(link_kinds) if link_kinds else None,
-                # The trash view of a task's notes stays reachable: the id
-                # source applies the effective perimeter by default, so the
-                # opt-in has to travel with the call (task 854f1c28).
-                include_deleted=include_deleted,
-            )
-            if not note_ids:
-                return {"items": [], "next_cursor": None, "truncated": False}
-        tz = (
-            await _caller_tz(s, user)
-            if any((created_after, created_before, updated_since))
-            else dt.UTC
-        )
-        rows = await notes_svc.list_notes(
-            s,
-            org_id=org,
-            project_id=uuid.UUID(project_id) if project_id else None,
-            tag_id=uuid.UUID(tag_id) if tag_id else None,
-            note_ids=note_ids,
-            maturities=want_maturities or None,
-            q=q,
-            include_archived=include_archived,
-            include_deleted=include_deleted,
-            limit=(limit + 1) if limit > 0 else limit,
-            after=after,
-            created_from=_to_instant(created_after, tz) if created_after else None,
-            created_to=_to_instant(created_before, tz) if created_before else None,
-            updated_since=_to_instant(updated_since, tz) if updated_since else None,
-            order_by=order_by,
-            order_desc=order_desc,
-        )
-        items, next_cursor, truncated = _page_envelope(
-            rows, limit, key=lambda n: [n.created_at, n.id]
-        )
-        if order_by is not None:
-            next_cursor = None
-        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in items])
-        pid_map = await note_links_svc.primary_task_ids_for_notes(
-            s, org_id=org, note_ids=[n.id for n in items]
-        )
-        # Phase 6 final: bodies come from note_part(ord=0)+; batched
-        # so the picker stays one round-trip even when
-        # include_transcript=True.
-        bodies = (
-            await notes_svc._bodies_by_note(s, note_ids=[n.id for n in items])
-            if include_transcript
-            else {}
-        )
-        return {
-            "items": [
-                _project_fields(
-                    _note(
-                        n,
-                        tagmap.get(n.id, []),
-                        primary_task_id=pid_map.get(n.id),
-                        include_transcript=include_transcript,
-                        transcript=bodies.get(n.id),
-                    ),
-                    fields,
-                )
-                for n in items
-            ],
-            "next_cursor": next_cursor,
-            "truncated": truncated,
-        }
-
-
-@mcp.tool()
-async def get_note(
-    token: str, org_id: str, note_id: str, include_part_bodies: bool = True
-) -> dict[str, Any]:
-    """Read one note. Includes the ordered ``parts[]`` (markdown blocks)
-    so an LLM gets the structured body in one round-trip; when the note
-    has zero parts the field is an empty list. The ``transcript`` field
-    is a convenience aggregate derived by joining the part bodies (it is
-    not stored separately, so it always mirrors ``parts[]``). Set
-    ``include_part_bodies=False`` to read a LARGE note as an outline
-    (per-part id/ord/title/byte-length/head, no bodies and no derived
-    transcript), then fetch only the parts you need with
-    ``get_note_part`` -- this avoids dumping a multi-hundred-KB note into
-    context."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
-        tagmap = await notes_svc.tags_by_note(s, note_ids=[note.id])
-        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=note.id)
-        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=note.id)
-        return _note(
-            note,
-            tagmap.get(note.id, []),
-            primary_task_id=pid,
-            parts=parts,
-            part_bodies=include_part_bodies,
-        )
-
-
-@mcp.tool()
 async def add_note_part(
     token: str,
     org_id: str,
@@ -6669,25 +6469,6 @@ async def delete_note_part(token: str, org_id: str, part_id: str) -> dict[str, A
             part_id=uuid.UUID(part_id),
         )
         return {"part_id": part_id, "deleted": True}
-
-
-@mcp.tool()
-async def list_note_parts(
-    token: str,
-    org_id: str,
-    note_id: str,
-    include_body: bool = False,
-) -> list[dict[str, Any]]:
-    """Outline (table of contents) of a note's markdown parts in ``ord``
-    order, to navigate a LARGE note without pulling every body into
-    context. ``include_body=False`` (default) returns id / ord / title /
-    lang / byte-length / first-line head per part; set True for the full
-    bodies. Pair with ``get_note_part`` for random access to one part."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=uuid.UUID(note_id))
-        if include_body:
-            return [_note_part(p) for p in parts]
-        return [_note_part_outline(p) for p in parts]
 
 
 @mcp.tool()
@@ -7161,10 +6942,12 @@ async def distill_note(
     origin_model_id: str | None = None,
 ) -> dict[str, Any]:
     """Fungal decomposition (ADR-0034): distil a note's body into a
-    reusable atom note and flag both source and distillation as humus so
-    the LLM walk surfaces them as fertiliser. Idempotent: an
-    already-distilled note returns its existing distillation
-    (``created`` false). Member role.
+    reusable atom note. The atom is born PROPOSED: it is invisible to
+    search and to the walk, and the source note is left as it is, until the
+    person approves it in the review inbox (``garden_review_pending``).
+    Approving is theirs alone; approval is also when the source becomes
+    humus. Idempotent: an already-distilled note returns its existing
+    distillation (``created`` false). Member role.
 
     By default Mycelium runs the distillation on the org's own metered LLM.
     To write the atom with YOUR OWN strong model instead, pass
@@ -7187,6 +6970,7 @@ async def distill_note(
             "distilled_note_id": str(res.distilled_note_id),
             "model_id": res.model_id,
             "created": res.created,
+            "review_state": res.review_state,
         }
 
 
@@ -7198,9 +6982,9 @@ async def extract_cluster_pattern(
     over a set of ARCHIVED source notes (a Leiden cluster, a cross-cluster
     pick, a project window -- you choose the grouping). Reads the sources,
     asks the per-org metered LLM for the through-lines, writes a new note
-    linked back to each source. A proposal, never a mutation of live notes;
-    needs >=2 archived sources. Idempotent on the source set (``created``
-    false on a re-run)."""
+    linked back to each source. Born PROPOSED, invisible until the person
+    approves it, and never a mutation of the sources; needs >=2 archived
+    sources. Idempotent on the source set (``created`` false on a re-run)."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await decomposition_svc.extract_cluster_pattern(
             s,
@@ -7219,8 +7003,9 @@ async def extract_cluster_pattern(
 async def synthesize_season(token: str, org_id: str, year: int, quarter: int) -> dict[str, Any]:
     """Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note
     for one quarter -- "what I cultivated this season" -- over the notes
-    archived in it. ``quarter`` is 1-4. A proposal, never a mutation of live
-    notes; metered LLM call inside. Idempotent per (year, quarter)."""
+    archived in it. ``quarter`` is 1-4. Born PROPOSED, invisible until the
+    person approves it, and never a mutation of the sources; metered LLM call
+    inside. Idempotent per (year, quarter)."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await decomposition_svc.synthesize_season(
             s,
@@ -7233,316 +7018,6 @@ async def synthesize_season(token: str, org_id: str, year: int, quarter: int) ->
             "season_note_id": str(res.note_id),
             "model_id": res.model_id,
             "created": res.created,
-        }
-
-
-@mcp.tool()
-async def list_distillation_candidates(
-    token: str, org_id: str, kind: str = "all", limit: int = 50
-) -> dict[str, Any]:
-    """Are there distillations to do? (task 4995a32f). Distillation is graph
-    MAINTENANCE, so this surfaces two families of candidate, read-only and
-    with no LLM call:
-
-    - NODE candidates (compact inert material into a denser atom): ``distill``
-      (one inert note), ``pattern`` (a Leiden cluster of >=2 archived notes),
-      ``season`` (a quarter's archived notes). Act with ``distill_note`` /
-      ``extract_cluster_pattern`` / ``synthesize_season`` -- pass your OWN
-      strong model's output via ``distilled_text`` (no org credits spent), or
-      omit it to use the org's hosted provider (metered).
-    - EDGE candidates (curate the link graph): ``link_add`` (a strong
-      tag/co-activity pair with no manual link -> create a ``related`` link),
-      ``link_prune`` (a ``related`` link whose basis has decayed),
-      ``link_direct`` (search traffic keeps traversing the pair in ONE
-      direction -> propose promoting to a directed ``hypha_of``, entry
-      note as parent; conservative heuristic, never auto-applied).
-
-    ``kind`` filters to one family (all|distill|pattern|season|link_add|
-    link_prune|link_direct). After acting, autonomously-produced atoms go through
-    ``garden_review_pending`` -> ``garden_review_approve``. Member role;
-    RLS-scoped."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        return await candidates_svc.list_distillation_candidates(
-            s, org_id=org, kind=kind, limit=limit
-        )
-
-
-@mcp.tool()
-async def list_events(
-    token: str,
-    org_id: str,
-    since: str | None = None,
-    limit: int = 100,
-) -> dict[str, Any]:
-    """Read the workspace coordination event bus (ADR-0036): the
-    read / propose / commit / reject events humans and other agents emit as
-    they act on the graph, newest first, RLS-scoped to your workspace. This is
-    how an MCP agent OBSERVES what its collaborators are doing; there is no
-    streaming subscription, you poll this.
-
-    ``since`` is an ISO-8601 timestamp cursor -- events at or after it are
-    returned (omit for the most recent ``limit``). Delivery is at-least-once:
-    the boundary event is re-returned, so dedupe by ``id``. To follow the
-    stream, remember the largest ``ts`` you saw and pass it back as ``since``
-    next time; if a poll returns exactly ``limit`` rows there may be more, so
-    poll again immediately. ``limit`` is 1..500 (default 100). A pure read."""
-    n = max(1, min(int(limit), 500))
-    since_dt: dt.datetime | None = None
-    if since:
-        since_dt = dt.datetime.fromisoformat(since)
-        if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=dt.UTC)
-    async with _tenant(token, org_id) as (s, org, _user):
-        rows = await event_bus_svc.recent_events(s, org_id=org, limit=n, since=since_dt)
-        return {
-            "events": [
-                {
-                    "id": str(e.id),
-                    "actor_id": str(e.actor_id) if e.actor_id else None,
-                    "actor_kind": e.actor_kind,
-                    "kind": e.kind,
-                    "node_kind": e.node_kind,
-                    "node_id": str(e.node_id) if e.node_id else None,
-                    "parent_event_id": (str(e.parent_event_id) if e.parent_event_id else None),
-                    "payload": e.payload,
-                    "ts": e.ts.isoformat(),
-                    "applied_at": e.applied_at.isoformat() if e.applied_at else None,
-                    "applied_state": e.applied_state,
-                }
-                for e in rows
-            ]
-        }
-
-
-@mcp.tool()
-async def garden_review_pending(token: str, org_id: str, limit: int = 50) -> dict[str, Any]:
-    """Review inbox (ADR-0043): the workspace's AUTONOMOUSLY-generated humus
-    notes awaiting human approval (``review_state='proposed'``), newest first.
-    Each row carries ``origin_model_id`` -- the model that produced the summary
-    (a local 3B != GPT != Scaleway) -- so you can see WHICH model wrote it
-    before deciding. A pure read. Member role; RLS-scoped."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        pending = await garden_review_svc.list_pending(s, org_id=org, limit=limit)
-        return {
-            "pending": [
-                {
-                    "note_id": str(p.note_id),
-                    "title": p.title,
-                    "humus_kind": p.humus_kind,
-                    "origin_model_id": p.origin_model_id,
-                    "preview": p.preview,
-                    "created_at": p.created_at.isoformat(),
-                    "version": p.version,
-                }
-                for p in pending
-            ]
-        }
-
-
-@mcp.tool()
-async def garden_review_rejected(token: str, org_id: str, limit: int = 50) -> dict[str, Any]:
-    """Review BIN (ADR-0043): the proposals a human DECLINED, most recently
-    declined first. A reject soft-deletes the node and leaves it
-    ``proposed``, a pair of states no other listing shows -- ``list_notes``
-    hides proposals even in the trash view -- so this is the only way to
-    find one again. Undo it with ``restore_note``, echoing ``version``.
-    A pure read. Member role; RLS-scoped."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        rejected = await garden_review_svc.list_rejected(s, org_id=org, limit=limit)
-        return {
-            "rejected": [
-                {
-                    "note_id": str(r.note_id),
-                    "title": r.title,
-                    "humus_kind": r.humus_kind,
-                    "origin_model_id": r.origin_model_id,
-                    "preview": r.preview,
-                    "created_at": r.created_at.isoformat(),
-                    "rejected_at": r.rejected_at.isoformat(),
-                    "version": r.version,
-                }
-                for r in rejected
-            ]
-        }
-
-
-@mcp.tool()
-async def garden_review_approve(
-    token: str, org_id: str, note_id: str, expected_version: int | None = None
-) -> dict[str, Any]:
-    """Approve a proposed humus note (ADR-0043): it becomes effective and
-    re-enters the retrieval walk / search / listings. Audited; emits a bus
-    ``commit`` event. Idempotent (a re-approve is a no-op). Member role.
-    Pass ``expected_version`` (served by ``garden_review_pending``) to fail
-    with ``stale_version`` if the note changed after you read it -- the
-    TOCTOU guard (task 2e36e732); omit it for the legacy unguarded path."""
-    async with _tenant(token, org_id) as (s, org, user):
-        note = await garden_review_svc.approve_node(
-            s,
-            org_id=org,
-            actor_id=user,
-            note_id=uuid.UUID(note_id),
-            expected_version=expected_version,
-        )
-        return {
-            "note_id": str(note.id),
-            "review_state": note.review_state,
-            "origin_model_id": note.origin_model_id,
-            "version": note.version,
-        }
-
-
-@mcp.tool()
-async def garden_review_reject(
-    token: str,
-    org_id: str,
-    note_id: str,
-    reason: str | None = None,
-    expected_version: int | None = None,
-) -> dict[str, Any]:
-    """Reject a proposed humus note (ADR-0043): soft-delete it so a weak
-    summary never pollutes the corpus (reversible via the trash/restore path).
-    Audited; emits a bus ``reject`` event carrying ``origin_model_id``.
-    Idempotent (a re-reject is a no-op). Member role. ``expected_version``
-    mirrors ``garden_review_approve`` (TOCTOU guard, task 2e36e732)."""
-    async with _tenant(token, org_id) as (s, org, user):
-        note = await garden_review_svc.reject_node(
-            s,
-            org_id=org,
-            actor_id=user,
-            note_id=uuid.UUID(note_id),
-            reason=reason,
-            expected_version=expected_version,
-        )
-        return {
-            "note_id": str(note.id),
-            "rejected": note.deleted_at is not None,
-            "origin_model_id": note.origin_model_id,
-            "version": note.version,
-        }
-
-
-@mcp.tool()
-async def note_restore_source(
-    token: str, org_id: str, note_id: str, reason: str | None = None
-) -> dict[str, Any]:
-    """Fase P (task 561c6aca), "ripristina originale": given a humus ATOM,
-    un-archive its ``hypha_of`` source notes (the originals are preserved,
-    never mutated) and retire the atom (an approved atom is demoted then
-    rejected; nothing is hard-deleted -- the provenance chain stays
-    queryable). Restoring is choosing the layer under the lens. Idempotent.
-    Member role."""
-    async with _tenant(token, org_id) as (s, org, user):
-        res = await garden_review_svc.restore_source(
-            s, org_id=org, actor_id=user, atom_note_id=uuid.UUID(note_id), reason=reason
-        )
-        return {
-            "atom_note_id": str(res.atom_note_id),
-            "source_ids": [str(x) for x in res.source_ids],
-            "restored_source_ids": [str(x) for x in res.restored_source_ids],
-            "atom_retired": res.atom_retired,
-        }
-
-
-@mcp.tool()
-async def garden_classify(
-    token: str, org_id: str, node_id: str, kinds: str | None = None
-) -> dict[str, Any]:
-    """Proposal engine (ADR-0032): for a note, propose {tags, links,
-    maturity, cluster}, each with a confidence + rationale, plus
-    ``signals_used`` for transparency. **Read-only** — never mutates; act
-    on a suggestion with ``garden_apply``. ``kinds`` is an optional CSV
-    subset of tags,links,maturity,cluster (default all; unknown tokens
-    dropped). Member-level, RLS-scoped."""
-    wanted = None
-    if kinds:
-        requested = {k.strip() for k in kinds.split(",") if k.strip()}
-        wanted = (
-            frozenset(requested & garden_classify_svc.ALL_KINDS) or garden_classify_svc.ALL_KINDS
-        )
-    async with _tenant(token, org_id) as (s, org, _user):
-        res = await garden_classify_svc.classify_node(
-            s, org_id=org, node_id=uuid.UUID(node_id), kinds=wanted
-        )
-        return {
-            "node_id": str(res.node_id),
-            "node_kind": res.node_kind,
-            "tags": [
-                {"tag_id": str(t.tag_id), "confidence": t.confidence, "rationale": t.rationale}
-                for t in res.tags
-            ],
-            "links": [
-                {
-                    "target_id": str(lc.target_id),
-                    "link_kind": lc.link_kind,
-                    "confidence": lc.confidence,
-                    "rationale": lc.rationale,
-                }
-                for lc in res.links
-            ],
-            "maturity": (
-                {
-                    "value": res.maturity.value,
-                    "confidence": res.maturity.confidence,
-                    "rationale": res.maturity.rationale,
-                    "auto_apply": res.maturity.auto_apply,
-                }
-                if res.maturity is not None
-                else None
-            ),
-            "cluster": (
-                {
-                    "leiden_id": res.cluster.leiden_id,
-                    "modularity": res.cluster.modularity,
-                    "confidence": res.cluster.confidence,
-                }
-                if res.cluster is not None
-                else None
-            ),
-            "signals_used": res.signals_used,
-            "model_version": res.model_version,
-        }
-
-
-@mcp.tool()
-async def garden_apply(
-    token: str,
-    org_id: str,
-    node_id: str,
-    suggestion_type: str,
-    suggestion_value: dict[str, Any],
-    action: str,
-    override_value: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
-    ADR-0037). ``accept``/``override`` mutate via the existing idempotent
-    services; ``reject``/``ignore`` only record the decision. Always
-    writes a ``classification_feedback`` event. Member role. ``action`` is
-    one of accept|reject|override|ignore (``auto`` is worker-only and is
-    rejected here so a client cannot forge a system promotion)."""
-    if action not in ("accept", "reject", "override", "ignore"):
-        raise DomainError(
-            MessageCode.GARDEN_ACTION_INVALID,
-            action=action,
-            valid="accept, ignore, override, reject",
-        )
-    async with _tenant(token, org_id) as (s, org, user):
-        feedback = await garden_classify_svc.apply_suggestion(
-            s,
-            org_id=org,
-            actor_id=user,
-            node_id=uuid.UUID(node_id),
-            suggestion_type=suggestion_type,
-            suggestion_value=suggestion_value,
-            action=action,
-            override_value=override_value,
-        )
-        return {
-            "feedback_id": str(feedback.id),
-            "node_id": node_id,
-            "suggestion_type": suggestion_type,
-            "action": action,
-            "applied": action in ("accept", "override"),
         }
 
 
@@ -9883,33 +9358,6 @@ async def list_note_task_links(
 
 
 @mcp.tool()
-async def suggest_note_links(
-    token: str, org_id: str, note_id: str, k: int = 5
-) -> list[dict[str, Any]]:
-    """Suggest the top-``k`` candidate notes to link from this note
-    (Adamic-Adar over shared tags + personalised-PageRank co-visit, minus
-    already-linked pairs; ADR-0029/0033 garden link prediction). Returns
-    ``{note_id, title, score, signals, rationale}`` ranked; the agent or
-    user confirms a link via ``link_notes`` -- nothing is auto-created.
-    Empty when the workspace has <2 notes or there is no signal."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        suggestions = await link_prediction_svc.suggest_links_for_note(
-            s, org_id=org, note_id=uuid.UUID(note_id), k=k
-        )
-        titles = await _note_titles(s, [sg.note_id for sg in suggestions])
-        return [
-            {
-                "note_id": str(sg.note_id),
-                "title": titles.get(sg.note_id),
-                "score": round(sg.score, 4),
-                "signals": sg.signals,
-                "rationale": sg.rationale,
-            }
-            for sg in suggestions
-        ]
-
-
-@mcp.tool()
 async def resolve_prefix(
     token: str,
     org_id: str,
@@ -10433,3 +9881,20 @@ async def restore_note_revision(
             fields=fields,
         )
         return {"note_id": note_id, "version": version}
+
+
+# The garden tools are generated from the operation registry (ADR-0068).
+# Imported last: the bindings need this module's registry and tenant opener.
+from mycelium_mcp import tools_garden, tools_notes  # noqa: E402,F401
+
+# Python callers (tests, eval scenarios) import tools from this module; the
+# generated ones stay importable under the names they always had. Resolved
+# on first access rather than here, because a caller that imports a tool
+# module first reaches this line while that module is still half-built.
+_GENERATED_TOOLS = frozenset({"get_note", "list_note_parts", "list_notes"})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _GENERATED_TOOLS:
+        return tools_notes.TOOLS[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

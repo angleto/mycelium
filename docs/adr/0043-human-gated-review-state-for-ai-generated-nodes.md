@@ -234,3 +234,59 @@ mycelium every time the forester threw something away. `fungal_lag` counted
 un-approved distillations as humus produced. Persisted `garden_health_daily`
 values are not back-filled: the stored series steps once at the first tick
 after the change and is continuous after it.
+
+## Amendment (2026-11-12): every synthesis is reviewed, by a person
+
+Angelo's rule after judging summaries written by the deployed models: nothing
+a model writes about his notes takes effect, and nothing about the notes it
+read changes, until he has approved it, or until an approval he has
+delegated to an adversarial verification (a later step, not built yet).
+
+- **Born proposed, always.** `distill_note`, `extract_cluster_pattern` and
+  `synthesize_season` lost their `autonomous` parameter: every synthesis is
+  born `review_state='proposed'`, whoever asked and whichever model wrote it.
+  Asking for a summary is not vouching for it. `garden_review_gate_enabled`
+  no longer affects humus (it still gates knowledge-graph extraction, which
+  this amendment does not touch).
+- **The source becomes humus at approval.** The distiller used to flip the
+  source's `humus_flag` when it CREATED the atom, while the atom was still a
+  hidden proposal, and nothing undid it on rejection: a rejected summary left
+  its source demoted behind an atom nobody could see. Now `approve_node`
+  marks the source, if it is still inert, under the version it read;
+  `reject_node` (and so `restore_source`) clears it unless another effective
+  distillation of the same source still justifies it. Each change leaves an
+  audit row (`garden_review:source_humus`) and a feedback row carrying the
+  reviewer's verdict (`humus_on_review_v1`). Patterns and seasons never mark
+  their sources.
+- **Approving and rejecting are a person's act.** MCP
+  `garden_review_approve|reject` and REST `POST /garden/review/approve|reject`
+  are human-only: a credential carrying a scope list cannot call them, so an
+  assistant cannot approve the summary it asked for. A credential with no
+  scope list still can, the same stated limit every human-only route has.
+- **An agent may carry out a review the person wrote down.** MCP
+  `garden_review_approve_on_decision` and `garden_review_reject_on_decision`
+  (scope `notes:write`) apply the ADR-0066 pattern: the agent cites a comment
+  and the server verifies it before anything moves. A proposed node cannot be
+  commented on, since a comment quotes the text it hangs on and that text must
+  not leave the review perimeter, so the comment lives on one of the node's
+  SOURCES (a live `hypha_of` parent). It must have been written by a person
+  with their own credential (the ADR-0066 writer checks, shared code), after
+  the node, and name the node on an `approve` or `reject` line, not on the
+  opposite line too, with a name no other node generated from that source
+  matches. The audit row and the bus event record the person, the executor
+  and the comment. A comment is not a write to the note it sits on, so it does
+  not restart the source's liveness clock. Both surfaces expose it, as one
+  registry operation (ADR-0068): the MCP tools
+  `garden_review_approve_on_decision` / `garden_review_reject_on_decision`
+  and `POST /garden/review/approve-on-decision` / `reject-on-decision`, at
+  `notes:write`, the executor resolved from the calling agent token either
+  way.
+- **A rejection reopens the question.** A distillation in the bin no longer
+  satisfies the idempotency check, and the distill response carries
+  `review_state` so a client sends the person to the review inbox instead of
+  opening a note ordinary reads do not serve.
+
+Existing rows are not rewritten. A source the old code marked while its atom
+is still proposed keeps the mark until the atom is approved (the mark stays)
+or rejected (the mark comes off).
+

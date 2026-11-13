@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from mycelium_api import correlation
+from mycelium_api import correlation, route_scopes
 from mycelium_api.deps import enforce_route_scope
 from mycelium_api.routers import (
     activity,
@@ -436,6 +436,9 @@ def create_app() -> FastAPI:
     app.include_router(telegram.router)
     app.include_router(buildinfo.router)
     app.include_router(export.router)
+    # Routes bound to a registry operation take their scope from it
+    # (ADR-0068); written now that every route is mounted at its final path.
+    route_scopes.bind_operations(app)
 
     # MCP streamable-http transport — same process, same DB, same
     # ingress. Authenticated by Authorization: Bearer mycelium_at_…; the

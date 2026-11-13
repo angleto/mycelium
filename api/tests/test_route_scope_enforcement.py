@@ -432,3 +432,14 @@ async def test_link_route_enforces_scope_per_kind() -> None:
         )
         assert r.status_code == 403, r.text
         assert r.json()["code"] == "agent.scope_denied"
+
+
+def test_reviewing_generated_text_is_human_only() -> None:
+    """The REST twin of the MCP fence on ``garden_review_approve`` and
+    ``garden_review_reject``: an agent token over REST must not approve a
+    summary either, or the fence would only move the door."""
+    for method, path in (
+        ("POST", "/garden/review/approve"),
+        ("POST", "/garden/review/reject"),
+    ):
+        assert ROUTE_SCOPES.get((method, path)) is HUMAN_ONLY, f"{method} {path} must be HUMAN_ONLY"

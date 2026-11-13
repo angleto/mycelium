@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import uuid
+from collections.abc import Callable
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
@@ -1405,16 +1406,27 @@ async def accept_suggestion(
 # made by the conversational assistant's tool loop, not typed by the person.
 _PERSON_CREDENTIAL_KIND = "human_api"
 
-# A line of the decision comment that accepts: the word, then the ids.
-_ACCEPT_LINE = re.compile(r"^\s*accept\b[\s:]*(?P<ids>.*)$", re.IGNORECASE | re.MULTILINE)
+# A line of a decision comment: the verb, then the ids it applies to.
 _ID_TOKEN = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,35}")
 _MIN_ID_PREFIX = 8
 
 
-def _named_prefixes(body: str) -> list[str]:
-    """The suggestion ids (full or an 8+ hex prefix) a comment accepts."""
+def _verb_line(verb: str) -> re.Pattern[str]:
+    return re.compile(rf"^\s*{verb}\b[\s:]*(?P<ids>.*)$", re.IGNORECASE | re.MULTILINE)
+
+
+_VERB_LINES: dict[str, re.Pattern[str]] = {
+    v: _verb_line(v) for v in ("accept", "approve", "reject")
+}
+
+
+def named_prefixes(body: str, verb: str = "accept") -> list[str]:
+    """The ids (full or an 8+ hex prefix) a comment names on a ``verb`` line.
+
+    The grammar is strict on purpose: the verb opens the line, so "do not
+    accept X" names nothing."""
     out: list[str] = []
-    for line in _ACCEPT_LINE.finditer(body):
+    for line in _VERB_LINES[verb].finditer(body):
         for tok in _ID_TOKEN.findall(line.group("ids")):
             hexed = tok.replace("-", "").lower()
             if len(hexed) >= _MIN_ID_PREFIX:
@@ -1422,30 +1434,36 @@ def _named_prefixes(body: str) -> list[str]:
     return out
 
 
-def _same_document_clause(ann: Annotation) -> ColumnElement[bool]:
-    """Annotations on the same document as ``ann``. A note counts as one
-    document across its parts, so a person can decide several suggestions on
-    one note in a single comment; a task description is its own document."""
-    if ann.doc_kind == "task_description":
-        return and_(Annotation.doc_kind == "task_description", Annotation.task_id == ann.task_id)
-    same_note_parts = select(NotePart.id).where(
-        NotePart.note_id
-        == select(NotePart.note_id).where(NotePart.id == ann.note_part_id).scalar_subquery()
-    )
-    return and_(Annotation.doc_kind == "note_part", Annotation.note_part_id.in_(same_note_parts))
-
-
-async def _verify_decision(
+async def load_decision_comment(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    ann: Annotation,
-    decision_comment_id: uuid.UUID,
-) -> uuid.UUID:
-    """Check that ``decision_comment_id`` is a person's decision to accept
-    ``ann`` and return the deciding person's identity id.
+    comment_id: uuid.UUID,
+    refuse: Callable[[str], DomainError],
+) -> Annotation:
+    """The live comment a decision is cited by, or ``refuse`` naming why not."""
+    dec = (
+        await session.execute(
+            select(Annotation).where(Annotation.id == comment_id, Annotation.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if dec is None or dec.kind != "comment":
+        raise refuse("not_a_comment")
+    if dec.deleted_at is not None:
+        raise refuse("deleted")
+    return dec
 
-    Every clause answers one way an agent could otherwise approve itself:
+
+async def person_who_wrote(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    dec: Annotation,
+    refuse: Callable[[str], DomainError],
+) -> uuid.UUID:
+    """The identity of the person who wrote ``dec``, with their own hand.
+
+    The checks every decision shares, whatever it decides (ADR-0066):
 
     - the author identity must be a person, so an agent's own comment is not
       a decision;
@@ -1456,39 +1474,7 @@ async def _verify_decision(
       the text could be the agent's while the author is the person. The
       audit log is append-only and never pruned, so it is the record of who
       wrote what; a comment with no creation row there is refused;
-    - that person must still be a member who could accept in the UI;
-    - the comment sits on the same document and was written after the
-      suggestion, so it cannot predate what it decides;
-    - it names the suggestion on an ``accept`` line, and the name matches no
-      other suggestion on the document, so a decision about one suggestion
-      cannot be spent on another.
-
-    A ``reason`` names the clause that failed; nothing is changed."""
-
-    def refuse(reason: str) -> DomainError:
-        return DomainError(MessageCode.SUGGESTION_DECISION_INVALID, reason=reason)
-
-    dec = (
-        await session.execute(
-            select(Annotation).where(
-                Annotation.id == decision_comment_id, Annotation.org_id == org_id
-            )
-        )
-    ).scalar_one_or_none()
-    if dec is None or dec.kind != "comment":
-        raise refuse("not_a_comment")
-    if dec.deleted_at is not None:
-        raise refuse("deleted")
-    on_document = (
-        await session.execute(
-            select(Annotation.id).where(Annotation.id == dec.id, _same_document_clause(ann))
-        )
-    ).scalar_one_or_none()
-    if on_document is None:
-        raise refuse("other_document")
-    if dec.created_at <= ann.created_at:
-        raise refuse("before_suggestion")
-
+    - that person must still be a member."""
     author = (
         await session.execute(select(Identity).where(Identity.id == dec.author_identity_id))
     ).scalar_one_or_none()
@@ -1517,8 +1503,62 @@ async def _verify_decision(
         ensure_role(await get_role(session, org_id, author.user_id), Role.member)
     except (NotFoundError, ForbiddenError):
         raise refuse("decider_not_member") from None
+    return author.id
 
-    named = _named_prefixes(dec.body)
+
+def _same_document_clause(ann: Annotation) -> ColumnElement[bool]:
+    """Annotations on the same document as ``ann``. A note counts as one
+    document across its parts, so a person can decide several suggestions on
+    one note in a single comment; a task description is its own document."""
+    if ann.doc_kind == "task_description":
+        return and_(Annotation.doc_kind == "task_description", Annotation.task_id == ann.task_id)
+    same_note_parts = select(NotePart.id).where(
+        NotePart.note_id
+        == select(NotePart.note_id).where(NotePart.id == ann.note_part_id).scalar_subquery()
+    )
+    return and_(Annotation.doc_kind == "note_part", Annotation.note_part_id.in_(same_note_parts))
+
+
+async def _verify_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    ann: Annotation,
+    decision_comment_id: uuid.UUID,
+) -> uuid.UUID:
+    """Check that ``decision_comment_id`` is a person's decision to accept
+    ``ann`` and return the deciding person's identity id.
+
+    Every clause answers one way an agent could otherwise approve itself.
+    Who wrote the comment is :func:`person_who_wrote`; on top of it:
+
+    - the comment sits on the same document and was written after the
+      suggestion, so it cannot predate what it decides;
+    - it names the suggestion on an ``accept`` line, and the name matches no
+      other suggestion on the document, so a decision about one suggestion
+      cannot be spent on another.
+
+    A ``reason`` names the clause that failed; nothing is changed."""
+
+    def refuse(reason: str) -> DomainError:
+        return DomainError(MessageCode.SUGGESTION_DECISION_INVALID, reason=reason)
+
+    dec = await load_decision_comment(
+        session, org_id=org_id, comment_id=decision_comment_id, refuse=refuse
+    )
+    on_document = (
+        await session.execute(
+            select(Annotation.id).where(Annotation.id == dec.id, _same_document_clause(ann))
+        )
+    ).scalar_one_or_none()
+    if on_document is None:
+        raise refuse("other_document")
+    if dec.created_at <= ann.created_at:
+        raise refuse("before_suggestion")
+
+    decided_by = await person_who_wrote(session, org_id=org_id, dec=dec, refuse=refuse)
+
+    named = named_prefixes(dec.body)
     mine = ann.id.hex
     hits = [p for p in named if mine.startswith(p)]
     if not hits:
@@ -1535,7 +1575,7 @@ async def _verify_decision(
     ).scalars()
     if any(o.hex.startswith(p) for o in others for p in hits):
         raise refuse("ambiguous_id")
-    return author.id
+    return decided_by
 
 
 async def accept_suggestion_on_decision(

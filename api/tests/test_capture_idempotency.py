@@ -77,7 +77,7 @@ async def test_a_retried_note_capture_returns_the_first_note() -> None:
         assert first.json()["id"] == second.json()["id"]
 
         listed = await c.get("/notes", headers=h, params={"q": "quoted"})
-        assert len(listed.json()) == 1
+        assert len(listed.json()["items"]) == 1
 
 
 async def test_the_same_key_with_a_different_body_is_refused() -> None:

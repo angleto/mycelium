@@ -2185,6 +2185,7 @@ export const it: Catalog = {
     linkTaskPrompt: 'Collega un task per fatturare il tempo da questa nota:',
     linkTaskPick: 'Seleziona un task…',
     untitled: 'Nota senza titolo',
+    loadMore: 'Carica altre note',
     converting: 'Generazione...',
     convertedShort: 'Generato',
     converted: 'Task generato dalla nota',

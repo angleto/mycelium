@@ -56,7 +56,7 @@ async def test_task_work_note_lifecycle() -> None:
         assert r2.json()["id"] == n["id"]
 
         # The work note appears in the notes list.
-        lst = (await c.get("/notes", headers=h)).json()
+        lst = (await c.get("/notes", headers=h)).json()["items"]
         row = next(x for x in lst if x["id"] == n["id"])
         assert row["task_id"] == tid
 

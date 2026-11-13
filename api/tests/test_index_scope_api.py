@@ -89,7 +89,7 @@ async def test_note_index_scope_round_trips_over_rest(_fake_embedder: None) -> N
         assert (await c.get(f"/notes/{nid}", headers=h)).json()["index_scope"] == "none"
         # The list projection is built by a different function than the
         # single-note one, and its schema default would mask a gap.
-        rows = (await c.get("/notes", headers=h)).json()
+        rows = (await c.get("/notes", headers=h)).json()["items"]
         assert [n["index_scope"] for n in rows if n["id"] == nid] == ["none"]
         r = await c.patch(
             f"/notes/{nid}",

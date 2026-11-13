@@ -417,7 +417,7 @@ async def test_note_serializer_carries_linked_task_title() -> None:
         assert (await c.get(f"/notes/{nid}", headers=h)).json()["task_title"] == "Onboard Acme"
 
         # List endpoint carries it too (the list-click open path).
-        lst = (await c.get("/notes", headers=h)).json()
+        lst = (await c.get("/notes", headers=h)).json()["items"]
         row = next(n for n in lst if n["id"] == nid)
         assert row["task_title"] == "Onboard Acme"
 

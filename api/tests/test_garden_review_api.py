@@ -2,10 +2,10 @@
 GET /garden/review/pending + POST /garden/review/approve|reject.
 
 Thin-adapter tests: the gate's behaviour is unit-tested in
-``core/tests/test_garden_review.py``; here we pin the HTTP contract. A
-``proposed`` node is only ever born from the AUTONOMOUS path, so the fixture
-generates one through the real decomposition service (``autonomous=True``
-under the gate) on the signed-up workspace, then drives the endpoints over
+``core/tests/test_garden_review.py``; here we pin the HTTP contract. Every
+synthesis is born ``proposed``, so the fixture generates one through the
+real decomposition service on the signed-up workspace, then drives the
+endpoints over
 HTTP: the inbox lists it WITH its producing model, approve makes it
 retrievable, reject 404s it, and a non-proposed note is refused.
 """
@@ -22,7 +22,6 @@ from httpx import ASGITransport, AsyncClient
 
 from mycelium_api.main import app
 from mycelium_core.ai_providers import set_llm_override
-from mycelium_core.config import get_settings
 from mycelium_core.db import tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.models.note import NoteKind
@@ -31,10 +30,9 @@ from mycelium_core.services import notes as nt
 
 
 @pytest.fixture
-def _wire(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _wire() -> Iterator[None]:
     set_llm_override(FakeLLM)
     set_embedder_override(FakeEmbedder)
-    monkeypatch.setattr(get_settings(), "garden_review_gate_enabled", True)
     try:
         yield
     finally:
@@ -62,8 +60,8 @@ async def _signup(c: AsyncClient) -> tuple[dict[str, str], str, str]:
 
 
 async def _seed_proposed(org: str, user: str) -> uuid.UUID:
-    """Generate a ``proposed`` pattern humus note the way the autonomous sweep
-    would, directly on the workspace the API test signed up."""
+    """Generate a ``proposed`` pattern humus note directly on the workspace
+    the API test signed up."""
     async with tenant_session(org, user) as s:
         ids = []
         for i in range(3):
@@ -79,7 +77,7 @@ async def _seed_proposed(org: str, user: str) -> uuid.UUID:
             ids.append(n.id)
         await s.flush()
         res = await decomp.extract_cluster_pattern(
-            s, org_id=uuid.UUID(org), actor_id=uuid.UUID(user), source_note_ids=ids, autonomous=True
+            s, org_id=uuid.UUID(org), actor_id=uuid.UUID(user), source_note_ids=ids
         )
     return res.note_id
 
@@ -142,7 +140,9 @@ async def test_the_review_bin_makes_a_rejection_undoable(_wire: None) -> None:
         assert nid not in {
             p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
         }
-        trashed = (await c.get("/notes", headers=h, params={"include_deleted": True})).json()
+        trashed = (await c.get("/notes", headers=h, params={"include_deleted": True})).json()[
+            "items"
+        ]
         assert nid not in {n["id"] for n in trashed}
 
         binned = (await c.get("/garden/review/rejected", headers=h)).json()

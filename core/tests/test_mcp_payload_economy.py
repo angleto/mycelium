@@ -22,15 +22,18 @@ because the gateway is the only surface that can also accept a short id back.
 
 from __future__ import annotations
 
+import typing
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
 
+from mycelium_core import operations as ops
 from mycelium_core.db import admin_session
 from mycelium_core.services.auth import signup
 from mycelium_mcp.gateway import execute_tool
+from mycelium_mcp.op_tools import TOOL_OPERATIONS
 from mycelium_mcp.server import (
     _PRINCIPAL,
     _TASK_DESCRIPTION_CHARS,
@@ -339,6 +342,12 @@ def _uuid_parsed_arguments() -> dict[str, set[str]]:
             if arg in ("token", "org_id"):
                 continue
             if re.search(rf"uuid\.UUID\({arg}\b", body):
+                out.setdefault(arg, set()).add(tool)
+    # A tool generated from a registry operation (ADR-0068) parses no id by
+    # hand: its argument model says which fields are uuids.
+    for tool, op_id in TOOL_OPERATIONS.items():
+        for arg, fi in ops.get(op_id).params.model_fields.items():
+            if uuid.UUID in (fi.annotation, *typing.get_args(fi.annotation)):
                 out.setdefault(arg, set()).add(tool)
     return out
 

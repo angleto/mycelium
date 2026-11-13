@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
+import { authFetch, errMessage } from '../api/client'
+import { notesByIds } from '../api/notes'
 import type { components } from '../shared'
 import { GardenIcon, type GardenIconName } from './GardenIcon'
 import { NotePickList } from './NotePickList'
@@ -56,25 +57,27 @@ export function LinkedNotesPanel({ taskId }: { taskId: string }) {
       task_id: string
       note_links: NoteTaskLink[]
     }
-    setLinks(data.note_links ?? [])
+    const next = data.note_links ?? []
+    setLinks(next)
+    setNotes(await notesByIds(next.map((l) => l.note_id)))
   }, [taskId, t])
 
   useEffect(() => {
     let active = true
     void (async () => {
-      const [linksRes, ns] = await Promise.all([
-        authFetch(`/tasks/${taskId}/note-links`),
-        api.GET('/notes', { params: { header: workspaceHeader() } }),
-      ])
-      if (!active) return
-      if (linksRes.ok) {
-        const data = (await linksRes.json()) as {
-          task_id: string
-          note_links: NoteTaskLink[]
-        }
-        setLinks(data.note_links ?? [])
+      // The linked notes are labelled by asking for them by id: the list's
+      // first page holds the newest notes, not necessarily these.
+      const linksRes = await authFetch(`/tasks/${taskId}/note-links`)
+      if (!active || !linksRes.ok) return
+      const data = (await linksRes.json()) as {
+        task_id: string
+        note_links: NoteTaskLink[]
       }
-      if (ns.data) setNotes(ns.data)
+      const next = data.note_links ?? []
+      const labelled = await notesByIds(next.map((l) => l.note_id))
+      if (!active) return
+      setLinks(next)
+      setNotes(labelled)
     })()
     return () => {
       active = false
@@ -214,9 +217,7 @@ export function LinkedNotesPanel({ taskId }: { taskId: string }) {
             {isAdding && (
               <div className="linkedpanel__picker">
                 <NotePickList
-                  notes={notes.filter(
-                    (n) => !items.some((li) => li.note_id === n.id),
-                  )}
+                  exclude={items.map((li) => li.note_id)}
                   value={null}
                   onPick={(id) => void addLink(kind, id)}
                   placeholder={t('linkedNotes.pickerPh')}

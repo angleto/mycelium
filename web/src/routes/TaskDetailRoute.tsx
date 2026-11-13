@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errCode, errMessage, errParam, workspaceHeader } from '../api/client'
+import { notesPage } from '../api/notes'
 import { fmtDateTime } from '../lib/tz'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RefreshHint } from '../components/RefreshHint'
@@ -400,7 +401,9 @@ export function TaskDetailRoute({
         api.GET('/tasks/{task_id}/reminders', {
           params: { header: h, path: { task_id: id } },
         }),
-        api.GET('/notes', { params: { header: h } }),
+        // The task's own notes, asked for by task: the list's first page
+        // holds the newest notes of the workspace, not this task's.
+        notesPage({ task_id: id, limit: 200 }),
         api.GET('/task-relations', { params: { header: h, query: { task_id: id } } }),
         // Possession (ADR-0063). Fetched with the rest rather than on a
         // failed transition, because the point is to say who holds the
@@ -424,12 +427,11 @@ export function TaskDetailRoute({
       if (rl.data) setRels(rl.data)
       if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
       if (rm.data) setReminders(rm.data)
-      if (nt.data)
-        setWorkNotes(
-          nt.data
-            .filter((n) => n.task_id === id)
-            .map((n) => ({ id: n.id, title: n.title })),
-        )
+      setWorkNotes(
+        nt.items
+          .filter((n) => n.task_id === id)
+          .map((n) => ({ id: n.id, title: n.title })),
+      )
     })().catch((e: unknown) => {
       if (active) setErr(errMessage(e))
     })

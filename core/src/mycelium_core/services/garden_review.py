@@ -16,10 +16,12 @@ This module owns the review lifecycle:
   carrying its ``origin_model_id`` so the human sees WHICH model produced the
   summary before deciding (Ollama 3B local != GPT != Scaleway).
 - :func:`approve_node` -- ``proposed`` -> ``approved``; the note becomes
-  effective. Audited; emits a bus ``commit`` event.
+  effective. Audited; emits a bus ``commit`` event. Approving a
+  distillation is also the one moment its source may become humus.
 - :func:`reject_node` -- soft-delete the note (a reject never pollutes);
   audited; emits a bus ``reject`` event carrying ``origin_model_id``.
   Reversible via the normal recovery/restore path like any soft-delete.
+  Rejecting a distillation takes the humus mark back off its source.
 
 No ``'rejected'`` is ever stored on ``review_state`` -- a reject removes the
 node, so a rejected summary never lingers. Member role; RLS-scoped.
@@ -31,16 +33,19 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.classification_feedback import ClassificationFeedback
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_link import NoteNoteLink
-from mycelium_core.services import audit, event_bus
+from mycelium_core.models.note_part import NotePart
+from mycelium_core.services import annotations as annotations_svc
+from mycelium_core.services import audit, event_bus, note_inert
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.rbac import require_role
 
@@ -52,6 +57,146 @@ _PROPOSED = "proposed"
 _UNREJECT = "unreject"
 _APPROVED = "approved"
 _PREVIEW_CHARS = 280
+#: Recorded on the humus feedback rows so the learning loop can tell this
+#: policy (a person's review decides the source) from the retired one, under
+#: which the distiller flipped the source by itself (``auto_humus_v1``).
+_SOURCE_HUMUS_POLICY = "humus_on_review_v1"
+
+
+async def _distillation_sources(
+    session: AsyncSession, *, org_id: uuid.UUID, atom: Note
+) -> list[Note]:
+    """The live notes a distillation was drawn from (its ``hypha_of``
+    parents). Empty for any other kind of node: a pattern or a season reads
+    its sources but never decides anything about them."""
+    if atom.humus_kind != "distillation":
+        return []
+    return list(
+        (
+            await session.execute(
+                select(Note)
+                .join(NoteNoteLink, NoteNoteLink.parent_note_id == Note.id)
+                .where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.child_note_id == atom.id,
+                    NoteNoteLink.kind == "hypha_of",
+                    Note.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _set_source_humus(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    source: Note,
+    atom: Note,
+    value: bool,
+) -> None:
+    """Set or clear a source's humus mark because a person reviewed ``atom``.
+
+    The update matches only while the flag still holds the opposite value and
+    the version is the one just read, so a repeat or a concurrent write is a
+    skip, never a second mutation. When it fires it leaves the same two
+    traces every garden mutation does: an audit row naming the distillation
+    that justified it, and an append-only feedback row for the learning
+    loop, with the reviewer's verdict as the action."""
+    row = (
+        await session.execute(
+            update(Note)
+            .where(
+                Note.id == source.id,
+                Note.version == source.version,
+                Note.humus_flag.is_(not value),
+            )
+            .values(humus_flag=value, version=Note.version + 1)
+            .returning(Note.version)
+        )
+    ).first()
+    if row is None:
+        return
+    await session.refresh(source)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=source.id,
+        action="garden_review:source_humus",
+        diff={
+            "humus_flag": {"old": not value, "new": value},
+            "distilled_note_id": str(atom.id),
+        },
+    )
+    session.add(
+        ClassificationFeedback(
+            org_id=org_id,
+            user_id=actor_id,
+            node_id=source.id,
+            suggestion_type="humus",
+            suggestion_value={"humus_flag": value},
+            action="accept" if value else "reject",
+            model_version=_SOURCE_HUMUS_POLICY,
+            signals_snapshot={
+                "trigger": "review",
+                "distilled_note_id": str(atom.id),
+                "distill_model_id": atom.origin_model_id,
+            },
+        )
+    )
+    await session.flush()
+
+
+async def _mark_sources_on_approve(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, atom: Note
+) -> None:
+    """An approved distillation stands in for its source, so the source
+    becomes humus -- but only if it is still inert. The person may have taken
+    the note up again while the summary waited for review, and a live note is
+    never demoted behind a summary of an older state of it."""
+    for src in await _distillation_sources(session, org_id=org_id, atom=atom):
+        if await note_inert.is_inert(session, note=src):
+            await _set_source_humus(
+                session, org_id=org_id, actor_id=actor_id, source=src, atom=atom, value=True
+            )
+
+
+async def _clear_sources_on_reject(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, atom: Note
+) -> None:
+    """A rejected or withdrawn distillation no longer justifies its source's
+    humus mark, so the mark comes off -- unless another distillation of the
+    same source is still effective. Also repairs the state the old distiller
+    left behind, which marked the source when the summary was created."""
+    for src in await _distillation_sources(session, org_id=org_id, atom=atom):
+        if not src.humus_flag:
+            continue
+        other = NoteNoteLink.__table__.alias("other_link")
+        still_justified = (
+            await session.execute(
+                select(
+                    exists().where(
+                        other.c.org_id == org_id,
+                        other.c.parent_note_id == src.id,
+                        other.c.kind == "hypha_of",
+                        other.c.child_note_id != atom.id,
+                        other.c.child_note_id == Note.id,
+                        Note.humus_kind == "distillation",
+                        Note.deleted_at.is_(None),
+                        Note.review_state.is_distinct_from(_PROPOSED),
+                    )
+                )
+            )
+        ).scalar_one()
+        if not still_justified:
+            await _set_source_humus(
+                session, org_id=org_id, actor_id=actor_id, source=src, atom=atom, value=False
+            )
 
 
 @dataclass(frozen=True)
@@ -197,6 +342,108 @@ async def _load_proposed(session: AsyncSession, *, org_id: uuid.UUID, note_id: u
     return note
 
 
+@dataclass(frozen=True)
+class Decision:
+    """A person's decision on a proposed node, carried out by someone else.
+
+    Recorded on the audit row and the bus event of the approve or reject, so
+    the two roles stay apart: ``decided_by`` is the person, ``executed_by``
+    the agent that ran it, ``comment_id`` where the person wrote it."""
+
+    decided_by_identity_id: uuid.UUID
+    comment_id: uuid.UUID
+    executed_by_identity_id: uuid.UUID | None
+
+    def record(self) -> dict[str, str | None]:
+        return {
+            "decided_by_identity_id": str(self.decided_by_identity_id),
+            "decision_comment_id": str(self.comment_id),
+            "executed_by_identity_id": (
+                str(self.executed_by_identity_id) if self.executed_by_identity_id else None
+            ),
+        }
+
+
+async def _verify_review_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    node: Note,
+    decision_comment_id: uuid.UUID,
+    verb: str,
+) -> uuid.UUID:
+    """Check that ``decision_comment_id`` is a person's decision to ``verb``
+    (``approve`` or ``reject``) ``node``, and return that person's identity.
+
+    The checks on who wrote the comment are the ones a suggestion's decision
+    passes (ADR-0066, :func:`annotations.person_who_wrote`). What differs is
+    where the comment lives. A proposed node cannot carry a comment -- its
+    text must not leave the review perimeter, and a comment quotes the text
+    it hangs on -- so the decision is written on one of its SOURCES, the
+    notes it was generated from, which the person can read. On top of the
+    writer checks:
+
+    - the comment is on a live ``hypha_of`` parent of the node;
+    - it was written after the node, so it cannot predate what it decides;
+    - it names the node on a ``verb`` line, does not also name it on the
+      opposite line, and the name matches no other node generated from the
+      same source, so one decision cannot be spent on another node or as
+      the opposite verdict.
+
+    A ``reason`` names the clause that failed; nothing is changed."""
+
+    def refuse(reason: str) -> DomainError:
+        return DomainError(MessageCode.GARDEN_REVIEW_DECISION_INVALID, reason=reason, verb=verb)
+
+    dec = await annotations_svc.load_decision_comment(
+        session, org_id=org_id, comment_id=decision_comment_id, refuse=refuse
+    )
+    source_id = None
+    if dec.doc_kind == "note_part" and dec.note_part_id is not None:
+        source_id = await session.scalar(
+            select(NotePart.note_id).where(NotePart.id == dec.note_part_id)
+        )
+    is_source = source_id is not None and await session.scalar(
+        select(
+            exists().where(
+                NoteNoteLink.org_id == org_id,
+                NoteNoteLink.parent_note_id == source_id,
+                NoteNoteLink.child_note_id == node.id,
+                NoteNoteLink.kind == "hypha_of",
+            )
+        )
+    )
+    if not is_source:
+        raise refuse("not_on_a_source")
+    if dec.created_at <= node.created_at:
+        raise refuse("before_proposal")
+
+    decided_by = await annotations_svc.person_who_wrote(
+        session, org_id=org_id, dec=dec, refuse=refuse
+    )
+
+    mine = node.id.hex
+    hits = [p for p in annotations_svc.named_prefixes(dec.body, verb) if mine.startswith(p)]
+    if not hits:
+        raise refuse("node_not_named")
+    opposite = "reject" if verb == "approve" else "approve"
+    if any(mine.startswith(p) for p in annotations_svc.named_prefixes(dec.body, opposite)):
+        raise refuse("contradictory")
+    siblings = (
+        await session.execute(
+            select(NoteNoteLink.child_note_id).where(
+                NoteNoteLink.org_id == org_id,
+                NoteNoteLink.parent_note_id == source_id,
+                NoteNoteLink.kind == "hypha_of",
+                NoteNoteLink.child_note_id != node.id,
+            )
+        )
+    ).scalars()
+    if any(o.hex.startswith(p) for o in siblings for p in hits):
+        raise refuse("ambiguous_id")
+    return decided_by
+
+
 async def approve_node(
     session: AsyncSession,
     *,
@@ -204,6 +451,7 @@ async def approve_node(
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
     expected_version: int | None = None,
+    decision: Decision | None = None,
 ) -> Note:
     """Approve a ``proposed`` node: ``review_state`` -> ``'approved'`` so it
     becomes effective (eligible for every retrieval/listing surface).
@@ -217,7 +465,10 @@ async def approve_node(
     the human never blesses content they have not seen. The check runs
     BEFORE the idempotent short-circuit on purpose: a stale view is an
     error even when the end state would coincide. ``None`` keeps the
-    legacy unguarded behaviour (idempotent MCP retries included)."""
+    legacy unguarded behaviour (idempotent MCP retries included).
+
+    ``decision`` is set only by :func:`approve_node_on_decision`: the person
+    who decided and where, recorded next to the executor."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
     if expected_version is not None and note.version != expected_version:
@@ -229,6 +480,7 @@ async def approve_node(
     note.review_state = _APPROVED
     note.version += 1
     await session.flush()
+    await _mark_sources_on_approve(session, org_id=org_id, actor_id=actor_id, atom=note)
     await audit.log(
         session,
         org_id=org_id,
@@ -236,7 +488,10 @@ async def approve_node(
         entity="note",
         entity_id=note_id,
         action="garden_review:approve",
-        diff={"review_state": {"old": _PROPOSED, "new": _APPROVED}},
+        diff={
+            "review_state": {"old": _PROPOSED, "new": _APPROVED},
+            **(decision.record() if decision else {}),
+        },
     )
     actor_kind = await event_bus.session_actor_kind(session)
     await event_bus.emit_event(
@@ -251,6 +506,7 @@ async def approve_node(
             "review": "approve",
             "origin_model_id": note.origin_model_id,
             "humus_kind": note.humus_kind,
+            **(decision.record() if decision else {}),
         },
         applied_state="committed",
         # Versioned: a node decided again after an un-reject is a NEW
@@ -271,6 +527,7 @@ async def reject_node(
     reason: str | None = None,
     expected_version: int | None = None,
     attribute_to_model: bool = True,
+    decision: Decision | None = None,
 ) -> Note:
     """Reject a ``proposed`` node: soft-delete it (it never pollutes the
     corpus) and emit a bus ``reject`` event carrying ``origin_model_id`` (so
@@ -288,7 +545,9 @@ async def reject_node(
     caller that retires a node for a reason that is not a verdict on what
     the model wrote: :func:`restore_source` withdrawing an atom to bring
     its sources back up. Charging that to the model would make a
-    provenance decision read as a quality signal."""
+    provenance decision read as a quality signal.
+
+    ``decision`` mirrors :func:`approve_node`."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await session.get(Note, note_id)
     if note is None or note.org_id != org_id:
@@ -302,6 +561,7 @@ async def reject_node(
     note.deleted_at = dt.datetime.now(dt.UTC)
     note.version += 1
     await session.flush()
+    await _clear_sources_on_reject(session, org_id=org_id, actor_id=actor_id, atom=note)
     await audit.log(
         session,
         org_id=org_id,
@@ -309,7 +569,11 @@ async def reject_node(
         entity="note",
         entity_id=note_id,
         action="garden_review:reject",
-        diff={"reason": reason} if reason else None,
+        diff={
+            **({"reason": reason} if reason else {}),
+            **(decision.record() if decision else {}),
+        }
+        or None,
     )
     actor_kind = await event_bus.session_actor_kind(session)
     await event_bus.emit_event(
@@ -325,6 +589,7 @@ async def reject_node(
             "origin_model_id": note.origin_model_id if attribute_to_model else None,
             "humus_kind": note.humus_kind,
             "reason": reason,
+            **(decision.record() if decision else {}),
         },
         applied_state="rejected",
         # Versioned, same reason as approve: after an un-reject, rejecting
@@ -332,6 +597,75 @@ async def reject_node(
         idempotency_key=f"garden_review:reject:{note_id}:{note.version}",
     )
     return note
+
+
+async def approve_node_on_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    decision_comment_id: uuid.UUID,
+    executed_by_identity_id: uuid.UUID | None,
+) -> Note:
+    """Approve a proposed node that a PERSON decided to approve, on their
+    behalf.
+
+    Approving is a person's act, and the plain :func:`approve_node` stays
+    out of every scoped credential's reach. This is how an agent carries out
+    a decision the person already wrote: it cites the comment, the server
+    verifies it (:func:`_verify_review_decision`), and only then runs the
+    same approve the UI runs, with the same stale check. An instruction the
+    agent merely reports would not do: the server cannot tell a real one
+    from an invented one.
+
+    ``expected_version`` is required here, not optional: the agent must
+    have read the node it is acting on."""
+    node = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if node.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    decided_by = await _verify_review_decision(
+        session, org_id=org_id, node=node, decision_comment_id=decision_comment_id, verb="approve"
+    )
+    return await approve_node(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        decision=Decision(decided_by, decision_comment_id, executed_by_identity_id),
+    )
+
+
+async def reject_node_on_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    decision_comment_id: uuid.UUID,
+    executed_by_identity_id: uuid.UUID | None,
+) -> Note:
+    """Reject a proposed node that a PERSON decided to reject, on their
+    behalf. The mirror of :func:`approve_node_on_decision`: the comment
+    must name the node on a ``reject`` line. The reason is the person's
+    comment, which the audit row points to."""
+    node = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if node.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    decided_by = await _verify_review_decision(
+        session, org_id=org_id, node=node, decision_comment_id=decision_comment_id, verb="reject"
+    )
+    return await reject_node(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        decision=Decision(decided_by, decision_comment_id, executed_by_identity_id),
+    )
 
 
 async def record_unreject(
@@ -613,13 +947,16 @@ async def accept_ratio_overall(session: AsyncSession, *, org_id: uuid.UUID) -> f
 
 
 __all__ = [
+    "Decision",
     "ModelAcceptRatio",
     "PendingNode",
     "RejectedNode",
     "accept_ratio_by_model",
     "accept_ratio_overall",
     "approve_node",
+    "approve_node_on_decision",
     "list_pending",
     "list_rejected",
     "reject_node",
+    "reject_node_on_decision",
 ]

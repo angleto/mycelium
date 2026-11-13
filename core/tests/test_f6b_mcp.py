@@ -91,7 +91,10 @@ async def test_note_serializers_carry_tags() -> None:
     full = await get_note(token=token, org_id=org, note_id=note["id"])
     assert "note-tag" in {g["name"] for g in full["tags"]}
     chip = next(g for g in full["tags"] if g["name"] == "note-tag")
-    assert {"id", "kind", "name", "color"} <= chip.keys()
+    # The note read answers lean (ADR-0068): a tag with no colour carries
+    # no ``color`` key rather than a null one.
+    assert {"id", "kind", "name"} <= chip.keys()
+    assert chip.get("color") is None
 
     listed = next(
         n for n in (await list_notes(token=token, org_id=org))["items"] if n["id"] == note["id"]

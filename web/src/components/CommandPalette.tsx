@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, logSearchClick, searchTasksByText, workspaceHeader } from '../api/client'
+import { findNotes } from '../api/notes'
 import {
   isPrefixCandidate,
   lookupPrefix,
@@ -152,15 +153,16 @@ export function CommandPalette() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
+      // Notes: the newest page only. The instant title filter runs over
+      // it, and the debounced server search below reaches every older
+      // note, so loading the whole list here bought nothing.
       const [tk, nt] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
-        api.GET('/notes', { params: { header: h } }),
+        findNotes('', 100),
       ])
       if (!active) return
       setTasks((tk.data ?? []).map((x) => ({ id: x.id, title: x.title })))
-      setNotes(
-        (nt.data ?? []).map((x) => ({ id: x.id, title: x.title ?? x.kind })),
-      )
+      setNotes(nt.map((x) => ({ id: x.id, title: x.title ?? x.kind })))
     })()
     requestAnimationFrame(() => inputRef.current?.focus())
     return () => {

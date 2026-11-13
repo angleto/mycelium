@@ -91,6 +91,8 @@ re-litigated per route):
 
 from __future__ import annotations
 
+from typing import Any
+
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 
 # Sentinels. Distinct objects rather than strings so they can never collide
@@ -374,25 +376,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     # --- export ---
     ("POST", "/export/pdf"): HUMAN_ONLY,
     # --- garden ---
-    ("POST", "/garden/apply"): "notes:write",
-    ("GET", "/garden/audit"): "events:read",
-    ("GET", "/garden/candidates"): "notes:read",
-    ("GET", "/garden/classify/{node_id}"): "notes:read",
-    ("GET", "/garden/clusters"): "notes:read",
-    ("GET", "/garden/graph"): "notes:read",
-    ("GET", "/garden/health"): "notes:read",
-    ("GET", "/garden/health/events"): "notes:read",
-    ("GET", "/garden/health/timeseries"): "notes:read",
-    ("POST", "/garden/learning/rollback"): "notes:write",
-    ("GET", "/garden/learning/telemetry"): "notes:read",
-    ("GET", "/garden/link-suggestions/{note_id}"): "notes:read",
-    ("GET", "/garden/review/accept-ratio"): "notes:read",
-    ("POST", "/garden/review/approve"): "notes:write",
-    ("GET", "/garden/review/pending"): "notes:read",
-    ("POST", "/garden/review/reject"): "notes:write",
-    ("GET", "/garden/review/rejected"): "notes:read",
-    ("POST", "/garden/review/restore-source"): "notes:write",
-    ("GET", "/garden/walk"): "notes:read",
+    # Reviewing generated text is a person's act; see the MCP twins in
+    # tool_scopes.py. Both surfaces fence it or neither does.
     # --- invoices ---
     ("GET", "/invoices"): "invoices:read",
     ("POST", "/invoices"): "invoices:write",
@@ -475,7 +460,6 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/mfa/setup"): HUMAN_ONLY,
     ("GET", "/mfa/status"): HUMAN_ONLY,
     # --- notes ---
-    ("GET", "/notes"): "notes:read",
     ("POST", "/notes"): "notes:write",
     ("POST", "/notes/command"): "notes:write",
     ("POST", "/notes/conversations"): "notes:write",
@@ -483,7 +467,6 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/notes/merge"): "notes:write",
     ("POST", "/notes/quick-create"): "notes:write",
     ("POST", "/notes/synthesize"): "ai:generate",
-    ("GET", "/notes/{note_id}"): "notes:read",
     ("PATCH", "/notes/{note_id}"): "notes:write",
     ("POST", "/notes/{note_id}/append"): "notes:write",
     ("POST", "/notes/{note_id}/archive"): "notes:write",
@@ -505,7 +488,6 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("DELETE", "/notes/{note_id}/links"): "notes:write",
     ("POST", "/notes/{note_id}/maturity"): "notes:write",
     ("POST", "/notes/{note_id}/messages"): "ai:generate",
-    ("GET", "/notes/{note_id}/parts"): "notes:read",
     ("POST", "/notes/{note_id}/parts"): "notes:write",
     ("PUT", "/notes/{note_id}/parts/order"): "notes:write",
     ("POST", "/notes/{note_id}/parts/stream"): "notes:write",
@@ -814,6 +796,43 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
 }
 
 
+# Routes whose entry above was not written by hand: a route bound to a
+# registry operation (ADR-0068) costs what the operation declares, and
+# ``bind_operations`` writes that entry when the app is built.
+_DERIVED: set[tuple[str, str]] = set()
+
+
+def bind_operations(app: Any) -> None:
+    """Write the scope entry of every route bound to an operation.
+
+    Refuses a hand-written entry for a bound route: two declarations of
+    what a route costs is the drift the registry exists to remove, and the
+    one that would win silently is whichever line was edited last. Called
+    by ``create_app``; idempotent, so building the app twice is harmless."""
+    from fastapi.routing import APIRoute
+
+    from mycelium_api.op_routes import OPERATION_ATTR
+    from mycelium_core import operations as ops
+
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        op_id = getattr(route.endpoint, OPERATION_ATTR, None)
+        if op_id is None:
+            continue
+        op = ops.get(op_id)
+        value: object = META if op.access is ops.META else op.access
+        for method in route.methods - {"HEAD", "OPTIONS"}:
+            key = (method, route.path)
+            if key in ROUTE_SCOPES and key not in _DERIVED:
+                raise RuntimeError(
+                    f"{method} {route.path} binds {op_id}, so its scope comes from the "
+                    "operation: remove its hand-written ROUTE_SCOPES entry"
+                )
+            ROUTE_SCOPES[key] = value
+            _DERIVED.add(key)
+
+
 def required_scope(method: str, path: str) -> object:
     """The scope key ``(method, path)`` needs, or ``PUBLIC`` / ``HUMAN_ONLY``,
     or the ``UNMAPPED`` sentinel when the route is not in the map (fail-closed:
@@ -845,9 +864,11 @@ def scope_permits(method: str, path: str, scope: list[str] | None) -> bool:
 
 __all__ = [
     "HUMAN_ONLY",
+    "META",
     "PUBLIC",
     "ROUTE_SCOPES",
     "UNMAPPED",
+    "bind_operations",
     "required_scope",
     "scope_permits",
 ]

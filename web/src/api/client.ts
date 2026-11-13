@@ -244,15 +244,21 @@ export async function searchNotesByText(
   query: string,
   tagId?: string,
   signal?: AbortSignal,
+  anyTagIds?: string[],
 ): Promise<components['schemas']['NoteListOut'][]> {
   const { data } = await api.GET('/notes', {
     params: {
       header: workspaceHeader(),
-      query: { q: query, ...(tagId ? { tag_id: tagId } : {}) },
+      query: {
+        q: query,
+        limit: 200,
+        ...(tagId ? { tag_id: tagId } : {}),
+        ...(anyTagIds && anyTagIds.length ? { any_tag_ids: anyTagIds } : {}),
+      },
     },
     signal,
   })
-  return data ?? []
+  return data?.items ?? []
 }
 
 // After auth we hold a token but no workspace context yet: fetch the

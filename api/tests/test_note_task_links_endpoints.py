@@ -226,7 +226,7 @@ async def test_linked_task_count_includes_all_four_kinds() -> None:
         # The list endpoint surfaces the count too (the chip lives in
         # the list view, so the field must be populated there as well
         # -- and via a batched query, not N+1).
-        listed = (await c.get("/notes", headers=h)).json()
+        listed = (await c.get("/notes", headers=h)).json()["items"]
         match = next(n for n in listed if n["id"] == note_id)
         assert match["linked_task_count"] == 3
         # And derived_task_ids stays exclusively the two "fruit" kinds

@@ -43,7 +43,9 @@ async def test_note_projection_is_enriched_and_projectable() -> None:
 
     full = await get_note(token=token, org_id=org, note_id=n["id"])
     assert full["maturity"] == "seed"  # always-set column, default
-    assert full["is_archived"] is False
+    # A false flag is omitted like a null one: the note read answers lean
+    # (ADR-0068), and an absent ``is_archived`` reads as false.
+    assert "is_archived" not in full
     assert "created_at" in full and "updated_at" in full
     # Unset nullable fields cost zero tokens (omitted, not null).
     assert "review_state" not in full and "summary" not in full

@@ -1,4 +1,5 @@
 import { api, workspaceHeader } from '../api/client'
+import { findNotes } from '../api/notes'
 import type { MentionKind } from './mentions'
 import { isPrefixCandidate, lookupPrefix } from './prefixLookup'
 
@@ -17,7 +18,7 @@ export async function searchCandidates(query: string): Promise<Cand[]> {
   const [tk, tg, nt] = await Promise.all([
     api.GET('/tasks', { params: { header: h } }),
     api.GET('/tags', { params: { header: h } }),
-    api.GET('/notes', { params: { header: h } }),
+    noteCandidates(query),
   ])
   const q = query.trim().toLowerCase()
   const out: Cand[] = []
@@ -26,12 +27,7 @@ export async function searchCandidates(query: string): Promise<Cand[]> {
       out.push({ kind: 'task', id: t.id, label: t.title })
     }
   }
-  for (const n of nt.data ?? []) {
-    const label = n.title ?? n.kind
-    if (!q || label.toLowerCase().includes(q)) {
-      out.push({ kind: 'note', id: n.id, label })
-    }
-  }
+  for (const n of nt) out.push({ kind: 'note', id: n.id, label: n.label })
   for (const g of tg.data ?? []) {
     if (!q || g.name.toLowerCase().includes(q)) {
       out.push({ kind: 'tag', id: g.id, label: g.name })
@@ -62,15 +58,25 @@ export async function searchEntities(query: string): Promise<EntityCand[]> {
   const h = workspaceHeader()
   const [tk, nt] = await Promise.all([
     api.GET('/tasks', { params: { header: h } }),
-    api.GET('/notes', { params: { header: h } }),
+    noteCandidates(q),
   ])
   const lc = q.toLowerCase()
   for (const t of tk.data ?? []) {
     if (!lc || t.title.toLowerCase().includes(lc)) take('task', t.id, t.title)
   }
-  for (const n of nt.data ?? []) {
-    const label = n.title ?? n.kind
-    if (!lc || label.toLowerCase().includes(lc)) take('note', n.id, label)
-  }
+  for (const n of nt) take('note', n.id, n.label)
   return out.slice(0, 8)
+}
+
+/** Notes for a typeahead, asked of the server so an old note is findable:
+ * the list's first page holds only the newest. The server matches the
+ * title, any part and tag names; a title match is what a person typing a
+ * name means, so those come first. */
+async function noteCandidates(query: string): Promise<{ id: string; label: string }[]> {
+  const lc = query.trim().toLowerCase()
+  const rows = await findNotes(query, 20)
+  const labelled = rows.map((n) => ({ id: n.id, label: n.title ?? n.kind }))
+  const inTitle = labelled.filter((n) => !lc || n.label.toLowerCase().includes(lc))
+  const elsewhere = labelled.filter((n) => lc && !n.label.toLowerCase().includes(lc))
+  return [...inTitle, ...elsewhere]
 }

@@ -375,6 +375,11 @@ class TenantCtx:
     # Set only when the request authenticated with a capability token
     # (the part-body-stream dep); the endpoint consumes it on success.
     capability_token_id: uuid.UUID | None = None
+    # The agent-token row id when the bearer is an agent token, None for a
+    # person's session. An operation that records WHO CARRIED OUT an act
+    # (an assistant executing a person's decision) resolves the executing
+    # identity from it, the same way the MCP transport does.
+    agent_token_id: uuid.UUID | None = None
 
 
 @asynccontextmanager
@@ -438,6 +443,7 @@ async def _tenant_scope(
             org_id=org_id,
             project_id=project_id,
             role=role,
+            agent_token_id=uuid.UUID(actor_subject_id) if actor_subject_id else None,
         )
 
 

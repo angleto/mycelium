@@ -17,7 +17,10 @@ from mycelium_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS
 from mycelium_core.services import agent_tokens as at_svc
 from mycelium_core.services import event_bus
 from mycelium_core.services.auth import signup
-from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits, list_events
+from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits
+from mycelium_mcp.tools_garden import TOOLS
+
+list_events = TOOLS["list_events"]
 
 
 def _email() -> str:

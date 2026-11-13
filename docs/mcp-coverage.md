@@ -1,9 +1,16 @@
 # MCP coverage
 
 The MCP surface is the agent-facing control plane, **co-equal to the REST
-API** (docs/adr/0001): `mcp/` is a thin adapter over `core/`, so every
-capability here has a REST sibling and vice-versa. A GUI- or REST-only
-capability is a genuine gap, not an asymmetry by design.
+API** (docs/adr/0001): `mcp/` is a thin adapter over `core/`, and a GUI- or
+REST-only capability is a gap, not an asymmetry by design.
+
+That parity is checked only where it is declared. A domain on the operation
+registry (docs/adr/0068; today the garden) declares each operation once in
+`core/src/mycelium_core/operations/`, and its REST routes and MCP tools are
+generated from it; `api/tests/test_operation_parity.py` fails if one of its
+operations is missing from a surface without a written reason. The other
+domains are still declared twice by hand, are listed as unbound in that test,
+and have known gaps.
 
 Over HTTP the surface is the three-meta-tool **dynamic-toolset gateway**
 (`search_tools` → `describe_tools` → `execute_tool`, see
@@ -47,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**285 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**294 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -63,7 +70,32 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### navigation (20)
+### garden (20)
+
+| Tool | Summary |
+|---|---|
+| `garden_apply` | Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037). |
+| `garden_classify` | The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and |
+| `garden_clusters` | Leiden communities over the weighted note graph: the community index |
+| `garden_health` | The garden's structural sensors (ADR-0035): the current readings and |
+| `garden_health_events` | What changed (ADR-0035): the discrete events that plausibly explain a |
+| `garden_health_timeseries` | Daily sensor snapshots over the last ``days``, newest first. Reads the |
+| `garden_learning_rollback` | Rewind the caller's learned priors to their state at ``to`` (ADR-0037): |
+| `garden_learning_telemetry` | What the classifier learned from the caller (ADR-0037): the |
+| `garden_review_accept_ratio` | How often a person approved, rather than rejected, each model's |
+| `garden_review_approve` | Approve a generated note (ADR-0043): it becomes effective and enters |
+| `garden_review_approve_on_decision` | Approve a generated note that a PERSON has decided to approve, on |
+| `garden_review_pending` | The review inbox (ADR-0043): generated notes awaiting a person's |
+| `garden_review_reject` | Reject a generated note (ADR-0043): it is moved to the review bin, |
+| `garden_review_reject_on_decision` | Reject a generated note that a PERSON has decided to reject, on |
+| `garden_review_rejected` | The review bin (ADR-0043): proposals a person declined, most recently |
+| `graph_walk` | Traverse the note graph from ``seed`` and return the walked notes as a |
+| `list_distillation_candidates` | Is there distillation to do? Distillation is graph maintenance, so |
+| `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |
+| `note_restore_source` | Restore the original under a humus atom: un-archive the atom's |
+| `suggest_note_links` | The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared |
+
+### navigation (18)
 
 | Tool | Summary |
 |---|---|
@@ -72,7 +104,6 @@ over-fetch the org table and filter in its head.
 | `add_dependency` | Add a typed task dependency (FS/SS/FF/SF). Cycles are rejected. |
 | `add_task_relation` | Link two tasks as "related" (symmetric, bidirectional; NOT a |
 | `graph` | Return the dependency DAG (nodes + edges) for a scope. |
-| `graph_walk` | Traverse the note graph ("micelio") rooted at ``seed`` and return the |
 | `link_notes` | Link two notes with a typed relation. The mycelial 4-verb model |
 | `list_note_links` | Traverse a note's typed note↔note links. Returns |
 | `list_note_task_links` | Traverse typed note↔task links. Pass ``task_id`` to get every note |
@@ -84,7 +115,6 @@ over-fetch the org table and filter in its head.
 | `remove_task_relation` | Remove a symmetric task relation by its id (from |
 | `resolve_annotation` | Mark a comment thread resolved. An instruction (a comment a person |
 | `resolve_prefix` | Resolve a short UUID prefix (the 8-char id in a roadmap note or a |
-| `suggest_note_links` | Suggest the top-``k`` candidate notes to link from this note |
 | `unlink_note_task` | Remove a typed note↔task link (``subject``, ``artifact``, |
 | `unlink_notes` | Remove a typed note-to-note link. Returns ``removed`` true/false |
 
@@ -104,7 +134,7 @@ over-fetch the org table and filter in its head.
 | `time_report_by_task` | Per-task time aggregate for the caller: total/billable seconds |
 | `update_time_entry` | Correct a time entry. Reassign with ``task_id`` (transitively |
 
-### calendar (11)
+### calendar (10)
 
 | Tool | Summary |
 |---|---|
@@ -112,7 +142,6 @@ over-fetch the org table and filter in its head.
 | `create_calendar` | Create a working calendar (weekday -> [start, end] HH:MM windows). |
 | `get_schedule` | Read one task's derived schedule row. |
 | `list_calendars` | List the org working calendars. |
-| `list_events` | Read the workspace coordination event bus (ADR-0036): the |
 | `list_holidays` | List a calendar's holidays (ascending). |
 | `list_schedule` | List derived schedule rows for a scope. |
 | `recompute_schedule` | Deterministically recompute the schedule for a scope under a |
@@ -177,7 +206,7 @@ over-fetch the org table and filter in its head.
 | `memory_write` | Write a memory blob (embedding metered when produced; degrades |
 | `set_email_ingest_to_memory` | Toggle whether this account's synced (non-bulk) messages are |
 
-### notes (60)
+### notes (58)
 
 | Tool | Summary |
 |---|---|
@@ -198,24 +227,22 @@ over-fetch the org table and filter in its head.
 | `distill_note` | Fungal decomposition (ADR-0034): distil a note's body into a |
 | `email_to_note` | Create a note from a message (WS-3), with a back-link. The account's |
 | `gdpr_erase_note` | GDPR hard-erasure of a note: cascades to its memory blobs (by note |
-| `get_note` | Read one note. Includes the ordered ``parts[]`` (markdown blocks) |
+| `get_note` | Read one note with its ordered ``parts`` (markdown blocks). Each part |
 | `get_note_part` | Read a single note part by id: random access into a long note's |
 | `get_note_part_body_capability` | Mint a multi-use ``note_part_body:read`` capability and return a |
 | `get_note_revision` | Single note-revision lookup; 404 if the id doesn't belong to |
 | `get_or_create_task_note` | Open a task's "work note" (creating it on first call). Idempotent: |
 | `get_text_block_capability` | Mint a multi-use ``<kind>:read`` capability for a task description |
 | `invoice_credit_note` | Create a TD04 credit note linked to a transmitted invoice. |
-| `list_distillation_candidates` | Are there distillations to do? (task 4995a32f). Distillation is graph |
 | `list_email_messages` | List ingested messages, optionally filtered by account. |
-| `list_note_parts` | Outline (table of contents) of a note's markdown parts in ``ord`` |
+| `list_note_parts` | A note's parts in order. With ``include_body=false`` each part is its |
 | `list_note_revisions` | Recovery-history timeline for a note, most recent first. |
-| `list_notes` | List notes (newest first); for the @note picker. Returns the paginated |
+| `list_notes` | List notes, newest first, one page at a time: pass ``next_cursor`` |
 | `list_task_participants` | List the additional identities pinned to an appointment-task |
 | `list_trashed_note_parts` | Parts of a note that were trashed and can still be restored, most |
 | `list_turns` | List the turns of a conversation note, in order. Returns the paginated |
 | `merge_notes` | Fold the source note's parts into the target (task 7070a456 |
 | `move_note_to_project` | Move a note into a project (share it). A note has at most one |
-| `note_restore_source` | Fase P (task 561c6aca), "ripristina originale": given a humus ATOM, |
 | `patch_note_part_body_capability` | Mint a single-use ``note_part_body:patch`` capability and return a |
 | `patch_text_block_capability` | Mint a single-use ``<kind>:patch`` capability for a task description |
 | `prepend_note_part` | Prepend markdown ``text`` to the FRONT of a note part without |
@@ -361,7 +388,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 
-### misc (38)
+### misc (32)
 
 | Tool | Summary |
 |---|---|
@@ -376,12 +403,6 @@ over-fetch the org table and filter in its head.
 | `edit_annotation_body_instructions` | Recipe for a TOKEN-FREE replace of an annotation's body (a |
 | `errands` | Place/context matcher: tasks for an errand run at a location and/or |
 | `extract_cluster_pattern` | Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note |
-| `garden_apply` | Apply or decline a ``garden_classify`` suggestion (ADR-0032 / |
-| `garden_classify` | Proposal engine (ADR-0032): for a note, propose {tags, links, |
-| `garden_review_approve` | Approve a proposed humus note (ADR-0043): it becomes effective and |
-| `garden_review_pending` | Review inbox (ADR-0043): the workspace's AUTONOMOUSLY-generated humus |
-| `garden_review_reject` | Reject a proposed humus note (ADR-0043): soft-delete it so a weak |
-| `garden_review_rejected` | Review BIN (ADR-0043): the proposals a human DECLINED, most recently |
 | `help` | Answer questions about Mycelium ITSELF -- its features, configuration and |
 | `ingest_sdi_receipt` | Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI. |
 | `kg_entities` | Look up knowledge-graph entities whose name matches ``query`` (ADR-0044). |

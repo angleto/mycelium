@@ -630,3 +630,24 @@ async def test_a_caller_without_a_scope_list_still_reaches_it() -> None:
         assert _scope_permits("accept_suggestion")
     finally:
         _PRINCIPAL_SCOPE.reset(tok)
+
+
+def test_reviewing_generated_text_is_a_persons_act() -> None:
+    """Approving a generated summary makes it effective and, for a
+    distillation, marks its source humus; rejecting it disposes of it. Both
+    cost ``notes:write`` like the proposal itself, so an agent could approve
+    what it had just written. The summaries come from models nobody has yet
+    validated on fidelity, and the person whose notes they summarise is the
+    one who has to look at them first. Asking for a summary stays open, and
+    so does carrying out a review the person wrote down: the service, not
+    the scope, verifies that decision."""
+    tok = _PRINCIPAL_SCOPE.set(["notes:write", "notes:read", "ai:generate"])
+    try:
+        assert not _scope_permits("garden_review_approve")
+        assert not _scope_permits("garden_review_reject")
+        assert _scope_permits("garden_review_pending")
+        assert _scope_permits("distill_note")
+        assert _scope_permits("garden_review_approve_on_decision")
+        assert _scope_permits("garden_review_reject_on_decision")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
