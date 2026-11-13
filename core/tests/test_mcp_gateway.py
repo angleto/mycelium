@@ -482,9 +482,9 @@ async def test_bootstrap_payloads_never_write_a_non_meta_tool_as_a_call() -> Non
 async def test_execute_result_reaches_the_client_as_one_compact_block() -> None:
     """The execute path is the one that pays for formatting.
 
-    ``search_tools`` / ``describe_tools`` annotate a ``list[dict]`` return, so
-    FastMCP gives them an output schema and the client reads the compact
-    ``structuredContent``. ``execute_tool`` returns ``Any``, which took the
+    (``search_tools`` / ``describe_tools`` paid a different way, through a
+    structured return sent twice; see the test below.) ``execute_tool``
+    returns ``Any``, which took the
     ``pydantic_core.to_json(..., indent=2)`` path in ``_convert_to_content``:
     measured over 721 recorded gateway calls on 2026-09-17, that indentation
     was 12.3% of every result token the server had ever put in a context
@@ -522,6 +522,35 @@ async def test_execute_tool_publishes_no_output_schema() -> None:
     for the payload twice."""
     tool = next(t for t in await gateway.list_tools() if t.name == "execute_tool")
     assert tool.outputSchema is None
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("search_tools", {"query": "create a task", "limit": 3}),
+        ("describe_tools", {"names": ["create_task", "get_note"]}),
+    ],
+)
+async def test_discovery_reaches_the_client_as_one_compact_block(
+    tool: str, args: dict[str, object]
+) -> None:
+    """The discovery meta-tools paid twice. Their ``list[dict]`` return gave
+    them an output schema, so FastMCP sent the payload as
+    ``structuredContent`` AND as one indented text block per entry: measured
+    on 2026-11-12, describing 10 tools put 16,740 characters in the
+    structured copy and 21,532 in the text copy. Same contract as the
+    execute path: one compact block, no output schema."""
+    published = next(t for t in await gateway.list_tools() if t.name == tool)
+    assert published.outputSchema is None
+    blocks = await gateway.call_tool(tool, args)
+    assert isinstance(blocks, list) and len(blocks) == 1
+    block = blocks[0]
+    assert isinstance(block, TextContent)
+    payload = json.loads(block.text)
+    assert isinstance(payload, list) and payload
+    # Compact by construction, whatever the descriptions say: the text is its
+    # own minimal re-serialisation.
+    assert block.text == json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
 
 async def test_wire_keeps_non_ascii_raw() -> None:

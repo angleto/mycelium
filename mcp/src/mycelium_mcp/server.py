@@ -431,57 +431,70 @@ def _config_reference() -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-def help(topic: str | None = None) -> dict[str, Any]:
+def help(topic: str | None = None, section: str | None = None) -> dict[str, Any]:
     """Answer questions about Mycelium ITSELF -- its features, configuration and
-    documentation. Call with NO ``topic`` for an overview + the full
-    environment-variable configuration reference + the list of documentation
-    topics. Call with a ``topic`` ('invoicing', 'architecture', 'data-model',
-    'functional-requirements', 'mcp-coverage', or any ``docs/`` filename; or
-    'configuration') to get that document's full text. To discover the available
-    TOOLS use ``search_tools``; the REST API reference is served at ``/apidocs``.
-    Read-only, no workspace needed."""
-    import difflib
+    documentation. Call with NO ``topic`` for an overview and the list of
+    documentation topics. ``topic`` may be a document name ('architecture',
+    'data-model', 'functional-requirements', 'mcp-coverage', ...), an ADR by
+    number ('43'), 'configuration' for the MYCELIUM_* reference, or any
+    keyword ('invoicing', 'humus'). A short document comes back whole; a long
+    one comes back as an ``outline`` of its headings plus its introduction,
+    and ``section`` (words from a heading, e.g. 'FR-9') returns that one
+    section. A keyword that names no document returns the few SECTIONS that
+    mention it most, across all docs and ADRs. To discover the available
+    TOOLS use ``search_tools``; the REST API reference is served at
+    ``/apidocs``. Read-only, no workspace needed."""
+    from mycelium_mcp import docs_index as dx
 
     docs = _docs_dir()
-    names = sorted(p.stem for p in docs.glob("*.md")) if docs else []
-    # Hide the many numbered ADRs from the top-level index; still fetchable by
-    # their exact name (e.g. help('0045-issuer-scoped-api-keys')).
+    paths = dx.doc_paths(docs) if docs else {}
+    names = sorted(paths)
+    # Hide the many numbered ADRs from the top-level index; they are reached
+    # by number or by a keyword landing in one of their sections.
     topics = [n for n in names if not n[:1].isdigit()]
 
     if topic:
         key = topic.strip().lower().replace(" ", "-")
         if key in ("config", "configuration", "settings", "env"):
             return {"topic": "configuration", "config": _config_reference()}
-        if docs:
-            lower = {n.lower(): n for n in names}
-            match = lower.get(key)
-            if match is None:
-                close = difflib.get_close_matches(key, list(lower), n=1, cutoff=0.6)
-                match = lower[close[0]] if close else None
-            if match:
-                return {
-                    "topic": match,
-                    "content": (docs / f"{match}.md").read_text(encoding="utf-8"),
-                }
-            # No filename match: fall back to a content search so an arbitrary
-            # keyword ('invoicing', 'scheduling', ...) still returns the most
-            # relevant document plus the other docs that mention it.
-            term = topic.strip().lower()
-            scored: list[tuple[int, str, str]] = []
-            for n in names:
-                try:
-                    text = (docs / f"{n}.md").read_text(encoding="utf-8")
-                except OSError:
-                    continue
-                hits = text.lower().count(term)
-                if hits:
-                    scored.append((hits, n, text))
+        match = dx.resolve(names, topic) if paths else None
+        if match:
+            text = paths[match].read_text(encoding="utf-8")
+            preamble, sections = dx.split_sections(text)
+            if section:
+                hit = dx.find_section(sections, section)
+                if hit is None:
+                    return {
+                        "topic": match,
+                        "error": f"no section of '{match}' matches '{section}'",
+                        "outline": dx.outline(sections),
+                    }
+                body, cut = dx.capped(hit.text, dx.SECTION_CAP)
+                return {"topic": match, "section": hit.title, "content": body, "truncated": cut}
+            if len(text) <= dx.FULL_DOC_CHARS:
+                return {"topic": match, "content": text}
+            intro, cut = dx.capped(preamble, dx.FULL_DOC_CHARS)
+            return {
+                "topic": match,
+                "content": intro,
+                "outline": dx.outline(sections),
+                "hint": "pass section=<words from a heading> for one section",
+            }
+        if paths:
+            scored, docs_hit = dx.keyword_sections(paths, topic)
             if scored:
-                scored.sort(key=lambda s: (-s[0], s[1]))
+                picked = []
+                for doc, sec, _n in scored[: dx.KEYWORD_SECTIONS]:
+                    body, cut = dx.capped(sec.text, dx.KEYWORD_CAP)
+                    picked.append(
+                        {"topic": doc, "section": sec.title, "content": body, "truncated": cut}
+                    )
                 return {
-                    "topic": scored[0][1],
-                    "content": scored[0][2],
-                    "also_matching": [n for _, n, _ in scored[1:6]],
+                    "query": topic,
+                    "sections": picked,
+                    "also_matching": [d for d in docs_hit if d not in {p["topic"] for p in picked}][
+                        :5
+                    ],
                 }
         return {
             "error": f"no document matches '{topic}'",

@@ -718,7 +718,6 @@ def ping() -> str:
     return f"mycelium-core {__version__}"
 
 
-@gateway.tool()
 async def search_tools(
     query: str, limit: int = 8, domain: str | None = None
 ) -> list[dict[str, Any]]:
@@ -777,7 +776,6 @@ async def search_tools(
     return out
 
 
-@gateway.tool()
 async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[str, Any]]:
     """Return ``{name, description, inputSchema}`` for the named tools
     (as found via ``search_tools``). The auth args (token/org_id) are
@@ -961,6 +959,30 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
 )
 async def _execute_tool_wire(name: str, arguments: dict[str, Any] | None = None) -> TextContent:
     return _wire(await execute_tool(name, arguments))
+
+
+# The discovery pair goes through the same adapter, for the same reason: a
+# ``list[dict]`` return made them structured, and a structured tool sends the
+# payload twice -- ``structuredContent`` plus one indented text block per
+# entry (measured 2026-11-12: 16,740 + 21,532 characters for ten tools
+# described). The functions above keep returning lists to their Python
+# callers; the wire gets one compact copy.
+@gateway.tool(
+    name="search_tools",
+    description=search_tools.__doc__ or "",
+    structured_output=False,
+)
+async def _search_tools_wire(query: str, limit: int = 8, domain: str | None = None) -> TextContent:
+    return _wire(await search_tools(query, limit, domain))
+
+
+@gateway.tool(
+    name="describe_tools",
+    description=describe_tools.__doc__ or "",
+    structured_output=False,
+)
+async def _describe_tools_wire(names: list[str], minimal: bool = True) -> TextContent:
+    return _wire(await describe_tools(names, minimal))
 
 
 __all__ = ["describe_tools", "execute_tool", "gateway", "ping", "prewarm", "search_tools"]
