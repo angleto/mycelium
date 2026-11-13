@@ -27,6 +27,7 @@ no auth args (the HTTP bearer still gates every request).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import inspect
 import json
@@ -125,9 +126,12 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
     caller that passes full uuids.
     """
     principal = _PRINCIPAL.get()
-    if principal is None:
-        return None  # stdio / unauthenticated: no session to resolve against
-    user_id, org_id, _token_id = principal
+    stdio_token = args.get("token")
+    stdio_org = args.get("org_id")
+    if principal is None and not (
+        isinstance(stdio_token, str) and stdio_token and isinstance(stdio_org, str)
+    ):
+        return None  # unauthenticated: no identity to resolve against
     pending: list[tuple[str, str, tuple[str, ...]]] = []
     for key, value in args.items():
         if not isinstance(value, str) or len(value) >= _FULL_UUID_LEN:
@@ -146,7 +150,22 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
         return None
     from mycelium_core.services import lookup as lookup_svc
 
-    async with tenant_session(str(org_id), str(user_id), actor_kind="mcp_token") as session:
+    # The ids this surface hands out are shortened for every caller, so they
+    # must expand for every caller too: a person on the stdio transport
+    # carries the session in ``token``/``org_id`` instead of a principal, and
+    # without this branch was given ids it could not pass back.
+    async with contextlib.AsyncExitStack() as stack:
+        if principal is not None:
+            user_id, org_id, _token_id = principal
+            session = await stack.enter_async_context(
+                tenant_session(str(org_id), str(user_id), actor_kind="mcp_token")
+            )
+        else:
+            from mycelium_mcp.server import _tenant
+
+            session, _org, _user = await stack.enter_async_context(
+                _tenant(str(stdio_token), str(stdio_org))
+            )
         for key, value, kinds in pending:
             try:
                 # Archived AND deleted are both in scope here, which is wider

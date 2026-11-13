@@ -219,6 +219,21 @@ async def test_a_short_id_is_accepted_wherever_it_is_handed_out() -> None:
     assert got["title"] == "reachable"
 
 
+async def test_a_person_without_a_principal_can_pass_a_short_id_back() -> None:
+    """The short form is handed to every caller of the gateway, a person
+    included: a person carries the session in ``token``/``org_id`` instead of
+    a principal. Expansion used to run only for a principal, so a person was
+    given ids it could not use and got a uuid parse error back."""
+    token, org_id, _uid = await _org()
+    assert _PRINCIPAL.get() is None
+    session = {"token": token, "org_id": org_id}
+    created = await execute_tool(name="create_task", arguments={**session, "title": "a person's"})
+    assert len(created["id"]) == 8
+    got = await execute_tool(name="get_task", arguments={**session, "task_id": created["id"]})
+    assert got["id"] == created["id"]
+    assert got["title"] == "a person's"
+
+
 async def test_an_unknown_prefix_is_refused_by_name() -> None:
     """An id that names nothing must say so as an id problem. Without
     expansion this reached the tool as a string and came back as a uuid parse

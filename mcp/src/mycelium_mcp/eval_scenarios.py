@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from mycelium_core.db import tenant_session
+from mycelium_core.security import create_access_token
 from mycelium_core.services import agent_tokens as agent_tokens_svc
 from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services.eval_metrics import freshness_ok, ndcg_at_k, tokens_chars4
@@ -219,7 +220,23 @@ class ScenarioRunner:
         digest = hashlib.sha256(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[
             :12
         ]
-        principal, authenticated, scope = await self._principal_for(actor)
+        if actor.kind == "human":
+            # A person acts as a person: through the session path the stdio
+            # transport uses, with no agent principal published. Injecting a
+            # principal for them would run them as an agent credential, and
+            # an agent credential is refused what only a person may do
+            # (approving generated text, for one), so the scenario would be
+            # measuring a reviewer the system no longer lets exist.
+            args = {
+                **args,
+                "token": create_access_token(
+                    user_id=str(actor.user_id), extra={"org_id": str(actor.org_id)}
+                ),
+                "org_id": str(actor.org_id),
+            }
+            principal, authenticated, scope = None, False, None
+        else:
+            principal, authenticated, scope = await self._principal_for(actor)
         token = _PRINCIPAL.set(principal)
         # Publish the actor's scope too (task c19f2f63): the gateway gate reads
         # _PRINCIPAL_SCOPE, so without this every eval ran full-access and the
