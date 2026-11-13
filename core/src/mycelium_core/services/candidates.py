@@ -60,7 +60,7 @@ from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.services import graph as graph_svc
 from mycelium_core.services import graph_snapshot as snap_svc
-from mycelium_core.services import note_inert
+from mycelium_core.services import note_inert, note_touch
 from mycelium_core.services.decomposition import _MAX_PATTERN_SOURCES, _existing_humus
 from mycelium_core.services.graph import _note_generic_tags, _pair_key
 from mycelium_core.services.note_effective import effective_note_clause, ineffective_note_ids
@@ -132,12 +132,16 @@ async def list_distillation_candidates(
     project_id: uuid.UUID | None = None,
     kind: CandidateKind = "all",
     limit: int = 50,
+    now: dt.datetime | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     """Compute distillation candidates (nodes + edges). Pure read, no LLM.
 
     ``kind`` selects a family (default ``"all"``). ``limit`` caps EACH
     output list. Returns ``{"nodes": [...], "edges": [...]}`` with the
-    fields the GUI/MCP contract pins.
+    fields the GUI/MCP contract pins. ``now`` is the clock the quiet window
+    is read against (default: the current instant); the activity log it is
+    compared with is append-only, so a caller cannot move a touch back in
+    time, only the instant it asks from.
     """
     want_distill = kind in ("all", "distill")
     want_pattern = kind in ("all", "pattern")
@@ -163,10 +167,11 @@ async def list_distillation_candidates(
         centrality = {str(k): float(v) for k, v in (snapshot.centrality or {}).items()}
         clusters = {str(k): int(v) for k, v in (snapshot.clusters or {}).items()}
 
-    now = dt.datetime.now(dt.UTC)
+    now = now or dt.datetime.now(dt.UTC)
 
     # ---- inert notes (distill eligibility) -------------------------------
     inert_notes: list[Note] = []
+    touched_by_id: dict[uuid.UUID, dt.datetime] = {}
     if want_distill or want_pattern:
         quiet_cutoff = now - dt.timedelta(days=note_inert.QUIET_WINDOW_DAYS)
         child = aliased(Note)
@@ -181,8 +186,14 @@ async def list_distillation_candidates(
             )
             .exists()
         )
+        # Quiet on the liveness clock, not on updated_at: the maturity
+        # sweep's own label write must not make a note look freshly edited,
+        # and a part edit must (note_touch).
+        last_touch = note_touch.last_touch_subquery(org_id)
+        touched = note_touch.touched_at(last_touch)
         stmt = (
-            select(Note)
+            select(Note, touched.label("touched_at"))
+            .outerjoin(last_touch, last_touch.c.note_id == Note.id)
             .where(
                 Note.org_id == org_id,
                 # Effective notes only (task f8402e7f): an un-approved
@@ -199,24 +210,26 @@ async def list_distillation_candidates(
                     Note.is_archived.is_(True),
                     Note.maturity == NoteMaturity.dormant.value,
                 ),
-                Note.updated_at < quiet_cutoff,
+                touched < quiet_cutoff,
                 ~note_inert.open_work_exists(Note.id),
                 ~already_distilled,
             )
             .limit(_SCAN_CAP)
         )
-        for n in (await session.execute(stmt)).scalars().all():
+        for n, n_touched in (await session.execute(stmt)).all():
             if project_ids is not None and n.id not in project_ids:
                 continue
             inert_notes.append(n)
+            touched_by_id[n.id] = n_touched
 
     # ---- NODE / distill --------------------------------------------------
     if want_distill:
 
         def _rank(n: Note) -> tuple[float, float]:
-            # centrality desc, then older-updated first (more stale -> riper)
+            # centrality desc, then least recently touched first (riper)
             c = centrality.get(str(n.id), 0.0)
-            age = -(n.updated_at.timestamp() if n.updated_at else 0.0)
+            last = touched_by_id.get(n.id)
+            age = -(last.timestamp() if last else 0.0)
             return (c, age)
 
         for n in sorted(inert_notes, key=_rank, reverse=True)[:limit]:

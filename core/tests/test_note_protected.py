@@ -63,7 +63,7 @@ async def _inert_note(
     n.is_archived = True
     await s.flush()  # type: ignore[attr-defined]
     await s.execute(  # type: ignore[attr-defined]
-        text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+        text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
         {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=days), "id": str(n.id)},
     )
     await s.refresh(n)  # type: ignore[attr-defined]
@@ -97,7 +97,7 @@ async def test_protected_note_is_not_inert_and_not_a_candidate() -> None:
             protected=False,
         )
         await s.execute(
-            text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+            text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
             {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(n.id)},
         )
         out = await cand.list_distillation_candidates(s, org_id=org, kind="distill")

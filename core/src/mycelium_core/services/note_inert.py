@@ -22,9 +22,11 @@ Notes:
   counts (a safety invariant errs toward not touching the note); this
   subsumes the "active watering" clause (watering is the ``subject``
   link kind).
-- There is no separate ``last_edit_at`` column, so the quiet window uses
-  ``updated_at``. The spec's draft/lock clauses are no-ops until those
-  columns exist (kept here as a documented gap, not a silent omission);
+- The quiet window reads the liveness clock of ``note_touch`` (last
+  non-system touch of the note or its parts, else its creation), not
+  ``updated_at``, which every system write bumps. The spec's draft/lock
+  clauses are no-ops until those columns exist (kept here as a documented
+  gap, not a silent omission);
   the ``protected`` clause is live since migration 0081 (Fase P, task
   561c6aca): protected prose is never eligible for decomposition.
 - All callers run inside a tenant session, so RLS scopes the queries to
@@ -44,6 +46,7 @@ from mycelium_core.models.note import Note, NoteMaturity
 from mycelium_core.models.note_link import NoteTaskLink
 from mycelium_core.models.task import Task
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import note_touch
 
 # A note edited within this window is treated as live (quiet-window
 # default; the spec's configurable 14 days).
@@ -91,6 +94,16 @@ async def is_inert(
     if not (note.is_archived or note.maturity == NoteMaturity.dormant.value):
         return False
     now = now or dt.datetime.now(dt.UTC)
-    if note.updated_at is not None and note.updated_at > now - dt.timedelta(days=quiet_days):
+    # The quiet window is read on the liveness clock, not on updated_at: a
+    # system write (the maturity sweep's own label) must not reopen it, and a
+    # part edit, which never moves the note row, must.
+    last_touch = note_touch.last_touch_subquery(note.org_id, note_id=note.id)
+    touched = await session.scalar(
+        select(note_touch.touched_at(last_touch))
+        .select_from(Note)
+        .outerjoin(last_touch, last_touch.c.note_id == Note.id)
+        .where(Note.id == note.id)
+    )
+    if touched is not None and touched > now - dt.timedelta(days=quiet_days):
         return False
     return not await note_has_open_work(session, note_id=note.id)

@@ -68,8 +68,10 @@ async def _open_task_on(s: object, org: uuid.UUID, user: uuid.UUID, note: Note) 
 
 
 async def _age(s: object, note: Note, days: int) -> None:
+    # "Untouched for ``days``" is the liveness clock (note_touch): creation
+    # or last non-system touch. Moving only updated_at no longer ages a note.
     await s.execute(  # type: ignore[attr-defined]
-        text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+        text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
         {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=days), "id": str(note.id)},
     )
     await s.refresh(note)  # type: ignore[attr-defined]

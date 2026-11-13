@@ -62,7 +62,7 @@ from mycelium_core.models.note_link import (
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
-from mycelium_core.services import audit, note_inert, tag_assignment
+from mycelium_core.services import audit, note_inert, note_touch, tag_assignment
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
@@ -1111,10 +1111,16 @@ async def tick_maturity_transitions(
     """Apply the garden seasonal rules (docs/adr/0029 D2):
 
     - ``seed`` notes touched in the last ``seed_to_growing_days``
-      (proxied by ``updated_at``) become ``growing``.
-    - ``growing`` or ``mature`` notes whose ``updated_at`` is older
-      than ``growing_to_dormant_days`` become ``dormant``.
+      become ``growing``.
+    - ``growing`` or ``mature`` notes not touched for
+      ``growing_to_dormant_days`` become ``dormant``.
     - ``dormant`` notes touched recently become ``growing``.
+
+    "Touched" is the liveness clock of ``note_touch`` (last non-system
+    activity on the note or its parts, else its creation), never
+    ``updated_at``: this sweep writes the maturity label itself, and reading
+    the row-write clock made every dormancy it wrote undo itself on the next
+    tick.
 
     Does NOT promote to ``mature`` (D2: that transition is always
     manual). Promoted/transplanted notes (``promoted_at IS NOT
@@ -1126,19 +1132,23 @@ async def tick_maturity_transitions(
     seed_threshold = now - dt.timedelta(days=seed_to_growing_days)
     dormant_threshold = now - dt.timedelta(days=growing_to_dormant_days)
     out: dict[str, int] = {"seed_to_growing": 0, "to_dormant": 0, "dormant_to_growing": 0}
+    last_touch = note_touch.last_touch_subquery(org_id)
+    touched = note_touch.touched_at(last_touch)
 
     # seed -> growing (touched recently)
     seed_to_growing = (
         (
             await session.execute(
-                select(Note).where(
+                select(Note)
+                .outerjoin(last_touch, last_touch.c.note_id == Note.id)
+                .where(
                     Note.org_id == org_id,
                     # An un-approved proposal does not age: its clock starts
                     # when a human accepts it (task a186c989).
                     effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity == NoteMaturity.seed.value,
-                    Note.updated_at > seed_threshold,
+                    touched > seed_threshold,
                 )
             )
         )
@@ -1153,14 +1163,16 @@ async def tick_maturity_transitions(
     to_dormant = (
         (
             await session.execute(
-                select(Note).where(
+                select(Note)
+                .outerjoin(last_touch, last_touch.c.note_id == Note.id)
+                .where(
                     Note.org_id == org_id,
                     # An un-approved proposal does not age: its clock starts
                     # when a human accepts it (task a186c989).
                     effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity.in_([NoteMaturity.growing.value, NoteMaturity.mature.value]),
-                    Note.updated_at < dormant_threshold,
+                    touched < dormant_threshold,
                     # Invariant (task 8a26c000): never auto-dormant a live
                     # note (one with an open linked task).
                     ~note_inert.open_work_exists(Note.id),
@@ -1178,14 +1190,16 @@ async def tick_maturity_transitions(
     dormant_to_growing = (
         (
             await session.execute(
-                select(Note).where(
+                select(Note)
+                .outerjoin(last_touch, last_touch.c.note_id == Note.id)
+                .where(
                     Note.org_id == org_id,
                     # An un-approved proposal does not age: its clock starts
                     # when a human accepts it (task a186c989).
                     effective_note_clause(),
                     Note.promoted_at.is_(None),
                     Note.maturity == NoteMaturity.dormant.value,
-                    Note.updated_at > seed_threshold,
+                    touched > seed_threshold,
                 )
             )
         )

@@ -33,8 +33,8 @@ from mycelium_core.models.note_link import NoteNoteLink  # noqa: E402
 from mycelium_core.models.note_tag import NoteTag  # noqa: E402
 from mycelium_core.models.tag import TagKind  # noqa: E402
 from mycelium_core.services import candidates as cand  # noqa: E402
+from mycelium_core.services import note_inert, taxonomy  # noqa: E402
 from mycelium_core.services import notes as nt  # noqa: E402
-from mycelium_core.services import taxonomy  # noqa: E402
 from mycelium_core.services.auth import signup  # noqa: E402
 from mycelium_core.services.taxonomy import ClientInput  # noqa: E402
 
@@ -88,7 +88,7 @@ async def _inert_note(
     n.is_archived = True
     await s.flush()  # type: ignore[attr-defined]
     await s.execute(  # type: ignore[attr-defined]
-        text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+        text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
         {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=days), "id": str(n.id)},
     )
     await s.refresh(n)  # type: ignore[attr-defined]
@@ -175,7 +175,7 @@ async def test_pattern_excludes_dormant_non_archived_members() -> None:
         d.maturity = NoteMaturity.dormant.value
         await s.flush()
         await s.execute(
-            text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+            text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
             {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(d.id)},
         )
         await s.refresh(d)
@@ -284,8 +284,12 @@ async def test_project_perimeter_is_respected() -> None:
             s, org_id=org, actor_id=user, name="Proj", client_tag_id=client.id
         )
         await nt.attach_tag(s, org_id=org, actor_id=user, note_id=inside.id, tag_id=proj.id)
+        # Attaching the project tag is a touch on the liveness clock
+        # (note_touch), and the activity log cannot be backdated: ask from a
+        # moment past the quiet window instead, as if the tag went on long ago.
+        later = dt.datetime.now(dt.UTC) + dt.timedelta(days=note_inert.QUIET_WINDOW_DAYS + 1)
         out = await cand.list_distillation_candidates(
-            s, org_id=org, project_id=proj.id, kind="distill"
+            s, org_id=org, project_id=proj.id, kind="distill", now=later
         )
         ids = {i for c in out["nodes"] for i in c["note_ids"]}
         assert str(inside.id) in ids

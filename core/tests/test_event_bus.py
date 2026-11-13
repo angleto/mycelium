@@ -308,6 +308,9 @@ async def test_agent_commit_on_inert_note_allowed_and_on_bus() -> None:
             .where(Note.id == note_id)
             .values(
                 is_archived=True,
+                # Quiet is read on the liveness clock (note_touch): creation
+                # when nobody touched the note since, so it moves too.
+                created_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=30),
                 updated_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=30),
             )
         )

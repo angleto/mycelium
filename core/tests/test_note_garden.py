@@ -332,13 +332,14 @@ async def test_tick_marks_old_growing_as_dormant() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         n = await _make_note(s, org, user, "old")
-        # Force the note into growing and age its updated_at past the
-        # dormant threshold.
+        # Force the note into growing and age it past the dormant
+        # threshold: creation is its liveness clock when nobody has touched
+        # it since (note_touch), so created_at moves with updated_at.
         n.maturity = NoteMaturity.growing.value
         await s.flush()
         far_past = dt.datetime.now(dt.UTC) - dt.timedelta(days=120)
         await s.execute(
-            text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+            text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
             {"t": far_past, "id": str(n.id)},
         )
         counters = await note_links.tick_maturity_transitions(s, org_id=org, actor_id=user)

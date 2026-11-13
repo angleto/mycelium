@@ -58,6 +58,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.services.note_effective import effective_note_clause
+from mycelium_core.services.note_touch import NOTE_TOUCH_ACTIONS, PART_TOUCH_ACTIONS
 
 # Rolling lookback: only the recent past shapes the live weave. Matches
 # the "last 30-90 days" framing in ADR-0031's co-activity note; 90 days
@@ -76,30 +77,10 @@ COACTIVITY_SESSION_GAP = datetime.timedelta(minutes=30)
 # tag/edit run lands well above it.
 _MAX_SESSION_NOTES = 25
 
-# Allow-lists of "working on it" actions (so a *new* action defaults to
-# not-counted). Verified against the real audit vocabulary:
-#   - ``entity="note"``  : the note-level lifecycle/content touches.
-#   - ``entity="note_part"`` : part-level content edits (resolved to the
-#     owning note). ``create``/``delete`` excluded as genesis/removal.
-# ``create``, ``archive``, ``delete``, ``restore``, ``gdpr_erase`` and the
-# autonomous ``auto_*`` / ``maturity_tick`` actions are all excluded as
-# genesis, removal or machine events. ``set_maturity`` is the *manual*
-# maturity override (the automatic ``maturity_tick`` carries
-# actor_kind='system' and is dropped by the actor filter).
-_NOTE_TOUCH_ACTIONS: frozenset[str] = frozenset(
-    {
-        "update",
-        "append",
-        "attach_tag",
-        "detach_tag",
-        "set_maturity",
-        "parts_reorder",
-        "restore_revision",
-        "transcribe",
-        "append_message",
-    }
-)
-_PART_TOUCH_ACTIONS: frozenset[str] = frozenset({"update", "append", "prepend", "replace"})
+# The "working on it" vocabulary (NOTE_TOUCH_ACTIONS / PART_TOUCH_ACTIONS)
+# lives in ``note_touch``, which the garden's liveness clock reads too: one
+# definition of what a touch is. Co-activity takes it as is, part ``create``
+# excluded (see the module docstring).
 
 
 async def _effective_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uuid.UUID]:
@@ -190,7 +171,7 @@ async def refresh_coactivity(
                 ActivityLog.entity_id.is_not(None),
                 ActivityLog.actor_id.is_not(None),
                 ActivityLog.actor_kind != "system",
-                ActivityLog.action.in_(_NOTE_TOUCH_ACTIONS),
+                ActivityLog.action.in_(NOTE_TOUCH_ACTIONS),
                 ActivityLog.ts >= since,
             )
         )
@@ -206,7 +187,7 @@ async def refresh_coactivity(
                 ActivityLog.entity == "note_part",
                 ActivityLog.actor_id.is_not(None),
                 ActivityLog.actor_kind != "system",
-                ActivityLog.action.in_(_PART_TOUCH_ACTIONS),
+                ActivityLog.action.in_(PART_TOUCH_ACTIONS),
                 ActivityLog.ts >= since,
                 NotePart.org_id == org_id,
             )

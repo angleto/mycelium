@@ -99,7 +99,7 @@ async def test_distill_note_creates_humus_atom(_wire_llm: None) -> None:
         source.is_archived = True
         await s.flush()
         await s.execute(
-            text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+            text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
             {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(source.id)},
         )
         await s.refresh(source)  # the raw UPDATE bypasses the identity map
@@ -277,7 +277,7 @@ async def _inert_source(s: object, org: uuid.UUID, user: uuid.UUID, *, title: st
     source.is_archived = True
     await s.flush()  # type: ignore[attr-defined]
     await s.execute(  # type: ignore[attr-defined]
-        text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+        text("UPDATE notes SET created_at = :t, updated_at = :t WHERE id = :id"),
         {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(source.id)},
     )
     await s.refresh(source)  # type: ignore[attr-defined]
