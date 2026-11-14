@@ -869,3 +869,193 @@ async def test_expired_requests_and_codes_are_refused() -> None:
         )
         assert r.status_code == 400
         assert r.json()["error"] == "invalid_grant"
+
+
+# ----- isolation and races (mycelium-cc review, 2026-11-13) ------------------
+#
+# Each of these is asserted against the database, not the routes alone: the
+# route answering 404 to a stranger proves the service filtered, the RLS
+# assertions prove the TABLE refuses even a query that forgets to. They were
+# mutation-checked: with each policy replaced by ``USING (true)`` the
+# cross-workspace reads, writes and inserts below succeed and these fail.
+
+
+async def _whole_flow(c: AsyncClient) -> tuple[dict[str, str], str]:
+    """A person, a dynamic client, an approval and a redeemed code: leaves an
+    assistant and its grant row in the person's workspace."""
+    person = await _signup(c)
+    client_id = await _client_id(c)
+    verifier, challenge = _pkce()
+    code = await _code_for(c, person, client_id, challenge)
+    r = await _token(
+        c, code=code, client_id=client_id, redirect_uri=CALLBACK, code_verifier=verifier
+    )
+    assert r.status_code == 200, r.text
+    return person, client_id
+
+
+async def test_rls_keeps_hand_registered_clients_inside_their_workspace() -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    from mycelium_core.db import tenant_session
+    from mycelium_core.models.oauth_client import OAuthClient
+
+    async with _client() as c:
+        owner = await _signup(c)
+        created = await c.post(
+            "/oauth/clients",
+            headers=owner,
+            json={"client_name": "Mine", "redirect_uris": ["http://127.0.0.1:7777/cb"]},
+        )
+        assert created.status_code == 201, created.text
+        client_id = created.json()["client_id"]
+        stranger = await _signup(c)
+    org_a, org_b = owner["X-Workspace-Id"], stranger["X-Workspace-Id"]
+    user = str(uuid.uuid4())
+
+    async with tenant_session(org_a, user) as s:
+        mine = (
+            await s.execute(select(OAuthClient).where(OAuthClient.client_id == client_id))
+        ).scalar_one_or_none()
+        assert mine is not None, "the owning workspace must see its own client"
+
+    async with tenant_session(org_b, user) as s:
+        # No WHERE on org_id: the policy alone must hide it.
+        seen = (
+            await s.execute(select(OAuthClient).where(OAuthClient.client_id == client_id))
+        ).scalar_one_or_none()
+        assert seen is None
+        renamed = await s.execute(
+            update(OAuthClient)
+            .where(OAuthClient.client_id == client_id)
+            .values(client_name="hijacked")
+            .returning(OAuthClient.id)
+        )
+        assert renamed.first() is None
+
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with tenant_session(org_b, user) as s:
+            s.add(
+                OAuthClient(
+                    client_id=f"{clients_svc.PUBLIC_CLIENT_PREFIX}{secrets.token_hex(8)}",
+                    client_name="planted",
+                    redirect_uris=["http://127.0.0.1:1/cb"],
+                    registration="manual",
+                    org_id=uuid.UUID(org_a),
+                    created_by_id=None,
+                )
+            )
+            await s.flush()
+
+    async with tenant_session(org_a, user) as s:
+        name = (
+            await s.execute(
+                select(OAuthClient.client_name).where(OAuthClient.client_id == client_id)
+            )
+        ).scalar_one()
+        assert name == "Mine"
+
+
+async def test_rls_keeps_oauth_grants_inside_their_workspace() -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    from mycelium_core.db import tenant_session
+    from mycelium_core.models.ai_assistant_oauth_grant import AiAssistantOAuthGrant
+
+    async with _client() as c:
+        owner, client_id = await _whole_flow(c)
+        stranger = await _signup(c)
+    org_a, org_b = owner["X-Workspace-Id"], stranger["X-Workspace-Id"]
+    user = str(uuid.uuid4())
+
+    async with tenant_session(org_a, user) as s:
+        grant = (
+            await s.execute(
+                select(AiAssistantOAuthGrant).where(AiAssistantOAuthGrant.client_id == client_id)
+            )
+        ).scalar_one()
+        assistant_id, approved_at = grant.assistant_id, grant.approved_at
+
+    async with tenant_session(org_b, user) as s:
+        seen = (
+            await s.execute(
+                select(AiAssistantOAuthGrant).where(
+                    AiAssistantOAuthGrant.assistant_id == assistant_id
+                )
+            )
+        ).scalar_one_or_none()
+        assert seen is None
+        moved = await s.execute(
+            update(AiAssistantOAuthGrant)
+            .where(AiAssistantOAuthGrant.assistant_id == assistant_id)
+            .values(redirect_uri="https://evil.example/cb")
+            .returning(AiAssistantOAuthGrant.assistant_id)
+        )
+        assert moved.first() is None
+
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with tenant_session(org_b, user) as s:
+            # A grant naming workspace A, written from workspace B.
+            s.add(
+                AiAssistantOAuthGrant(
+                    assistant_id=assistant_id,
+                    org_id=uuid.UUID(org_a),
+                    client_id="planted",
+                    client_registration="dynamic",
+                    client_name="planted",
+                    redirect_uri="https://evil.example/cb",
+                    approved_by_id=None,
+                    approved_at=approved_at,
+                )
+            )
+            await s.flush()
+
+    async with tenant_session(org_a, user) as s:
+        uri = (
+            await s.execute(
+                select(AiAssistantOAuthGrant.redirect_uri).where(
+                    AiAssistantOAuthGrant.assistant_id == assistant_id
+                )
+            )
+        ).scalar_one()
+        assert uri == CALLBACK
+
+
+async def test_concurrent_redeems_of_one_code_yield_exactly_one_token() -> None:
+    import asyncio
+
+    async with _client() as c:
+        person = await _signup(c)
+        client_id = await _client_id(c)
+        verifier, challenge = _pkce()
+        code = await _code_for(c, person, client_id, challenge)
+        form = {
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": CALLBACK,
+            "code_verifier": verifier,
+        }
+        results = await asyncio.gather(*(_token(c, **form) for _ in range(8)))
+    statuses = sorted(r.status_code for r in results)
+    assert statuses == [200] + [400] * 7, [r.text for r in results]
+    assert {r.json()["error"] for r in results if r.status_code == 400} == {"invalid_grant"}
+
+
+async def test_a_person_cannot_approve_into_a_workspace_they_are_not_in() -> None:
+    async with _client() as c:
+        person = await _signup(c)
+        stranger = await _signup(c)
+        client_id = await _client_id(c)
+        _, challenge = _pkce()
+        rid = _consent_request_id(await _authorize(c, client_id, challenge))
+        foreign = {**person, "X-Workspace-Id": stranger["X-Workspace-Id"]}
+        r = await c.post(
+            "/oauth/consent/approve",
+            headers=foreign,
+            json={"request": rid, "label": "x", "scope": list(DEFAULT_SCOPES)},
+        )
+        assert r.status_code in (403, 404), r.text
+        # The request was not spent: its rightful answer still works, in the
+        # person's own workspace, and the code lands there.
+        params = await _approve(c, person, rid)
+        assert params["code"]

@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from mycelium_core.oauth.deployment import validate_public_base_url, validate_trusted_proxies
 from mycelium_core.oauth.redirects import validate_scheme_allowlist
 
 
@@ -950,6 +951,16 @@ class Settings(BaseSettings):
         self.oauth_private_use_redirect_schemes = sorted(
             validate_scheme_allowlist(self.oauth_private_use_redirect_schemes)
         )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_oauth_deployment(self) -> Settings:
+        """Refuse a public base URL that is not an origin and a proxy list
+        that does not parse or trusts a whole address family, and store both
+        normalised (``oauth.deployment``). Empty stays valid: it is the "off"
+        that ``oauth.production`` already handles."""
+        self.public_base_url = validate_public_base_url(self.public_base_url)
+        self.issuer_key_trusted_proxies = validate_trusted_proxies(self.issuer_key_trusted_proxies)
         return self
 
     @model_validator(mode="after")

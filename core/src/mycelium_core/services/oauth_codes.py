@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.models.oauth_code import OAuthCode
@@ -50,22 +50,31 @@ async def mint(
 
 
 async def consume(session: AsyncSession, *, code: str) -> OAuthCode | None:
-    """Look up + atomically delete a code. Returns ``None`` for an
-    unknown or expired code; the row is deleted either way so a stale
-    code cannot be reused after a successful auth attempt."""
+    """Claim a code: delete it and return what it carried, or ``None`` for an
+    unknown or expired code. The row is deleted either way, so a stale code
+    cannot be reused after a successful auth attempt.
+
+    The claim is ONE statement, ``DELETE ... RETURNING``: of several
+    exchanges racing on the same code, Postgres lets exactly one delete the
+    row and the others find nothing. It used to be a SELECT followed by a
+    DELETE whose result nobody read, so every exchange that SELECTed before
+    the first DELETE got the row back and minted a token
+    (``tests/test_oauth_code_single_use.py``)."""
     row = (
-        await session.execute(select(OAuthCode).where(OAuthCode.code == code))
+        await session.execute(
+            delete(OAuthCode)
+            .where(OAuthCode.code == code)
+            .returning(OAuthCode)
+            .execution_options(synchronize_session=False)
+        )
     ).scalar_one_or_none()
-    if row is None:
-        return None
-    await session.execute(delete(OAuthCode).where(OAuthCode.code == code))
     # Lazy GC: anytime we land here, wipe everything that already
     # expired. Cheap (the index supports it) and avoids a separate
     # cron job. Stays under the per-request scope.
     now = dt.datetime.now(dt.UTC)
     await session.execute(delete(OAuthCode).where(OAuthCode.expires_at < now))
     await session.commit()
-    if row.expires_at < now:
+    if row is None or row.expires_at < now:
         return None
     return row
 

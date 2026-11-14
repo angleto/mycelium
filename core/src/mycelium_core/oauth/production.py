@@ -10,8 +10,10 @@ issuer. Two settings make those protections real, in ANY environment:
 ``MYCELIUM_PUBLIC_BASE_URL``  without it, the issuer is built from the
     request's Host, which the caller chooses (nginx forwards ``$host``).
 
-The two strategies run ONLY when both are set. The gate does not try to
-recognise production: an earlier version did, by ``MYCELIUM_ENV``, which
+The two strategies run ONLY when both are set, and a value that is set but
+wrong (a proxy entry that does not parse, a catch-all network, a base URL that
+is not an https origin) stops the process at startup (``oauth.deployment``).
+The gate does not try to recognise production: an earlier version did, by ``MYCELIUM_ENV``, which
 defaults to ``dev`` and that nothing else reads, so a production deployment
 that never set it got the strategies on and unprotected -- it failed open
 (third security review, 2026-11-13). Now the safe state needs no recognition.
