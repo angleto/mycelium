@@ -184,6 +184,7 @@ export const en = {
     copyManual: 'The clipboard is not available here — copy this by hand:',
     copyFailed: 'Copy failed',
     peek: 'Open here, without leaving the list',
+    moreActions: 'More actions',
   },
   taskLinkKind: {
     subject: 'subject',

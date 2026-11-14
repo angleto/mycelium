@@ -491,7 +491,7 @@ a:hover {
 .setnav__link {
   padding: var(--sp-6) var(--sp-12);
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
@@ -512,7 +512,7 @@ a:hover {
   color: var(--text);
   padding: var(--sp-2) var(--sp-8);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   background: var(--surface-2);
 }
 .running:hover {
@@ -704,6 +704,17 @@ button.running__n {
                             of device, it is the width at which one
                             specific row runs out of room.
    =========================================================== */
+/* On a phone the page IS the card. The framed card inside the padded
+   content area spent about 3rem of a 390px width on two borders and two
+   gutters, which is the width a title needs to fit on one line. */
+@media (max-width: 640px) {
+  .content > .card {
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+  }
+}
 @media (max-width: 820px) {
   .topbar__hamburger { display: inline-block; }
   /* Tighter topbar: only the hamburger, brand and the glanceable
@@ -1472,27 +1483,53 @@ button.btn--danger:hover {
   display: inline-block;
 }
 
-/* Toggle pill: a button styled like a chip used as a stateful switch
-   (e.g. pomodoro notification on/off). Avoids the misalignment between
-   a native checkbox and its label that the original "label + input"
-   layout had. */
+/* Toggle: a button used as a stateful switch (components/Toggle.tsx).
+   Shaped like every other button, with the 8px corner, because it IS a
+   control: the pill shape is kept for what is not pressed (tags, counts,
+   badges), so that the shape alone says "this does something" or "this
+   says something". The state is the box, not the words, and the label
+   never wraps: a two-word label broken over three lines inside a rounded
+   border was what this replaced on a phone. */
 .toggle-pill {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-12);
-  border-radius: var(--radius-pill);
-  font-size: 0.78rem;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-12) var(--sp-4) var(--sp-8);
+  border-radius: var(--radius-8);
+  font-size: 0.85rem;
   font-weight: 600;
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text-h);
   border: 1px solid var(--border);
   cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.toggle-pill__box {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+  border: 1.5px solid var(--muted);
+  border-radius: var(--radius-4);
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface);
 }
 .toggle-pill--on {
-  background: var(--accent);
-  color: var(--accent-fg);
   border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.toggle-pill--on .toggle-pill__box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.toggle-pill--on .toggle-pill__box::after {
+  content: '';
+  width: 0.28rem;
+  height: 0.52rem;
+  border: solid var(--accent-fg);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
 }
 .toggle-pill:hover { border-color: var(--accent); }
 
@@ -2052,6 +2089,86 @@ button.btn--danger:hover {
   margin-left: auto; /* group actions to the right of row 2 */
 }
 
+/* On a phone the note row reads top to bottom: the title on a line of its
+   own, then what kind of note it is with its chips, then one line of the
+   text. Side by side, at 390px, the three shared a line and the title was
+   squeezed into a column a word wide, four lines tall. */
+@media (max-width: 640px) {
+  .noteitem__main {
+    flex-wrap: wrap;
+    row-gap: var(--sp-4);
+  }
+  .noteitem__title {
+    flex: 1 1 100%;
+  }
+  .noteitem__preview {
+    flex: 1 1 100%;
+    max-width: 100%;
+    margin-left: 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+  .noteitem__actions {
+    margin-left: 0;
+  }
+}
+/* MoreMenu (components/MoreMenu.tsx): the secondary actions of a row, in a
+   small panel under its trigger. Anchored to the trigger's right edge,
+   because the trigger is the last control of its row and a panel opening
+   rightwards from it would leave the card on a phone. */
+.moremenu {
+  position: relative;
+  display: inline-flex;
+}
+.list li .moremenu button {
+  margin-left: 0;
+}
+.moremenu__trigger {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.moremenu__list {
+  position: absolute;
+  top: calc(100% + var(--sp-4));
+  right: 0;
+  z-index: 30;
+  min-width: 11rem;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  box-shadow: 0 6px 24px rgba(21, 32, 26, 0.14);
+}
+.moremenu__item {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-4);
+  padding: var(--sp-8) var(--sp-12);
+  font-size: 0.88rem;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.moremenu__item:hover:not(:disabled),
+.moremenu__item:focus-visible {
+  background: var(--surface-2);
+}
+.moremenu__item:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.moremenu__item--danger {
+  color: var(--err);
+}
+/* The permanent one is set apart from the reversible ones above it. */
+.moremenu__item--danger:not(:first-child) {
+  margin-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-4) var(--radius-4);
+}
 /* ---- clients & projects: aligned rows + a real form grid ---- */
 .cprow {
   display: flex;
@@ -2179,6 +2296,25 @@ button.btn--danger:hover {
 .modal__head {
   border-bottom: 1px solid var(--border);
 }
+/* The title gives way before the close button does. As a flex item its
+   automatic minimum is its longest unbroken run, so a task title of
+   seventy characters held the head at 480px on a 390px phone: the head
+   pushed past the panel, the backdrop scrolled sideways to show the
+   focused close button, and the dialog opened shifted off the left edge
+   with only its border in view. Two lines, then an ellipsis: the title
+   names the dialog, the body is where it is read in full. */
+.modal__head > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.modal__head > button {
+  flex: none;
+}
 .modal__foot {
   border-top: 1px solid var(--border);
   flex-wrap: wrap;
@@ -2241,6 +2377,22 @@ button.btn--danger:hover {
 .modal__panel--detail {
   width: min(1200px, 96vw);
   height: 92vh;
+}
+/* On a phone the detail is a screen, not a card over a screen: the 2vw
+   gutter and the rounded frame cost the width the content needs and
+   leave a strip of the list underneath that reads as tappable and is
+   not. Full screen, dynamic viewport height so the browser bars do not
+   hide the bottom of it. */
+@media (max-width: 640px) {
+  .modal__backdrop:has(> .modal__panel--detail) {
+    padding: 0;
+  }
+  .modal__panel--detail {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
 }
 .peek__body {
   overflow: auto;
@@ -3649,6 +3801,32 @@ button.btn--danger:hover {
   margin: var(--sp-2) var(--sp-4);
   background: var(--border);
 }
+/* On a phone the toolbar is one line that scrolls sideways. Wrapped, its
+   thirty-odd buttons took six rows -- half of a 664px screen above the
+   first line of the text being edited, and pinned there by the sticky
+   rule above while typing. One row keeps the text in view; the buttons
+   past the edge are a swipe away, and the cut-off button at the edge is
+   what says there are more. */
+@media (max-width: 640px) {
+  .rte__bar {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .rte__bar::-webkit-scrollbar {
+    display: none;
+  }
+  .rte__bar-left,
+  .rte__tools {
+    flex-wrap: nowrap;
+  }
+  .rte__bar > *,
+  .rte__bar-left > *,
+  .rte__tools > * {
+    flex: none;
+  }
+}
 /* In the notes modal the editor scrolls inside .modal__body, whose top
    edge is the right anchor for the sticky toolbar (no topbar in the
    overlay). */
@@ -3988,6 +4166,21 @@ button.btn--danger:hover {
   flex: 1;
   min-width: 14rem;
 }
+/* On a phone the form is one field until it is used. Its date, client,
+   project and two buttons filled the whole first screen of /tasks, so the
+   list the page exists for started below the fold. They come back the
+   moment the title has focus or text, which is the only moment they are
+   needed; the explanatory line under the form goes with them. */
+@media (max-width: 640px) {
+  .quickadd:not(:focus-within):has(> .quickadd__title:placeholder-shown)
+    > :not(.quickadd__title),
+  .quickadd:not(:focus-within):has(> .quickadd__title:placeholder-shown) + .hint {
+    display: none;
+  }
+  .quickadd__title {
+    min-width: 100%;
+  }
+}
 .tasklist .taskrow {
   display: flex;
   align-items: center;
@@ -3996,10 +4189,16 @@ button.btn--danger:hover {
 }
 
 /* View tabs (Kanban / List) — segmented control next to the filter row. */
+/* Never shrinks: the control clips its tabs (``overflow: hidden`` keeps
+   the active fill inside the rounded border), so a shrunk segmented
+   control is one whose last tab is cut. Measured on a 390px phone: "Week"
+   half visible and "Month" gone, with nothing to say it was there. The
+   row around it wraps instead. */
 .viewtabs {
   display: inline-flex;
+  flex: none;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   overflow: hidden;
   background: var(--surface);
 }
@@ -4010,8 +4209,26 @@ button.btn--danger:hover {
   font-size: 0.85rem;
   cursor: pointer;
   color: inherit;
+  white-space: nowrap;
+}
+/* A finger is not a pointer: on a touch screen the segmented tabs and the
+   toggles were 27px tall, under every size a thumb can hit reliably. */
+@media (pointer: coarse) {
+  .viewtabs__tab,
+  .toggle-pill {
+    min-height: 2.25rem;
+  }
+}
+@media (max-width: 640px) {
+  .filterbar__group {
+    flex-wrap: wrap;
+  }
 }
 .viewtabs__tab + .viewtabs__tab { border-left: 1px solid var(--border); }
+/* The base button style gives every button its own corner; inside a
+   segmented control that drew each tab as a separate rounded box. The
+   control owns the corners, the tabs are square. */
+.viewtabs .viewtabs__tab { border-radius: 0; }
 .viewtabs__tab--active {
   background: var(--accent);
   color: var(--accent-fg);
@@ -4198,17 +4415,31 @@ button.btn--danger:hover {
 .kanban__card .aibadge {
   -webkit-user-drag: none;
 }
-.kanban__card-head {
+/* The card's foot: who it belongs to on the left, its controls on the
+   right. It wraps, so a RUNNING timer's wider cluster (pause, memo, stop
+   with the live readout) drops below the badge instead of crushing it; the
+   badge itself gives way with an ellipsis, since a handle is context. */
+.kanban__foot {
   display: flex;
-  /* Wrap so a RUNNING timer's wide actions cluster (pause + memo +
-     stop-with-live-readout ⏱■ H:MM:SS) drops onto its own line below the
-     title instead of crushing it. On a 16rem card the title + a running
-     timer can't share one row; without wrap the title was squeezed below
-     a single word's width and wrapped one-character-per-line, while the
-     non-shrinkable IdentityBadge spilled over the actions. */
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--sp-6);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--border);
+}
+.kanban__who {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.kanban__who:empty {
+  display: none;
+}
+.kanban__who .idbadge {
+  max-width: 100%;
+}
+.kanban__who .idbadge__handle {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The actions cluster may wrap and may shrink; what it may not do is leave
    the card. It used to be able to: `flex-shrink: 0` on a row holding copy +
@@ -4244,25 +4475,19 @@ button.btn--danger:hover {
   padding: var(--sp-2) var(--sp-6);
 }
 .kanban__title {
-  font-weight: 500;
-  color: inherit;
+  font-weight: 600;
+  color: var(--text-h);
   text-decoration: none;
-  word-break: break-word;
-  /* flex-basis 0 makes the line-break decision depend on min-width
-     alone, not on title length: the title's packing width is always the
-     6rem floor, so the two idle start glyphs (⏱▶ ⏱▶▶) always fit beside
-     it while the wider running-timer cluster (pause+memo+stop readout)
-     always wraps below it (see .kanban__card-head) — regardless of how
-     long the title is. The floor also keeps the title at least a word
-     wide, so it never wraps one-character-per-line nor lets the
-     non-shrinkable IdentityBadge overflow the actions. flex-grow then
-     expands the title to fill whatever space its line has left. */
-  flex: 1 1 0;
-  min-width: 6rem;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 .kanban__title:hover { text-decoration: underline; }
+.kanban__meta:not(:has(> *)) {
+  display: none;
+}
 .kanban__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-6);
   font-size: 0.8rem;
@@ -4454,6 +4679,83 @@ button.btn--danger:hover {
     width: 100%;
     margin-left: 0;
     flex-wrap: wrap;
+  }
+}
+/* The row's own controls, as one group at the end of the status cluster:
+   when the row stacks they move to the right edge together instead of
+   breaking apart over two lines (the timer pair used to land alone on a
+   third line under the copy/peek/focus icons). */
+.taskrow__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+/* One size for every control a task carries, wherever it is listed. The
+   copy/peek/focus icons were 28px tall with a hairline glyph and the two
+   timer buttons 34px with a bold one, side by side on the same line: two
+   families of button for one row of actions. Same height, same padding,
+   same centring; the icons stay quieter by opacity, not by size. */
+:is(.taskrow__actions, .kanban__card-actions, .recentrow__actions, .noteitem__actions) .btn--sm {
+  height: 1.9rem;
+  min-width: 1.9rem;
+  padding: 0 var(--sp-8);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (pointer: coarse) {
+  :is(.taskrow__actions, .kanban__card-actions, .recentrow__actions, .noteitem__actions) .btn--sm {
+    height: 2.25rem;
+    min-width: 2.25rem;
+  }
+}
+.taskrow__who:empty {
+  display: none;
+}
+/* A handle can be an email-derived slug of 25 characters; in the status
+   cluster it is context, not content, so it gives way first. */
+.taskrow__who .idbadge {
+  max-width: 9rem;
+}
+.taskrow__who .idbadge__handle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 1200px) {
+  .taskrow__actions {
+    margin-left: auto;
+  }
+}
+/* On a phone the title takes the whole first line (beside its checkbox),
+   and the tags share the second line with the status instead of taking
+   half the first: beside a 390px title they turned every title into a
+   four-line column. */
+@media (max-width: 640px) {
+  .taskrow__title {
+    flex: 1 1 calc(100% - 2rem);
+  }
+  .taskrow__tags {
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+    padding-left: var(--sp-24);
+  }
+  .taskrow__meta {
+    width: auto;
+    flex: 1 1 auto;
+  }
+  .taskrow__sep {
+    display: none;
+  }
+}
+/* Without hover there is no "row under the pointer", so the quiet
+   controls stayed at 40% forever on a touch screen and read as disabled. */
+@media (hover: none) {
+  .copyid,
+  .peek,
+  .focushere--icon {
+    opacity: 0.75;
   }
 }
 .taskrow__sep {
@@ -4840,7 +5142,7 @@ button.btn--danger:hover {
   align-items: center;
   gap: var(--sp-6);
   padding: var(--sp-4) var(--sp-12);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   font-size: 0.78rem;
   font-weight: 600;
   border: 1px solid var(--border);
@@ -4997,9 +5299,16 @@ button.btn--danger:hover {
   font-weight: 600;
 }
 @media (max-width: 820px) {
+  /* Stretch, not the grid's ``align-items: start``. In a column flexbox
+     that value sizes each item to its CONTENT, and the editor toolbar
+     laid out on one line is 600px: measured at 390px the main column
+     came out 608px wide inside a 297px box. On the page the excess hid
+     behind the card; in the peek dialog it made the backdrop scroll
+     sideways and the dialog opened shifted off the left edge. */
   .taskdetail__grid {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
   }
   /* Properties move above the content as a collapsible panel. */
   .taskdetail__aside {
@@ -5693,7 +6002,7 @@ button.btn--danger:hover {
   padding: var(--sp-6) var(--sp-8);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   font-size: 0.85rem;
   cursor: pointer;
   color: inherit;
@@ -6112,7 +6421,7 @@ button.btn--danger:hover {
   align-items: center;
   gap: var(--sp-6);
   padding: var(--sp-6) var(--sp-12);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-8);
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-h);

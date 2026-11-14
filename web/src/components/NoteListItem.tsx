@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { TagChip } from './TagChip'
 import { CopyIdButton } from './CopyIdButton'
 import { PeekButton } from './PeekButton'
+import { MoreMenu } from './MoreMenu'
 import type { components } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
@@ -86,7 +87,8 @@ export function NoteListItem({
         </span>
         <span className="noteitem__actions">
           {/* The two that do not change the note, first: take the id, or
-              read it where it is. Everything after them acts on it. */}
+              read it where it is. Then the one done often, deriving a task;
+              the rest, two of which destroy the note, behind the menu. */}
           <CopyIdButton
             id={note.id}
             variant="icon"
@@ -98,44 +100,31 @@ export function NoteListItem({
           />
           <button
             type="button"
-            className="btn--sm"
+            className="btn--ghost btn--sm"
             title={t('notes.toTaskHint')}
             disabled={converting}
             onClick={onConvert}
           >
             {converting ? t('notes.converting') : t('notes.toTask')}
           </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            title={t('notes.promoteHint')}
-            disabled={converting || isPromoted}
-            onClick={onPromote}
-          >
-            {isPromoted ? t('notes.promotedShort') : t('notes.promote')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={onArchive}
-          >
-            {t('notes.archive')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={onDelete}
-          >
-            {t('notes.deleteBtn')}
-          </button>
-          <button
-            type="button"
-            className="btn--danger btn--sm"
-            title={t('notes.eraseHint')}
-            onClick={onErase}
-          >
-            {t('notes.erase')}
-          </button>
+          <MoreMenu
+            items={[
+              {
+                label: isPromoted ? t('notes.promotedShort') : t('notes.promote'),
+                title: t('notes.promoteHint'),
+                disabled: converting || isPromoted,
+                onSelect: onPromote,
+              },
+              { label: t('notes.archive'), onSelect: onArchive },
+              { label: t('notes.deleteBtn'), onSelect: onDelete },
+              {
+                label: t('notes.erase'),
+                title: t('notes.eraseHint'),
+                danger: true,
+                onSelect: onErase,
+              },
+            ]}
+          />
         </span>
       </div>
     </li>

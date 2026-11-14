@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { usePomodoro } from '../lib/pomodoro'
+import { Toggle } from './Toggle'
 
 export function PomodoroSettings() {
   const { t } = useTranslation()
@@ -49,28 +50,18 @@ export function PomodoroSettings() {
         </label>
       </div>
       <div className="row">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={p.config.notify}
-          className={
-            'toggle-pill' + (p.config.notify ? ' toggle-pill--on' : '')
-          }
-          onClick={() => p.updateConfig({ notify: !p.config.notify })}
+        <Toggle
+          on={p.config.notify}
+          onChange={() => p.updateConfig({ notify: !p.config.notify })}
         >
-          {t('pomodoro.notify')}: {p.config.notify ? t('common.on') : t('common.off')}
-        </button>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={p.config.sound}
-          className={
-            'toggle-pill' + (p.config.sound ? ' toggle-pill--on' : '')
-          }
-          onClick={() => p.updateConfig({ sound: !p.config.sound })}
+          {t('pomodoro.notify')}
+        </Toggle>
+        <Toggle
+          on={p.config.sound}
+          onChange={() => p.updateConfig({ sound: !p.config.sound })}
         >
-          {t('pomodoro.sound')}: {p.config.sound ? t('common.on') : t('common.off')}
-        </button>
+          {t('pomodoro.sound')}
+        </Toggle>
       </div>
     </section>
   )

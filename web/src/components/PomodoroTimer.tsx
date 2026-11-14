@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatMmSs, usePomodoro, type Phase } from '../lib/pomodoro'
 import { useMediaQuery } from '../lib/useMediaQuery'
+import { Toggle } from './Toggle'
 
 // Below this width the popover would either spill off-screen or pin
 // the user against a corner; switch to a centred fixed modal instead.
@@ -349,28 +350,18 @@ function PomodoroPopover({
           </label>
         </div>
         <div className="pomodoro__settings-row">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={p.config.notify}
-            className={
-              'toggle-pill' + (p.config.notify ? ' toggle-pill--on' : '')
-            }
-            onClick={() => p.updateConfig({ notify: !p.config.notify })}
+          <Toggle
+            on={p.config.notify}
+            onChange={() => p.updateConfig({ notify: !p.config.notify })}
           >
-            {t('pomodoro.notify')}: {p.config.notify ? t('common.on') : t('common.off')}
-          </button>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={p.config.sound}
-            className={
-              'toggle-pill' + (p.config.sound ? ' toggle-pill--on' : '')
-            }
-            onClick={() => p.updateConfig({ sound: !p.config.sound })}
+            {t('pomodoro.notify')}
+          </Toggle>
+          <Toggle
+            on={p.config.sound}
+            onChange={() => p.updateConfig({ sound: !p.config.sound })}
           >
-            {t('pomodoro.sound')}: {p.config.sound ? t('common.on') : t('common.off')}
-          </button>
+            {t('pomodoro.sound')}
+          </Toggle>
         </div>
       </fieldset>
       <footer className="pomodoro__foot">

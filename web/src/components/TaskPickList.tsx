@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { parseFilter } from '../lib/taskFilter'
 import type { components } from '../shared'
+import { Toggle } from './Toggle'
 
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
@@ -79,19 +80,13 @@ export function TaskPickList({
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button
-          type="button"
-          role="switch"
-          aria-checked={showTerminal}
-          className={
-            'toggle-pill toggle-pill--sm' +
-            (showTerminal ? ' toggle-pill--on' : '')
-          }
-          onClick={() => setShowTerminal((v) => !v)}
+        <Toggle
+          on={showTerminal}
+          onChange={() => setShowTerminal((v) => !v)}
+          small
         >
-          {t('time.showTerminal')}:{' '}
-          {showTerminal ? t('common.on') : t('common.off')}
-        </button>
+          {t('time.showTerminal')}
+        </Toggle>
       </div>
       {filtered.length === 0 ? (
         <p className="hint taskpicklist__empty">{t('tasks.none')}</p>

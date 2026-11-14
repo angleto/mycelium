@@ -183,6 +183,7 @@ export const it: Catalog = {
     copyManual: 'Gli appunti non sono disponibili qui — copia a mano questo testo:',
     copyFailed: 'Copia non riuscita',
     peek: 'Apri qui, senza lasciare la lista',
+    moreActions: 'Altre azioni',
   },
   taskLinkKind: {
     subject: 'oggetto',

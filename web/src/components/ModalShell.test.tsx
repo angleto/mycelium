@@ -16,14 +16,16 @@ function mount(node: React.ReactElement): void {
   act(() => root.render(node))
 }
 
+// The dialog is portalled to the document root, so it is looked for there
+// and not inside the element the component was mounted in.
 function backdrop(): HTMLElement {
-  const el = host.querySelector('.modal__backdrop')
+  const el = document.querySelector('.modal__backdrop')
   if (!(el instanceof HTMLElement)) throw new Error('no backdrop')
   return el
 }
 
 function panel(): HTMLElement {
-  const el = host.querySelector('.modal__panel')
+  const el = document.querySelector('.modal__panel')
   if (!(el instanceof HTMLElement)) throw new Error('no panel')
   return el
 }
@@ -60,9 +62,22 @@ describe('ModalShell', () => {
     expect(el.getAttribute('aria-modal')).toBe('true')
     const labelId = el.getAttribute('aria-labelledby')
     expect(labelId).toBeTruthy()
-    expect(host.querySelector(`#${CSS.escape(labelId as string)}`)?.textContent).toBe(
+    expect(document.querySelector(`#${CSS.escape(labelId as string)}`)?.textContent).toBe(
       'Una nota',
     )
+  })
+
+  it('is not rendered inside the element that opened it', () => {
+    // Mounted inside a task row it inherited the row's ``nowrap`` (the
+    // title and every line of the task refused to wrap) and sat inside the
+    // row's draggable card. At the document root it inherits nothing.
+    mount(
+      <ModalShell title="Una nota" onClose={() => {}}>
+        <div className="modal__body">corpo</div>
+      </ModalShell>,
+    )
+    expect(host.contains(backdrop())).toBe(false)
+    expect(backdrop().parentElement).toBe(document.body)
   })
 
   it('closes on Escape, without letting the key reach the app underneath', () => {

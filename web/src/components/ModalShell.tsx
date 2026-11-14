@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 // The house modal contract, as a component instead of a convention.
@@ -72,7 +73,14 @@ export function ModalShell({
     else closeRef.current?.focus()
   }, [])
 
-  return (
+  // Rendered at the document root, not where the caller sits. A dialog
+  // mounted inside a list row inherits the row's typography -- the task
+  // row's status cluster is ``white-space: nowrap``, so every line of the
+  // task opened over it refused to wrap, the title first -- and sits inside
+  // the row's draggable card, where selecting text in the dialog could
+  // start dragging the card under it. React events still bubble through
+  // the component tree, which is what the callers' handlers expect.
+  return createPortal(
     <div
       className="modal__backdrop"
       role="dialog"
@@ -104,5 +112,7 @@ export function ModalShell({
         {children}
       </div>
     </div>
+  ,
+    document.body,
   )
 }

@@ -158,58 +158,20 @@ export function TaskKanban({
                     onDragStart={(e) => onCardDragStart(e, tk.id)}
                     onDragEnd={onCardDragEnd}
                   >
-                    {/* draggable={false} on the inner Link so the
-                        browser starts the LI's HTML5 drag instead of
-                        the anchor's native drag (which would otherwise
-                        carry just the href, never firing the column's
-                        drop). Click still navigates to /tasks/{id}. */}
-                    <div className="kanban__card-head">
-                      <Link
-                        to={`/tasks/${tk.id}`}
-                        className="kanban__title"
-                        draggable={false}
-                      >
-                        {tk.assignee_kind ? (
-                          <IdentityBadge
-                            kind={tk.assignee_kind}
-                            handle={tk.assignee_handle ?? null}
-                          />
-                        ) : tk.created_by_kind === 'ai_assistant' ||
-                          tk.created_by_kind === 'mcp_token' ? (
-                          <IdentityBadge
-                            kind={tk.created_by_kind}
-                            handle={tk.created_by_handle ?? null}
-                            label={tk.created_by_label ?? null}
-                            title={t('tasks.aiCreatedTitle', {
-                              handle:
-                                tk.created_by_label ??
-                                tk.created_by_handle ??
-                                '',
-                            })}
-                          />
-                        ) : tk.executor_kind === 'llm_agent' ? (
-                          <span
-                            className="aibadge"
-                            title={t('tasks.aiTitle')}
-                          >
-                            {t('tasks.aiBadge')}
-                          </span>
-                        ) : null}
-                        {tk.title}
-                      </Link>
-                      {/* Shared timer widget plus the two controls that
-                          save a round trip through the detail page: take
-                          the id, or read the card. The wrapper stops
-                          mousedown/click from bubbling into the LI's
-                          dragstart heuristic. */}
-                      <div
-                        className="kanban__card-actions"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
-                      </div>
-                    </div>
+                    {/* Title first: it is what a column is scanned for. The
+                        status (taken, priority, when) and the tags follow it,
+                        and who it belongs to sits in the footer beside the
+                        controls -- context, not the headline. draggable={false}
+                        on the Link so the browser starts the LI's HTML5 drag
+                        instead of the anchor's own (which carries only the
+                        href and never fires the column's drop). */}
+                    <Link
+                      to={`/tasks/${tk.id}`}
+                      className="kanban__title"
+                      draggable={false}
+                    >
+                      {tk.title}
+                    </Link>
                     <div className="kanban__meta">
                       {/* First in the meta row, i.e. directly under the
                           title and in the same slot the list uses: on a
@@ -253,6 +215,45 @@ export function TaskKanban({
                         ))}
                       </div>
                     )}
+                    <div className="kanban__foot">
+                      <span className="kanban__who">
+                        {tk.assignee_kind ? (
+                          <IdentityBadge
+                            kind={tk.assignee_kind}
+                            handle={tk.assignee_handle ?? null}
+                          />
+                        ) : tk.created_by_kind === 'ai_assistant' ||
+                          tk.created_by_kind === 'mcp_token' ? (
+                          <IdentityBadge
+                            kind={tk.created_by_kind}
+                            handle={tk.created_by_handle ?? null}
+                            label={tk.created_by_label ?? null}
+                            title={t('tasks.aiCreatedTitle', {
+                              handle:
+                                tk.created_by_label ??
+                                tk.created_by_handle ??
+                                '',
+                            })}
+                          />
+                        ) : tk.executor_kind === 'llm_agent' ? (
+                          <span
+                            className="aibadge"
+                            title={t('tasks.aiTitle')}
+                          >
+                            {t('tasks.aiBadge')}
+                          </span>
+                        ) : null}
+                      </span>
+                      {/* The wrapper stops mousedown/click from bubbling into
+                          the LI's dragstart heuristic. */}
+                      <div
+                        className="kanban__card-actions"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
+                      </div>
+                    </div>
                   </li>
                 )
               })}

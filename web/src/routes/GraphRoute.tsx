@@ -9,6 +9,7 @@ import { useFocus } from '../lib/focus'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { formatDueDate } from '../lib/time'
 import type { components } from '../shared'
+import { Toggle } from '../components/Toggle'
 
 type Task = components['schemas']['TaskOut']
 type Graph = components['schemas']['GraphOut']
@@ -257,18 +258,12 @@ export function GraphRoute() {
             <option value="ai">{t('graph.scopeAi')}</option>
           </select>
         </label>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={showTerminal}
-          className={
-            'toggle-pill' + (showTerminal ? ' toggle-pill--on' : '')
-          }
-          onClick={() => setShowTerminal((v) => !v)}
+        <Toggle
+          on={showTerminal}
+          onChange={() => setShowTerminal((v) => !v)}
         >
-          {t('graph.showTerminal')}:{' '}
-          {showTerminal ? t('common.on') : t('common.off')}
-        </button>
+          {t('graph.showTerminal')}
+        </Toggle>
       </div>
       {wfStates.length > 0 && (
         <div className="tagfilter">

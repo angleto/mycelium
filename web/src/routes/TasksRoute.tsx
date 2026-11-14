@@ -24,6 +24,7 @@ import {
 import { usePossessions } from '../lib/usePossessions'
 import type { Lease } from '../shared'
 import type { components } from '../shared'
+import { Toggle } from '../components/Toggle'
 
 type Worker = components['schemas']['WorkerOut']
 
@@ -1074,44 +1075,28 @@ export function TasksRoute() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={dateFocus}
-            className={'toggle-pill' + (dateFocus ? ' toggle-pill--on' : '')}
-            onClick={() => setDateFocus((v) => !v)}
+          <Toggle
+            on={dateFocus}
+            onChange={() => setDateFocus((v) => !v)}
             title={t('tasks.dateFocusHint')}
           >
-            {t('tasks.dateFocus')}:{' '}
-            {dateFocus ? t('common.on') : t('common.off')}
-          </button>
+            {t('tasks.dateFocus')}
+          </Toggle>
           {view === 'kanban' && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showHidden}
-              className={
-                'toggle-pill' + (showHidden ? ' toggle-pill--on' : '')
-              }
-              onClick={() => setShowHidden((v) => !v)}
+            <Toggle
+              on={showHidden}
+              onChange={() => setShowHidden((v) => !v)}
             >
-              {t('tasks.showHidden')}:{' '}
-              {showHidden ? t('common.on') : t('common.off')}
-            </button>
+              {t('tasks.showHidden')}
+            </Toggle>
           )}
           {view === 'list' && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={hideTerminal}
-              className={
-                'toggle-pill' + (hideTerminal ? ' toggle-pill--on' : '')
-              }
-              onClick={() => setHideTerminal((v) => !v)}
+            <Toggle
+              on={hideTerminal}
+              onChange={() => setHideTerminal((v) => !v)}
             >
-              {t('tasks.hideTerminal')}:{' '}
-              {hideTerminal ? t('common.on') : t('common.off')}
-            </button>
+              {t('tasks.hideTerminal')}
+            </Toggle>
           )}
         </div>
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
@@ -1208,19 +1193,12 @@ export function TasksRoute() {
           {(() => {
             const allOn = sel.size > 0 && listShown.every((x) => sel.has(x.id))
             return (
-              <button
-                type="button"
-                role="switch"
-                aria-checked={allOn}
-                className={
-                  'toggle-pill' + (allOn ? ' toggle-pill--on' : '')
-                }
-                onClick={() =>
-                  setSel(allOn ? new Set() : new Set(listShown.map((x) => x.id)))
-                }
+              <Toggle
+                on={allOn}
+                onChange={() => setSel(allOn ? new Set() : new Set(listShown.map((x) => x.id)))}
               >
-                {t('tasks.selectAll')}: {allOn ? t('common.on') : t('common.off')}
-              </button>
+                {t('tasks.selectAll')}
+              </Toggle>
             )
           })()}
           {sel.size > 0 && (
@@ -1389,32 +1367,6 @@ export function TasksRoute() {
                   aria-label={t('tasks.select')}
                 />
                 <Link to={`/tasks/${tk.id}`} className="taskrow__title">
-                  {tk.assignee_kind ? (
-                    <IdentityBadge
-                      kind={tk.assignee_kind}
-                      handle={tk.assignee_handle ?? null}
-                    />
-                  ) : tk.created_by_kind === 'ai_assistant' ||
-                    tk.created_by_kind === 'mcp_token' ? (
-                    // Created by an AI agent (identity-bound or bare
-                    // MCP token); badge is always bot, label comes from
-                    // ai_assistants.label OR agent_tokens.name.
-                    <IdentityBadge
-                      kind={tk.created_by_kind}
-                      handle={tk.created_by_handle ?? null}
-                      label={tk.created_by_label ?? null}
-                      title={t('tasks.aiCreatedTitle', {
-                        handle:
-                          tk.created_by_label ?? tk.created_by_handle ?? '',
-                      })}
-                    />
-                  ) : tk.executor_kind === 'llm_agent' ? (
-                    // Unassigned but routed to the bot pool: keep the
-                    // legacy aibadge marker (no handle to show).
-                    <span className="aibadge" title={t('tasks.aiTitle')}>
-                      {t('tasks.aiBadge')}
-                    </span>
-                  ) : null}
                   {tk.title}
                 </Link>
                 <span
@@ -1442,6 +1394,37 @@ export function TasksRoute() {
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />
+                  {/* Who, in the status cluster and not inside the title link: in
+                      the link the badge came first and split the title in two on
+                      a phone ("someone-long-handle Preparare / demo per ..."). */}
+                  <span className="taskrow__who">
+                    {tk.assignee_kind ? (
+                      <IdentityBadge
+                        kind={tk.assignee_kind}
+                        handle={tk.assignee_handle ?? null}
+                      />
+                    ) : tk.created_by_kind === 'ai_assistant' ||
+                      tk.created_by_kind === 'mcp_token' ? (
+                      // Created by an AI agent (identity-bound or bare
+                      // MCP token); badge is always bot, label comes from
+                      // ai_assistants.label OR agent_tokens.name.
+                      <IdentityBadge
+                        kind={tk.created_by_kind}
+                        handle={tk.created_by_handle ?? null}
+                        label={tk.created_by_label ?? null}
+                        title={t('tasks.aiCreatedTitle', {
+                          handle:
+                            tk.created_by_label ?? tk.created_by_handle ?? '',
+                        })}
+                      />
+                    ) : tk.executor_kind === 'llm_agent' ? (
+                      // Unassigned but routed to the bot pool: keep the
+                      // legacy aibadge marker (no handle to show).
+                      <span className="aibadge" title={t('tasks.aiTitle')}>
+                        {t('tasks.aiBadge')}
+                      </span>
+                    ) : null}
+                  </span>
                   {tk.start_at && tk.duration_minutes ? (
                     <span
                       className="muted"
@@ -1495,7 +1478,9 @@ export function TasksRoute() {
                   ) : (
                     <span className="muted">{tk.state}</span>
                   )}
-                  <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
+                  <span className="taskrow__actions">
+                    <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
+                  </span>
                 </span>
               </li>
             )

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../shared'
+import { Toggle } from '../components/Toggle'
 
 type Calendar = components['schemas']['CalendarOut']
 type Task = components['schemas']['TaskOut']
@@ -272,16 +273,12 @@ export function EventsRoute() {
       </form>
       {hasTerminalTasks && (
         <div className="row">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showTerminal}
-            className={'toggle-pill' + (showTerminal ? ' toggle-pill--on' : '')}
-            onClick={() => setShowTerminal((v) => !v)}
+          <Toggle
+            on={showTerminal}
+            onChange={() => setShowTerminal((v) => !v)}
           >
-            {t('events.showTerminal')}:{' '}
-            {showTerminal ? t('common.on') : t('common.off')}
-          </button>
+            {t('events.showTerminal')}
+          </Toggle>
         </div>
       )}
       {visibleAppointments.length === 0 ? (
