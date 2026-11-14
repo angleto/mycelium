@@ -6,6 +6,7 @@ import { IdentityBadge } from './IdentityBadge'
 import { TaskQuickActions } from './TaskQuickActions'
 import { relTime } from '../lib/time'
 import { usePersistedFlag } from '../lib/persistedFlag'
+import { usePins } from '../api/pins'
 import type { components } from '../shared'
 
 type Task = components['schemas']['TaskOut']
@@ -58,7 +59,16 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
     }
   }, [count])
 
-  const recent = [...tasks].sort((a, b) => recencyMs(b) - recencyMs(a)).slice(0, count)
+  const { ids: pinnedIds } = usePins()
+
+  // A pinned task is already in the list above this one: shown here too it
+  // only takes one of the few rows from a task that is not at hand. Filtered
+  // before the cut, so the count is still that many recent tasks; pinning
+  // from a row here moves the task up there, and unpinning brings it back.
+  const recent = [...tasks]
+    .filter((tk) => !pinnedIds.includes(tk.id))
+    .sort((a, b) => recencyMs(b) - recencyMs(a))
+    .slice(0, count)
 
   return (
     <section className="recentwidget">

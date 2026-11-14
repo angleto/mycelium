@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { PinnedTasks } from './PinnedTasks'
+import { RecentTasks } from './RecentTasks'
 import { resetPinsForTest } from '../api/pins'
 import { clearSession, setSession } from '../auth/session'
 import '../i18n'
@@ -74,11 +75,18 @@ function answer(): void {
 let host: HTMLDivElement
 let root: Root
 
-async function mount(): Promise<void> {
+async function mount(withRecent: T[] = []): Promise<void> {
   await act(async () => {
     root.render(
       <MemoryRouter>
         <PinnedTasks tasks={[]} />
+        {withRecent.length > 0 && <RecentTasks
+            tasks={
+              // The same partial rows the API double answers with: the list
+              // reads only the fields they carry.
+              withRecent.map(row) as unknown as Parameters<typeof RecentTasks>[0]['tasks']
+            }
+          />}
       </MemoryRouter>,
     )
   })
@@ -141,5 +149,24 @@ describe('PinnedTasks', () => {
     expect(calls).toContain('POST /tasks/unpin')
     expect(pins).toEqual([])
     expect(host.querySelector('.pinnedwidget')).toBeNull()
+  })
+
+  it('keeps a pinned task out of the recent ones, and gives it back on unpin', async () => {
+    localStorage.clear()
+    pins = [TASKS.a.id]
+    await mount([TASKS.a, TASKS.b])
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('.recentwidget__toggle')!.click()
+    })
+    const recent = () =>
+      [...host.querySelectorAll('.recentwidget:not(.pinnedwidget) .recentrow__title')].map((e) => e.textContent)
+    expect(titles()).toEqual(['Aperto'])
+    expect(recent()).toEqual(['Chiuso'])
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('.pinnedwidget .pinbtn')!.click()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(host.querySelector('.pinnedwidget')).toBeNull()
+    expect([...recent()].sort()).toEqual(['Aperto', 'Chiuso'])
   })
 })
