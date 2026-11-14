@@ -2383,6 +2383,11 @@ button.btn--danger:hover {
    leave a strip of the list underneath that reads as tappable and is
    not. Full screen, dynamic viewport height so the browser bars do not
    hide the bottom of it. */
+/* Full screen also means under the status bar: the app is installed with
+   viewport-fit=cover and a translucent status bar, so y=0 is behind the
+   clock and the battery, and the close button that sat there could not be
+   pressed. The panel pads itself clear of every inset, as the top bar
+   does; in a browser tab the insets are 0 and nothing moves. */
 @media (max-width: 640px) {
   .modal__backdrop:has(> .modal__panel--detail) {
     padding: 0;
@@ -2392,6 +2397,20 @@ button.btn--danger:hover {
     height: 100dvh;
     border: 0;
     border-radius: 0;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .modal__panel--detail > .modal__head {
+    min-height: 3rem;
+  }
+  .modal__panel--detail > .modal__head > strong {
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+  .modal__panel--detail > .modal__head > button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    font-size: 1.1rem;
   }
 }
 .peek__body {
@@ -2490,6 +2509,9 @@ button.btn--danger:hover {
     height: 100dvh;
     border: 0;
     border-radius: 0;
+    /* Same as the detail panel: clear of the status bar and the notch. */
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   }
   .modal--sheet .modal__head {
     flex-wrap: wrap;
@@ -5287,12 +5309,48 @@ button.btn--danger:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.taskdetail__headersep {
-  width: 1px;
-  align-self: stretch;
-  min-height: 1.4rem;
-  background: var(--border);
-  margin: 0 var(--sp-2);
+.taskdetail__work,
+.taskdetail__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.taskdetail__tools {
+  gap: var(--sp-4);
+}
+/* On a phone the header is two full-width lines: the work controls, then
+   the tools pushed to the right edge, where the thumb is. */
+@media (max-width: 640px) {
+  .taskdetail__headeractions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-8);
+  }
+  .taskdetail__tools {
+    justify-content: flex-end;
+  }
+  .taskdetail__work .taskdetail__savestate {
+    margin-left: auto;
+  }
+  /* The detail is the whole screen here: the card's desktop gutter only
+     narrows the title and the editor. */
+  .peek__body > .card {
+    padding: var(--sp-12);
+  }
+}
+/* One height for every control in the header, icons included: a pin
+   18px tall next to a 34px select read as a smaller, lesser control. */
+.taskdetail__headeractions :is(.btn--sm, .chip--copy) {
+  min-height: 1.9rem;
+  min-width: 1.9rem;
+}
+@media (pointer: coarse) {
+  .taskdetail__headeractions :is(.btn--sm, .chip--copy) {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
 }
 .taskdetail__badges {
   margin: 0;

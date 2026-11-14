@@ -27,6 +27,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { CopyIdButton } from '../components/CopyIdButton'
 import { FocusHereButton } from '../components/FocusHereButton'
 import { PinButton } from '../components/PinButton'
+import { MoreMenu } from '../components/MoreMenu'
 import { formatHours } from '../lib/estimate'
 import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
@@ -1196,52 +1197,53 @@ export function TaskDetailRoute({
             </span>
           </div>
         )}
+        {/* Two groups that wrap as units. The work controls (state, clock)
+            lead, because they are what the page is opened for; the tools
+            follow: quiet icons, the one structural action used often (new
+            child), and a menu for the two that remove the task from view.
+            Eleven controls in one wrapping row read as three ragged lines
+            on a phone, with Delete a thumb's width from the state select. */}
         <div className="taskdetail__headeractions">
-          <span className="taskdetail__savestate hint" aria-live="polite">
-            {dirty ? t('tasks.unsaved') : t('tasks.saved')}
-          </span>
-          <CopyIdButton
-            id={id}
-            label={t('tasks.copyId')}
-            copiedLabel={t('tasks.idCopied')}
-          />
-          <PinButton taskId={id} />
-          <FocusHereButton tags={task?.tags} />
-          <select
-            aria-label={t('tasks.state')}
-            value={stateId}
-            onChange={(e) => void onChangeState(e.target.value)}
-          >
-            {states.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-          <TaskTimer taskId={id} />
-          <span className="taskdetail__headersep" aria-hidden="true" />
-          <button
-            type="button"
-            className="btn--sm"
-            onClick={() => void onNewChild()}
-            title={t('tasks.newChildHint')}
-          >
-            {t('tasks.newChild')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={() => void onArchive()}
-          >
-            {t('tasks.archive')}
-          </button>
-          <button
-            type="button"
-            className="btn--danger btn--sm"
-            onClick={() => void onDelete()}
-          >
-            {t('tasks.delete')}
-          </button>
+          <div className="taskdetail__work">
+            <select
+              aria-label={t('tasks.state')}
+              value={stateId}
+              onChange={(e) => void onChangeState(e.target.value)}
+            >
+              {states.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <TaskTimer taskId={id} />
+            <span className="taskdetail__savestate hint" aria-live="polite">
+              {dirty ? t('tasks.unsaved') : t('tasks.saved')}
+            </span>
+          </div>
+          <div className="taskdetail__tools">
+            <CopyIdButton
+              id={id}
+              label={t('tasks.copyId')}
+              copiedLabel={t('tasks.idCopied')}
+            />
+            <PinButton taskId={id} />
+            <FocusHereButton tags={task?.tags} variant="icon" />
+            <button
+              type="button"
+              className="btn--sm"
+              onClick={() => void onNewChild()}
+              title={t('tasks.newChildHint')}
+            >
+              {t('tasks.newChild')}
+            </button>
+            <MoreMenu
+              items={[
+                { label: t('tasks.archive'), onSelect: () => void onArchive() },
+                { label: t('tasks.delete'), onSelect: () => void onDelete(), danger: true },
+              ]}
+            />
+          </div>
         </div>
       </header>
       {task.deleted_at != null && (
