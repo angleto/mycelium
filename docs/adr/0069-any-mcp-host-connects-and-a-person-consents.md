@@ -394,8 +394,15 @@ The one way to run them without the two settings is
 `MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK=true`, named for what it costs: callers
 are unattributed (no per-origin bound) and the issuer follows the Host
 header. It is for a development stack or the test suite, which sets it in
-`conftest.py`; `.env.example` sets it for local development. Where
-`MYCELIUM_ENV` declares production it is IGNORED, with an error at startup.
+`conftest.py`; `.env.example` ships it off. It is honoured only where
+`MYCELIUM_ENV` is `dev`, `test` or `local`, and IGNORED, with an error at
+startup, anywhere else: an allowlist, because the first version refused it
+only for the spellings of production, and `prd`, `staging` or an empty value
+then ran the strategies unattributed.
+
+A value that is set but wrong stops the process instead (`oauth.deployment`):
+a base URL that is not an https origin, a proxy entry that does not parse, or
+a proxy list that covers a whole address family.
 
 nginx: an explicit `server_name` for the public host with a `default_server`
 answering 444 was considered and NOT applied. The cluster manifests (probes,
@@ -434,10 +441,11 @@ the same hole without that risk.
   can evict other people's unused registrations and unanswered requests --
   which costs them a retry, never an approved consent, never a credential,
   and never locks anyone out. The metadata-document meter is per process.
-- **The opt-out is refused only in a DECLARED production.** A production
-  deployment that sets `MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK=true` without
-  setting `MYCELIUM_ENV=production` runs the open strategies unattributed.
-  Off is the default; turning it on takes that explicit, named setting.
+- **The opt-out trusts `MYCELIUM_ENV`.** A production deployment that sets
+  `MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK=true` AND declares itself `dev`,
+  `test` or `local` runs the open strategies unattributed. Off is the
+  default, and turning it on takes two explicit settings that both say
+  "this is not production".
 - **Token lifetime.** An assistant's bearer lives 365 days (shown in the
   Connections tab); short-lived tokens with refresh are the issuer's job and
   not done here.

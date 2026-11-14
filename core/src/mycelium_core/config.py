@@ -461,8 +461,8 @@ class Settings(BaseSettings):
     # set, in any environment (``mycelium_core.oauth.production``). This is the
     # one way to run them without: for a dev stack or a test suite with no
     # proxy chain, where callers' origins cannot be attributed and the issuer
-    # follows the request's Host. Ignored, with an error at startup, when
-    # MYCELIUM_ENV is production.
+    # follows the request's Host. Honoured only when MYCELIUM_ENV is dev, test
+    # or local; ignored, with an error at startup, anywhere else.
     oauth_unattributed_origins_ok: bool = False
     # Private-use redirect URI schemes for native apps (RFC 8252 §7.1), e.g.
     # '["cursor","vscode"]'. Empty by default: allowing a scheme trusts

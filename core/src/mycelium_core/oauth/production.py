@@ -21,9 +21,12 @@ that never set it got the strategies on and unprotected -- it failed open
 The only way to run them without the two settings is an explicit opt-out,
 ``MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK=true``, named for what it costs: for
 a development stack or a test suite with no proxy chain to anchor and no
-public name to pin. It is IGNORED, with an error at startup, where the
-environment is declared production: there it would be the exposure the two
-settings exist to close.
+public name to pin. It is honoured ONLY where ``MYCELIUM_ENV`` names one of
+those (``dev``, ``test``, ``local``, compared stripped and lowercased) and
+IGNORED, with an error at startup, everywhere else. An allowlist, not a list
+of the spellings of production: the earlier rule refused the flag only for
+``production`` / ``prod``, so ``prd``, ``staging`` or an empty value ran the
+strategies unattributed (mycelium-cc review, 2026-11-14).
 
 Off means: absent from the discovery document, ``/register`` answers 404,
 https client ids are refused. Everything else -- the app, assistant secrets,
@@ -35,13 +38,17 @@ from __future__ import annotations
 
 from mycelium_core.config import Settings
 
-_PRODUCTION = frozenset({"production", "prod"})
+# Where the opt-out may apply: a stack with no proxy chain and no public name.
+OPT_OUT_ENVIRONMENTS = frozenset({"dev", "test", "local"})
 
 
-def is_production(settings: Settings) -> bool:
-    """Declared production. Used ONLY to refuse the opt-out: the gate itself
-    never depends on recognising the environment."""
-    return settings.env.strip().lower() in _PRODUCTION
+def _environment(settings: Settings) -> str:
+    return settings.env.strip().lower()
+
+
+def opt_out_environment(settings: Settings) -> bool:
+    """Whether the declared environment is one the opt-out may apply to."""
+    return _environment(settings) in OPT_OUT_ENVIRONMENTS
 
 
 def missing_for_open_endpoints(settings: Settings) -> list[str]:
@@ -55,7 +62,7 @@ def missing_for_open_endpoints(settings: Settings) -> list[str]:
 
 
 def opt_out_honoured(settings: Settings) -> bool:
-    return settings.oauth_unattributed_origins_ok and not is_production(settings)
+    return settings.oauth_unattributed_origins_ok and opt_out_environment(settings)
 
 
 def open_endpoints_allowed(settings: Settings) -> bool:
@@ -67,8 +74,11 @@ def startup_problems(settings: Settings) -> list[str]:
     strategies run as configured."""
     problems: list[str] = []
     missing = missing_for_open_endpoints(settings)
-    if settings.oauth_unattributed_origins_ok and is_production(settings):
-        problems.append("MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK is ignored in production")
+    if settings.oauth_unattributed_origins_ok and not opt_out_environment(settings):
+        problems.append(
+            "MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK is ignored: MYCELIUM_ENV="
+            f"{settings.env!r} is not one of {', '.join(sorted(OPT_OUT_ENVIRONMENTS))}"
+        )
     if missing and not opt_out_honoured(settings):
         problems.append(
             "OAuth dynamic client registration and client metadata documents are "
@@ -78,9 +88,10 @@ def startup_problems(settings: Settings) -> list[str]:
 
 
 __all__ = [
-    "is_production",
+    "OPT_OUT_ENVIRONMENTS",
     "missing_for_open_endpoints",
     "open_endpoints_allowed",
+    "opt_out_environment",
     "opt_out_honoured",
     "startup_problems",
 ]

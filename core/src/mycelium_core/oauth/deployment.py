@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 _LOOPBACK_NAMES = frozenset({"localhost"})
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+_MAPPED = ipaddress.IPv6Network("::ffff:0:0/96")
 
 
 def _is_loopback(host: str) -> bool:
@@ -64,6 +65,10 @@ def validate_public_base_url(value: str) -> str:
     host = parts.hostname or ""
     if parts.scheme not in ("https", "http") or not host:
         raise ValueError(f"{name} must be an https origin: {raw!r}")
+    if host.endswith(".") or port == 0:
+        # Both name the same server as the plain form while differing from it
+        # as a string, and the issuer is compared as a string by every client.
+        raise ValueError(f"{name} must not end in a dot or name port 0: {raw!r}")
     if parts.username is not None or parts.password is not None:
         raise ValueError(f"{name} must not carry credentials")
     if parts.path not in ("", "/") or parts.query or parts.fragment or raw.endswith(("?", "#")):
@@ -92,14 +97,25 @@ def validate_trusted_proxies(entries: list[str]) -> list[str]:
     trusts a whole address family (``0.0.0.0/0``, ``::/0``, or networks that
     add up to one of them, such as ``0.0.0.0/1`` with ``128.0.0.0/1``)."""
     nets = [_parse_network(e) for e in entries]
-    for family in (ipaddress.IPv4Network, ipaddress.IPv6Network):
-        same = [n for n in nets if isinstance(n, family)]
-        if any(c.prefixlen == 0 for c in ipaddress.collapse_addresses(same)):  # type: ignore[type-var]
-            raise ValueError(
-                "MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES trusts every address of a family: "
-                "every caller could then write its own address into X-Forwarded-For. "
-                "List the proxy hops in front of the backend."
-            )
+    # An IPv4-mapped IPv6 network (``::ffff:0:0/96`` and inside it) covers the
+    # IPv4 addresses it carries, so it counts towards the IPv4 family too.
+    as_v4: list[ipaddress.IPv4Network] = [
+        n for n in nets if isinstance(n, ipaddress.IPv4Network)
+    ] + [
+        ipaddress.IPv4Network((int(n.network_address) & 0xFFFFFFFF, n.prefixlen - 96))
+        for n in nets
+        if isinstance(n, ipaddress.IPv6Network) and n.prefixlen >= 96 and n.subnet_of(_MAPPED)
+    ]
+    as_v6: list[ipaddress.IPv6Network] = [n for n in nets if isinstance(n, ipaddress.IPv6Network)]
+    covered = [c for c in ipaddress.collapse_addresses(as_v4) if c.prefixlen == 0] + [
+        c for c in ipaddress.collapse_addresses(as_v6) if c.prefixlen == 0
+    ]
+    if covered:
+        raise ValueError(
+            "MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES trusts every address of a family: "
+            "every caller could then write its own address into X-Forwarded-For. "
+            "List the proxy hops in front of the backend."
+        )
     return [str(n) for n in nets]
 
 

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from mycelium_core.config import Settings
 from mycelium_core.oauth.deployment import validate_public_base_url, validate_trusted_proxies
-from mycelium_core.oauth.production import open_endpoints_allowed
+from mycelium_core.oauth.production import open_endpoints_allowed, startup_problems
 
 _SECRETS = {"jwt_secret": "x" * 64, "secret_key": "y" * 64}
 
@@ -46,6 +46,9 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "https://m.example:99999",
         "https://m.example/\nx",
         "https://mÿ.example",
+        "https://m.example.",
+        "https://m.example.:443",
+        "https://m.example:0",
     ],
 )
 def test_a_base_url_that_is_not_an_https_origin_refuses_to_start(value: str) -> None:
@@ -83,6 +86,8 @@ def test_an_origin_is_accepted_and_stored_normalised(value: str, stored: str) ->
         ["::/0"],
         ["10.0.0.0/8", "::/0"],
         ["0.0.0.0/1", "128.0.0.0/1"],
+        ["::ffff:0:0/96"],
+        ["::ffff:0.0.0.0/97", "128.0.0.0/1"],
     ],
 )
 def test_a_proxy_list_that_does_not_parse_or_trusts_everyone_refuses_to_start(
@@ -113,3 +118,44 @@ def test_both_valid_settings_still_open_the_strategies() -> None:
 def test_the_validators_are_the_ones_settings_use() -> None:
     assert validate_public_base_url("") == ""
     assert validate_trusted_proxies([]) == []
+
+
+def test_a_mapped_proxy_inside_one_ipv4_network_is_accepted() -> None:
+    assert _settings(issuer_key_trusted_proxies=["::ffff:10.0.0.0/104"]).issuer_key_trusted_proxies
+
+
+# ----- the opt-out applies only where the environment says "not production" ---
+
+
+@pytest.mark.parametrize("env", ["dev", "test", "local", " Dev ", "LOCAL"])
+def test_the_opt_out_is_honoured_in_a_development_environment(env: str) -> None:
+    s = _settings(env=env, oauth_unattributed_origins_ok=True)
+    assert open_endpoints_allowed(s)
+    assert startup_problems(s) == []
+
+
+@pytest.mark.parametrize("env", ["production", "prod", "prd", "staging", "", "  ", "development"])
+def test_the_opt_out_is_ignored_anywhere_else(env: str) -> None:
+    s = _settings(env=env, oauth_unattributed_origins_ok=True)
+    assert not open_endpoints_allowed(s)
+    problems = startup_problems(s)
+    assert any("MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK is ignored" in p for p in problems)
+    assert any("DISABLED" in p for p in problems)
+
+
+def test_an_ignored_opt_out_does_not_block_a_configured_deployment() -> None:
+    s = _settings(
+        env="staging",
+        oauth_unattributed_origins_ok=True,
+        public_base_url="https://m.example",
+        issuer_key_trusted_proxies=["10.0.0.0/8"],
+    )
+    assert open_endpoints_allowed(s)
+
+
+def test_the_example_environment_file_ships_the_opt_out_off() -> None:
+    import pathlib
+
+    example = pathlib.Path(__file__).resolve().parents[2] / ".env.example"
+    lines = [ln.strip() for ln in example.read_text().splitlines()]
+    assert "MYCELIUM_OAUTH_UNATTRIBUTED_ORIGINS_OK=false" in lines
