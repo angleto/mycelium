@@ -1361,13 +1361,18 @@ export function TasksRoute() {
             const score = tk.importance * tk.urgency
             return (
               <li key={tk.id} className="taskrow">
-                <input
-                  type="checkbox"
-                  className="taskrow__sel"
-                  checked={sel.has(tk.id)}
-                  onChange={() => toggleSel(tk.id)}
-                  aria-label={t('tasks.select')}
-                />
+                {/* The label is the hit area: on a touch screen it is a
+                    36px square around a box that stays the size of the
+                    other checkboxes, so the row does not move. */}
+                <label className="taskrow__selhit">
+                  <input
+                    type="checkbox"
+                    className="taskrow__sel"
+                    checked={sel.has(tk.id)}
+                    onChange={() => toggleSel(tk.id)}
+                    aria-label={t('tasks.select')}
+                  />
+                </label>
                 <Link to={`/tasks/${tk.id}`} className="taskrow__title">
                   {tk.title}
                 </Link>

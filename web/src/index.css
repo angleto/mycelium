@@ -1001,6 +1001,18 @@ textarea {
    the scheduler/notifications task pickers were otherwise spilling the
    page sideways on a phone. Inline selects (topbar, segmented controls)
    sit outside a label/.field and keep their own sizing. */
+/* A checkbox or a radio reads beside its words, not above them. The column
+   layout above is for a caption over a field; a box stacked on top of
+   "Show archived" read as a stray square, and each page that noticed fixed
+   its own label (.cpform__chk, .recentwidget__count) while the others
+   kept the stack. Element weight only, so a label with a class of its own
+   (a top-aligned permission with a description under it) keeps its own
+   alignment. */
+label:where(:has(> input[type='checkbox'], > input[type='radio'])) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-6);
+}
 label > select,
 .field > select {
   width: 100%;
@@ -1159,6 +1171,12 @@ button,
   color: var(--accent-fg);
   cursor: pointer;
 }
+/* `font: inherit` above takes the heading's display face when a control
+   sits in a heading (the Time report's CSV exports did): a control reads
+   in the interface face wherever it is placed. */
+:is(h1, h2, h3, h4) :is(button, .btn) {
+  font-family: var(--sans);
+}
 button:hover,
 .btn:hover {
   filter: brightness(1.05);
@@ -1176,6 +1194,40 @@ button.btn--ghost {
 .btn--sm {
   padding: var(--sp-4) var(--sp-8);
   font-size: 0.8rem;
+}
+/* One floor for every control a finger has to hit, set once here instead
+   of page by page. The small button is 28px tall with the pointer that it
+   was sized for; on a touch screen it is the target the whole app is
+   operated with, and the page-by-page fixes left Time, Clients and
+   Invoices at 27px, task-row selects at 23px and checkboxes at 13px.
+   2.25rem (36px) is the floor; the inline text controls (a caret, a name
+   that opens, a list toggle) get it too, centred, so the line grows
+   rather than the hit area shrinking. Only the touch case moves: with a
+   mouse every size stays as it was. */
+@media (pointer: coarse) {
+  .btn--sm,
+  button.chip,
+  select,
+  .modechip,
+  .cpcaret,
+  .cpitem__name--btn,
+  .recentwidget__toggle,
+  .filterbar__tagstoggle {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+  .cpcaret,
+  .cpitem__name--btn,
+  .filterbar__tagstoggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
 }
 .card--running {
   border-color: var(--accent);
@@ -1636,7 +1688,7 @@ button.btn--danger:hover {
 .aiset { gap: var(--sp-16); }
 .aiconnector__row { align-items: center; flex-wrap: wrap; gap: var(--sp-6); }
 .aiconnector__instructions {
-  font-family: var(--font);
+  font-family: var(--sans);
   margin: 0;
   padding: 0;
   background: transparent;
@@ -4719,9 +4771,25 @@ button.btn--danger:hover {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.taskrow__selhit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
 .taskrow__sel {
   flex: none;
   margin: 0;
+}
+@media (pointer: coarse) {
+  /* A 36px target that takes the room of a 24px one: the negative margin
+     gives back what the padding adds, so the title stays where it was. */
+  .taskrow__selhit {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    margin: calc(var(--sp-6) * -1);
+  }
 }
 .taskrow__state {
   font-size: 0.8rem;
@@ -4790,12 +4858,6 @@ button.btn--danger:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-@media (pointer: coarse) {
-  :is(.taskrow__actions, .kanban__card-actions, .recentrow__actions, .noteitem__actions) .btn--sm {
-    height: 2.25rem;
-    min-width: 2.25rem;
-  }
 }
 .taskrow__who:empty {
   display: none;
@@ -5347,9 +5409,8 @@ button.btn--danger:hover {
   min-width: 1.9rem;
 }
 @media (pointer: coarse) {
-  .taskdetail__headeractions :is(.btn--sm, .chip--copy) {
+  .taskdetail__headeractions .chip--copy {
     min-height: 2.25rem;
-    min-width: 2.25rem;
   }
 }
 .taskdetail__badges {
@@ -6116,7 +6177,7 @@ button.btn--danger:hover {
    anchored below it with controls, edit-running, and inline settings. */
 .pomodoro {
   position: relative;
-  font-family: var(--font);
+  font-family: var(--sans);
 }
 .pomodoro__trigger {
   display: inline-flex;
