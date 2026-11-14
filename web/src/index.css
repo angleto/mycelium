@@ -4248,6 +4248,44 @@ button.btn--danger:hover {
   flex-direction: column;
   gap: var(--sp-4);
 }
+/* The pinned tasks (components/PinnedTasks.tsx): the Recent panel's frame,
+   with the accent on its edge, because it is the list the person built
+   rather than one the app computed. */
+.pinnedwidget {
+  border-left: 3px solid var(--accent);
+}
+.pinnedwidget__title {
+  margin: 0;
+  padding: var(--sp-2) 0;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+/* The pin toggle: quiet like the icons beside it until it is on, then at
+   full strength in the accent, since then it says something about the
+   task (it is pinned) rather than offering something. */
+.pinbtn {
+  padding: var(--sp-2) var(--sp-6);
+  line-height: 1;
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.pinbtn:hover,
+.pinbtn:focus-visible {
+  opacity: 1;
+}
+.pinbtn.is-on {
+  opacity: 1;
+  filter: none;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+@media (hover: none) {
+  .pinbtn:not(.is-on) {
+    opacity: 0.75;
+  }
+}
 .recentwidget__head {
   display: flex;
   align-items: center;
@@ -4335,6 +4373,33 @@ button.btn--danger:hover {
 .recentrow__when {
   font-size: 0.75rem;
   white-space: nowrap;
+}
+.recentrow__who:empty {
+  display: none;
+}
+.recentrow__who .idbadge {
+  max-width: 9rem;
+}
+.recentrow__who .idbadge__handle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* On a phone the title takes the first line whole and wraps, and the
+   status goes under it: on one 390px line beside the status the title had
+   no width left at all. */
+@media (max-width: 640px) {
+  .recentrow__line {
+    flex-wrap: wrap;
+    row-gap: var(--sp-4);
+  }
+  .recentrow__title {
+    flex: 1 1 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .recentrow__meta {
+    flex-wrap: wrap;
+  }
 }
 
 /* Kanban board. Horizontal scroll if more columns than fit. Each

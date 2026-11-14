@@ -70,7 +70,7 @@ Surface = Literal["rest", "mcp"]
 
 #: Domains an operation may declare. Grows as domains move onto the
 #: registry; ``search_tools`` reads a bound tool's domain from here.
-DOMAINS: frozenset[str] = frozenset({"garden", "notes"})
+DOMAINS: frozenset[str] = frozenset({"garden", "notes", "tasks"})
 
 #: The modules that declare operations. Importing one registers its
 #: operations; :func:`load_all` imports every one, which is what a parity
@@ -78,6 +78,7 @@ DOMAINS: frozenset[str] = frozenset({"garden", "notes"})
 OPERATION_MODULES: tuple[str, ...] = (
     "mycelium_core.operations.garden",
     "mycelium_core.operations.notes",
+    "mycelium_core.operations.tasks",
 )
 
 

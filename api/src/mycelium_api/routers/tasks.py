@@ -20,6 +20,7 @@ from mycelium_api.deps import (
     task_description_write_ctx,
     tenant_ctx,
 )
+from mycelium_api.op_routes import bind_route
 from mycelium_api.routers.annotations import annotation_out_one, annotations_out
 from mycelium_api.routers.attachments import att_out, read_capped, upload_file_field
 from mycelium_api.routers.tags import require_tag_kind
@@ -97,11 +98,18 @@ from mycelium_core.services import notifications as notif_svc
 from mycelium_core.services import participants as part_svc
 from mycelium_core.services import task_checklist as checklist_svc
 from mycelium_core.services import task_leases as lease_svc
+from mycelium_core.services import task_pins as pins_svc
 from mycelium_core.services import tasks as svc
 from mycelium_core.services import workflow as wf
 from mycelium_core.timewindow import split_due
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+# A person's pins (migration 0027), bound to the operation registry so the
+# MCP tools ``pin_task`` / ``unpin_task`` are the same operation. One body
+# segment, so no ``/{task_id}`` route can shadow them.
+bind_route(router, "POST", "/pin", "tasks.pin", name="pin_task")
+bind_route(router, "POST", "/unpin", "tasks.unpin", name="unpin_task")
 
 
 def _parse_due(raw: str | None) -> datetime.date | datetime.datetime | None:
@@ -487,7 +495,22 @@ async def list_tasks(
     order_by: TaskOrderBy | None = None,
     order_desc: bool = False,
     limit: Annotated[int | None, Query(gt=0, le=500)] = None,
+    # The caller's own pins (migration 0027), most recently pinned first,
+    # archived and closed ones included: a pin is kept until it is cleared,
+    # so the list that shows pins must show every one of them. Combines with
+    # the other filters like ``ids`` does.
+    pinned: bool = False,
 ) -> list[TaskOut]:
+    pin_order: list[uuid.UUID] | None = None
+    if pinned:
+        pin_order = await pins_svc.pinned_task_ids(
+            ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
+        )
+        if not pin_order:
+            return []
+        pinned_set = set(pin_order)
+        ids = [i for i in ids if i in pinned_set] if ids is not None else pin_order
+        include_archived = True
     rows = await svc.list_tasks(
         ctx.session,
         org_id=ctx.org_id,
@@ -511,6 +534,9 @@ async def list_tasks(
         include_deleted=include_deleted,
         with_description=False,
     )
+    if pin_order is not None and order_by is None:
+        rank = {tid: i for i, tid in enumerate(pin_order)}
+        rows = sorted(rows, key=lambda t: rank.get(t.id, len(rank)))
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
     row_ids = {t.id for t in rows}

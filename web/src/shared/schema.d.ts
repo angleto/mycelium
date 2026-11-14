@@ -928,6 +928,50 @@ export interface paths {
         patch: operations["patch_tag_tags__tag_id__patch"];
         trace?: never;
     };
+    "/tasks/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pin Task
+         * @description Pin a task for the person this credential acts for: it is listed
+         *     above the recent tasks, first, until it is unpinned, closed or not.
+         *     Changes nothing on the task. Idempotent: pinning a pinned task keeps the
+         *     original pin time. A task in the bin cannot be pinned.
+         */
+        post: operations["pin_task_tasks_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/unpin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unpin Task
+         * @description Clear the person's pin on a task. Idempotent, and it works on any
+         *     task, closed or in the bin, so a pin can always be removed.
+         */
+        post: operations["unpin_task_tasks_unpin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks": {
         parameters: {
             query?: never;
@@ -15337,6 +15381,27 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** TaskPinIn */
+        TaskPinIn: {
+            /**
+             * Task Id
+             * Format: uuid
+             * @description The task to pin or unpin.
+             */
+            task_id: string;
+        };
+        /** TaskPinOut */
+        TaskPinOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Pinned */
+            pinned: boolean;
+            /** Pinned At */
+            pinned_at?: string | null;
+        };
         /** TaskRelationCreateIn */
         TaskRelationCreateIn: {
             /**
@@ -18041,6 +18106,82 @@ export interface operations {
             };
         };
     };
+    pin_task_tasks_pin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskPinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPinOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_task_tasks_unpin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskPinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPinOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tasks_tasks_get: {
         parameters: {
             query?: {
@@ -18063,6 +18204,7 @@ export interface operations {
                 order_by?: ("priority" | "due_date" | "start_date" | "created_at" | "updated_at" | "necessity") | null;
                 order_desc?: boolean;
                 limit?: number | null;
+                pinned?: boolean;
             };
             header: {
                 "x-workspace-id": string;

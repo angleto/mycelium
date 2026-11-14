@@ -11,6 +11,7 @@ import { TaskKanban } from '../components/TaskKanban'
 import { LeaseBadge } from '../components/LeaseBadge'
 import { SessionsPanel } from '../components/SessionsPanel'
 import { RecentTasks } from '../components/RecentTasks'
+import { PinnedTasks } from '../components/PinnedTasks'
 import { TaskQuickActions } from '../components/TaskQuickActions'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
@@ -932,6 +933,7 @@ export function TasksRoute() {
     <section className="card card--wide">
       <h1>{t('tasks.title')}</h1>
 
+      <PinnedTasks tasks={tasks} />
       <RecentTasks tasks={focused} />
 
       <form onSubmit={(e) => void onCreate(e)} className="quickadd">

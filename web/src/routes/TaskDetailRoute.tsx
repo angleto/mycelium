@@ -26,6 +26,7 @@ import { RevisionsPanel } from '../components/RevisionsPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { CopyIdButton } from '../components/CopyIdButton'
 import { FocusHereButton } from '../components/FocusHereButton'
+import { PinButton } from '../components/PinButton'
 import { formatHours } from '../lib/estimate'
 import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
@@ -1204,6 +1205,7 @@ export function TaskDetailRoute({
             label={t('tasks.copyId')}
             copiedLabel={t('tasks.idCopied')}
           />
+          <PinButton taskId={id} />
           <FocusHereButton tags={task?.tags} />
           <select
             aria-label={t('tasks.state')}

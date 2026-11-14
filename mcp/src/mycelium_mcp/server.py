@@ -1437,6 +1437,7 @@ async def list_tasks(
     updated_since: str | None = None,
     order_by: str | None = None,
     order_desc: bool = False,
+    pinned: bool = False,
 ) -> dict[str, Any]:
     """List tasks: filter by state, tag, parent, assignee, owner, free-text
     ``q``, or a due/start/updated date window; optional ``order_by`` +
@@ -1452,7 +1453,9 @@ async def list_tasks(
     ``order_by`` you still get ``items`` + ``truncated`` but ``next_cursor`` is
     null (raise ``limit`` to see more). For just the matching count use
     ``count_tasks`` (same filters); for ranked retrieval ``search(kinds=
-    ['task'])`` or ``what_can_i_do_now``; ``get_task`` for one task's detail."""
+    ['task'])`` or ``what_can_i_do_now``; ``get_task`` for one task's detail.
+    ``pinned=True`` lists only the tasks the person this credential acts for
+    has pinned (``pin_task``), closed and archived ones included."""
     from mycelium_core.models.identity import IdentityKind
 
     # A cursor pins the default keyset order (it was issued under it); ignore
@@ -1474,11 +1477,18 @@ async def list_tasks(
             start_after=start_after,
             updated_since=updated_since,
         )
+        pin_ids: list[uuid.UUID] | None = None
+        if pinned:
+            from mycelium_core.services import task_pins as pins_svc
+
+            pin_ids = await pins_svc.pinned_task_ids(s, org_id=org, user_id=user)
+            include_archived = True
         # Fetch one extra row to detect truncation; the limit is pushed into
         # SQL by the service (no whole-table materialize).
         rows = await tasks.list_tasks(
             s,
             org_id=org,
+            ids=pin_ids,
             state_id=uuid.UUID(state_id) if state_id else None,
             tag_id=uuid.UUID(tag_id) if tag_id else None,
             parent_task_id=uuid.UUID(parent_task_id) if parent_task_id else None,
@@ -9893,7 +9903,7 @@ async def restore_note_revision(
 
 # The garden tools are generated from the operation registry (ADR-0068).
 # Imported last: the bindings need this module's registry and tenant opener.
-from mycelium_mcp import tools_garden, tools_notes  # noqa: E402,F401
+from mycelium_mcp import tools_garden, tools_notes, tools_tasks  # noqa: E402,F401
 
 # Python callers (tests, eval scenarios) import tools from this module; the
 # generated ones stay importable under the names they always had. Resolved

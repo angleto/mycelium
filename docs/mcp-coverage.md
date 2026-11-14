@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**294 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**296 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -331,7 +331,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (52)
+### tasks (54)
 
 | Tool | Summary |
 |---|---|
@@ -360,6 +360,7 @@ over-fetch the org table and filter in its head.
 | `list_task_revisions` | Recovery-history timeline for a task, most recent first. |
 | `list_tasks` | List tasks: filter by state, tag, parent, assignee, owner, free-text |
 | `list_trashed_comments` | Comments of a task that were deleted and can still be restored, |
+| `pin_task` | Pin a task for the person this credential acts for: it is listed |
 | `prepend_to_comment` | Prepend ``text`` to the FRONT of a comment without reading or |
 | `prepend_to_task_description` | Prepend ``text`` to the FRONT of ``task.description`` without |
 | `purge_comment` | PURGE a comment: destroy the entry, its card state and its whole |
@@ -382,6 +383,7 @@ over-fetch the org table and filter in its head.
 | `task_pull` | Take the next unheld task in a workflow state, atomically. |
 | `unassign_task` | Unassign a user from a task. |
 | `uncheck_item` | Un-tick a checklist item (clears ``done_at`` / ``done_by``). |
+| `unpin_task` | Clear the person's pin on a task. Idempotent, and it works on any |
 | `update_comment` | EDIT a comment: replace its whole body. Completes the |
 | `update_task` | Edit task fields (only the given ones). ``priority`` is a |
 | `upload_attachment` | Attach a file (base64-encoded bytes) to a note OR a task. |

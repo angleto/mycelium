@@ -164,9 +164,16 @@ surface gains what the other already had:
    page. The writing tools still build their answer with the old
    hand-written serialiser; they move with the note writes, the slice that
    touches the person's text and so goes last and separately.
-4. Then tasks, annotations, invoicing, and the rest, each closing its
-   gaps, moving its serialisers to core read models and removing its entries
-   from the unbound lists.
+4. **Tasks: started with pins (2026-11-14).** A person's pins (migration
+   0027) are the first task operations on the registry, new rather than
+   migrated: `tasks.pin` and `tasks.unpin` serve `POST /tasks/pin`,
+   `POST /tasks/unpin`, `pin_task` and `unpin_task`. The pinned list is not
+   an operation of its own but `pinned=true` on the task list, on both
+   surfaces, so a pinned task is drawn from the row every other list draws.
+   The rest of the domain moves with its read model.
+5. Then the rest of tasks, annotations, invoicing, and the others, each
+   closing its gaps, moving its serialisers to core read models and removing
+   its entries from the unbound lists.
 
 Per domain, the step is done when its routes and tools are bound, its entries
 are gone from both lists, and its existing tests pass unchanged.

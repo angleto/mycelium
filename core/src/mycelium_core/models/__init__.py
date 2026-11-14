@@ -171,6 +171,7 @@ from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.task_participant import TaskParticipant
+from mycelium_core.models.task_pin import TaskPin
 from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
@@ -335,6 +336,7 @@ __all__ = [
     "TaskIndexPointer",
     "TaskLease",
     "TaskParticipant",
+    "TaskPin",
     "TaskRecurrence",
     "TaskRelation",
     "TaskTag",

@@ -42,7 +42,7 @@ function recencyMs(tk: Task): number {
 // tag filter and Focus sidebar (client/project) but ignores the transient
 // search box and date lens.
 export function RecentTasks({ tasks }: { tasks: Task[] }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   // Closed on a profile that has never chosen: open it measured at 268px on a
   // page whose board already started below the fold, so the shortcut to what
   // you just touched was pushing the thing you came for out of sight. Whoever
@@ -98,55 +98,68 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
           <p className="hint">{t('tasks.none')}</p>
         ) : (
           <ul className="list recentlist">
-            {recent.map((tk) => {
-              const score = tk.importance * tk.urgency
-              return (
-                <li key={tk.id} className="recentrow">
-                  <div className="recentrow__line">
-                    <Link to={`/tasks/${tk.id}`} className="recentrow__title">
-                      {tk.assignee_kind ? (
-                        <IdentityBadge
-                          kind={tk.assignee_kind}
-                          handle={tk.assignee_handle ?? null}
-                        />
-                      ) : tk.created_by_kind === 'ai_assistant' ||
-                        tk.created_by_kind === 'mcp_token' ? (
-                        <IdentityBadge
-                          kind={tk.created_by_kind}
-                          handle={tk.created_by_handle ?? null}
-                          label={tk.created_by_label ?? null}
-                          title={t('tasks.aiCreatedTitle', {
-                            handle:
-                              tk.created_by_label ?? tk.created_by_handle ?? '',
-                          })}
-                        />
-                      ) : tk.executor_kind === 'llm_agent' ? (
-                        <span className="aibadge" title={t('tasks.aiTitle')}>
-                          {t('tasks.aiBadge')}
-                        </span>
-                      ) : null}
-                      {tk.title}
-                    </Link>
-                    <span className="recentrow__meta">
-                      <span className="muted">{tk.state}</span>
-                      <PriorityChip priority={tk.priority} score={score} />
-                      <span className="muted recentrow__when" title={tk.updated_at}>
-                        {relTime(tk.updated_at, i18n.language)}
-                      </span>
-                    </span>
-                  </div>
-                  {/* The actions take a line of their own: on the line above
-                      they would compete with the title for the only width a
-                      one-line row has, and the title is what the row is read
-                      for. */}
-                  <div className="recentrow__actions">
-                    <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
-                  </div>
-                </li>
-              )
-            })}
+            {recent.map((tk) => (
+              <TaskShortRow key={tk.id} task={tk} />
+            ))}
           </ul>
         ))}
     </section>
+  )
+}
+
+/** One task as a short row: the title on its line, the state, priority and
+ *  last change beside it, the quick actions on the line below. The recent
+ *  tasks and the pinned ones are drawn with the same row, so the two lists
+ *  read the same and a change to one is a change to both. */
+export function TaskShortRow({ task: tk }: { task: Task }) {
+  const { t, i18n } = useTranslation()
+  const score = tk.importance * tk.urgency
+  return (
+    <li className="recentrow">
+      <div className="recentrow__line">
+        <Link to={`/tasks/${tk.id}`} className="recentrow__title">
+          {tk.title}
+        </Link>
+        <span className="recentrow__meta">
+          {/* Who, beside the status and not inside the title link, where on a
+              phone it took the whole line and pushed the title out of view. */}
+          <span className="recentrow__who">
+            {tk.assignee_kind ? (
+              <IdentityBadge
+                kind={tk.assignee_kind}
+                handle={tk.assignee_handle ?? null}
+              />
+            ) : tk.created_by_kind === 'ai_assistant' ||
+              tk.created_by_kind === 'mcp_token' ? (
+              <IdentityBadge
+                kind={tk.created_by_kind}
+                handle={tk.created_by_handle ?? null}
+                label={tk.created_by_label ?? null}
+                title={t('tasks.aiCreatedTitle', {
+                  handle:
+                    tk.created_by_label ?? tk.created_by_handle ?? '',
+                })}
+              />
+            ) : tk.executor_kind === 'llm_agent' ? (
+              <span className="aibadge" title={t('tasks.aiTitle')}>
+                {t('tasks.aiBadge')}
+              </span>
+            ) : null}
+          </span>
+          <span className="muted">{tk.state}</span>
+          <PriorityChip priority={tk.priority} score={score} />
+          <span className="muted recentrow__when" title={tk.updated_at}>
+            {relTime(tk.updated_at, i18n.language)}
+          </span>
+        </span>
+      </div>
+      {/* The actions take a line of their own: on the line above
+          they would compete with the title for the only width a
+          one-line row has, and the title is what the row is read
+          for. */}
+      <div className="recentrow__actions">
+        <TaskQuickActions id={tk.id} title={tk.title} tags={tk.tags} />
+      </div>
+    </li>
   )
 }
