@@ -36,7 +36,7 @@ from collections.abc import Iterator
 
 import pytest
 from _fake_embedder import FakeEmbedder
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
@@ -496,6 +496,160 @@ async def test_the_sweep_writes_every_release_into_the_activity_log(
     assert row.diff["reason"] == LeaseRelease.expired.value
     assert row.diff["holder_worker_id"] == str(dead_w)
     assert dt.datetime.fromisoformat(row.diff["expired_at"]) == deadline
+
+
+async def _release_rows(org: uuid.UUID, user: uuid.UUID, lease_id: uuid.UUID) -> list[ActivityLog]:
+    async with tenant_session(str(org), str(user)) as s:
+        return list(
+            (
+                await s.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity == "task_lease",
+                        ActivityLog.entity_id == lease_id,
+                        ActivityLog.action == "release",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _expired_lease(
+    org: uuid.UUID, user: uuid.UUID, task_id: uuid.UUID, label: str
+) -> tuple[uuid.UUID, uuid.UUID, dt.datetime]:
+    """A lease whose holder stopped answering: (lease, worker, deadline)."""
+    w = await _worker(org, user, label)
+    async with tenant_session(str(org), str(user)) as s:
+        lease = await leases_svc.acquire(
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=w, ttl_seconds=60
+        )
+        deadline = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+        lease.expires_at = deadline
+        return lease.id, w, deadline
+
+
+def _assert_expiry_row(
+    rows: list[ActivityLog], task_id: uuid.UUID, worker: uuid.UUID, deadline: dt.datetime
+) -> None:
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.actor_id is None
+    assert row.diff is not None
+    assert row.diff["task_id"] == str(task_id)
+    assert row.diff["reason"] == LeaseRelease.expired.value
+    assert row.diff["holder_worker_id"] == str(worker)
+    assert dt.datetime.fromisoformat(row.diff["expired_at"]) == deadline
+
+
+async def test_a_lease_reclaimed_by_the_next_holder_is_logged_like_the_sweep(
+    _embedder: None,
+) -> None:
+    """Whether the sweep or the next session reaches a dead lease first is
+    timing. The activity log must say the same thing either way, so the
+    release written when ``acquire`` finds the lease expired has the same
+    shape as the sweep's, beside the new holder's own ``acquire`` row."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    lease_id, dead_w, deadline = await _expired_lease(org, user, task_id, "dead")
+    next_w = await _worker(org, user, "next")
+
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=next_w)
+
+    _assert_expiry_row(await _release_rows(org, user, lease_id), task_id, dead_w, deadline)
+
+
+async def test_a_lease_reclaimed_by_a_pull_is_logged_like_the_sweep(_embedder: None) -> None:
+    """The same reclaim, reached from the queue instead of by name."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    lease_id, dead_w, deadline = await _expired_lease(org, user, task_id, "dead")
+    next_w = await _worker(org, user, "next")
+
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
+        pulled, _ = await leases_svc.pull(
+            s, org_id=org, actor_id=user, state_id=task.state_id, worker_id=next_w
+        )
+        assert pulled.id == task_id
+
+    _assert_expiry_row(await _release_rows(org, user, lease_id), task_id, dead_w, deadline)
+
+
+async def test_a_lease_taken_over_by_the_owner_is_logged_for_the_one_interrupted(
+    _embedder: None,
+) -> None:
+    """``acquire(preempt=True)`` ends a live lease that is not the caller's.
+    The interrupted holder's lease gets its own release row, with the owner
+    as the actor and ``preempted`` as the reason, not only the owner's
+    ``acquire``."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    first_w = await _worker(org, user, "first")
+    owner_w = await _worker(org, user, "owner")
+
+    async with tenant_session(str(org), str(user)) as s:
+        first = await leases_svc.acquire(
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=first_w
+        )
+        first_id = first.id
+    async with tenant_session(str(org), str(user)) as s:
+        await leases_svc.acquire(
+            s, org_id=org, actor_id=user, task_id=task_id, worker_id=owner_w, preempt=True
+        )
+
+    rows = await _release_rows(org, user, first_id)
+    assert len(rows) == 1
+    assert rows[0].actor_id == user
+    assert rows[0].diff is not None
+    assert rows[0].diff["reason"] == LeaseRelease.preempted.value
+
+
+async def test_two_sweeps_at_once_log_each_release_once(_embedder: None) -> None:
+    """Worker replicas sweep concurrently. Both read the same expired rows;
+    only the one whose UPDATE took a row may log it, or the log counts each
+    dead session twice.
+
+    The overlap is forced rather than hoped for: the first sweep keeps its
+    transaction open until the second is seen waiting on its row locks, so
+    the second has read the rows as unreleased and then loses every one."""
+    org, user = await _org()
+    task_ids = await _make_tasks(org, user, 4)
+    lease_ids = [
+        (await _expired_lease(org, user, t, f"dead-{i}"))[0] for i, t in enumerate(task_ids)
+    ]
+
+    async def second_sweep() -> list[uuid.UUID]:
+        async with tenant_session(str(org), str(user), actor_kind="system") as s:
+            return await leases_svc.sweep_expired(s)
+
+    async def waiting_on_a_lock() -> bool:
+        async with admin_session() as s:
+            n = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE wait_event_type = 'Lock' AND query ILIKE 'UPDATE task_leases%'"
+                    )
+                )
+            ).scalar_one()
+        return int(n) > 0
+
+    async with tenant_session(str(org), str(user), actor_kind="system") as s:
+        first = await leases_svc.sweep_expired(s)
+        second = asyncio.create_task(second_sweep())
+        for _ in range(200):
+            if await waiting_on_a_lock():
+                break
+            await asyncio.sleep(0.02)
+        else:
+            second.cancel()
+            pytest.fail("the second sweep never waited on the first one's locks")
+    assert sorted(first) == sorted(task_ids)
+    assert await second == []
+    for lid in lease_ids:
+        assert len(await _release_rows(org, user, lid)) == 1
 
 
 async def test_a_task_nobody_holds_is_still_movable_by_anybody(_embedder: None) -> None:

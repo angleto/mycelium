@@ -263,16 +263,60 @@ async def _lock_task(session: AsyncSession, task_id: uuid.UUID) -> Task | None:
     ).scalar_one_or_none()
 
 
+async def _log_expiry(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    lease_id: uuid.UUID,
+    task_id: uuid.UUID,
+    holder_worker_id: uuid.UUID | None,
+    expires_at: dt.datetime,
+) -> None:
+    """The activity row for a lease that ended because its deadline passed.
+
+    One writer for both places that end such a lease -- the sweep, and the
+    next holder reclaiming it on ``acquire`` or ``pull`` -- because they
+    record the same event: a session stopped answering. No actor, because
+    nobody released it; the row names the worker that went silent and the
+    deadline it missed. The caller that happened to find it writes its own
+    ``acquire`` row next to this one.
+    """
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=None,
+        entity="task_lease",
+        entity_id=lease_id,
+        action="release",
+        diff={
+            "task_id": str(task_id),
+            "reason": LeaseRelease.expired.value,
+            "holder_worker_id": str(holder_worker_id) if holder_worker_id else None,
+            "expired_at": expires_at.isoformat(),
+        },
+    )
+
+
 async def _reclaim_expired(session: AsyncSession, *, lease: TaskLease, now: dt.datetime) -> None:
     """Release an expired row so the index is free for the next holder.
 
     Called with the task row already locked, so no second caller can be
-    reclaiming the same row concurrently.
+    reclaiming the same row concurrently. Logged like the sweep's releases:
+    whether the sweep or the next holder gets there first is timing, and
+    the activity log must not depend on it.
     """
     lease.released_at = now
     lease.release_reason = LeaseRelease.expired.value
     lease.version += 1
     await session.flush()
+    await _log_expiry(
+        session,
+        org_id=lease.org_id,
+        lease_id=lease.id,
+        task_id=lease.task_id,
+        holder_worker_id=lease.holder_worker_id,
+        expires_at=lease.expires_at,
+    )
 
 
 async def _insert_lease(
@@ -364,10 +408,17 @@ async def acquire(
                     expires_at=existing.expires_at.isoformat(),
                 )
             await require_role(session, org_id, actor_id, Role.owner)
-            existing.released_at = now
-            existing.release_reason = LeaseRelease.preempted.value
-            existing.version += 1
-            await session.flush()
+            # Through ``release`` so the preempted lease gets its own
+            # activity row; only the new holder's ``acquire`` was written
+            # before, and the one interrupted was nowhere.
+            await release(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                task_id=task_id,
+                reason=LeaseRelease.preempted,
+                require_holder=False,
+            )
         else:
             await _reclaim_expired(session, lease=existing, now=now)
 
@@ -1036,18 +1087,12 @@ async def sweep_expired(
     for r in rows:
         if r.id not in released:
             continue  # released by its holder between the read and the write
-        await audit.log(
+        await _log_expiry(
             session,
             org_id=r.org_id,
-            actor_id=None,
-            entity="task_lease",
-            entity_id=r.id,
-            action="release",
-            diff={
-                "task_id": str(r.task_id),
-                "reason": LeaseRelease.expired.value,
-                "holder_worker_id": str(r.holder_worker_id) if r.holder_worker_id else None,
-                "expired_at": r.expires_at.isoformat(),
-            },
+            lease_id=r.id,
+            task_id=r.task_id,
+            holder_worker_id=r.holder_worker_id,
+            expires_at=r.expires_at,
         )
     return [r.task_id for r in rows if r.id in released]

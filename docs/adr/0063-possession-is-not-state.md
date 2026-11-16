@@ -211,8 +211,12 @@ it is — visible, pullable, honest.
   runaway budget on taking work. Both are decisions about the bus's own
   vocabulary and belong to the bus. Meanwhile the coordination question is
   answered: `task_leases_list(include_released=True)` says who holds what and
-  who handed what off, and every acquire and release is in the activity log
-  with the actor and the token.
+  who handed what off, and every acquire and release is in the activity log.
+  A release somebody made carries that actor and the token; a release
+  nobody made -- a deadline that passed, ended by the sweep or by the next
+  holder finding it -- carries no actor, and names the worker that stopped
+  answering and the deadline it missed. A lease taken over by the owner
+  gets its own release row, `preempted`, beside the owner's `acquire`.
 - The lease is advisory about files. Mycelium is not a filesystem mutex: it
   says who holds the work, not who holds the file. Two agents editing the same
   tree is a client-side problem with a client-side answer (per-agent working
