@@ -217,6 +217,11 @@ it is — visible, pullable, honest.
   holder finding it -- carries no actor, and names the worker that stopped
   answering and the deadline it missed. A lease taken over by the owner
   gets its own release row, `preempted`, beside the owner's `acquire`.
+  Each release is logged once: a lease is ended in one place, by an UPDATE
+  that takes only a row still unreleased, and only the path whose UPDATE took
+  it writes the row, so two paths racing on one lease (the sweep and the next
+  holder, a closing worker, or the holder giving it back) cannot log it twice
+  or overwrite the reason the first one recorded.
 - The lease is advisory about files. Mycelium is not a filesystem mutex: it
   says who holds the work, not who holds the file. Two agents editing the same
   tree is a client-side problem with a client-side answer (per-agent working

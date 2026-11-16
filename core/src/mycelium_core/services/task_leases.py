@@ -263,6 +263,45 @@ async def _lock_task(session: AsyncSession, task_id: uuid.UUID) -> Task | None:
     ).scalar_one_or_none()
 
 
+async def _end_leases(
+    session: AsyncSession,
+    *,
+    lease_ids: Sequence[uuid.UUID],
+    reason: LeaseRelease,
+    at: dt.datetime,
+) -> set[uuid.UUID]:
+    """End the leases that are still live, and say which ones THIS call ended.
+
+    The one place a lease is released. ``released_at IS NULL`` is in the
+    UPDATE, and the caller logs only what came back, because every path that
+    ends a lease can race another one on the same row: the sweep and the
+    next holder reclaiming it, the sweep and a worker closing, the sweep and
+    the holder giving it back. Writing by primary key, as three of the four
+    paths did, made the second writer wait on the first's row lock and then
+    release the row again -- a second activity row for one release, and the
+    first reason overwritten (verification of task 9d4088e9, 2026-11-16).
+    Under READ COMMITTED the waiting UPDATE re-reads the row after the first
+    commits, sees it released, and takes nothing.
+    """
+    if not lease_ids:
+        return set()
+    return set(
+        (
+            await session.execute(
+                update(TaskLease)
+                .where(TaskLease.id.in_(list(lease_ids)), TaskLease.released_at.is_(None))
+                .values(
+                    released_at=at,
+                    release_reason=reason.value,
+                    version=TaskLease.version + 1,
+                )
+                .returning(TaskLease.id)
+                .execution_options(synchronize_session="fetch")
+            )
+        ).scalars()
+    )
+
+
 async def _log_expiry(
     session: AsyncSession,
     *,
@@ -305,10 +344,11 @@ async def _reclaim_expired(session: AsyncSession, *, lease: TaskLease, now: dt.d
     whether the sweep or the next holder gets there first is timing, and
     the activity log must not depend on it.
     """
-    lease.released_at = now
-    lease.release_reason = LeaseRelease.expired.value
-    lease.version += 1
     await session.flush()
+    if lease.id not in await _end_leases(
+        session, lease_ids=[lease.id], reason=LeaseRelease.expired, at=now
+    ):
+        return  # the sweep ended it first, and logged it
     await _log_expiry(
         session,
         org_id=lease.org_id,
@@ -688,10 +728,14 @@ async def release(
         )
         if not holder.holds(lease):
             raise ForbiddenError(MessageCode.LEASE_NOT_HELD)
-    lease.released_at = now
-    lease.release_reason = reason.value
-    lease.version += 1
     await session.flush()
+    if lease.id not in await _end_leases(session, lease_ids=[lease.id], reason=reason, at=now):
+        # Ended between the read and the write -- by the sweep, after its
+        # deadline passed. Nothing was held any more, which is what this
+        # function returns None for; the release that happened is logged
+        # by whoever made it, with its own reason.
+        await session.refresh(lease)
+        return None
     await audit.log(
         session,
         org_id=org_id,
@@ -734,17 +778,11 @@ async def release_all_for_worker(
     ).all()
     if not rows:
         return []
-    ids = [r[0] for r in rows]
-    await session.execute(
-        update(TaskLease)
-        .where(TaskLease.id.in_(ids), TaskLease.released_at.is_(None))
-        .values(
-            released_at=now,
-            release_reason=LeaseRelease.explicit.value,
-            version=TaskLease.version + 1,
-        )
+    ended = await _end_leases(
+        session, lease_ids=[r[0] for r in rows], reason=LeaseRelease.explicit, at=now
     )
     await session.flush()
+    rows = [r for r in rows if r[0] in ended]
     for _lease_id, task_id in rows:
         await audit.log(
             session,
@@ -1068,20 +1106,8 @@ async def sweep_expired(
     ).all()
     if not rows:
         return []
-    ids = [r.id for r in rows]
-    released = set(
-        (
-            await session.execute(
-                update(TaskLease)
-                .where(TaskLease.id.in_(ids), TaskLease.released_at.is_(None))
-                .values(
-                    released_at=at,
-                    release_reason=LeaseRelease.expired.value,
-                    version=TaskLease.version + 1,
-                )
-                .returning(TaskLease.id)
-            )
-        ).scalars()
+    released = await _end_leases(
+        session, lease_ids=[r.id for r in rows], reason=LeaseRelease.expired, at=at
     )
     await session.flush()
     for r in rows:

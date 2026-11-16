@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import uuid
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 
 import pytest
 from _fake_embedder import FakeEmbedder
@@ -650,6 +650,109 @@ async def test_two_sweeps_at_once_log_each_release_once(_embedder: None) -> None
     assert await second == []
     for lid in lease_ids:
         assert len(await _release_rows(org, user, lid)) == 1
+
+
+async def _a_lease_lock_is_awaited() -> bool:
+    async with admin_session() as s:
+        n = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' AND query ILIKE 'UPDATE task_leases%'"
+                )
+            )
+        ).scalar_one()
+    return int(n) > 0
+
+
+async def _after_an_uncommitted_sweep(
+    org: uuid.UUID, user: uuid.UUID, second: Callable[[], Awaitable[object]]
+) -> object:
+    """Run ``second`` while a sweep holds the lease rows it released, and
+    commit the sweep only once ``second`` is seen waiting on those rows: the
+    interleaving in which the second path read the lease as live and then
+    writes it after the sweep's release is already final."""
+    async with tenant_session(str(org), str(user), actor_kind="system") as s:
+        assert await leases_svc.sweep_expired(s)
+        pending = asyncio.create_task(second())
+        for _ in range(200):
+            if await _a_lease_lock_is_awaited():
+                break
+            await asyncio.sleep(0.02)
+        else:
+            pending.cancel()
+            pytest.fail("the second path never waited on the sweep's row lock")
+    return await pending
+
+
+async def test_a_reclaim_racing_the_sweep_logs_the_release_once(_embedder: None) -> None:
+    """The sweep releases an expired lease while another session, which
+    read it as unreleased, is reclaiming it to take the task. One release,
+    one activity row; the new holder still gets its lease."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    lease_id, dead_w, deadline = await _expired_lease(org, user, task_id, "dead")
+    next_w = await _worker(org, user, "next")
+
+    async def reclaim() -> TaskLease:
+        async with tenant_session(str(org), str(user)) as s:
+            return await leases_svc.acquire(
+                s, org_id=org, actor_id=user, task_id=task_id, worker_id=next_w
+            )
+
+    taken = await _after_an_uncommitted_sweep(org, user, reclaim)
+    assert isinstance(taken, TaskLease) and taken.holder_worker_id == next_w
+    _assert_expiry_row(await _release_rows(org, user, lease_id), task_id, dead_w, deadline)
+
+
+async def test_a_worker_closing_while_the_sweep_runs_logs_each_release_once(
+    _embedder: None,
+) -> None:
+    """Closing a worker gives back what it holds; if the sweep got there
+    first, the close frees nothing, logs nothing and does not report the
+    task as freed by it."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    lease_id, dead_w, deadline = await _expired_lease(org, user, task_id, "dead")
+
+    async def close() -> list[uuid.UUID]:
+        async with tenant_session(str(org), str(user)) as s:
+            _w, freed = await workers_svc.close_worker(
+                s, org_id=org, actor_id=user, worker_id=dead_w
+            )
+            return freed
+
+    freed = await _after_an_uncommitted_sweep(org, user, close)
+    assert freed == []
+    _assert_expiry_row(await _release_rows(org, user, lease_id), task_id, dead_w, deadline)
+
+
+async def test_a_holder_giving_back_a_lease_the_sweep_just_ended_changes_nothing(
+    _embedder: None,
+) -> None:
+    """The holder releases a lease whose deadline has passed, while the sweep
+    is releasing it. The sweep's release stands: one row, reason ``expired``,
+    and the lease row is not rewritten to ``explicit``."""
+    org, user = await _org()
+    (task_id,) = await _make_tasks(org, user, 1)
+    lease_id, dead_w, deadline = await _expired_lease(org, user, task_id, "late")
+
+    async def give_back() -> TaskLease | None:
+        async with tenant_session(str(org), str(user)) as s:
+            return await leases_svc.release(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=task_id,
+                reason=LeaseRelease.explicit,
+                worker_id=dead_w,
+            )
+
+    assert await _after_an_uncommitted_sweep(org, user, give_back) is None
+    _assert_expiry_row(await _release_rows(org, user, lease_id), task_id, dead_w, deadline)
+    async with tenant_session(str(org), str(user)) as s:
+        row = await s.get(TaskLease, lease_id)
+        assert row is not None and row.release_reason == LeaseRelease.expired.value
 
 
 async def test_a_task_nobody_holds_is_still_movable_by_anybody(_embedder: None) -> None:
