@@ -68,6 +68,7 @@ from mycelium_core.models.workflow import WorkflowDefinition, WorkflowState, Wor
 from mycelium_core.security import decode_token_async
 from mycelium_core.services import advisory as advisory_svc
 from mycelium_core.services import agent_runtime as agent_runtime_svc
+from mycelium_core.services import agent_tokens as agent_tokens_svc
 from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import annotations as annotations_svc
 from mycelium_core.services import attachments as attachments_svc
@@ -196,6 +197,13 @@ async def _tenant(
         actor_kind = "mcp_token"
         actor_subject = str(token_id) if token_id is not None else None
     else:
+        # stdio has no scope gate on a direct tool call, and it opens the
+        # session as ``human_api``: it is a person's transport, and only a
+        # person's session token may open it. ``decode_token_async`` also
+        # accepts an agent token, which here would have reached every tool,
+        # person-only ones included, recorded as a person (task f34a0292).
+        if agent_tokens_svc.is_agent_token(token):
+            raise AuthError(MessageCode.AUTH_STDIO_PERSON_ONLY)
         claims = await decode_token_async(token)
         sub = claims.get("sub")
         if not isinstance(sub, str):

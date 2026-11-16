@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import uuid
 
+from _mcp_agent import as_agent
+
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.services import agent_tokens as at_svc
 from mycelium_core.services.auth import signup
@@ -50,28 +52,37 @@ async def test_the_sensors_answer_over_mcp() -> None:
     per-model accept ratio and the learning telemetry were REST-only."""
     raw = await _token()
 
-    health = await TOOLS["garden_health"](token=raw, org_id="")
+    async with as_agent(raw):
+        health = await TOOLS["garden_health"](token="", org_id="")
     assert set(health) == {"generated_at", "metrics", "trend"}
     assert health["metrics"], "an empty workspace still reports its sensors"
 
-    series = await TOOLS["garden_health_timeseries"](token=raw, org_id="", days=7)
+    async with as_agent(raw):
+        series = await TOOLS["garden_health_timeseries"](token="", org_id="", days=7)
     assert series == {"snapshots": []}
 
-    events = await TOOLS["garden_health_events"](token=raw, org_id="")
+    async with as_agent(raw):
+        events = await TOOLS["garden_health_events"](token="", org_id="")
     assert set(events) == {"events"}
 
-    clusters = await TOOLS["garden_clusters"](token=raw, org_id="")
+    async with as_agent(raw):
+        clusters = await TOOLS["garden_clusters"](token="", org_id="")
     assert set(clusters) == {"clusters", "modularity", "count"}
 
-    ratio = await TOOLS["garden_review_accept_ratio"](token=raw, org_id="")
+    async with as_agent(raw):
+        ratio = await TOOLS["garden_review_accept_ratio"](token="", org_id="")
     assert ratio == {"models": []}
 
-    learned = await TOOLS["garden_learning_telemetry"](token=raw, org_id="")
+    async with as_agent(raw):
+        learned = await TOOLS["garden_learning_telemetry"](token="", org_id="")
     assert learned == {"reject_hotspots": [], "drift": []}
 
 
 async def test_a_rollback_with_nothing_learned_changes_nothing() -> None:
     raw = await _token()
-    out = await TOOLS["garden_learning_rollback"](token=raw, org_id="", to="2026-01-01T00:00:00Z")
+    async with as_agent(raw):
+        out = await TOOLS["garden_learning_rollback"](
+            token="", org_id="", to="2026-01-01T00:00:00Z"
+        )
     assert out["features_changed"] == 0
     assert out["top_change"] is None

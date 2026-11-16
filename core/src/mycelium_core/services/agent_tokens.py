@@ -177,6 +177,19 @@ async def list_tokens(
     return list(result.scalars().all())
 
 
+async def _session_token_id(session: AsyncSession) -> uuid.UUID | None:
+    """The agent token this session was opened with, or None."""
+    raw = (
+        await session.execute(text("SELECT current_setting('app.current_actor_subject', true)"))
+    ).scalar()
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except ValueError:
+        return None
+
+
 async def revoke(
     session: AsyncSession,
     *,
@@ -184,9 +197,18 @@ async def revoke(
     actor_id: uuid.UUID,
     token_id: uuid.UUID,
 ) -> None:
-    """Owner-gated. Mark a token revoked; idempotent (a re-revoke is a
-    no-op that preserves the original ``revoked_at`` timestamp)."""
-    await require_role(session, org_id, actor_id, Role.owner)
+    """Owner-gated, except for a token revoking ITSELF. Mark a token
+    revoked; idempotent (a re-revoke is a no-op that preserves the original
+    ``revoked_at`` timestamp).
+
+    Revoking yourself only removes authority, and ``mycelium auth logout
+    --revoke`` depends on it, so it must not depend on the role of whoever
+    minted the token: a member's token was refused its own logout. "Itself"
+    is read from the session (``app.current_actor_subject``, which the
+    adapters set to the presenting token's id), never from the request, so
+    no caller can name another token as its own."""
+    if await _session_token_id(session) != token_id:
+        await require_role(session, org_id, actor_id, Role.owner)
     result = await session.execute(
         select(AgentToken).where(AgentToken.id == token_id, AgentToken.org_id == org_id)
     )

@@ -18,8 +18,9 @@ ARGUMENT (a ``kind`` discriminator): those live in ``DYNAMIC_TOOL_SCOPES``
 below with a per-call resolver instead of a single static key. A tool is in
 exactly one of the two maps.
 
-FAIL-CLOSED: a tool absent from this map is DENIED to a *scoped* assistant
-(bare / stdio / human tokens keep full access -- see ``server._scope_permits``).
+FAIL-CLOSED: a tool absent from this map is DENIED to a *scoped* assistant.
+A bare agent token holds every key but never a ``HUMAN_ONLY`` tool; only a
+person's session on stdio reaches everything -- see ``server._scope_permits``.
 The ``test_mcp_scope_enforcement`` drift guard asserts this map stays in
 lockstep with the live registry, so a newly added @mcp.tool() that lacks an
 entry here fails CI rather than silently defaulting open or shut.

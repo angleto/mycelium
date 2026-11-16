@@ -25,6 +25,7 @@ class MessageCode(enum.StrEnum):
     AUTH_MISSING_BEARER = "auth.missing_bearer"
     AUTH_TOKEN_INVALID = "auth.token_invalid"  # noqa: S105 (message code, not a secret)
     AUTH_TOKEN_NO_SUB = "auth.token_no_sub"  # noqa: S105 (message code, not a secret)
+    AUTH_STDIO_PERSON_ONLY = "auth.stdio_person_only"
     AUTH_WORKSPACE_REQUIRED = "auth.workspace_required"
     AUTH_EMAIL_ALREADY_REGISTERED = "auth.email_already_registered"
     AUTH_EMAIL_NOT_VERIFIED = "auth.email_not_verified"
@@ -334,6 +335,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_MISSING_BEARER: "Missing Authorization: Bearer header",
         MessageCode.AUTH_TOKEN_INVALID: "Invalid or expired token",
         MessageCode.AUTH_TOKEN_NO_SUB: "Token without subject",
+        MessageCode.AUTH_STDIO_PERSON_ONLY: (
+            "The stdio transport is for a person's session token; an agent token "
+            "connects over HTTP at /mcp"
+        ),
         MessageCode.AUTH_WORKSPACE_REQUIRED: "X-Workspace-Id header is required",
         MessageCode.AUTH_EMAIL_ALREADY_REGISTERED: "Email already registered",
         MessageCode.AUTH_EMAIL_NOT_VERIFIED: "Email not verified",

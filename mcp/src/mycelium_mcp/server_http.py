@@ -32,7 +32,8 @@ Auth flow per request:
 The per-assistant scope list (``AuthenticatedAgent.assistant_scope``) is
 published into ``_PRINCIPAL_SCOPE`` and enforced per tool by the gateway gate
 (``server._scope_permits`` / ``tool_scopes``; task c19f2f63, enabler B). A bare
-agent token carries no scope list and keeps full-MCP access, as before.
+agent token carries no scope list: it holds every scope key, and it is still an
+agent, so no tool reserved to a person reaches it (task f34a0292).
 
 The transport runs STATELESS (``stateless_http=True`` in ``make_mcp_app``): the
 scope is re-read from the bearer on every request rather than frozen into a
@@ -113,8 +114,9 @@ class _BearerAuthMiddleware:
             return
         token = _PRINCIPAL.set((principal.user_id, principal.org_id, principal.token_id))
         # Publish the bound assistant's scope so the gateway gate can enforce it
-        # per tool (task c19f2f63, enabler B). None for a bare token = full
-        # access; a scope list restricts a bound assistant to those keys.
+        # per tool (task c19f2f63, enabler B). None for a bare token = every
+        # scope key but no person-only tool; a scope list restricts a bound
+        # assistant to those keys.
         scope_token = _PRINCIPAL_SCOPE.set(principal.assistant_scope)
         try:
             await self.app(scope, receive, send)

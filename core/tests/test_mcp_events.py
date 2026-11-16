@@ -12,6 +12,8 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
+from _mcp_agent import as_agent
+
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS
 from mycelium_core.services import agent_tokens as at_svc
@@ -65,7 +67,8 @@ async def test_list_events_returns_bus_events_newest_first() -> None:
     raw = await _token(org, user)
 
     # org_id="" -> the agent token carries the workspace (same path as the CLI).
-    out = await list_events(token=raw, org_id="")
+    async with as_agent(raw):
+        out = await list_events(token="", org_id="")
     evs = out["events"]
     assert [e["kind"] for e in evs] == ["commit", "snapshot"]  # ts DESC
     assert [e["id"] for e in evs] == [str(e2.id), str(e1.id)]
@@ -81,7 +84,8 @@ async def test_list_events_since_cursor_excludes_older() -> None:
 
     # The cursor is inclusive (``ts >= since``, at-least-once): passing the
     # newest ts returns that event and nothing older.
-    out = await list_events(token=raw, org_id="", since=e2.ts.isoformat())
+    async with as_agent(raw):
+        out = await list_events(token="", org_id="", since=e2.ts.isoformat())
     ids = [e["id"] for e in out["events"]]
     assert ids == [str(e2.id)]
 
@@ -92,7 +96,8 @@ async def test_list_events_is_rls_scoped_to_the_workspace() -> None:
     await _emit(org_a, user_a, "snapshot", 1)
     raw_b = await _token(org_b, user_b)
 
-    out = await list_events(token=raw_b, org_id="")
+    async with as_agent(raw_b):
+        out = await list_events(token="", org_id="")
     assert out["events"] == []  # B never sees A's events
 
 

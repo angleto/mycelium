@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import uuid
 
+from _mcp_agent import as_agent
+
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.services import agent_tokens as svc
 from mycelium_core.services.auth import signup
@@ -31,12 +33,14 @@ async def _signup() -> tuple[uuid.UUID, uuid.UUID]:
 
 
 async def test_mcp_tenant_accepts_agent_token() -> None:
+    """Over HTTP, where an agent token reaches the tools: the bearer
+    middleware publishes the principal and the call opens the token's
+    workspace. stdio refuses it (``test_mcp_stdio_person_only``)."""
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         r = await svc.mint(s, org_id=org, actor_id=user, name="claude")
-    raw = r.raw
-    # The positional org_id may be empty; the agent token carries it.
-    tags = await list_tags(token=raw, org_id="")
+    async with as_agent(r.raw):
+        tags = await list_tags(token="", org_id="")
     # The fresh workspace has no tags yet (no canonical seed of generic
     # tags), so the empty list confirms the call succeeded under
     # tenant_session opened against the token-carried workspace.
@@ -51,11 +55,15 @@ async def test_mcp_tenant_rejects_revoked_agent_token() -> None:
 
     from mycelium_core.errors import AuthError
 
+    # The HTTP bearer middleware authenticates through this call; a revoked
+    # token does not get a principal, so it never reaches a tool.
+    assert await svc.authenticate(r.raw) is None
+    # Nor does stdio take it, revoked or not.
     try:
         await list_tags(token=r.raw, org_id="")
     except AuthError:
         return
-    raise AssertionError("revoked agent token should not authenticate via MCP")
+    raise AssertionError("an agent token should not open the stdio transport")
 
 
 async def test_mcp_tenant_still_accepts_jwt_unchanged() -> None:

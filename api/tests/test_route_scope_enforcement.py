@@ -567,3 +567,29 @@ async def test_refiling_a_task_through_patch_costs_tags_assign_not_tags_write() 
             json={"expected_version": task["version"], "project_tag_id": project["id"]},
         )
         assert r.status_code == 200, r.text
+
+
+async def test_a_token_revokes_itself_whatever_role_the_request_runs_at() -> None:
+    """Self-revocation must not depend on the owner role. A token whose
+    request runs below owner -- a member's, or an owner's without the
+    ``X-Workspace-Role: owner`` lever -- was refused its own logout with
+    ``rbac.role_insufficient`` (verification of task f34a0292, 2026-11-16).
+    Revoking ANOTHER token still needs the owner role and a person."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        tid_a, pat_a = await _bare_token(c, owner, "a")
+        tid_b, _pat_b = await _bare_token(c, owner, "b")
+        below_owner = {k: v for k, v in pat_a.items() if k != "X-Workspace-Role"}
+        below_owner["X-Workspace-Role"] = "member"
+
+        r = await c.delete(f"/agent-tokens/{tid_b}", headers=below_owner)
+        assert r.status_code == 403, r.text
+
+        r = await c.delete(f"/agent-tokens/{tid_a}", headers=below_owner)
+        assert r.status_code == 204, r.text
+        r = await c.get("/tasks", headers=below_owner)
+        assert r.status_code == 401, r.text
+
+        listed = (await c.get("/agent-tokens", headers=owner)).json()
+        assert {str(t["id"]): t for t in listed}[tid_b]["revoked_at"] is None

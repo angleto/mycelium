@@ -112,14 +112,20 @@ ADR already gives for not deciding on identity: every agent session shares it.
 The decision is now taken on the kind of credential.
 
 - A person's session (the login JWT, on REST or on the stdio transport)
-  reaches everything, as before.
+  reaches everything, as before. stdio accepts nothing else: it has no scope
+  gate on a direct tool call and records its caller as a person, so an agent
+  token presented there is refused (`auth.stdio_person_only`) and connects over
+  HTTP at `/mcp` instead. Until 2026-11-16 the stdio decoder accepted an agent
+  token and treated it as a person.
 - Every agent credential, with or without an assistant, and a capability
   minted by one, is refused every `HUMAN_ONLY` route and tool and does not see
   the tools in the catalogue. Without an assistant it still holds every scope
   key, so ordinary work through the CLI is unchanged.
 - One exception: a token may revoke itself, which only removes authority and is
-  what `mycelium auth logout --revoke` does. Revoking another token stays a
-  person's act.
+  what `mycelium auth logout --revoke` does, whatever the role its request runs
+  at (until 2026-11-16 the service still asked for the owner role, so a
+  member's token could not log itself out). "Itself" is read from the session,
+  not the request. Revoking another token stays a person's act.
 - The CLI's person-only commands (`auth mfa *`, `workspace list`) ask for the
   password, run on the session it opens and close it afterwards. No flag or
   environment variable supplies the password, because a password stored once
