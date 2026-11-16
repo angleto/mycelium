@@ -253,6 +253,11 @@ export const en = {
       hint: 'Proposals you declined: they show in no other list, not even the trash. Undo to put one back in the review queue.',
     },
     undoReject: 'Undo rejection',
+    facts: {
+      title: 'Facts read from your notes',
+      hint: 'Relations a model found in your notes on its own. None of them counts until you approve it; a rejected fact is not proposed again.',
+      source: 'from',
+    },
   },
   gardenSuggest: {
     title: 'Garden suggestions',

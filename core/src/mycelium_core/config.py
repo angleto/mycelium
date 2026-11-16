@@ -630,13 +630,27 @@ class Settings(BaseSettings):
     # MYCELIUM_DISTILL_VERIFY_PASS_ENABLED=true.
     distill_verify_pass_enabled: bool = False
 
-    # Human-gated review state for AUTONOMOUSLY-extracted knowledge-graph
-    # nodes (ADR-0043). When set, a KG extraction run by an unsolicited sweep
-    # is born ``review_state='proposed'`` until a human approves it. It no
-    # longer governs humus: every distillation, pattern and season is born
-    # proposed regardless of this flag (ADR-0043, amendment of 2026-11-12).
-    # MYCELIUM_GARDEN_REVIEW_GATE_ENABLED=true.
-    garden_review_gate_enabled: bool = False
+    # Autonomous knowledge-graph extraction (ADR-0071). Part of the garden
+    # loop, so it also needs ``garden_loop_enabled``, and it pauses with the
+    # rest of the loop on the workspace's kill-switch and daily credit cap.
+    # What it writes is always born ``review_state='proposed'`` and waits in
+    # the kg review inbox for a person; there is no setting that changes
+    # that (the former ``garden_review_gate_enabled`` was retired with
+    # ADR-0071 because it could). MYCELIUM_KG_AUTONOMOUS_EXTRACT_ENABLED=true.
+    kg_autonomous_extract_enabled: bool = False
+    # Tokens one pass may spend, input and output together, estimated per
+    # note from its own size (services.kg.estimate_read_tokens). Bounds a
+    # burst; the money bound is the daily credit cap. 20k is a few dozen
+    # ordinary notes, chosen so the first backfill spreads over several
+    # passes instead of landing on one bill. A note whose estimate alone
+    # exceeds it is set aside as too_large.
+    kg_extract_tokens_per_pass: int = Field(default=20_000, ge=1_000)
+    # A note is read only once nothing in it changed for this long, so a
+    # note being written is paid for once, not once per pause in typing.
+    kg_extract_settle_minutes: int = Field(default=15, ge=0)
+    # A read that failed (model error, unparseable answer) is retried by
+    # later passes until it has failed this many times for the same text.
+    kg_extract_max_attempts: int = Field(default=3, ge=1)
 
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by

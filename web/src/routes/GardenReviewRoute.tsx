@@ -17,6 +17,9 @@ import type { components } from '../shared'
 //    | link_direct (one-way search traversal -> promote to hypha_of).
 //  - In attesa di revisione : autonomously-produced humus atoms awaiting a
 //    human approve/reject (ADR-0043).
+//  - Fatti letti dalle note  : knowledge-graph facts a model extracted on
+//    its own, awaiting the same decision (ADR-0071). The first page only;
+//    the inbox is newest first and the rest arrives as these are decided.
 //
 // Actions are wired only where a REST endpoint exists today: single-note
 // distill (POST /notes/{id}/distill) and review approve/reject. Pattern,
@@ -28,6 +31,7 @@ type CandidateNode = components['schemas']['GardenCandidateNode']
 type CandidateEdge = components['schemas']['GardenCandidateEdge']
 type ReviewItem = components['schemas']['GardenReviewPendingItem']
 type RejectedItem = components['schemas']['GardenReviewRejectedItem']
+type ProposedFact = components['schemas']['KgProposedFact']
 
 const NODE_GLYPH: Record<string, string> = {
   distill: '⚗️',
@@ -41,13 +45,14 @@ export function GardenReviewRoute() {
   const [edges, setEdges] = useState<CandidateEdge[]>([])
   const [pending, setPending] = useState<ReviewItem[]>([])
   const [rejected, setRejected] = useState<RejectedItem[]>([])
+  const [facts, setFacts] = useState<ProposedFact[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     setErr('')
-    const [cand, rev, bin] = await Promise.all([
+    const [cand, rev, bin, kg] = await Promise.all([
       api.GET('/garden/candidates', {
         params: { header: workspaceHeader(), query: { kind: 'all', limit: 50 } },
       }),
@@ -55,6 +60,9 @@ export function GardenReviewRoute() {
         params: { header: workspaceHeader(), query: { limit: 50 } },
       }),
       api.GET('/garden/review/rejected', {
+        params: { header: workspaceHeader(), query: { limit: 50 } },
+      }),
+      api.GET('/kg/review/pending', {
         params: { header: workspaceHeader(), query: { limit: 50 } },
       }),
     ])
@@ -68,6 +76,8 @@ export function GardenReviewRoute() {
     else setPending(rev.data ?? [])
     if (bin.error) setErr((e) => e || errMessage(bin.error))
     else setRejected(bin.data ?? [])
+    if (kg.error) setErr((e) => e || errMessage(kg.error))
+    else setFacts(kg.data?.items ?? [])
   }, [])
 
   useEffect(() => {
@@ -141,7 +151,24 @@ export function GardenReviewRoute() {
     [reload],
   )
 
-  const total = nodes.length + edges.length + pending.length + rejected.length
+  const onFactReview = useCallback(
+    async (edgeId: string, action: 'approve' | 'reject', expectedVersion: number) => {
+      setBusy(`fact-${action}:${edgeId}`)
+      setErr('')
+      const path = action === 'approve' ? '/kg/review/approve' : '/kg/review/reject'
+      // expected_version = the version this row rendered, as for notes.
+      const { error } = await api.POST(path, {
+        params: { header: workspaceHeader() },
+        body: { edge_id: edgeId, expected_version: expectedVersion },
+      })
+      setBusy(null)
+      if (error) setErr(errMessage(error))
+      await reload()
+    },
+    [reload],
+  )
+
+  const total = nodes.length + edges.length + pending.length + rejected.length + facts.length
 
   return (
     <div className="ghreview">
@@ -308,6 +335,65 @@ export function GardenReviewRoute() {
                       disabled={busy === `reject:${r.note_id}`}
                       title={t('gardenReview.reject')}
                       onClick={() => void onReview(r.note_id, 'reject', r.version)}
+                    >
+                      × {t('gardenReview.reject')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* ---- Fatti letti dalle note ---------------------------------- */}
+          <section className="ghreview__section">
+            <header className="ghreview__sectionhead">
+              <h2>{t('gardenReview.facts.title')}</h2>
+              <span className="muted">({facts.length})</span>
+            </header>
+            <p className="hint">{t('gardenReview.facts.hint')}</p>
+            {facts.length === 0 ? (
+              <p className="hint">{t('gardenReview.none')}</p>
+            ) : (
+              <ul className="ghreview__list">
+                {facts.map((f) => (
+                  <li key={f.edge_id} className="ghreview__item">
+                    <span className="ghreview__glyph" aria-hidden="true">
+                      🕸️
+                    </span>
+                    <span className="ghreview__body">
+                      <span className="ghreview__title">
+                        {f.subject.name} <span className="chip">{f.predicate}</span>{' '}
+                        {f.object.name}
+                      </span>
+                      {f.source_note_id && (
+                        <span className="ghreview__reason">
+                          {t('gardenReview.facts.source')}{' '}
+                          <Link to={`/notes/${f.source_note_id}`}>
+                            {f.source_note_title || f.source_note_id.slice(0, 8)}
+                          </Link>
+                        </span>
+                      )}
+                    </span>
+                    {f.origin_model_id && (
+                      <span className="muted" title={t('gardenReview.pending.model')}>
+                        {f.origin_model_id}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      disabled={busy === `fact-approve:${f.edge_id}`}
+                      title={t('gardenReview.approve')}
+                      onClick={() => void onFactReview(f.edge_id, 'approve', f.version)}
+                    >
+                      ✓ {t('gardenReview.approve')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      disabled={busy === `fact-reject:${f.edge_id}`}
+                      title={t('gardenReview.reject')}
+                      onClick={() => void onFactReview(f.edge_id, 'reject', f.version)}
                     >
                       × {t('gardenReview.reject')}
                     </button>

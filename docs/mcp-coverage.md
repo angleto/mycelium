@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**297 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**300 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -94,6 +94,17 @@ over-fetch the org table and filter in its head.
 | `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |
 | `note_restore_source` | Restore the original under a humus atom: un-archive the atom's |
 | `suggest_note_links` | The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared |
+
+### kg (6)
+
+| Tool | Summary |
+|---|---|
+| `kg_entities` | Look up knowledge-graph entities whose name matches ``query`` (ADR-0044). |
+| `kg_extract` | Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts) |
+| `kg_neighbors` | Effective knowledge-graph facts around an entity id (ADR-0044). |
+| `kg_review_approve` | Approve a proposed knowledge-graph fact (ADR-0071): it becomes |
+| `kg_review_pending` | The knowledge-graph review inbox (ADR-0071): facts a model extracted |
+| `kg_review_reject` | Reject a proposed knowledge-graph fact (ADR-0071): it never becomes |
 
 ### navigation (18)
 
@@ -391,7 +402,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 | `work_digest` | What happened on the tasks of a client or project in a window: the |
 
-### misc (32)
+### misc (29)
 
 | Tool | Summary |
 |---|---|
@@ -408,9 +419,6 @@ over-fetch the org table and filter in its head.
 | `extract_cluster_pattern` | Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note |
 | `help` | Answer questions about Mycelium ITSELF -- its features, configuration and |
 | `ingest_sdi_receipt` | Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI. |
-| `kg_entities` | Look up knowledge-graph entities whose name matches ``query`` (ADR-0044). |
-| `kg_extract` | Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts) |
-| `kg_neighbors` | Effective knowledge-graph facts around an entity id (ADR-0044). |
 | `list_annotations` | List the annotations (comments + suggestions) on a markdown document, |
 | `list_assigned_annotations` | The "assigned to me" inbox: annotations assigned to ``assignee_handle`` |
 | `list_dependencies` | List task dependencies, newest first, optionally only those touching a |

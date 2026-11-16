@@ -387,6 +387,9 @@ _NOT_AN_ENTITY_ID = {
     "created_by",
     "decision_comment_id",
     "dependency_id",
+    # A knowledge-graph fact (kg_review_*): resolve_prefix reaches tasks and
+    # notes, not facts.
+    "edge_id",
     "entity",
     "entry_id",
     "executor_id",

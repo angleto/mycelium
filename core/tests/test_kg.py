@@ -9,6 +9,7 @@ born-proposed review gate, multi-hop traversal, and RLS org isolation.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import sys
 import uuid
@@ -150,10 +151,13 @@ async def test_extract_meters_through_the_per_org_seam() -> None:
             res = await kg.extract_facts(s, org_id=org, actor_id=user, note_id=note.id)
             assert res.facts == 1
             assert res.model_id == "fake-llm"
+            # The key names the text read, so a re-read after an edit is
+            # charged and a retry of the same text is not (ADR-0071).
+            body_key = hashlib.sha256(b"Ann at Initech.").hexdigest()[:16]
             rec = (
                 await s.execute(
                     select(UsageRecord).where(
-                        UsageRecord.operation_id == f"kg_extract:{org}:{note.id}"
+                        UsageRecord.operation_id == f"kg_extract:{org}:{note.id}:{body_key}"
                     )
                 )
             ).scalar_one()

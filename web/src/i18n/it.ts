@@ -252,6 +252,11 @@ export const it: Catalog = {
       hint: "Proposte che hai rifiutato: non compaiono in nessun'altra lista, nemmeno nel cestino. Annulla per rimetterle in attesa di revisione.",
     },
     undoReject: 'Annulla rifiuto',
+    facts: {
+      title: 'Fatti letti dalle tue note',
+      hint: 'Relazioni che un modello ha trovato da solo nelle tue note. Nessuna vale finché non la approvi; un fatto rifiutato non viene riproposto.',
+      source: 'da',
+    },
   },
   gardenSuggest: {
     title: 'Suggerimenti del giardino',

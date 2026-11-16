@@ -48,6 +48,15 @@ def render_inventory() -> str:
     by_domain: dict[str, list[dict[str, str]]] = {}
     for meta in cat:
         by_domain.setdefault(meta["domain"], []).append(meta)
+    # A domain the gateway does not order would be counted in the header and
+    # listed under no heading: the "kg" review tools were, until the gateway
+    # gained the bucket (ADR-0071). Refuse instead of rendering a short list.
+    unordered = sorted(set(by_domain) - set(_DOMAIN_ORDER))
+    if unordered:
+        raise SystemExit(
+            f"tools in domains the gateway does not order: {unordered}; "
+            "add a rule to mycelium_mcp.gateway._DOMAIN_RULES"
+        )
     domains = [d for d in _DOMAIN_ORDER if d in by_domain]
 
     lines: list[str] = [

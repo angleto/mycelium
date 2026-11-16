@@ -251,6 +251,39 @@ def _compute_credits(
     return raw.quantize(Decimal("0.0001"))
 
 
+async def ensure_affordable(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    model_id: str | None,
+    basis: CostBasis,
+    units_in: Decimal,
+    units_out: Decimal,
+) -> None:
+    """Refuse with ``INSUFFICIENT_CREDITS`` BEFORE a provider is called, on an
+    estimate, when the wallet could not pay for it. A free call (no rate card
+    on a non-BYOK basis, as in :func:`meter_if_billable`) always passes.
+
+    :func:`meter` only refuses AFTER the provider has answered, which is right
+    for a person waiting on the answer and wrong for an unattended loop: there
+    the provider is paid, the debit is refused, and the next tick does it
+    again. This check is advisory -- the atomic debit in :func:`meter` stays
+    the authority, so an estimate below the real cost can still end in a
+    refusal after the call, once."""
+    rate = await _active_rate_card(session, model_id)
+    if basis is not CostBasis.byok and rate is None:
+        return
+    cfg = await get_billing_config(session, org_id)
+    needed = _compute_credits(
+        basis=basis,
+        units_in=units_in,
+        units_out=units_out,
+        rate=rate,
+        byok_factor=cfg.byok_fee_factor,
+    )
+    await ensure_credits(session, org_id=org_id, needed=needed)
+
+
 async def meter_if_billable(
     session: AsyncSession,
     *,

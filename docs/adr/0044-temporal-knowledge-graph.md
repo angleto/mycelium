@@ -80,7 +80,8 @@ Multi-hop / as-of query is exposed over MCP: `kg_extract`, `kg_entities`,
 - Deferred / follow-ups: auto-contradiction detection across notes (the
   primitives `supersede_fact`/`invalidate_fact` exist; auto-deciding which
   facts conflict is a separate LLM-reasoning step); wiring extraction into the
-  autonomous ingest sweep behind a flag; feeding currently-valid kg_edges into
+  autonomous ingest sweep behind a flag (done by ADR-0071, 2026-11-16, with
+  the review surface it needed); feeding currently-valid kg_edges into
   graph.py's PageRank/betweenness for KG centrality; the external benchmark
   harness (B3) that measures multi-hop/temporal/governance.
 

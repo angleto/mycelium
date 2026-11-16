@@ -20,6 +20,7 @@ on a single workspace are isolated; the loop keeps going.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import uuid
 
@@ -27,6 +28,8 @@ from sqlalchemy import select
 
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import (
@@ -37,6 +40,7 @@ from mycelium_core.services import (
     garden_health,
     garden_learning,
     graph_snapshot,
+    kg,
     memory,
     note_links,
 )
@@ -66,6 +70,55 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
     if not rows:
         return None
     return rows[0].user_id
+
+
+async def _kg_extraction_pass(org_id: uuid.UUID, owner: uuid.UUID) -> None:
+    """One budgeted pass of autonomous KG extraction for one workspace.
+
+    Every note is read and recorded in its OWN transaction: the model is paid
+    when it answers, so a later failure in the pass must not roll back the
+    record of a read already paid for, which the next pass would then pay
+    for again. Running out of credits ends the pass; the notes not reached
+    stay pending for the next one."""
+    settings = get_settings()
+    settled_before = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+        minutes=settings.kg_extract_settle_minutes
+    )
+    async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+        pending = await kg.pending_reads(
+            s,
+            org_id=org_id,
+            settled_before=settled_before,
+            max_attempts=settings.kg_extract_max_attempts,
+            token_budget=settings.kg_extract_tokens_per_pass,
+            # Enough rows to fill one budget with small notes; the plan, not
+            # this bound, decides what is read.
+            scan=500,
+        )
+    plan = kg.plan_pass(pending, token_budget=settings.kg_extract_tokens_per_pass)
+    for big in plan.too_large:
+        async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+            await kg.record_too_large(s, org_id=org_id, pending=big)
+    outcomes: dict[str, int] = {}
+    for item in plan.read:
+        try:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                outcome = await kg.read_autonomously(s, org_id=org_id, actor_id=owner, pending=item)
+        except DomainError as exc:
+            if exc.code == MessageCode.INSUFFICIENT_CREDITS:
+                _log.info("kg extraction pass stopped org=%s: out of credits", org_id)
+                break
+            raise
+        if outcome is not None:  # None: another pass holds or did this read
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    if outcomes or plan.too_large:
+        _log.info(
+            "kg extraction pass org=%s pending=%d outcomes=%s too_large=%d",
+            org_id,
+            len(pending),
+            outcomes,
+            len(plan.too_large),
+        )
 
 
 async def run_once() -> int:
@@ -231,6 +284,15 @@ async def run_once() -> int:
                             _log.info("garden learning snapshot org=%s users=%d", org_id, n_snap)
                 except Exception:
                     _log.exception("learning prior snapshot failed for org=%s", org_id)
+            # Autonomous knowledge-graph extraction (ADR-0071). After every
+            # other step, because it is the one that spends on a model: a
+            # pass that runs out of credits must not cost the maturity sweep
+            # or the snapshots above. Sub-flagged, off by default.
+            if get_settings().kg_autonomous_extract_enabled:
+                try:
+                    await _kg_extraction_pass(org_id, owner)
+                except Exception:
+                    _log.exception("kg extraction pass failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(

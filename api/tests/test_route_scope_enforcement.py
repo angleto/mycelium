@@ -525,6 +525,8 @@ def test_reviewing_generated_text_is_human_only() -> None:
     for method, path in (
         ("POST", "/garden/review/approve"),
         ("POST", "/garden/review/reject"),
+        ("POST", "/kg/review/approve"),
+        ("POST", "/kg/review/reject"),
     ):
         assert ROUTE_SCOPES.get((method, path)) is HUMAN_ONLY, f"{method} {path} must be HUMAN_ONLY"
 

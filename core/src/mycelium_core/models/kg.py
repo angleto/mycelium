@@ -18,7 +18,7 @@ stays as-of-queryable -- invalidate-not-delete, mirroring
 Facts are born ``review_state='proposed'`` when extracted autonomously and
 withheld from every read until adjudicated, exactly like notes (ADR-0043).
 The effective-fact predicate is
-``invalidated_at IS NULL AND review_state IS DISTINCT FROM 'proposed'`` plus
+``invalidated_at IS NULL AND review_state NOT IN ('proposed', 'rejected')`` plus
 the as-of window ``(valid_from IS NULL OR valid_from <= :t) AND (valid_to IS
 NULL OR valid_to > :t)``.
 """
@@ -29,7 +29,7 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -137,7 +137,8 @@ class KgEdge(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     superseded_by_edge_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("kg_edge.id", ondelete="SET NULL"), nullable=True
     )
-    # 'proposed' (autonomous, awaiting adjudication) | NULL/'approved' = effective.
+    # 'proposed' (autonomous, awaiting a person) | 'rejected' (a person turned it
+    # down; also invalidated) | NULL/'approved' = effective.
     review_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     origin_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -174,5 +175,37 @@ class KgEntitySource(UUIDPKMixin, OrgScopedMixin, Base):
         PG_UUID(as_uuid=True), ForeignKey("notes.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class KgNoteExtraction(UUIDPKMixin, OrgScopedMixin, Base):
+    """What the autonomous extraction pass has already read (migration 0028).
+
+    One row per note, rewritten on each attempt. ``parts_signature`` hashes
+    the text of the note's parts in order, so the pass reads a note again
+    only after its text changed. A note that yields no
+    fact leaves no trace in ``kg_edge`` or ``kg_entity_source``, which is why
+    neither of them can stand in for this table."""
+
+    __tablename__ = "kg_note_extraction"
+    __table_args__ = (
+        Index("uq_kg_note_extraction_note", "org_id", "note_id", unique=True),
+        CheckConstraint(
+            "outcome IN ('ok', 'failed', 'too_large')", name="ck_kg_note_extraction_outcome"
+        ),
+    )
+
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("notes.id", ondelete="CASCADE"), nullable=False
+    )
+    parts_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 'ok' | 'failed' | 'too_large' (DB CHECK); services.kg.ExtractionOutcome.
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    facts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    estimated_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    attempted_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

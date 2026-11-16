@@ -133,6 +133,20 @@ class MeteredLLM:
     def model_id(self) -> str | None:
         return getattr(self._inner, "model_id", None)
 
+    async def ensure_affordable(self, *, tokens_in: int, tokens_out: int) -> None:
+        """Refuse before the provider is called when the wallet could not pay
+        an estimated ``tokens_in`` / ``tokens_out`` (see
+        :func:`billing.ensure_affordable`). For unattended callers; a call a
+        person waits on can keep relying on the debit after the answer."""
+        await billing.ensure_affordable(
+            self._session,
+            org_id=self._org_id,
+            model_id=self.model_id,
+            basis=self._basis,
+            units_in=Decimal(tokens_in),
+            units_out=Decimal(tokens_out),
+        )
+
     async def complete(
         self, *, system: str | None, messages: Sequence[tuple[str, str]]
     ) -> LLMResult:

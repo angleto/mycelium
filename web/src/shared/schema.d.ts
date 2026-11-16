@@ -6403,6 +6403,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kg/review/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kg Review Pending
+         * @description The knowledge-graph review inbox (ADR-0071): facts a model extracted
+         *     from the notes on its own, newest first, each with the model that read
+         *     it, the note it came from and the ``version`` to echo when deciding. A
+         *     proposed fact appears here and nowhere else until a person approves it.
+         *     Pass ``next_cursor`` back as ``cursor`` for the next page.
+         */
+        get: operations["kg_review_pending_kg_review_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kg/review/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kg Review Approve
+         * @description Approve a proposed knowledge-graph fact (ADR-0071): it becomes
+         *     effective and enters kg_neighbors and every other read of the graph. A
+         *     person's act: a credential carrying a scope list cannot call it. Audited,
+         *     idempotent; ``expected_version`` from the pending listing.
+         */
+        post: operations["kg_review_approve_kg_review_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kg/review/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kg Review Reject
+         * @description Reject a proposed knowledge-graph fact (ADR-0071): it never becomes
+         *     effective, the row is kept as frozen history, and the autonomous pass
+         *     does not propose the same triple again. A person's act: a credential
+         *     carrying a scope list cannot call it. Audited, idempotent;
+         *     ``expected_version`` from the pending listing.
+         */
+        post: operations["kg_review_reject_kg_review_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/stream": {
         parameters: {
             query?: never;
@@ -11830,6 +11901,95 @@ export interface components {
             logo_position?: string | null;
             /** Is Default */
             is_default?: boolean | null;
+        };
+        /** KgEntityRef */
+        KgEntityRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+        };
+        /**
+         * KgProposedFact
+         * @description One fact awaiting a person's decision. ``origin_model_id`` names the
+         *     model that read it and ``source_note_id`` the note it was read from, so
+         *     the reviewer can check the claim against its source before deciding.
+         */
+        KgProposedFact: {
+            /**
+             * Edge Id
+             * Format: uuid
+             */
+            edge_id: string;
+            subject: components["schemas"]["KgEntityRef"];
+            /** Predicate */
+            predicate: string;
+            object: components["schemas"]["KgEntityRef"];
+            /** Valid From */
+            valid_from?: string | null;
+            /** Valid To */
+            valid_to?: string | null;
+            /** Confidence */
+            confidence?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Source Note Id */
+            source_note_id?: string | null;
+            /** Source Note Title */
+            source_note_title?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Version */
+            version: number;
+        };
+        /** KgReviewActionIn */
+        KgReviewActionIn: {
+            /**
+             * Edge Id
+             * Format: uuid
+             */
+            edge_id: string;
+            /**
+             * Expected Version
+             * @description The version read from the pending listing; the action fails with stale_version if the fact changed since.
+             */
+            expected_version?: number | null;
+        };
+        /** KgReviewActionOut */
+        KgReviewActionOut: {
+            /**
+             * Edge Id
+             * Format: uuid
+             */
+            edge_id: string;
+            /** Review State */
+            review_state: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * KgReviewPendingPage
+         * @description One page of proposed facts, newest first. ``next_cursor`` is null on
+         *     the last page.
+         */
+        KgReviewPendingPage: {
+            /** Items */
+            items: components["schemas"]["KgProposedFact"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
         };
         /**
          * LLMProviderOut
@@ -30203,6 +30363,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenLearningTelemetryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    kg_review_pending_kg_review_pending_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description The next_cursor of the previous page, for the next one. */
+                cursor?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KgReviewPendingPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    kg_review_approve_kg_review_approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KgReviewActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KgReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    kg_review_reject_kg_review_reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KgReviewActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KgReviewActionOut"];
                 };
             };
             /** @description Validation Error */

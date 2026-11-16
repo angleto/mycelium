@@ -9940,7 +9940,7 @@ async def restore_note_revision(
 
 # The garden tools are generated from the operation registry (ADR-0068).
 # Imported last: the bindings need this module's registry and tenant opener.
-from mycelium_mcp import tools_garden, tools_notes, tools_tasks  # noqa: E402,F401
+from mycelium_mcp import tools_garden, tools_kg, tools_notes, tools_tasks  # noqa: E402,F401
 
 # Python callers (tests, eval scenarios) import tools from this module; the
 # generated ones stay importable under the names they always had. Resolved

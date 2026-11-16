@@ -512,6 +512,12 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # declaration (``_domain_for``); this rule only names the bucket, so
     # the coverage document orders it, and catches an unbound garden_* name.
     ("garden", ("garden",)),
+    # The knowledge graph (ADR-0044, ADR-0071): the registry-bound review
+    # tools take "kg" from their declaration, and this rule both orders the
+    # bucket and gathers the hand-written kg_* tools with them. Before it
+    # existed the bound tools were counted in docs/mcp-coverage.md and
+    # listed under no heading.
+    ("kg", ("kg_",)),
     # Navigation/relations must come next: link/relation/resolve tools
     # also contain "note"/"task" in their names, so they would otherwise
     # be swallowed by the notes/tasks rules below.

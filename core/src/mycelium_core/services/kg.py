@@ -15,16 +15,19 @@ Builds and queries a typed, bi-temporal knowledge graph over the org's notes:
 - ``entity_facts`` / ``traverse`` answer 1-hop and multi-hop questions with an
   optional ``as_of`` valid-time clamp; effective facts only.
 
-Effective + as-of predicate: ``invalidated_at IS NULL AND review_state IS
-DISTINCT FROM 'proposed' AND (valid_from IS NULL OR valid_from <= t) AND
+Effective + as-of predicate: ``invalidated_at IS NULL AND review_state NOT
+IN ('proposed', 'rejected') AND (valid_from IS NULL OR valid_from <= t) AND
 (valid_to IS NULL OR valid_to > t)`` where t = ``as_of`` or now.
 """
 
 from __future__ import annotations
 
 import datetime
+import enum
+import hashlib
 import json
 import logging
+import math
 import re
 import unicodedata
 import uuid
@@ -39,15 +42,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from mycelium_core.ai_providers import LLMProvider
-from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.models.kg import KG_ENTITY_TYPES, KgEdge, KgEntity, KgEntitySource
+from mycelium_core.models.kg import (
+    KG_ENTITY_TYPES,
+    KgEdge,
+    KgEntity,
+    KgEntitySource,
+    KgNoteExtraction,
+)
 from mycelium_core.models.membership import Role
 from mycelium_core.services import audit
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.identities import ensure_for_user
-from mycelium_core.services.llm_resolver import resolve_llm
+from mycelium_core.services.llm_resolver import MeteredLLM, resolve_llm
 from mycelium_core.services.rbac import require_role
 
 _WS_RE = re.compile(r"\s+")
@@ -96,11 +104,23 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+_PROPOSED = "proposed"
+_APPROVED = "approved"
+_REJECTED = "rejected"
+
+
 def _review_state_for(autonomous: bool) -> str | None:
-    """Autonomous extraction is born 'proposed' (withheld until adjudicated)
-    when the review gate is on; user-initiated extraction is effective. Mirrors
-    decomposition._review_state_for (ADR-0043)."""
-    return "proposed" if autonomous and get_settings().garden_review_gate_enabled else None
+    """Autonomous extraction is ALWAYS born 'proposed', withheld from every
+    read until a person approves it. It used to follow
+    ``garden_review_gate_enabled``, which defaults to off, so the first
+    autonomous pass would have written effective facts about the notes with
+    nobody having read them: the opposite of ADR-0043's amendment, which says
+    nothing a model writes about the notes takes effect before approval.
+
+    User-initiated extraction (``kg_extract``) stays effective. Whether it
+    should be born proposed too is an open decision recorded in ADR-0071,
+    not settled here."""
+    return _PROPOSED if autonomous else None
 
 
 @dataclass(frozen=True)
@@ -127,7 +147,10 @@ class FactView:
 
 def _parse_extraction(raw: str) -> dict[str, Any]:
     """Defensive parse of the extractor's output (no provider JSON-mode): try
-    the whole string, then the first ``{...}`` block; never raise."""
+    the whole string, then the first ``{...}`` block; never raise. An answer
+    with no JSON object in it parses to ``{}``, not to empty lists: it used to
+    return ``{"entities": [], "relations": []}``, which made an unreadable
+    answer indistinguishable from a note that states no fact."""
     for candidate in (raw.strip(), None):
         text = candidate if candidate is not None else (_first_json_block(raw))
         if not text:
@@ -138,7 +161,7 @@ def _parse_extraction(raw: str) -> dict[str, Any]:
             continue
         if isinstance(obj, dict):
             return obj
-    return {"entities": [], "relations": []}
+    return {}
 
 
 def _first_json_block(raw: str) -> str | None:
@@ -330,19 +353,34 @@ async def add_fact(
     return edge
 
 
-async def extract_facts(
+@dataclass(frozen=True)
+class _Reading:
+    """What a model answered about one note, before anything is written."""
+
+    model_id: str
+    parsed: dict[str, Any]
+    # False when the answer held no JSON object with an entities or
+    # relations list: an empty graph and an unreadable answer are different
+    # outcomes, and only the first one is a successful read.
+    understood: bool
+
+
+async def _read_note(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
-    llm: LLMProvider | None = None,
-    autonomous: bool = False,
-) -> ExtractionResult:
-    """Extract a typed knowledge graph from a note's body via the per-org
-    metered LLM and persist entities + facts. Facts are born 'proposed' when
-    ``autonomous`` and the review gate is on, else effective. ``llm`` is an
-    explicit test/override injection (decomposition pattern)."""
+    llm: LLMProvider | None,
+    attempt: int | None,
+) -> _Reading:
+    """Call the metered model on a note's body. Writes nothing but the
+    metering, so a caller can keep the debit of an answer it then fails to
+    use. ``attempt`` is set by the unattended pass only: it checks the wallet
+    BEFORE the call (an unattended loop must not pay a provider for a debit
+    that is then refused), and it enters the metering key, so a retry of the
+    same text is a new call and a new charge rather than a replay of the
+    first one's debit."""
     await require_role(session, org_id, actor_id, Role.member)
     # Read the note row before its text (task a186c989): ``get_body`` joins
     # the parts and never looks at ``notes``, so without this the body of a
@@ -353,15 +391,46 @@ async def extract_facts(
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    # The metering key names the TEXT read, not just the note: keyed on the
+    # note alone, a re-read after an edit replayed the first debit and was
+    # never charged, while a retry of the same request must not be charged
+    # twice.
+    body_key = hashlib.sha256(body.encode()).hexdigest()[:16]
+    op_key = f"kg_extract:{org_id}:{note_id}:{body_key}"
+    if attempt is not None:
+        op_key += f":auto{attempt}"
     provider = llm or await resolve_llm(
         session,
         org_id,
         actor_id=actor_id,
-        operation_id=f"kg_extract:{org_id}:{note_id}",
+        operation_id=op_key,
         op="extract",
     )
+    if attempt is not None and isinstance(provider, MeteredLLM):
+        estimate = estimate_read_tokens(len(body.encode()))
+        await provider.ensure_affordable(
+            tokens_in=estimate - _output_allowance(estimate),
+            tokens_out=_output_allowance(estimate),
+        )
     res = await provider.complete(system=_EXTRACT_SYSTEM, messages=[("user", body)])
     parsed = _parse_extraction(res.text)
+    understood = isinstance(parsed.get("entities"), list) or isinstance(
+        parsed.get("relations"), list
+    )
+    return _Reading(model_id=res.model_id, parsed=parsed, understood=understood)
+
+
+async def _write_reading(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    reading: _Reading,
+    autonomous: bool,
+) -> ExtractionResult:
+    """Persist what a reading states as entities and facts."""
+    parsed = reading.parsed
     identity_id = await _actor_identity_id(session, org_id, actor_id)
     review = _review_state_for(autonomous)
 
@@ -373,12 +442,20 @@ async def extract_facts(
     # a spurious 'other' duplicate.
     by_key: dict[tuple[str, str], KgEntity] = {}
     by_name: dict[str, KgEntity] = {}
+    # The types the reading declared, by normalized name. An autonomous
+    # reading creates an entity only when a relation uses it, typed from here:
+    # an entity is visible to every search as soon as it exists, and one that
+    # no proposed fact explains would be a model's output in effect before
+    # anyone approved it.
+    declared: dict[str, Any] = {}
 
     async def _entity(name: str, entity_type: Any) -> KgEntity:
         norm = normalize_entity_name(name)
         etype = _coerce_entity_type(entity_type)
         if etype == "other" and norm in by_name:
             return by_name[norm]
+        if etype == "other" and norm in declared:
+            etype = _coerce_entity_type(declared[norm])
         key = (etype, norm)
         if key in by_key:
             return by_key[key]
@@ -387,7 +464,7 @@ async def extract_facts(
             org_id=org_id,
             name=name,
             entity_type=etype,
-            origin_model_id=res.model_id,
+            origin_model_id=reading.model_id,
             created_by=identity_id,
         )
         by_key[key] = ent
@@ -402,10 +479,14 @@ async def extract_facts(
                 and isinstance(spec.get("name"), str)
                 and spec["name"].strip()
             ):
-                await _entity(spec["name"], spec.get("type"))
+                if autonomous:
+                    declared.setdefault(normalize_entity_name(spec["name"]), spec.get("type"))
+                else:
+                    await _entity(spec["name"], spec.get("type"))
 
     edge_ids: list[uuid.UUID] = []
     entity_ids: set[uuid.UUID] = set()
+    dropped = 0
     relations = parsed.get("relations")
     if isinstance(relations, list):
         for rel in relations:
@@ -423,10 +504,26 @@ async def extract_facts(
                 and obj_name.strip()
             ):
                 continue
+            valid_from = _parse_dt(rel.get("valid_from"))
+            valid_to = _parse_dt(rel.get("valid_to"))
+            if valid_from is not None and valid_to is not None and valid_to <= valid_from:
+                # A window the model got backwards is one bad relation, not a
+                # bad reading: dropping it keeps every other fact of the note.
+                # It used to raise from add_fact and take them all down.
+                dropped += 1
+                continue
             subj = await _entity(subj_name, "other")
             obj = await _entity(obj_name, "other")
             entity_ids.update((subj.id, obj.id))
             if subj.id == obj.id:  # the DB CHECK forbids a self-edge
+                continue
+            if autonomous and await _rejected_before(
+                session, org_id=org_id, subject_id=subj.id, predicate=pred, object_id=obj.id
+            ):
+                # A person already turned this triple down, or retracted it.
+                # Proposing it again on every re-read would ask the same
+                # question until they gave in; the answer stands until someone
+                # asserts the fact themselves.
                 continue
             edge = await add_fact(
                 session,
@@ -434,11 +531,11 @@ async def extract_facts(
                 subject_id=subj.id,
                 predicate=pred,
                 object_id=obj.id,
-                valid_from=_parse_dt(rel.get("valid_from")),
-                valid_to=_parse_dt(rel.get("valid_to")),
+                valid_from=valid_from,
+                valid_to=valid_to,
                 confidence=_parse_confidence(rel.get("confidence")),
                 source_note_id=note_id,
-                origin_model_id=res.model_id,
+                origin_model_id=reading.model_id,
                 review_state=review,
                 created_by=identity_id,
             )
@@ -458,13 +555,47 @@ async def extract_facts(
         entity="note",
         entity_id=note_id,
         action="kg_extract",
-        diff={"entities": len(entity_ids), "facts": len(edge_ids), "model_id": res.model_id},
+        diff={
+            "entities": len(entity_ids),
+            "facts": len(edge_ids),
+            "dropped": dropped,
+            "model_id": reading.model_id,
+            "autonomous": autonomous,
+        },
     )
     return ExtractionResult(
         entities=len(entity_ids),
         facts=len(edge_ids),
         edge_ids=edge_ids,
-        model_id=res.model_id,
+        model_id=reading.model_id,
+    )
+
+
+async def extract_facts(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    llm: LLMProvider | None = None,
+    autonomous: bool = False,
+) -> ExtractionResult:
+    """Extract a typed knowledge graph from a note's body via the per-org
+    metered LLM and persist entities + facts. Facts are born 'proposed' when
+    ``autonomous``, else effective. An answer with no JSON in it yields an
+    empty extraction here; the unattended pass, which must tell the two
+    apart, calls :func:`read_autonomously` instead. ``llm`` is an explicit
+    test/override injection (decomposition pattern)."""
+    reading = await _read_note(
+        session, org_id=org_id, actor_id=actor_id, note_id=note_id, llm=llm, attempt=None
+    )
+    return await _write_reading(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        reading=reading,
+        autonomous=autonomous,
     )
 
 
@@ -492,8 +623,11 @@ async def invalidate_fact(
     ).scalar_one_or_none()
     if edge is None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    # Identity before the assignments, as in reject_fact: a flush between
+    # them would freeze the row half-written.
+    invalidated_by = await _actor_identity_id(session, org_id, actor_id)
     edge.invalidated_at = now or _now()
-    edge.invalidated_by = await _actor_identity_id(session, org_id, actor_id)
+    edge.invalidated_by = invalidated_by
     edge.superseded_by_edge_id = superseded_by_edge_id
     edge.version += 1
     await session.flush()
@@ -576,25 +710,51 @@ async def supersede_fact(
     return old, new_edge
 
 
-async def approve_fact(
-    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, edge_id: uuid.UUID
+async def _load_reviewable(
+    session: AsyncSession, *, org_id: uuid.UUID, edge_id: uuid.UUID
 ) -> KgEdge:
-    """Approve a proposed fact: it becomes effective (review_state='approved',
-    which is DISTINCT FROM 'proposed'). ADR-0043 review gate for facts."""
-    await require_role(session, org_id, actor_id, Role.member)
+    """A fact that is, or was, up for review: proposed, approved or rejected.
+    A fact that never went through review (asserted by a person) is absent
+    here, not forbidden: it is not a proposal, so there is nothing to decide."""
     edge = (
         await session.execute(
             select(KgEdge).where(
                 KgEdge.org_id == org_id,
                 KgEdge.id == edge_id,
-                KgEdge.review_state == "proposed",
-                KgEdge.invalidated_at.is_(None),
+                KgEdge.review_state.in_((_PROPOSED, _APPROVED, _REJECTED)),
             )
         )
     ).scalar_one_or_none()
     if edge is None:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
-    edge.review_state = "approved"
+        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    return edge
+
+
+async def approve_fact(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    edge_id: uuid.UUID,
+    expected_version: int | None = None,
+) -> KgEdge:
+    """Approve a proposed fact: it becomes effective (``review_state=
+    'approved'``, which is DISTINCT FROM 'proposed'). ADR-0043 for facts.
+
+    ``expected_version`` is the version the reviewer read; a fact that changed
+    since fails with ``stale_version``, checked before the idempotent
+    short-circuit so a stale view is an error even when the end state would
+    coincide. Approving an approved fact is a no-op; a rejected one is no
+    longer a proposal and is absent."""
+    await require_role(session, org_id, actor_id, Role.member)
+    edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
+    if expected_version is not None and edge.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if edge.review_state == _APPROVED:
+        return edge
+    if edge.review_state != _PROPOSED or edge.invalidated_at is not None:
+        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    edge.review_state = _APPROVED
     edge.version += 1
     await session.flush()
     await audit.log(
@@ -604,15 +764,162 @@ async def approve_fact(
         entity="kg_edge",
         entity_id=edge_id,
         action="kg_approve",
+        diff={"review_state": {"old": _PROPOSED, "new": _APPROVED}},
     )
     return edge
 
 
 async def reject_fact(
-    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, edge_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    edge_id: uuid.UUID,
+    expected_version: int | None = None,
 ) -> KgEdge:
-    """Reject a proposed fact: invalidate it (invalidate-not-delete)."""
-    return await invalidate_fact(session, org_id=org_id, actor_id=actor_id, edge_id=edge_id)
+    """Reject a proposed fact: ``review_state='rejected'`` and invalidated in
+    the same write (invalidate-not-delete), so it leaves every read and the
+    row is frozen from then on by the DB trigger. The rejection is remembered
+    per triple: the autonomous pass does not propose it again.
+
+    Only a PROPOSED fact can be rejected here. This used to delegate to
+    ``invalidate_fact`` unconditionally, so "reject" could tombstone an
+    effective fact a person had asserted. Rejecting a rejected fact is a
+    no-op; ``expected_version`` as for :func:`approve_fact`."""
+    await require_role(session, org_id, actor_id, Role.member)
+    edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
+    if expected_version is not None and edge.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if edge.review_state == _REJECTED:
+        return edge
+    if edge.review_state != _PROPOSED or edge.invalidated_at is not None:
+        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    edge.review_state = _REJECTED
+    # The identity first: resolving it may flush, and a flush between the two
+    # assignments would write invalidated_at alone, after which the trigger
+    # refuses the row's next UPDATE (measured by the review of 2026-11-16).
+    invalidated_by = await _actor_identity_id(session, org_id, actor_id)
+    edge.invalidated_at = _now()
+    edge.invalidated_by = invalidated_by
+    edge.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="kg_edge",
+        entity_id=edge_id,
+        action="kg_reject",
+        diff={"review_state": {"old": _PROPOSED, "new": _REJECTED}},
+    )
+    return edge
+
+
+async def _rejected_before(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    subject_id: uuid.UUID,
+    predicate: str,
+    object_id: uuid.UUID,
+) -> bool:
+    return (
+        await session.execute(
+            select(KgEdge.id)
+            .where(
+                KgEdge.org_id == org_id,
+                KgEdge.subject_id == subject_id,
+                KgEdge.predicate == normalize_predicate(predicate),
+                KgEdge.object_id == object_id,
+                # Rejected by a person, or retracted as wrong
+                # (invalidate_fact). A superseded fact is not here: it was
+                # true for its window, so it does not set invalidated_at.
+                or_(KgEdge.review_state == _REJECTED, KgEdge.invalidated_at.is_not(None)),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none() is not None
+
+
+@dataclass(frozen=True)
+class ProposedFact:
+    edge_id: uuid.UUID
+    subject_id: uuid.UUID
+    subject_name: str
+    subject_type: str
+    predicate: str
+    object_id: uuid.UUID
+    object_name: str
+    object_type: str
+    valid_from: datetime.datetime | None
+    valid_to: datetime.datetime | None
+    confidence: Decimal | None
+    origin_model_id: str | None
+    source_note_id: uuid.UUID | None
+    source_note_title: str | None
+    created_at: datetime.datetime
+    version: int
+
+
+async def list_proposed_facts(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    limit: int,
+    after: tuple[datetime.datetime, uuid.UUID] | None = None,
+) -> list[ProposedFact]:
+    """Facts awaiting a person's decision, newest first, keyset-paged on
+    ``(created_at, id)``. Fetch ``limit + 1`` to learn whether a next page
+    exists. A proposed fact appears here and nowhere else: every other read
+    withholds it."""
+    from mycelium_core.models.note import Note
+
+    await require_role(session, org_id, actor_id, Role.member)
+    subj = aliased(KgEntity)
+    obj = aliased(KgEntity)
+    stmt = (
+        select(KgEdge, subj, obj, Note.title)
+        .join(subj, subj.id == KgEdge.subject_id)
+        .join(obj, obj.id == KgEdge.object_id)
+        .outerjoin(Note, Note.id == KgEdge.source_note_id)
+        .where(
+            KgEdge.org_id == org_id,
+            KgEdge.review_state == _PROPOSED,
+            KgEdge.invalidated_at.is_(None),
+        )
+    )
+    if after is not None:
+        created, row_id = after
+        stmt = stmt.where(
+            or_(
+                KgEdge.created_at < created,
+                (KgEdge.created_at == created) & (KgEdge.id < row_id),
+            )
+        )
+    stmt = stmt.order_by(KgEdge.created_at.desc(), KgEdge.id.desc()).limit(limit)
+    rows = (await session.execute(stmt)).all()
+    return [
+        ProposedFact(
+            edge_id=e.id,
+            subject_id=s_.id,
+            subject_name=s_.name,
+            subject_type=s_.entity_type,
+            predicate=e.predicate,
+            object_id=o_.id,
+            object_name=o_.name,
+            object_type=o_.entity_type,
+            valid_from=e.valid_from,
+            valid_to=e.valid_to,
+            confidence=e.confidence,
+            origin_model_id=e.origin_model_id,
+            source_note_id=e.source_note_id,
+            source_note_title=title,
+            created_at=e.created_at,
+            version=e.version,
+        )
+        for e, s_, o_, title in rows
+    ]
 
 
 async def erase_by_source(
@@ -728,7 +1035,9 @@ def _effective_clauses(
     (``created_at <= tx_as_of AND (invalidated_at IS NULL OR invalidated_at >
     tx_as_of)``). NOTE: ``review_state`` is a current-state column (not
     transaction-time-tracked), so a currently-proposed fact stays excluded on
-    every axis."""
+    every axis, and so does a rejected one: it was a proposal until a person
+    turned it down and was never believed, while its ``invalidated_at`` alone
+    would let ``tx_as_of`` before the rejection read it as a belief."""
     t = as_of or _now()
     if tx_as_of is None:
         tx_clause: Any = KgEdge.invalidated_at.is_(None)
@@ -738,7 +1047,7 @@ def _effective_clauses(
         )
     return [
         tx_clause,
-        KgEdge.review_state.is_distinct_from("proposed"),
+        or_(KgEdge.review_state.is_(None), KgEdge.review_state.notin_((_PROPOSED, _REJECTED))),
         or_(KgEdge.valid_from.is_(None), KgEdge.valid_from <= t),
         or_(KgEdge.valid_to.is_(None), KgEdge.valid_to > t),
     ]
@@ -753,12 +1062,32 @@ async def search_entities(
     entity_type: str | None = None,
     limit: int = 20,
 ) -> list[KgEntity]:
-    """Entities whose normalized name contains ``query`` (RLS-scoped)."""
+    """Entities whose normalized name contains ``query`` (RLS-scoped).
+
+    An entity shows when at least one effective fact touches it, or when no
+    fact touches it at all (an entity a person extracted on its own). One
+    whose every fact is still proposed, or was rejected, stays hidden: the
+    autonomous pass creates entities only for the facts it proposes, and
+    listing them would put a model's reading in effect before a person
+    approved any of it."""
     await require_role(session, org_id, actor_id, Role.member)
     norm = normalize_entity_name(query)
+    touches = or_(KgEdge.subject_id == KgEntity.id, KgEdge.object_id == KgEntity.id)
+    # Believed and decided, whatever its validity window: an entity whose
+    # facts all lie in the past is still a real entity.
+    effective_fact = (
+        select(KgEdge.id).where(
+            KgEdge.org_id == org_id,
+            touches,
+            KgEdge.invalidated_at.is_(None),
+            or_(KgEdge.review_state.is_(None), KgEdge.review_state.notin_((_PROPOSED, _REJECTED))),
+        )
+    ).exists()
+    any_fact = select(KgEdge.id).where(KgEdge.org_id == org_id, touches).exists()
     stmt = select(KgEntity).where(
         KgEntity.org_id == org_id,
         KgEntity.normalized_name.like(f"%{norm}%"),
+        or_(effective_fact, ~any_fact),
     )
     if entity_type:
         stmt = stmt.where(KgEntity.entity_type == _coerce_entity_type(entity_type))
@@ -879,3 +1208,334 @@ async def traverse(
             org_id,
         )
     return out[:max_edges]
+
+
+# --------------------------------------------------------------------------
+# Autonomous extraction (ADR-0071): what feeds the graph without being asked
+# --------------------------------------------------------------------------
+
+
+class ExtractionOutcome(enum.StrEnum):
+    """The closed set ``kg_note_extraction.outcome`` holds (DB CHECK)."""
+
+    OK = "ok"
+    FAILED = "failed"
+    TOO_LARGE = "too_large"
+
+
+#: Output allowance per read, as a fraction of the input estimate plus a
+#: floor. NOT measured: no autonomous pass has run yet to measure it on. It
+#: only sizes how many notes one pass attempts; what a read really costs is
+#: metered from the provider's own count and bounded by the workspace's
+#: daily credit cap (``autonomous_budget``), which this estimate never
+#: replaces. Revisit against the usage records of the first passes.
+_OUTPUT_FRACTION = 0.5
+_OUTPUT_FLOOR_TOKENS = 256
+
+
+def estimate_read_tokens(body_bytes: int) -> int:
+    """What reading a note of ``body_bytes`` costs in tokens, input and
+    output: the system prompt and the body at the byte-per-token ratio
+    measured for billing (Italian prose and JSON), plus the output
+    allowance above."""
+    from mycelium_core.services.billing import BYTES_PER_TOKEN
+
+    input_tokens = math.ceil((len(_EXTRACT_SYSTEM.encode()) + body_bytes) / BYTES_PER_TOKEN)
+    return input_tokens + math.ceil(input_tokens * _OUTPUT_FRACTION) + _OUTPUT_FLOOR_TOKENS
+
+
+def _output_allowance(estimate: int) -> int:
+    """The output share of an :func:`estimate_read_tokens` figure."""
+    input_tokens = math.floor((estimate - _OUTPUT_FLOOR_TOKENS) / (1 + _OUTPUT_FRACTION))
+    return estimate - input_tokens
+
+
+@dataclass(frozen=True)
+class PendingRead:
+    note_id: uuid.UUID
+    parts_signature: str
+    estimated_tokens: int
+    attempts: int  # attempts already recorded for THIS signature (0 = never)
+
+
+# A note qualifies when a person could have written it and wants it seen:
+# live, not archived, not a proposal or a rejection, not opted out of
+# automatic indexing (ADR-0056: index_scope='none' keeps a note away from
+# every automatic reader, and a model reading it is one), not still being
+# transcribed, and left alone for ``settle`` so a note being typed is not
+# paid for once per pause. The signature hashes the parts' text in order:
+# measured on 2026-11-16, ``update_note`` rewrites part 0's body in place
+# without bumping ``note_part.version``, so a signature over id, version and
+# order (the first version of this query) missed every ordinary edit. The
+# hash is computed in the database; nothing leaves it.
+_PENDING_SQL = text(
+    """
+    WITH sig AS (
+        SELECT p.note_id,
+               md5(string_agg(p.ord || ':' || md5(p.body), ','
+                              ORDER BY p.ord, p.id)) AS signature,
+               max(p.updated_at) AS last_edit,
+               sum(octet_length(p.body)) AS body_bytes,
+               bool_or(p.body ~ '[^[:space:]]') AS has_text
+          FROM note_part p
+         WHERE p.org_id = :org_id
+         GROUP BY p.note_id
+    )
+    SELECT n.id AS note_id, sig.signature, sig.body_bytes,
+           CASE WHEN x.parts_signature = sig.signature THEN x.attempts ELSE 0 END AS attempts
+      FROM notes n
+      JOIN sig ON sig.note_id = n.id
+      LEFT JOIN kg_note_extraction x ON x.org_id = n.org_id AND x.note_id = n.id
+     WHERE n.org_id = :org_id
+       AND n.deleted_at IS NULL
+       AND NOT n.is_archived
+       AND n.index_scope = 'org'
+       AND n.status <> 'transcribing'
+       AND (n.review_state IS NULL OR n.review_state NOT IN ('proposed', 'rejected'))
+       AND sig.has_text
+       AND sig.last_edit < :settled_before
+       AND (x.id IS NULL
+            OR x.parts_signature <> sig.signature
+            OR (x.outcome = 'failed' AND x.attempts < :max_attempts)
+            OR (x.outcome = 'too_large' AND x.estimated_tokens <= :token_budget))
+     ORDER BY sig.last_edit ASC, n.id ASC
+     LIMIT :scan
+    """
+)
+
+
+async def pending_reads(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    settled_before: datetime.datetime,
+    max_attempts: int,
+    token_budget: int,
+    scan: int,
+) -> list[PendingRead]:
+    """Notes the autonomous pass has not read in their current form, the
+    longest-settled first, so a large note waiting for budget is never
+    overtaken by a stream of fresh edits. A note set aside as too large
+    comes back once ``token_budget`` can hold it, as well as after an edit."""
+    rows = (
+        await session.execute(
+            _PENDING_SQL,
+            {
+                "org_id": org_id,
+                "settled_before": settled_before,
+                "max_attempts": max_attempts,
+                "token_budget": token_budget,
+                "scan": scan,
+            },
+        )
+    ).all()
+    return [
+        PendingRead(
+            note_id=r.note_id,
+            parts_signature=r.signature,
+            estimated_tokens=estimate_read_tokens(int(r.body_bytes)),
+            attempts=int(r.attempts),
+        )
+        for r in rows
+    ]
+
+
+@dataclass(frozen=True)
+class PassPlan:
+    read: list[PendingRead]
+    too_large: list[PendingRead]
+
+
+def plan_pass(pending: list[PendingRead], *, token_budget: int) -> PassPlan:
+    """Which pending notes one pass reads, charging each its own estimate.
+
+    In order, and stopping at the first note that does not fit what is left:
+    skipping it for smaller ones behind it would let a steady trickle of
+    small notes starve it forever. A note that alone exceeds the whole budget
+    can never fit, so it is set aside as ``too_large`` (recorded, visible,
+    re-tried only when it changes) instead of blocking every note behind it."""
+    read: list[PendingRead] = []
+    too_large: list[PendingRead] = []
+    left = token_budget
+    for p in pending:
+        if p.estimated_tokens > token_budget:
+            too_large.append(p)
+            continue
+        if p.estimated_tokens > left:
+            break
+        read.append(p)
+        left -= p.estimated_tokens
+    return PassPlan(read=read, too_large=too_large)
+
+
+async def _record_read(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    pending: PendingRead,
+    outcome: ExtractionOutcome,
+    model_id: str | None,
+    facts: int,
+) -> None:
+    stmt = pg_insert(KgNoteExtraction).values(
+        org_id=org_id,
+        note_id=pending.note_id,
+        parts_signature=pending.parts_signature,
+        outcome=outcome.value,
+        attempts=pending.attempts + 1,
+        model_id=model_id,
+        facts=facts,
+        estimated_tokens=pending.estimated_tokens,
+        attempted_at=_now(),
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["org_id", "note_id"],
+            set_={
+                "parts_signature": stmt.excluded.parts_signature,
+                "outcome": stmt.excluded.outcome,
+                "attempts": stmt.excluded.attempts,
+                "model_id": stmt.excluded.model_id,
+                "facts": stmt.excluded.facts,
+                "estimated_tokens": stmt.excluded.estimated_tokens,
+                "attempted_at": stmt.excluded.attempted_at,
+            },
+        )
+    )
+
+
+async def record_too_large(
+    session: AsyncSession, *, org_id: uuid.UUID, pending: PendingRead
+) -> None:
+    """Set a note aside without reading it (see :func:`plan_pass`)."""
+    await _record_read(
+        session,
+        org_id=org_id,
+        pending=pending,
+        outcome=ExtractionOutcome.TOO_LARGE,
+        model_id=None,
+        facts=0,
+    )
+
+
+async def _taken_elsewhere(
+    session: AsyncSession, *, org_id: uuid.UUID, pending: PendingRead
+) -> bool:
+    """Hold this note's read for the rest of the transaction, or report that
+    another pass holds it or has already done it.
+
+    Nothing guarantees one worker process: two passes over the same
+    workspace would each pay a provider for the same note (measured by the
+    review of 2026-11-16: two concurrent reads, two provider calls, one
+    charge). The lock is transaction-scoped, and each note is read in its own
+    transaction, so it covers exactly the call and its writes. The ledger is
+    re-read after the lock, because the other pass may have finished and
+    released it between our listing and our turn."""
+    got = (
+        await session.execute(
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:k, 0))"),
+            {"k": f"kg_read:{pending.note_id}"},
+        )
+    ).scalar_one()
+    if not got:
+        return True
+    done = (
+        await session.execute(
+            select(KgNoteExtraction.id).where(
+                KgNoteExtraction.org_id == org_id,
+                KgNoteExtraction.note_id == pending.note_id,
+                KgNoteExtraction.parts_signature == pending.parts_signature,
+                KgNoteExtraction.attempts > pending.attempts,
+            )
+        )
+    ).scalar_one_or_none()
+    return done is not None
+
+
+async def read_autonomously(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    pending: PendingRead,
+    llm: LLMProvider | None = None,
+) -> ExtractionOutcome | None:
+    """Read one note on nobody's request and write what it states as
+    PROPOSED facts, then record the read. Returns the outcome, or None when
+    another pass holds or has done this read.
+
+    Two savepoints, because the call and the writes fail differently. The
+    model call carries the debit: if it fails, nothing was charged, and the
+    note is recorded ``failed``. The writes come after the debit: if they
+    fail, they roll back alone and the debit stays, because the provider was
+    paid; a single savepoint around both, the first version of this, rolled
+    the debit back with them and every retry was free. An answer with no JSON
+    in it is ``failed`` too, charged, and retried under a new metering key.
+
+    Running out of credits is not a failure of the note: it is re-raised, so
+    the caller stops the pass, and it is normally raised before the call by
+    the wallet check in :func:`_read_note`."""
+    if await _taken_elsewhere(session, org_id=org_id, pending=pending):
+        return None
+
+    async def _failed(model_id: str | None) -> ExtractionOutcome:
+        await _record_read(
+            session,
+            org_id=org_id,
+            pending=pending,
+            outcome=ExtractionOutcome.FAILED,
+            model_id=model_id,
+            facts=0,
+        )
+        return ExtractionOutcome.FAILED
+
+    try:
+        async with session.begin_nested():
+            reading = await _read_note(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=pending.note_id,
+                llm=llm,
+                attempt=pending.attempts + 1,
+            )
+    except DomainError as exc:
+        if exc.code == MessageCode.INSUFFICIENT_CREDITS:
+            raise
+        _log.warning(
+            "kg autonomous read failed org=%s note=%s code=%s", org_id, pending.note_id, exc.code
+        )
+        return await _failed(None)
+    except Exception:
+        _log.exception("kg autonomous read failed org=%s note=%s", org_id, pending.note_id)
+        return await _failed(None)
+    if not reading.understood:
+        _log.warning(
+            "kg autonomous read unreadable org=%s note=%s model=%s",
+            org_id,
+            pending.note_id,
+            reading.model_id,
+        )
+        return await _failed(reading.model_id)
+    try:
+        async with session.begin_nested():
+            res = await _write_reading(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=pending.note_id,
+                reading=reading,
+                autonomous=True,
+            )
+    except Exception:
+        _log.exception("kg autonomous write failed org=%s note=%s", org_id, pending.note_id)
+        return await _failed(reading.model_id)
+    await _record_read(
+        session,
+        org_id=org_id,
+        pending=pending,
+        outcome=ExtractionOutcome.OK,
+        model_id=res.model_id,
+        facts=res.facts,
+    )
+    return ExtractionOutcome.OK

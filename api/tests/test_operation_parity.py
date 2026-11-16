@@ -231,13 +231,25 @@ def test_every_operation_documents_itself() -> None:
 def test_writing_or_judging_generated_text_stays_a_persons_act() -> None:
     """The fence of ADR-0043 now lives in one declaration, so it is asserted
     on the declaration and on both derived maps."""
-    for op_id in ("garden.review.approve", "garden.review.reject"):
+    for op_id in (
+        "garden.review.approve",
+        "garden.review.reject",
+        "kg.review.approve",
+        "kg.review.reject",
+    ):
         assert ops.get(op_id).access is HUMAN_ONLY
-    assert tool_scopes.TOOL_SCOPES["garden_review_approve"] is HUMAN_ONLY
-    assert tool_scopes.TOOL_SCOPES["garden_review_reject"] is HUMAN_ONLY
+    for tool in ("garden_review_approve", "garden_review_reject"):
+        assert tool_scopes.TOOL_SCOPES[tool] is HUMAN_ONLY
+    for tool in ("kg_review_approve", "kg_review_reject"):
+        assert tool_scopes.TOOL_SCOPES[tool] is HUMAN_ONLY
     create_app()
-    assert route_scopes.ROUTE_SCOPES[("POST", "/garden/review/approve")] is HUMAN_ONLY
-    assert route_scopes.ROUTE_SCOPES[("POST", "/garden/review/reject")] is HUMAN_ONLY
+    for path in (
+        "/garden/review/approve",
+        "/garden/review/reject",
+        "/kg/review/approve",
+        "/kg/review/reject",
+    ):
+        assert route_scopes.ROUTE_SCOPES[("POST", path)] is HUMAN_ONLY
 
 
 def test_a_hand_written_scope_for_a_bound_tool_is_refused() -> None:

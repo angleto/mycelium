@@ -30,7 +30,6 @@ from _fake_embedder import FakeEmbedder
 from sqlalchemy import select
 
 from mycelium_core.ai_providers import set_llm_override
-from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import ConflictError, NotFoundError
@@ -123,21 +122,6 @@ async def test_generation_is_born_proposed_with_model(_wire: None) -> None:
         assert note.humus_flag is True
         assert note.humus_kind == "pattern"
         assert note.origin_model_id == res.model_id == "fake-llm"
-
-
-async def test_the_review_gate_setting_does_not_open_the_gate(
-    _wire: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``garden_review_gate_enabled`` is off in production. It once decided
-    whether a synthesis went live unseen; for humus it no longer decides
-    anything, and turning it off must not let a summary through."""
-    monkeypatch.setattr(get_settings(), "garden_review_gate_enabled", False)
-    org, user = await _org()
-    async with tenant_session(str(org), str(user)) as s:
-        await _seed_billing(s, org, user)
-        res = await _make_proposed_pattern(s, org, user)
-        note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
-        assert note.review_state == "proposed"
 
 
 # ── D2: invisible on every listing surface until approved ──────────────────
