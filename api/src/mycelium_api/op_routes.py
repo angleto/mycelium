@@ -35,6 +35,7 @@ def op_ctx(ctx: TenantCtx) -> ops.OpCtx:
         actor_id=ctx.user_id,
         project_id=ctx.project_id,
         agent_token_id=ctx.agent_token_id,
+        scope=ctx.scope,
     )
 
 
@@ -89,7 +90,11 @@ def bind_route(router: APIRouter, method: str, path: str, op_id: str, *, name: s
 
     async def endpoint(**kwargs: Any) -> Any:
         ctx: TenantCtx = kwargs.pop("ctx")
-        args = kwargs.pop("body") if "body" in kwargs else op.params.model_validate(kwargs)
+        # A GET's arguments arrive one by one and FastAPI validates each, but a
+        # rule across them (a window whose end follows its start) lives on the
+        # model, and ``parse`` is what turns its refusal into the domain error
+        # both surfaces return. ``model_validate`` here let it out as a 500.
+        args = kwargs.pop("body") if "body" in kwargs else op.parse(kwargs)
         return await op(op_ctx(ctx), args)
 
     endpoint.__name__ = endpoint.__qualname__ = name

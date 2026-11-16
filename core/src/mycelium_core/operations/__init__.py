@@ -89,13 +89,28 @@ class OpCtx:
     ``actor_id`` is the user the credential acts for. ``agent_token_id`` is
     set when the credential is an agent token, on either surface, so an
     operation that records who CARRIED OUT an act can tell an assistant
-    executing a person's decision from the person acting directly."""
+    executing a person's decision from the person acting directly.
+
+    ``scope`` is the scope list of the assistant behind the credential, or
+    None when there is none: a person's session, or a token with no
+    assistant bound, both of which the gate already lets through to every
+    key. The gate decides whether the operation runs at all; ``scope`` is for
+    an operation whose answer is assembled from several kinds of data, so it
+    can leave out the parts the caller may not read (see :meth:`may`)."""
 
     session: AsyncSession
     org_id: uuid.UUID
     actor_id: uuid.UUID
     project_id: uuid.UUID | None = None
     agent_token_id: uuid.UUID | None = None
+    scope: frozenset[str] | None = None
+
+    def may(self, key: str) -> bool:
+        """Whether the caller holds scope ``key``. Default-deny for a key the
+        catalogue does not know, so a typo cannot read as a grant."""
+        if key not in VALID_SCOPE_KEYS:
+            raise ValueError(f"unknown scope key {key!r}")
+        return self.scope is None or key in self.scope
 
 
 @dataclass(frozen=True)

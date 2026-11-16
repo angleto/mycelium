@@ -972,6 +972,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Work Digest
+         * @description What happened on the tasks of a client or project in a window: the
+         *     material of a progress report, collected, not summarised.
+         *
+         *     Every task with something in ``[start_from, start_to)``, most recent
+         *     activity first, each with its events in order: created, state changes,
+         *     description edits (consecutive ones folded, ``count``), work-diary
+         *     comments in full, and the time entries started in the window with their
+         *     memo. Hours count completed entries only; a running timer is listed
+         *     with ``running``. Tasks in the bin are left out, archived ones kept.
+         *     Without client or project, the whole workspace. Sections the
+         *     credential may not read (tasks, comments, time) are named in
+         *     ``withheld``. To write the report, compose from this and cite each task.
+         */
+        get: operations["work_digest_tasks_digest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks": {
         parameters: {
             query?: never;
@@ -9555,6 +9586,48 @@ export interface components {
             /** Expires At */
             expires_at: string | null;
         };
+        /** DigestEventOut */
+        DigestEventOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            kind: components["schemas"]["EventKind"];
+            /** Actor */
+            actor?: string | null;
+            /**
+             * Via Agent
+             * @default false
+             */
+            via_agent?: boolean;
+            /** Text */
+            text?: string | null;
+            /** Comment Id */
+            comment_id?: string | null;
+            /** Reply To */
+            reply_to?: string | null;
+            /** Entry Id */
+            entry_id?: string | null;
+            /** From State */
+            from_state?: string | null;
+            /** To State */
+            to_state?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Billable */
+            billable?: boolean | null;
+            /**
+             * Running
+             * @default false
+             */
+            running?: boolean;
+            /**
+             * Count
+             * @default 1
+             */
+            count?: number;
+        };
         /** DiscardDryRunOut */
         DiscardDryRunOut: {
             /** Discarded */
@@ -10048,6 +10121,11 @@ export interface components {
             /** Settles Existing Draft */
             settles_existing_draft: boolean;
         };
+        /**
+         * EventKind
+         * @enum {string}
+         */
+        EventKind: "task_created" | "state_changed" | "description_edited" | "comment" | "time_entry";
         /**
          * ExecKind
          * @enum {string}
@@ -15183,6 +15261,49 @@ export interface components {
              */
             count?: number;
         };
+        /** TaskDigestOut */
+        TaskDigestOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Title */
+            title: string;
+            /** State */
+            state?: string | null;
+            /**
+             * State Is Terminal
+             * @default false
+             */
+            state_is_terminal?: boolean;
+            /**
+             * Is Archived
+             * @default false
+             */
+            is_archived?: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
+            /** Project Name */
+            project_name?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Client Name */
+            client_name?: string | null;
+            /** Seconds */
+            seconds: number;
+            /** Billable Seconds */
+            billable_seconds: number;
+            /** Events */
+            events: components["schemas"]["DigestEventOut"][];
+        };
         /** TaskIdOut */
         TaskIdOut: {
             /**
@@ -16012,6 +16133,31 @@ export interface components {
              * @default false
              */
             narrate?: boolean;
+        };
+        /** WorkDigestOut */
+        WorkDigestOut: {
+            /**
+             * Start From
+             * Format: date-time
+             */
+            start_from: string;
+            /**
+             * Start To
+             * Format: date-time
+             */
+            start_to: string;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
+            /** Withheld */
+            withheld: string[];
+            /** Seconds */
+            seconds: number;
+            /** Billable Seconds */
+            billable_seconds: number;
+            /** Tasks */
+            tasks: components["schemas"]["TaskDigestOut"][];
         };
         /** WorkerClosedOut */
         WorkerClosedOut: {
@@ -18169,6 +18315,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskPinOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    work_digest_tasks_digest_get: {
+        parameters: {
+            query: {
+                /** @description Start of the window, inclusive. ISO-8601 with a UTC offset (2026-11-09T00:00:00+01:00): where a day starts is the reader's call. */
+                start_from: string;
+                /** @description End of the window, exclusive, same form. At most 92 days after start_from. */
+                start_to: string;
+                /** @description Only the tasks of this client (its client tag). */
+                client_tag_id?: string | null;
+                /** @description Only the tasks of this project (its project tag). */
+                project_tag_id?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkDigestOut"];
                 };
             };
             /** @description Validation Error */

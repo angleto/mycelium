@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**296 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**297 tools across 15 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -331,7 +331,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (54)
+### tasks (55)
 
 | Tool | Summary |
 |---|---|
@@ -389,6 +389,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment` | Attach a file (base64-encoded bytes) to a note OR a task. |
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
+| `work_digest` | What happened on the tasks of a client or project in a window: the |
 
 ### misc (32)
 
@@ -414,7 +415,7 @@ over-fetch the org table and filter in its head.
 | `list_assigned_annotations` | The "assigned to me" inbox: annotations assigned to ``assignee_handle`` |
 | `list_dependencies` | List task dependencies, newest first, optionally only those touching a |
 | `list_issuer_profiles` | List the workspace's issuer profiles (the cedente VAT subjects) so an |
-| `list_time_entries` | List time entries, optionally filtered by task or user. |
+| `list_time_entries` | List time entries, newest first, each with its ``memo`` (the free-text |
 | `ping` | Liveness probe; returns the mycelium-core version. |
 | `reopen_annotation` | Reopen a resolved comment thread. |
 | `scan_reminders` | Enqueue idempotent due-date reminders for assignees. |

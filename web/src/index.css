@@ -7953,3 +7953,58 @@ button.btn--danger:hover {
   padding-right: var(--sp-4);
   font-weight: 500;
 }
+
+/* The work diary (routes/DiaryRoute.tsx, ADR-0070): a task per block, its
+   events as a dense timeline under it. The text of a comment or a memo keeps
+   its line breaks, since it is the person's own writing, quoted. */
+.diary__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  margin: var(--sp-12) 0;
+}
+.diary__tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+.diary__task {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  background: var(--surface-2);
+  padding: var(--sp-8) var(--sp-12);
+}
+.diary__taskhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-8);
+}
+.diary__hours {
+  margin-left: auto;
+}
+.diary__events {
+  list-style: none;
+  margin: var(--sp-8) 0 0;
+  padding: 0 0 0 var(--sp-12);
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+.diary__event--comment,
+.diary__event--time_entry {
+  color: var(--text-h);
+}
+.diary__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-8);
+  color: var(--text);
+}

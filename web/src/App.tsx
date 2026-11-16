@@ -18,6 +18,7 @@ import { GraphRoute } from './routes/GraphRoute'
 import { SchedulerRoute } from './routes/SchedulerRoute'
 import { EventsRoute } from './routes/EventsRoute'
 import { TimeRoute } from './routes/TimeRoute'
+import { DiaryRoute } from './routes/DiaryRoute'
 import { AdvisoryRoute } from './routes/AdvisoryRoute'
 import { BudgetsRoute } from './routes/BudgetsRoute'
 import { EmailRoute } from './routes/EmailRoute'
@@ -73,6 +74,7 @@ function App() {
             <Route path="/schedule" element={<SchedulerRoute />} />
             <Route path="/calendar" element={<EventsRoute />} />
             <Route path="/time" element={<TimeRoute />} />
+            <Route path="/diary" element={<DiaryRoute />} />
             <Route path="/advisory" element={<AdvisoryRoute />} />
             <Route path="/budgets" element={<BudgetsRoute />} />
             <Route path="/email" element={<EmailRoute />} />

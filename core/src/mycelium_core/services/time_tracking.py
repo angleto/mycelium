@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -495,6 +495,14 @@ async def add_manual_entry(
     return entry
 
 
+def tasks_carrying(tag_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+    """The ids of the tasks carrying ``tag_id``: what "scoped to a client" or
+    "to a project" means for every time read and for the work digest. A task
+    carries its one client and its one project as tags (docs/adr/0003), so
+    the membership is the tag itself, not a walk from project to client."""
+    return select(TaskTag.task_id).where(TaskTag.tag_id == tag_id)
+
+
 async def list_entries(
     session: AsyncSession,
     *,
@@ -530,9 +538,7 @@ async def list_entries(
     for tag_id in (client_tag_id, project_tag_id):
         if tag_id is None:
             continue
-        stmt = stmt.where(
-            TimeEntry.task_id.in_(select(TaskTag.task_id).where(TaskTag.tag_id == tag_id))
-        )
+        stmt = stmt.where(TimeEntry.task_id.in_(tasks_carrying(tag_id)))
     stmt = stmt.order_by(TimeEntry.started_at.desc(), TimeEntry.id.desc())
     if limit is not None:
         stmt = stmt.offset(offset).limit(limit)

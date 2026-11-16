@@ -55,6 +55,7 @@ from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import (
     ConstraintKind,
+    ExecKind,
     Necessity,
     ScheduleMode,
     SchedulePolicy,
@@ -4287,11 +4288,20 @@ async def list_time_entries(
     org_id: str,
     task_id: str | None = None,
     user_id: str | None = None,
+    start_from: str | None = None,
+    start_to: str | None = None,
+    billable: bool | None = None,
+    client_tag_id: str | None = None,
+    project_tag_id: str | None = None,
     fields: list[str] | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List time entries, optionally filtered by task or user.
+    """List time entries, newest first, each with its ``memo`` (the free-text
+    note of the session) and its task, project and client. Filters, as on
+    ``GET /time/entries``: task, user, entries STARTED in the ISO-8601
+    window ``start_from`` (inclusive) / ``start_to`` (exclusive), billable,
+    and the client or project tag of the task.
     ``fields`` opt-in keeps only the named columns (``id`` always kept).
     ``limit``/``offset`` paginate at the DB level (default limit 100)."""
     async with _tenant(token, org_id) as (s, org, _user):
@@ -4300,6 +4310,11 @@ async def list_time_entries(
             org_id=org,
             task_id=uuid.UUID(task_id) if task_id else None,
             user_id=uuid.UUID(user_id) if user_id else None,
+            start_from=dt.datetime.fromisoformat(start_from) if start_from else None,
+            start_to=dt.datetime.fromisoformat(start_to) if start_to else None,
+            billable=billable,
+            client_tag_id=uuid.UUID(client_tag_id) if client_tag_id else None,
+            project_tag_id=uuid.UUID(project_tag_id) if project_tag_id else None,
             limit=limit,
             offset=offset,
         )
@@ -4408,15 +4423,28 @@ async def time_report(
     org_id: str,
     group_by: str = "project",
     billable: bool | None = None,
+    start_from: str | None = None,
+    start_to: str | None = None,
+    executor_kind: str | None = None,
+    client_tag_id: str | None = None,
+    project_tag_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregated time report grouped by project|client|generic|user|task."""
+    """Aggregated time report grouped by project|client|generic|user|task.
+    Same filters as ``GET /time/report``: entries STARTED in the ISO-8601
+    window ``start_from`` (inclusive) / ``start_to`` (exclusive), billable,
+    ``executor_kind`` (human|llm_agent), and the client or project tag."""
     async with _tenant(token, org_id) as (s, org, user):
         rows = await time_svc.report(
             s,
             org_id=org,
             actor_id=user,
             group_by=ReportGroup(group_by),
+            start_from=dt.datetime.fromisoformat(start_from) if start_from else None,
+            start_to=dt.datetime.fromisoformat(start_to) if start_to else None,
             billable=billable,
+            executor_kind=ExecKind(executor_kind) if executor_kind else None,
+            client_tag_id=uuid.UUID(client_tag_id) if client_tag_id else None,
+            project_tag_id=uuid.UUID(project_tag_id) if project_tag_id else None,
         )
         return [
             {

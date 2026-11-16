@@ -110,6 +110,10 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 # segment, so no ``/{task_id}`` route can shadow them.
 bind_route(router, "POST", "/pin", "tasks.pin", name="pin_task")
 bind_route(router, "POST", "/unpin", "tasks.unpin", name="unpin_task")
+# What happened on a client's or project's tasks in a window, the MCP tool
+# ``work_digest`` on the other side. Declared here, at import, so it is
+# registered before ``GET /{task_id}`` and is never read as a task id.
+bind_route(router, "GET", "/digest", "tasks.work_digest", name="work_digest")
 
 
 def _parse_due(raw: str | None) -> datetime.date | datetime.datetime | None:

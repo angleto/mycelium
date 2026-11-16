@@ -15,13 +15,15 @@ async def op_ctx(token: str, org_id: str) -> AsyncIterator[OpCtx]:
     # Imported here, not at the top: ``server`` imports the tool modules
     # that import this one, so a module-level import is a cycle whenever a
     # caller imports a tool module before the server.
-    from mycelium_mcp.server import _PRINCIPAL, _tenant
+    from mycelium_mcp.server import _PRINCIPAL, _PRINCIPAL_SCOPE, _tenant
 
     async with _tenant(token, org_id) as (session, org, user):
         principal = _PRINCIPAL.get()
+        scope = _PRINCIPAL_SCOPE.get()
         yield OpCtx(
             session=session,
             org_id=org,
             actor_id=user,
             agent_token_id=principal[2] if principal is not None else None,
+            scope=frozenset(scope) if scope is not None else None,
         )

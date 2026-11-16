@@ -5,6 +5,7 @@ export type IconName =
   | 'tasks'
   | 'trash'
   | 'time'
+  | 'diary'
   | 'schedule'
   | 'calendar'
   | 'workflows'
@@ -27,6 +28,7 @@ const P: Record<IconName, string> = {
   tasks: 'M9 6h12M9 12h12M9 18h12M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14',
   time: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  diary: 'M6 3h11a2 2 0 0 1 2 2v16H8a2 2 0 0 1-2-2ZM6 17a2 2 0 0 1 2-2h11M10 7h5M10 10h5',
   schedule: 'M4 6h16M4 12h10M4 18h7M16 16l2 2 4-4',
   calendar: 'M4 5h16v16H4zM4 9h16M8 3v4M16 3v4',
   workflows: 'M6 5h6v4H6zM12 15h6v4h-6zM9 9v3a3 3 0 0 0 3 3',

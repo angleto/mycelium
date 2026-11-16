@@ -503,6 +503,7 @@ export function AppShell() {
       items: [
         { to: '/tasks', label: t('tasks.nav'), icon: 'tasks' },
         { to: '/time', label: t('time.nav'), icon: 'time' },
+        { to: '/diary', label: t('diary.nav'), icon: 'diary' },
         { to: '/schedule', label: t('scheduler.nav'), icon: 'schedule' },
         { to: '/calendar', label: t('events.nav'), icon: 'calendar' },
         { to: '/trash', label: t('trash.nav'), icon: 'trash' },

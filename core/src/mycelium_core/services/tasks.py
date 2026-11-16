@@ -1383,6 +1383,10 @@ async def set_state(
         entity="task",
         entity_id=task_id,
         action="set_state",
+        # Both ends of the move, so the log alone says what happened: the
+        # work digest reads transitions from here, and ``entity_revision``,
+        # which also has them, is purged after its retention window.
+        diff={"from_state_id": str(old_state_id), "state_id": str(state_id)},
     )
     await _log_task_revision(
         session,

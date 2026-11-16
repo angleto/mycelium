@@ -170,6 +170,12 @@ surface gains what the other already had:
    `POST /tasks/unpin`, `pin_task` and `unpin_task`. The pinned list is not
    an operation of its own but `pinned=true` on the task list, on both
    surfaces, so a pinned task is drawn from the row every other list draws.
+   The work digest followed (2026-11-16, ADR-0070): `tasks.work_digest`
+   serves `GET /tasks/digest` and `work_digest`. It is the first operation
+   whose answer is assembled from data under different scopes, so the
+   operation context now carries the caller's scope list (`OpCtx.scope`),
+   and the first GET with a rule across its arguments, so the GET binding
+   now validates through `Operation.parse` like every other path.
    The rest of the domain moves with its read model.
 5. Then the rest of tasks, annotations, invoicing, and the others, each
    closing its gaps, moving its serialisers to core read models and removing

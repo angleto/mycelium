@@ -393,6 +393,15 @@ class TenantCtx:
     # (an assistant executing a person's decision) resolves the executing
     # identity from it, the same way the MCP transport does.
     agent_token_id: uuid.UUID | None = None
+    # The bound assistant's scope list when the bearer is an agent token with
+    # an assistant, None otherwise (a person's session, a bare token). The
+    # app-level gate has already decided the route; this is for an operation
+    # that assembles its answer from several kinds of data and must leave out
+    # the kinds the caller may not read (``OpCtx.may``). The capability branch
+    # of the part-body-stream dependency leaves it None too: a capability is
+    # confined by the one action it names, and that dependency serves no
+    # registry operation.
+    scope: frozenset[str] | None = None
 
 
 @asynccontextmanager
@@ -404,6 +413,7 @@ async def _tenant_scope(
     x_workspace_role: str | None,
     x_admin_mode: str | None,
     actor_subject_id: str | None = None,
+    scope: list[str] | None = None,
 ) -> AsyncIterator[TenantCtx]:
     """RLS-scoped tenant session shared by ``tenant_ctx`` and the
     part-body-stream dep: open the session as the human/api caller,
@@ -457,6 +467,7 @@ async def _tenant_scope(
             project_id=project_id,
             role=role,
             agent_token_id=uuid.UUID(actor_subject_id) if actor_subject_id else None,
+            scope=frozenset(scope) if scope is not None else None,
         )
 
 
@@ -544,6 +555,7 @@ async def tenant_ctx(
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
         actor_subject_id=_agent_token_id(claims),
+        scope=claims.get("assistant_scope"),
     ) as ctx:
         yield ctx
 
@@ -736,6 +748,7 @@ async def _capability_or_bearer(
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
         actor_subject_id=_agent_token_id(claims),
+        scope=claims.get("assistant_scope"),
     ) as ctx:
         yield ctx, None
 
