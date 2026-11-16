@@ -527,3 +527,43 @@ def test_reviewing_generated_text_is_human_only() -> None:
         ("POST", "/garden/review/reject"),
     ):
         assert ROUTE_SCOPES.get((method, path)) is HUMAN_ONLY, f"{method} {path} must be HUMAN_ONLY"
+
+
+async def test_refiling_a_task_through_patch_costs_tags_assign_not_tags_write() -> None:
+    """``PATCH /tasks/{id}`` carries ``project_tag_id`` / ``client_tag_id``,
+    the REST twin of MCP ``move_task_to_project`` / ``set_task_client``. The
+    route's own gate is ``tasks:write``; the handler asks for ``tags:assign``
+    on top. Before the split ``tags:write`` passed there too, and nothing
+    tested that it no longer does: putting it back left every test green
+    (verification of task e2ef53be, 2026-11-16)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        client = (
+            await c.post("/clients", headers=owner, json={"name": "C", "legal_name": "C srl"})
+        ).json()
+        project = (
+            await c.post(
+                "/projects", headers=owner, json={"name": "P", "client_tag_id": client["id"]}
+            )
+        ).json()
+        task = (await c.post("/tasks", headers=owner, json={"title": "refile me"})).json()
+
+        wide = await _assistant_headers(c, owner, ["tasks:read", "tasks:write", "tags:write"])
+        for field, tag in (("project_tag_id", project["id"]), ("client_tag_id", client["id"])):
+            r = await c.patch(
+                f"/tasks/{task['id']}",
+                headers=wide,
+                json={"expected_version": task["version"], field: tag},
+            )
+            assert r.status_code == 403, (field, r.text)
+            assert r.json()["code"] == "agent.scope_denied"
+            assert r.json()["params"]["scope"] == "tags:assign"
+
+        narrow = await _assistant_headers(c, owner, ["tasks:read", "tasks:write", "tags:assign"])
+        r = await c.patch(
+            f"/tasks/{task['id']}",
+            headers=narrow,
+            json={"expected_version": task["version"], "project_tag_id": project["id"]},
+        )
+        assert r.status_code == 200, r.text
