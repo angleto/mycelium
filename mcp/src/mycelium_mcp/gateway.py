@@ -878,8 +878,9 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     # Per-tool scope gate (task c19f2f63, enabler B). ``execute_tool`` is the
     # sole path to a concrete tool over the HTTP transport, so this is the
     # security chokepoint. Deny BEFORE validating args / running, so a forbidden
-    # call leaks neither the arg schema nor any side effect. Full-access callers
-    # (bare token / stdio / human) pass through unchanged. The concrete args are
+    # call leaks neither the arg schema nor any side effect. A bare token holds
+    # every scope key but is still refused a tool reserved to a person; only a
+    # person's own session passes everything. The concrete args are
     # passed so an argument-dependent tool (DYNAMIC_TOOL_SCOPES, e.g. the
     # text_block / list_attachments kind multiplexers) is gated on the scope its
     # SPECIFIC call needs, not a single coarse key.

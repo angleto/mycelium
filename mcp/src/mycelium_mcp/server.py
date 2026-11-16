@@ -542,7 +542,8 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
     """Session bootstrap: who am I, what may I do, and my durable memory here.
     Call this FIRST at session start (especially an external LLM / MCP client).
     Read-only. Returns your resolved identity + granted scope (``scope`` null =
-    full access, no per-tool restriction); your OPEN assigned tasks; and a recall
+    every scope key; tools reserved to a person stay refused to any agent
+    credential); your OPEN assigned tasks; and a recall
     of your durable memory lane (channel 'agent'), so you resume from Mycelium
     instead of a machine-local file. Durable/shareable memory lives here (write it
     with ``memory_write`` on channel 'agent'; durable procedures as protected

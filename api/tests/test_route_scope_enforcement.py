@@ -593,3 +593,23 @@ async def test_a_token_revokes_itself_whatever_role_the_request_runs_at() -> Non
 
         listed = (await c.get("/agent-tokens", headers=owner)).json()
         assert {str(t["id"]): t for t in listed}[tid_b]["revoked_at"] is None
+
+
+async def test_a_person_below_owner_cannot_revoke_someone_elses_token() -> None:
+    """The self-revocation exemption is for a token revoking itself, read
+    from the session. It must not turn into "the role check is skipped": a
+    person whose request runs below owner still may not revoke another
+    token. Skipping the check always left every test green (second
+    verification of task f34a0292, 2026-11-16)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        tid, _pat = await _bare_token(c, owner, "victim")
+        member_view = {**owner, "X-Workspace-Role": "member"}
+
+        r = await c.delete(f"/agent-tokens/{tid}", headers=member_view)
+        assert r.status_code == 403, r.text
+        assert r.json()["code"] == "rbac.role_insufficient", r.text
+
+        listed = (await c.get("/agent-tokens", headers=owner)).json()
+        assert {str(t["id"]): t for t in listed}[tid]["revoked_at"] is None

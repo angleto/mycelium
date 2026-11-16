@@ -82,9 +82,9 @@ class AgentToken(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         DateTime(timezone=True), nullable=True
     )
     # Bind to an ``ai_assistants`` row (migration 0059). NULL for legacy
-    # bare tokens minted before the assistant flow existed; they keep
-    # working with full MCP surface (no scope filter). The UI only mints
-    # new tokens via the assistant lifecycle.
+    # bare tokens (and those `mycelium auth login` still mints): they hold
+    # every scope key, but they are agent credentials, so nothing reserved
+    # to a person reaches them (task f34a0292).
     assistant_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("ai_assistants.id", ondelete="CASCADE"),
