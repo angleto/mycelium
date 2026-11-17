@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from _mcp_agent import as_agent
+from tests_helpers import as_agent
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS

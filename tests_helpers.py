@@ -14,7 +14,8 @@ from __future__ import annotations
 import json as _json
 import secrets
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
 import httpx
 from sqlalchemy import select
@@ -23,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mycelium_core.mcp_scopes import SCOPE_CATALOG
 from mycelium_core.models.ai_assistant import AiAssistant, AssistantRuntime
 from mycelium_core.models.identity import Identity
+from mycelium_core.services import agent_tokens as agent_tokens_svc
+from mycelium_mcp.server import _PRINCIPAL, _PRINCIPAL_SCOPE
 
 # A fully-capable NON-DANGER assistant (every read + every write) for tests that
 # need a writable agent. Deliberately DECOUPLED from the product DEFAULT_SCOPES,
@@ -124,3 +127,24 @@ def random_ula48() -> str:
     without one run spending the next one's."""
     a, b, c = secrets.randbelow(0xFF), secrets.randbelow(0xFFFF), secrets.randbelow(0xFFFF)
     return f"fd{a:02x}:{b:x}:{c:x}"
+
+
+@asynccontextmanager
+async def as_agent(raw: str) -> AsyncIterator[None]:
+    """Call MCP tools the way an agent token reaches them: over HTTP.
+
+    The bearer middleware (``server_http``) authenticates the agent token and
+    publishes the principal and its scope list for the duration of the
+    request; the tools then read them instead of their ``token`` argument.
+    stdio is a person's transport and refuses an agent token, so a test that
+    passes one positionally is testing a door that does not exist."""
+    principal = await agent_tokens_svc.authenticate(raw)
+    if principal is None:
+        raise RuntimeError("the agent token did not authenticate")
+    reset = _PRINCIPAL.set((principal.user_id, principal.org_id, principal.token_id))
+    reset_scope = _PRINCIPAL_SCOPE.set(principal.assistant_scope)
+    try:
+        yield
+    finally:
+        _PRINCIPAL_SCOPE.reset(reset_scope)
+        _PRINCIPAL.reset(reset)

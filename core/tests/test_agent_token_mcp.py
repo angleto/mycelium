@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from _mcp_agent import as_agent
+from tests_helpers import as_agent
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.services import agent_tokens as svc
