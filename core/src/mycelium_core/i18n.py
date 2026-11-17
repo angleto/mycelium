@@ -736,7 +736,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "a task nobody has taken reads as free to every other session"
         ),
         MessageCode.WORKER_NOT_FOUND: (
-            "No such worker in this workspace. Open one with worker_open and pass the id it returns"
+            "No open worker with this id in this workspace. A worker is closed by worker_close, "
+            "or by the server once it has gone unseen for hours holding nothing. Open a new one "
+            "with worker_open and pass the id it returns"
         ),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"

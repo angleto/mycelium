@@ -86,10 +86,12 @@ class AgentWorker(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Bas
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
     # Stamped by the operations a worker performs, so a human can see
-    # which sessions are still doing anything. Not a heartbeat: nothing
-    # expires on it, and a worker that stops being seen keeps whatever it
-    # holds until the LEASE expires. Possession has the deadline; this is
-    # only a reading.
+    # which sessions are still doing anything. Not a heartbeat for what a
+    # worker HOLDS: a worker that stops being seen keeps its leases until
+    # each LEASE expires, and possession has the deadline. What it does
+    # decide is the worker's own end: once it is old and the worker holds
+    # nothing, the sweep closes the worker (``close_idle``), because a
+    # session that is killed never calls ``worker_close``.
     last_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

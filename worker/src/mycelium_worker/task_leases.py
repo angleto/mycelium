@@ -1,4 +1,5 @@
-"""Reclaim the task possessions of sessions that never came back.
+"""Reclaim the task possessions of sessions that never came back, then
+close the sessions themselves.
 
 The backstop that did not exist. Before migration 0017 an agent that
 died mid-task left the task in a working state with nothing recording
@@ -30,6 +31,7 @@ are told apart by whether the tasks come back quickly under a new holder.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import uuid
 
@@ -39,6 +41,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
+from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import task_leases
 
 _log = logging.getLogger("mycelium.worker.task_leases")
@@ -71,7 +74,8 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
 
 async def run_once(batch_size: int | None = None) -> int:
     """One pass across all workspaces; returns how many were reclaimed."""
-    limit = batch_size or get_settings().task_lease_sweep_batch
+    settings = get_settings()
+    limit = batch_size or settings.task_lease_sweep_batch
     try:
         org_ids = await _all_workspaces()
     except Exception:
@@ -85,6 +89,23 @@ async def run_once(batch_size: int | None = None) -> int:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 task_ids = await task_leases.sweep_expired(s, limit=limit)
+            # A separate transaction, after the reclaim has committed: a
+            # worker whose only lease just expired holds nothing now, and is
+            # closed in this pass rather than the next. Never inside the
+            # reclaim's transaction, so a failure here cannot undo it.
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                closed = await workers_svc.close_idle(
+                    s,
+                    idle_for=dt.timedelta(seconds=settings.agent_worker_idle_close_seconds),
+                    limit=limit,
+                )
+            if closed:
+                _log.info(
+                    "task-lease sweep org=%s closed_idle_workers=%d workers=%s",
+                    org_id,
+                    len(closed),
+                    ",".join(str(w) for w in closed[:20]),
+                )
             if task_ids:
                 # Logged with the task ids rather than only a count: the
                 # question a human asks next is always "which ones", and

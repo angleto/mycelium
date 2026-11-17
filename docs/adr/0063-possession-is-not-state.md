@@ -174,6 +174,21 @@ it is — visible, pullable, honest.
   reclaims them. No person is on either path. What the sweep does NOT do is
   move the task back a state, so a reclaimed task sits where the dead session
   left it, which is the truth about how far it got.
+- **The same holds for the worker, and for two months it did not.** The sweep
+  freed a dead session's tasks and left its worker open, because only
+  `worker_close` ever closed one. On 2026-11-17 production had 157 open workers
+  out of 167 opened, one of them holding a task, and the sessions panel counted
+  all 157 as working. The sweep now also closes a worker that holds no
+  unreleased lease and has not been seen for `agent_worker_idle_close_seconds`
+  (six hours by default, several lease TTLs). It releases nothing: a worker
+  with an expired lease waits for the reclaim to run first. The race with a
+  session taking work at that moment is closed in the database, not by
+  reading first: stamping `last_seen_at` is an UPDATE that matches only an
+  open worker, so whichever of the two commits first, the other re-reads the
+  row and backs off. A session that was only quiet is refused once with
+  `worker.not_found`, opens a new worker and carries on; it held nothing.
+  `last_seen_at` is therefore no longer only a reading: it decides when a
+  worker ends, though still never when a lease does.
 - **The deadline is the only thing that frees a crashed holder, so the default
   is a real decision and it is not measured.** 3600s means a killed session can
   hold a task for up to an hour. Shorter recovers faster and starts stealing

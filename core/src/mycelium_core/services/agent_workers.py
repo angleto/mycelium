@@ -24,6 +24,10 @@ recovery paths are deliberately different in cost and identical in
 outcome: a session that is stopped frees its tasks now, a session that
 dies frees them when its lease expires and the sweep reclaims. Neither
 needs a person.
+
+:func:`close_idle` is the same argument for the worker itself. A session
+that dies never calls :func:`close_worker`, so without it the worker stays
+open forever and the sessions panel counts the dead as working.
 """
 
 from __future__ import annotations
@@ -32,13 +36,14 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.membership import Role
+from mycelium_core.models.task_lease import TaskLease
 from mycelium_core.services import audit
 from mycelium_core.services.rbac import require_role
 
@@ -120,14 +125,33 @@ async def get_worker(
 
 
 async def touch(session: AsyncSession, *, worker_id: uuid.UUID) -> None:
-    """Stamp ``last_seen_at``. A reading, not a heartbeat: nothing
-    expires on it, and a worker nobody has seen for an hour still holds
-    whatever it holds until the LEASE expires. Possession carries the
-    deadline; this only lets a human tell a busy session from a quiet
-    one."""
-    await session.execute(
-        update(AgentWorker).where(AgentWorker.id == worker_id).values(last_seen_at=_now())
-    )
+    """Stamp ``last_seen_at`` on an OPEN worker, and refuse a closed one.
+
+    A reading for a human, and since the idle close it is also what keeps a
+    quiet session from being taken for a dead one: :func:`close_idle` only
+    closes a worker whose ``last_seen_at`` is old.
+
+    The refusal lives in the UPDATE, not in the read before it, because the
+    read can be stale. A caller that read the worker as open while the idle
+    close was committing would otherwise stamp a closed row and go on to
+    take a lease under it, and a lease on a closed worker is one no
+    ``worker_close`` will ever give back. With ``closed_at IS NULL`` in the
+    predicate the two orders both come out right: if the close commits
+    first, this UPDATE waits on its row lock, re-reads the row, finds it
+    closed and matches nothing; if this UPDATE runs first, the close waits
+    on the row lock this transaction now holds and re-reads a
+    ``last_seen_at`` that is no longer old.
+    """
+    stamped = (
+        await session.execute(
+            update(AgentWorker)
+            .where(AgentWorker.id == worker_id, AgentWorker.closed_at.is_(None))
+            .values(last_seen_at=_now())
+            .returning(AgentWorker.id)
+        )
+    ).scalar_one_or_none()
+    if stamped is None:
+        raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
 
 
 async def list_workers(
@@ -211,3 +235,86 @@ async def close_worker(
             diff={"freed": str(len(freed))},
         )
     return worker, freed
+
+
+async def close_idle(
+    session: AsyncSession,
+    *,
+    idle_for: dt.timedelta,
+    limit: int = 200,
+    now: dt.datetime | None = None,
+) -> list[uuid.UUID]:
+    """Close the workers of sessions that ended without saying so.
+
+    A worker used to close only through :func:`close_worker`, and a session
+    that is killed, crashes or runs out of context calls nothing. Measured
+    in production on 2026-11-17: 167 workers opened since the feature
+    shipped, 10 closed, 157 still open, one of them holding a task. The
+    sessions panel counted all 157 as working.
+
+    Closed here: a worker nobody has seen for ``idle_for`` that holds no
+    unreleased lease. Both conditions, because each alone is wrong. Silence
+    alone would close a session in the middle of a long lease it took with
+    a long TTL; holding nothing alone would close a session between two
+    tasks. A worker that still holds an expired lease is left for the next
+    pass, after the lease sweep has reclaimed it: this function never
+    releases anything, so it never competes with the paths that do.
+
+    The decision is one conditional UPDATE, so nothing between a read and
+    a write can make it stale; :func:`touch` carries the other half of the
+    argument. A session that was only quiet and comes back is refused with
+    ``worker.not_found``, opens a new worker and carries on: it held
+    nothing, so it lost nothing.
+
+    Logged as a ``close`` with no actor, like the lease sweep's releases:
+    nobody acted, and the ``system`` kind of the session says who did.
+    """
+    at = now or _now()
+    cutoff = at - idle_for
+    live_lease = (
+        select(TaskLease.id)
+        .where(
+            TaskLease.holder_worker_id == AgentWorker.id,
+            TaskLease.released_at.is_(None),
+        )
+        .exists()
+    )
+    idle = and_(
+        AgentWorker.closed_at.is_(None),
+        func.coalesce(AgentWorker.last_seen_at, AgentWorker.opened_at) < cutoff,
+        ~live_lease,
+    )
+    candidates = (
+        select(AgentWorker.id)
+        .where(idle)
+        .order_by(func.coalesce(AgentWorker.last_seen_at, AgentWorker.opened_at).asc())
+        .limit(limit)
+        .scalar_subquery()
+    )
+    # The predicate is repeated on the UPDATE itself: the candidates were
+    # chosen on a snapshot, and only the UPDATE's own WHERE is re-checked
+    # against a row that a concurrent ``touch`` changed under it.
+    closed = (
+        await session.execute(
+            update(AgentWorker)
+            .where(AgentWorker.id.in_(candidates), idle)
+            .values(closed_at=at, version=AgentWorker.version + 1)
+            .returning(AgentWorker.id, AgentWorker.org_id, AgentWorker.last_seen_at)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    for row in closed:
+        await audit.log(
+            session,
+            org_id=row.org_id,
+            actor_id=None,
+            entity="agent_worker",
+            entity_id=row.id,
+            action="close",
+            diff={
+                "reason": "idle",
+                "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else "",
+                "freed": "0",
+            },
+        )
+    return [row.id for row in closed]

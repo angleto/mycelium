@@ -206,6 +206,15 @@ class Settings(BaseSettings):
     # a workload.
     task_lease_sweep_interval_seconds: int = 60
     task_lease_sweep_batch: int = 200
+    # How long a working session (``agent_workers``) may go unseen, holding
+    # nothing, before the sweep closes it. A session that is killed never
+    # calls ``worker_close``, and before this the panel counted every one
+    # of them as working forever (157 open on 2026-11-17, one alive).
+    # Several times the default lease TTL, so a session between two tasks
+    # is not closed under itself; a guess, like the TTL, and the cost of
+    # guessing short is small: a quiet session that comes back is refused
+    # once and opens a new worker, having held nothing to lose.
+    agent_worker_idle_close_seconds: int = 6 * 3600
 
     # Two-phase transmit (ADR-0046). The dispatch wall time is bounded
     # explicitly (httpx's 30 s timeout is PER PHASE -- connect/write/read --
