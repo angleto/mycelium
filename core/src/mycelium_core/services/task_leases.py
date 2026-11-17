@@ -44,7 +44,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, and_, exists, func, or_, select, text, true, update
+from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
@@ -269,6 +269,7 @@ async def _end_leases(
     lease_ids: Sequence[uuid.UUID],
     reason: LeaseRelease,
     at: dt.datetime,
+    expired_by: dt.datetime | None = None,
 ) -> set[uuid.UUID]:
     """End the leases that are still live, and say which ones THIS call ended.
 
@@ -282,14 +283,28 @@ async def _end_leases(
     first reason overwritten (verification of task 9d4088e9, 2026-11-16).
     Under READ COMMITTED the waiting UPDATE re-reads the row after the first
     commits, sees it released, and takes nothing.
+
+    ``expired_by`` is for the two paths that end a lease BECAUSE its deadline
+    passed, the sweep and a reclaim: the deadline goes into the same WHERE,
+    so it is re-read with the row. Without it a renewal committed while the
+    sweep waited on the row was ended anyway, as expired, and its holder had
+    been told it was extended (third verification of task 9d4088e9). A
+    release the holder or the owner asked for does not pass it: those end
+    the lease whatever its deadline says.
     """
     if not lease_ids:
         return set()
+    still_held: list[ColumnElement[bool]] = [
+        TaskLease.id.in_(list(lease_ids)),
+        TaskLease.released_at.is_(None),
+    ]
+    if expired_by is not None:
+        still_held.append(TaskLease.expires_at <= expired_by)
     return set(
         (
             await session.execute(
                 update(TaskLease)
-                .where(TaskLease.id.in_(list(lease_ids)), TaskLease.released_at.is_(None))
+                .where(*still_held)
                 .values(
                     released_at=at,
                     release_reason=reason.value,
@@ -336,19 +351,58 @@ async def _log_expiry(
     )
 
 
-async def _reclaim_expired(session: AsyncSession, *, lease: TaskLease, now: dt.datetime) -> None:
+async def _extend(
+    session: AsyncSession, *, lease: TaskLease, now: dt.datetime, ttl_seconds: int | None
+) -> bool:
+    """Push the deadline of a lease that is still unreleased. False when it
+    was ended between the caller's read and this write.
+
+    The mirror of :func:`_end_leases`, and conditional for the same reason:
+    renewing and the idempotent re-acquire wrote by primary key, so a lease
+    the sweep had just ended got a new deadline on a released row, and the
+    caller was told it held a task nobody held (third verification of task
+    9d4088e9).
+    """
+    await session.flush()
+    extended = (
+        await session.execute(
+            update(TaskLease)
+            .where(TaskLease.id == lease.id, TaskLease.released_at.is_(None))
+            .values(
+                expires_at=_deadline(now, ttl_seconds),
+                renewed_at=now,
+                version=TaskLease.version + 1,
+            )
+            .returning(TaskLease.id)
+            .execution_options(synchronize_session="fetch")
+        )
+    ).scalar_one_or_none()
+    await session.refresh(lease)
+    return extended is not None
+
+
+async def _reclaim_expired(session: AsyncSession, *, lease: TaskLease, now: dt.datetime) -> bool:
     """Release an expired row so the index is free for the next holder.
+    True when the index is free, whoever freed it.
 
     Called with the task row already locked, so no second caller can be
     reclaiming the same row concurrently. Logged like the sweep's releases:
     whether the sweep or the next holder gets there first is timing, and
     the activity log must not depend on it.
+
+    The holder's own renewal does not take the task lock, so it can land
+    between the caller's read and this write. The deadline is re-checked in
+    the UPDATE, and a lease renewed in that window is left alone: False,
+    and the caller treats the task as held.
     """
     await session.flush()
     if lease.id not in await _end_leases(
-        session, lease_ids=[lease.id], reason=LeaseRelease.expired, at=now
+        session, lease_ids=[lease.id], reason=LeaseRelease.expired, at=now, expired_by=now
     ):
-        return  # the sweep ended it first, and logged it
+        await session.refresh(lease)
+        # Released: the sweep ended it first, and logged it. Unreleased:
+        # its holder renewed it, and it binds again.
+        return lease.released_at is not None
     await _log_expiry(
         session,
         org_id=lease.org_id,
@@ -357,6 +411,7 @@ async def _reclaim_expired(session: AsyncSession, *, lease: TaskLease, now: dt.d
         holder_worker_id=lease.holder_worker_id,
         expires_at=lease.expires_at,
     )
+    return True
 
 
 async def _insert_lease(
@@ -435,12 +490,13 @@ async def acquire(
         if holder.holds(existing):
             # Mine already: extend, do not fail. Same row, so the fence
             # does not move -- nobody else ever held it.
-            existing.expires_at = _deadline(now, ttl_seconds)
-            existing.renewed_at = now
-            existing.version += 1
-            await session.flush()
-            return existing
-        if existing.is_live(now):
+            if await _extend(session, lease=existing, now=now, ttl_seconds=ttl_seconds):
+                return existing
+            # The sweep ended it between the read and the write. The task
+            # row is locked here, so nobody else can have taken it since:
+            # take it again as a new possession, with a new fence and its
+            # own acquire row, below.
+        elif existing.is_live(now):
             if not preempt:
                 raise ConflictError(
                     MessageCode.LEASE_HELD_BY_OTHER,
@@ -459,8 +515,12 @@ async def acquire(
                 reason=LeaseRelease.preempted,
                 require_holder=False,
             )
-        else:
-            await _reclaim_expired(session, lease=existing, now=now)
+        elif not await _reclaim_expired(session, lease=existing, now=now):
+            raise ConflictError(
+                MessageCode.LEASE_HELD_BY_OTHER,
+                holder=await held_by(session, existing),
+                expires_at=existing.expires_at.isoformat(),
+            )
 
     lease = await _insert_lease(
         session,
@@ -614,7 +674,8 @@ async def pull(
                 # prevent; treat it as a lost candidate and re-pick
                 # rather than asserting it cannot happen.
                 continue
-            await _reclaim_expired(session, lease=stale, now=now)
+            if not await _reclaim_expired(session, lease=stale, now=now):
+                continue  # renewed by its holder meanwhile: a lost candidate
 
         task = await _lock_task(session, candidate_id)
         if task is None:
@@ -688,15 +749,11 @@ async def renew(
         raise ConflictError(MessageCode.LEASE_NOT_HELD)
     if fence is not None and int(fence) != int(lease.fence):
         raise ConflictError(MessageCode.LEASE_FENCE_STALE)
-    if not lease.is_live(now):
-        # Expired but not yet swept, and still ours on the index. Renewing
-        # it is safe precisely because nobody could have taken it: the
-        # index was occupied the whole time.
-        pass
-    lease.expires_at = _deadline(now, ttl_seconds)
-    lease.renewed_at = now
-    lease.version += 1
-    await session.flush()
+    # Expired but not yet swept is still ours on the index, and renewing it
+    # is safe because nobody could have taken it. Swept meanwhile is not:
+    # the conditional write says which of the two it found.
+    if not await _extend(session, lease=lease, now=now, ttl_seconds=ttl_seconds):
+        raise ConflictError(MessageCode.LEASE_NOT_HELD)
     return lease
 
 
@@ -1107,12 +1164,16 @@ async def sweep_expired(
     if not rows:
         return []
     released = await _end_leases(
-        session, lease_ids=[r.id for r in rows], reason=LeaseRelease.expired, at=at
+        session,
+        lease_ids=[r.id for r in rows],
+        reason=LeaseRelease.expired,
+        at=at,
+        expired_by=at,
     )
     await session.flush()
     for r in rows:
         if r.id not in released:
-            continue  # released by its holder between the read and the write
+            continue  # released or renewed by its holder between the read and the write
         await _log_expiry(
             session,
             org_id=r.org_id,

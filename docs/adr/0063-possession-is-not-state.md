@@ -221,7 +221,12 @@ it is — visible, pullable, honest.
   that takes only a row still unreleased, and only the path whose UPDATE took
   it writes the row, so two paths racing on one lease (the sweep and the next
   holder, a closing worker, or the holder giving it back) cannot log it twice
-  or overwrite the reason the first one recorded.
+  or overwrite the reason the first one recorded. The two paths that end a
+  lease because its deadline passed put the deadline in that UPDATE too, so a
+  renewal that commits first keeps the lease; and a renewal is itself an
+  UPDATE that takes only a row still unreleased, so it never extends a lease
+  the sweep has ended. A caller told "extended" holds the task, and a caller
+  whose lease was ended is told it does not.
 - The lease is advisory about files. Mycelium is not a filesystem mutex: it
   says who holds the work, not who holds the file. Two agents editing the same
   tree is a client-side problem with a client-side answer (per-agent working
