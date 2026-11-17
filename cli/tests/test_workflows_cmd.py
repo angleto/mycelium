@@ -1,11 +1,9 @@
-"""``mycelium workflow export|import`` against a stubbed API (offline).
+"""``mycelium workflow export`` against a stubbed API (offline).
 
 The rules of the document live in the server (docs/adr/0052), so what is
 worth testing here is the part the CLI actually owns: which endpoint it
-calls, that the file it writes is the server's bytes rather than a
-re-serialisation of them, that ``--into`` is what separates "replace
-this workflow" from "create a new one", and that a file which is not
-JSON fails with a message naming the file instead of a traceback.
+calls, and that the file it writes is the server's bytes rather than a
+re-serialisation of them. Import is not offered (docs/adr/0072).
 """
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ import httpx
 from typer.testing import CliRunner
 
 from mycelium_cli.cmds import workflows as wf_cmd
-from mycelium_cli.http import CLIError
 from mycelium_cli.main import app
 
 runner = CliRunner()
@@ -88,54 +85,10 @@ def test_export_to_stdout(monkeypatch) -> None:
     assert json.loads(res.stdout)["name"] == "Delivery"
 
 
-def test_import_without_into_creates_a_new_workflow(monkeypatch, tmp_path: Path) -> None:
-    cap: dict[str, Any] = {}
-    monkeypatch.setattr(wf_cmd, "client", _stub_client(cap))
-    src = tmp_path / "wf.json"
-    src.write_text(_EXPORTED, encoding="utf-8")
-    res = runner.invoke(app, ["workflow", "import", "--file", str(src), "--name", "Copy"])
-    assert res.exit_code == 0, res.output
-    assert ("POST", "/workflows/import") in cap["calls"]
-    assert cap["query"]["name"] == "Copy"
-    assert cap["body"] == json.loads(_EXPORTED)
-
-
-def test_import_with_into_replaces_that_workflow(monkeypatch, tmp_path: Path) -> None:
-    cap: dict[str, Any] = {}
-    monkeypatch.setattr(wf_cmd, "client", _stub_client(cap))
-    src = tmp_path / "wf.json"
-    src.write_text(_EXPORTED, encoding="utf-8")
-    res = runner.invoke(app, ["workflow", "import", "--file", str(src), "--into", _WF])
-    assert res.exit_code == 0, res.output
-    assert ("POST", f"/workflows/{_WF}/import") in cap["calls"]
-    assert ("POST", "/workflows/import") not in cap["calls"]
-
-
-def test_name_with_into_is_refused_rather_than_ignored(monkeypatch, tmp_path: Path) -> None:
-    # Accepting it silently would look like a rename that never happened.
-    cap: dict[str, Any] = {}
-    monkeypatch.setattr(wf_cmd, "client", _stub_client(cap))
-    src = tmp_path / "wf.json"
-    src.write_text(_EXPORTED, encoding="utf-8")
-    res = runner.invoke(
-        app, ["workflow", "import", "--file", str(src), "--into", _WF, "--name", "Copy"]
-    )
-    # CliRunner invokes the Typer app directly, so the CLIError arrives
-    # as the exception; main._entrypoint is what renders it in a shell.
-    assert res.exit_code == 1
-    assert isinstance(res.exception, CLIError)
-    assert "--name" in str(res.exception)
-    assert "calls" not in cap
-
-
-def test_a_file_that_is_not_json_fails_with_the_filename(monkeypatch, tmp_path: Path) -> None:
-    cap: dict[str, Any] = {}
-    monkeypatch.setattr(wf_cmd, "client", _stub_client(cap))
-    src = tmp_path / "notes.txt"
-    src.write_text("this is not a workflow", encoding="utf-8")
-    res = runner.invoke(app, ["workflow", "import", "--file", str(src)])
-    assert res.exit_code == 1
-    assert isinstance(res.exception, CLIError)
-    assert "notes.txt" in str(res.exception)
-    # Nothing was sent: a bad file is caught before the round trip.
-    assert "calls" not in cap
+def test_there_is_no_import_a_workflow_is_written_from_the_web_app() -> None:
+    # The CLI's token is an agent's to the server, and writing a workflow
+    # is a person's act; a command that can only ever be refused is not
+    # offered.
+    res = runner.invoke(app, ["workflow", "import", "--file", "wf.json"])
+    assert res.exit_code != 0
+    assert "No such command" in res.output

@@ -255,6 +255,30 @@ async def test_create_task_then_set_state_transitions() -> None:
     assert "->" in reply and "error" not in reply.lower()
 
 
+async def test_a_refused_close_tells_the_person_why() -> None:
+    """A Telegram turn may not declare work done on its own. The refusal used
+    to reach the person as "not allowed from the current state", which reads
+    as a workflow without that arc."""
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="finish me")
+        tid = task.id
+    steps: list[_Step] = [
+        json.dumps({"tool": "set_task_state", "args": {"id": str(tid), "state": "in_progress"}}),
+        json.dumps({"tool": "set_task_state", "args": {"id": str(tid), "state": "done"}}),
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="I finished it, close it",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    assert "refused" in reply and "check by another worker" in reply
+    assert "current state" not in reply
+
+
 async def test_update_task_priority_persists() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:

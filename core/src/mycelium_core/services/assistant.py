@@ -400,8 +400,11 @@ async def _run_tool(
                 expected_version=t.version,
                 state_id=target.id,
             )
-        except DomainError:
-            return f"error: transition to '{target.name}' is not allowed from the current state"
+        except DomainError as exc:
+            # The domain's own reason. A fixed "not allowed from the current
+            # state" told the person a close refused for want of a check was
+            # a missing arc in the workflow.
+            return f"error: moving to '{target.name}' was refused: {exc}"
         return f"task {task_id} -> {target.name}"
 
     if tool == "add_task_comment":

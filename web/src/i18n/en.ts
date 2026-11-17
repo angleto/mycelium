@@ -1659,6 +1659,9 @@ export const en = {
     initial: 'Initial',
     defaultState: 'Default',
     terminal: 'Terminal',
+    closesWork: 'Work done',
+    closesWorkHint:
+      'Entering this state says the work is done, so an agent gets here only after a check by another worker. Turn it off on a terminal state that ends the work without doing it (wontfix, duplicate).',
     hidden: 'Hidden',
     hiddenHint:
       'Skip the column for this state in the kanban view by default. Toggle "Show hidden" on the board to reveal.',

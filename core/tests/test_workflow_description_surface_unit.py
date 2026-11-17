@@ -111,6 +111,7 @@ def test_the_serialisers_expose_every_field_a_caller_reasons_from() -> None:
         "ord",
         "is_initial",
         "is_terminal",
+        "closes_work",
         "is_hidden",
         "description",
     }

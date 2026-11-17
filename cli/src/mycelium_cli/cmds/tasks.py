@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import enum
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 
 import typer
 
+from mycelium_cli.cmds import worker as worker_cmd
 from mycelium_cli.cmds._common import (
     attachment_markdown_ref,
     client,
@@ -369,14 +371,26 @@ def edit(
     success(f"updated task {short_id(full)} (v{result.get('version')})")
 
 
+_WORKER_OPTION = typer.Option(
+    None,
+    "--worker",
+    "-w",
+    help=f"The worker to move it as. Default: ${worker_cmd.ENV_VAR} (mycelium worker open).",
+)
+
+
 @app.command()
 def done(
     task_id: str = typer.Argument(
         ..., autocompletion=complete_task_id, help="Task to mark as done."
     ),
+    worker: str | None = _WORKER_OPTION,
 ) -> None:
-    """Transition the task to the 'done' state."""
-    _transition(task_id, target_name="done")
+    """Transition the task to the 'done' state.
+
+    The CLI moves as an agent, so it closes only work another worker
+    handed it to check; its own work goes to 'verify'."""
+    _transition(task_id, target_name="done", worker=worker)
 
 
 @app.command()
@@ -384,18 +398,20 @@ def verify(
     task_id: str = typer.Argument(
         ..., autocompletion=complete_task_id, help="Task to mark as awaiting verification."
     ),
+    worker: str | None = _WORKER_OPTION,
 ) -> None:
     """Transition the task to the 'verify' state (pre-done, user gate)."""
-    _transition(task_id, target_name="verify")
+    _transition(task_id, target_name="verify", worker=worker)
 
 
 @app.command()
 def to(
     task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     state: str = typer.Argument(..., help="Target state name."),
+    worker: str | None = _WORKER_OPTION,
 ) -> None:
     """Generic transition: ``mycelium task to <id> in_progress``."""
-    _transition(task_id, target_name=state)
+    _transition(task_id, target_name=state, worker=worker)
 
 
 @app.command()
@@ -815,7 +831,23 @@ def _render_full_graph(graph_data: dict[str, Any]) -> None:
 # --- internals -------------------------------------------------------
 
 
-def _transition(task_id: str, *, target_name: str) -> None:
+def _transition(task_id: str, *, target_name: str, worker: str | None) -> None:
+    """Move a task as this shell's worker, taking it first if needed.
+
+    The server refuses a move by an agent credential that does not hold
+    the task, and the CLI's token is one. So the move is two calls: take
+    the task for the worker, then move it naming that worker, which also
+    gives the hold back (moving a task ends its lease). A hold this call
+    took for a move the server then refused is given back too: the
+    person asked for a move, not for the task to sit taken until its
+    lease runs out."""
+    raw_worker = worker_cmd.current_worker(worker)
+    if raw_worker is None:
+        raise CLIError(
+            "the CLI moves a task as a worker, and this shell has none.",
+            hint='Run: eval "$(mycelium worker open)"   (or pass --worker)',
+        )
+    worker_id = worker_cmd.parse_worker(raw_worker)
     with client() as c:
         full = _resolve_task(c, task_id)
         task = get_json(c.get(f"/tasks/{full}"))
@@ -827,12 +859,41 @@ def _transition(task_id: str, *, target_name: str) -> None:
         if str(target["id"]) == str(task["state_id"]):
             info(f"already in state '{target_name}'.")
             return
-        get_json(
-            c.post(
-                f"/tasks/{full}/state",
-                json={"state_id": target["id"], "expected_version": task["version"]},
-            )
+        # Whether this worker held the task before this command, so that a
+        # refused move gives back only a hold the command itself took. The
+        # list returns every unreleased lease, expired ones included, and an
+        # expired lease is no hold.
+        now = dt.datetime.now(dt.UTC)
+        held_before = any(
+            worker_cmd.same_worker(x.get("holder_worker_id"), worker_id)
+            and dt.datetime.fromisoformat(str(x["expires_at"])) > now
+            for x in get_json(c.get(f"/tasks/{full}/leases"))
         )
+        # Always taken, never assumed from that list: the server decides
+        # whether this worker holds the task, and taking it again is
+        # idempotent for the same worker (it extends the hold). Taking a
+        # task writes the lease, not the task row, so the version read
+        # above is still the one to send.
+        with worker_cmd.explain_worker_errors(worker_id):
+            get_json(c.post(f"/tasks/{full}/leases", json={"worker_id": worker_id}))
+        try:
+            get_json(
+                c.post(
+                    f"/tasks/{full}/state",
+                    json={
+                        "state_id": target["id"],
+                        "expected_version": task["version"],
+                        "worker_id": worker_id,
+                    },
+                )
+            )
+        except BaseException:
+            # Any failure, a lost reply included: the person asked for a
+            # move, not for the task to sit taken until its lease runs out.
+            if not held_before:
+                with contextlib.suppress(Exception):
+                    get_json(c.post(f"/tasks/{full}/leases/release", json={"worker_id": worker_id}))
+            raise
     success(f"task {short_id(task_id)} → [bold]{target_name}[/bold]")
 
 

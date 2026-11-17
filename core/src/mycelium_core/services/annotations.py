@@ -48,6 +48,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit, md_anchor, text_patch
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services.note_effective import effective_note_clause
@@ -1398,13 +1399,10 @@ async def accept_suggestion(
     )
 
 
-# The one credential a decision may have been written with: a person's own
-# bearer over REST (the SPA, the CLI), which the API publishes as
-# ``human_api`` with no subject. An agent token over REST is ``human_api``
-# WITH its token id as subject, and every MCP call over HTTP is
-# ``mcp_token``. ``human_telegram`` is left out on purpose: its writes are
-# made by the conversational assistant's tool loop, not typed by the person.
-_PERSON_CREDENTIAL_KIND = "human_api"
+# A decision counts only when every write of it came from a person's own
+# session (``services.caller``): not an agent token over MCP or REST, not a
+# Telegram turn, whose writes are made by the assistant's tool loop rather
+# than typed by the person, and not the server acting on its own.
 
 # A line of a decision comment: the verb, then the ids it applies to.
 _ID_TOKEN = re.compile(r"[0-9a-fA-F][0-9a-fA-F-]{7,35}")
@@ -1493,9 +1491,7 @@ async def person_who_wrote(
     ).all()
     if not any(w.action == "create" for w in writes):
         raise refuse("no_record_of_writer")
-    by_person = (
-        w.actor_kind == _PERSON_CREDENTIAL_KIND and w.actor_subject_id is None for w in writes
-    )
+    by_person = (caller_svc.classify(w.actor_kind, w.actor_subject_id).is_person for w in writes)
     if not all(by_person):
         raise refuse("written_through_an_agent")
 

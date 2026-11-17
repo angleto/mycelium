@@ -811,6 +811,7 @@ class StateOut(BaseModel):
     ord: int
     is_initial: bool
     is_terminal: bool
+    closes_work: bool = False
     is_hidden: bool = False
     description: str | None = None
 
@@ -1138,6 +1139,8 @@ class WorkflowStateSpecIn(BaseModel):
     is_terminal: bool = False
     is_hidden: bool = False
     description: str | None = None
+    # Omitted: closes work exactly when terminal (migration 0029).
+    closes_work: bool | None = None
 
 
 class TransitionIn(BaseModel):
@@ -1160,6 +1163,9 @@ class WorkflowStateEditIn(BaseModel):
     is_terminal: bool = False
     is_hidden: bool = False
     description: str | None = None
+    # Omitted: an existing state keeps its value, a new one closes work
+    # when terminal (``workflow._closes_work``).
+    closes_work: bool | None = None
 
 
 class WorkflowPatchIn(BaseModel):
@@ -1187,6 +1193,7 @@ class WorkflowDocStateIn(BaseModel):
     is_terminal: bool = False
     is_hidden: bool = False
     description: str | None = None
+    closes_work: bool | None = None
 
 
 class WorkflowDocTransitionIn(BaseModel):

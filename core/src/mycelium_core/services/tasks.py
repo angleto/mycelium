@@ -28,6 +28,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import ExecKind, Necessity, Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
+from mycelium_core.models.task_lease import LeaseRelease
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
@@ -1322,9 +1323,9 @@ async def set_state(
     ONE state.
 
     - A task somebody else holds cannot be moved by a third party. A task
-      nobody holds can be moved by anyone, which keeps every path that
-      predates possession working -- the UI, the CLI, the scheduler, an
-      agent that never took a lease.
+      nobody holds can be moved by a person and by the server, which
+      keeps the UI and the scheduler working. An agent credential, the
+      CLI's included, must take it first (``assert_may_move``).
     - Moving a held task to a DIFFERENT state releases the lease, in this
       transaction. That is what makes "moved it to the checking station
       and carried on working" a refused write rather than a habit to be
@@ -1356,24 +1357,54 @@ async def set_state(
         await wf.assert_transition(session, workflow.id, old_state_id, state_id)
     # Terminal detection reuses the SAME notion the scheduler uses
     # (``WorkflowState.is_terminal``), never a hardcoded state name.
-    term_rows: dict[uuid.UUID, bool] = {
-        sid: is_term
-        for sid, is_term in (
+    flags: dict[uuid.UUID, tuple[bool, bool]] = {
+        sid: (is_term, closes)
+        for sid, is_term, closes in (
             await session.execute(
-                select(WorkflowState.id, WorkflowState.is_terminal).where(
-                    WorkflowState.id.in_({old_state_id, state_id})
-                )
+                select(
+                    WorkflowState.id, WorkflowState.is_terminal, WorkflowState.closes_work
+                ).where(WorkflowState.id.in_({old_state_id, state_id}))
             )
         ).all()
     }
-    was_terminal = bool(term_rows.get(old_state_id, False))
-    now_terminal = bool(term_rows.get(state_id, False))
+    was_terminal = flags.get(old_state_id, (False, False))[0]
+    now_terminal, closes_work = flags.get(state_id, (False, False))
+    # Declaring the work done is checked even on the pull path
+    # (``_lease_checked``): that is the path that let an agent take a task
+    # and close it in one call.
+    check = (
+        await _leases.assert_may_close(session, task_id=task_id, worker_id=worker_id)
+        if closes_work and old_state_id != state_id
+        else None
+    )
+    # End the possession before the move is written, so the move can record
+    # whether it was the holder passing the work on. Before the completion
+    # fan-out below too, so a handoff notification never describes a task
+    # that still reads as held by the worker who just passed it on.
+    released = (
+        await _leases.release_on_transition(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            task_id=task_id,
+            new_state_id=state_id,
+            ends_work=now_terminal or closes_work,
+            worker_id=worker_id,
+        )
+        if old_state_id != state_id
+        else None
+    )
+    values: dict[str, Any] = {"state_id": state_id}
+    if old_state_id != state_id:
+        # Who passed the task into this state: the holder's worker on a
+        # handoff, nobody on any other move (``Task.handed_over_by_worker_id``).
+        values["handed_over_by_worker_id"] = worker_id if released is LeaseRelease.handoff else None
     new_version = await optimistic_update(
         session,
         Task,
         pk=task_id,
         expected_version=expected_version,
-        values={"state_id": state_id},
+        values=values,
     )
     _task_search.mark_task_dirty(session, task_id)
     await audit.log(
@@ -1386,7 +1417,14 @@ async def set_state(
         # Both ends of the move, so the log alone says what happened: the
         # work digest reads transitions from here, and ``entity_revision``,
         # which also has them, is purged after its retention window.
-        diff={"from_state_id": str(old_state_id), "state_id": str(state_id)},
+        diff={
+            "from_state_id": str(old_state_id),
+            "state_id": str(state_id),
+            # Which session moved it, beside the credential the row already
+            # records: several sessions share one credential.
+            **({"worker_id": str(worker_id)} if worker_id is not None else {}),
+            **({"check": check} if check is not None else {}),
+        },
     )
     await _log_task_revision(
         session,
@@ -1406,18 +1444,6 @@ async def set_state(
     # swallowed inside the hook; the state transition above is the
     # source of truth and is never rolled back by it. Imported lazily
     # to avoid a tasks<->notifications<->coordination import cycle.
-    # End the possession before the completion fan-out below, so a
-    # handoff notification never describes a task that still reads as
-    # held by the worker who just passed it on.
-    if old_state_id != state_id:
-        await _leases.release_on_transition(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            task_id=task_id,
-            new_state_id=state_id,
-            now_terminal=now_terminal,
-        )
     if now_terminal and not was_terminal:
         from mycelium_core.services import coordination as _coord
         from mycelium_core.services import recurrence as _rec

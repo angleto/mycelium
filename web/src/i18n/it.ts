@@ -1654,6 +1654,9 @@ export const it: Catalog = {
     initial: 'Iniziale',
     defaultState: 'Predefinito',
     terminal: 'Finale',
+    closesWork: 'Lavoro fatto',
+    closesWorkHint:
+      "Entrare in questo stato dichiara il lavoro fatto, quindi un agente ci arriva solo dopo una verifica di un altro worker. Spegnilo su uno stato finale che chiude il lavoro senza farlo (wontfix, duplicato).",
     hidden: 'Nascosto',
     hiddenHint:
       'Salta la colonna di questo stato nella vista kanban di default. Attiva "Mostra nascosti" sulla board per rivelarla.',

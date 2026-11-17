@@ -378,12 +378,14 @@ TOOL_SCOPES: dict[str, str | frozenset[str] | SurfaceGate | None] = {
     # would not cover the other, so it takes the workflow one and the task
     # read is gated by the tenant guard like every other task read.
     "task_workflow": "workflows:read",
-    "create_workflow": "workflows:write",
-    "delete_workflow": "workflows:write",
-    "set_default_workflow": "workflows:write",
-    "set_project_workflow": "workflows:write",
+    # Writing a workflow is a person's act: it decides where an agent's work
+    # needs another worker's check (``workflow._require_not_a_model``).
+    "create_workflow": HUMAN_ONLY,
+    "delete_workflow": HUMAN_ONLY,
+    "set_default_workflow": HUMAN_ONLY,
+    "set_project_workflow": HUMAN_ONLY,
     "set_task_state": "tasks:state",
-    "update_workflow": "workflows:write",
+    "update_workflow": HUMAN_ONLY,
 }
 
 

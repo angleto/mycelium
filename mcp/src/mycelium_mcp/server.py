@@ -2004,7 +2004,14 @@ async def set_task_state(
     holds refuses the move, and moving a task you hold to a different
     state RELEASES your lease -- ``handoff`` to a working state, ``done``
     to a terminal one. After that you hold nothing, which is the point:
-    the station you moved it to is somebody else's to pick up."""
+    the station you moved it to is somebody else's to pick up.
+
+    A state with ``closes_work`` (``done``) declares the work done, and an
+    agent enters it only as the CHECKER: holding the task under its own
+    worker, never having handed this task off itself, after another worker
+    handed it off. Your own finished work goes to the checking station
+    instead; ``task.close_requires_check`` says which of the three is
+    missing. The person closes directly."""
     async with _tenant(token, org_id) as (s, org, user):
         version = await tasks.set_state(
             s,
@@ -8874,6 +8881,13 @@ def _workflow(w: WorkflowDefinition) -> dict[str, Any]:
     }
 
 
+def _closes_work_arg(st: dict[str, Any]) -> bool | None:
+    """``closes_work`` from a state dict: absent or null means "not stated",
+    which the service resolves (``workflow._closes_work``)."""
+    raw = st.get("closes_work")
+    return None if raw is None else bool(raw)
+
+
 def _state(st: WorkflowState) -> dict[str, Any]:
     return {
         "id": str(st.id),
@@ -8881,6 +8895,9 @@ def _state(st: WorkflowState) -> dict[str, Any]:
         "ord": st.ord,
         "is_initial": st.is_initial,
         "is_terminal": st.is_terminal,
+        # Entering it declares the work done: an agent gets there only after
+        # a check made by another worker (``tasks.set_state``).
+        "closes_work": st.closes_work,
         # Whether the SPA hides this column by default. An agent listing a
         # board wants to know that a state exists but is not on screen.
         "is_hidden": st.is_hidden,
@@ -9007,8 +9024,13 @@ async def create_workflow(
     description: str | None = None,
 ) -> dict[str, Any]:
     """Create a workflow. ``states`` items: {name, ord?, is_initial?,
-    is_terminal?, is_hidden?, description?} (exactly one initial).
-    ``transitions``: [from, to] name pairs.
+    is_terminal?, closes_work?, is_hidden?, description?} (exactly one
+    initial). ``transitions``: [from, to] name pairs.
+
+    ``closes_work`` marks the state that declares the work done: an agent
+    enters it only after a check by another worker. Omitted, it follows
+    ``is_terminal``; set it false on a terminal state that ends the work
+    without claiming it was done (``wontfix``, ``duplicated``).
 
     Write the descriptions. A state name is a label, not a contract: only
     the workflow's own description says what `verify` is for, who moves a
@@ -9028,6 +9050,7 @@ async def create_workflow(
                     ord=int(st.get("ord", 0)),
                     is_initial=bool(st.get("is_initial", False)),
                     is_terminal=bool(st.get("is_terminal", False)),
+                    closes_work=_closes_work_arg(st),
                     is_hidden=bool(st.get("is_hidden", False)),
                     description=st.get("description"),
                 )
@@ -9053,7 +9076,8 @@ async def update_workflow(
 
     This is a REPLACE, including the descriptions: a state dict without a
     ``description`` clears the one it had, exactly as it clears an ``ord``
-    it does not send. Read the states first and send them back whole."""
+    it does not send. Read the states first and send them back whole.
+    ``closes_work`` is the exception: omitted, an existing state keeps it."""
     async with _tenant(token, org_id) as (s, org, user):
         await workflow_svc.update_workflow(
             s,
@@ -9069,6 +9093,7 @@ async def update_workflow(
                     ord=int(st.get("ord", 0)),
                     is_initial=bool(st.get("is_initial", False)),
                     is_terminal=bool(st.get("is_terminal", False)),
+                    closes_work=_closes_work_arg(st),
                     is_hidden=bool(st.get("is_hidden", False)),
                     description=st.get("description"),
                 )

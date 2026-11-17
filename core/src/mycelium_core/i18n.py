@@ -228,6 +228,8 @@ class MessageCode(enum.StrEnum):
     LEASE_QUEUE_EMPTY = "task.lease.queue_empty"
     LEASE_SELF_VERIFICATION = "task.lease.self_verification"
     LEASE_REQUIRED = "task.lease.required"
+    TASK_CLOSE_REQUIRES_CHECK = "task.close_requires_check"
+    WORKFLOW_PERSON_ONLY = "workflow.person_only"
     WORKER_NOT_FOUND = "worker.not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
@@ -734,6 +736,20 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "worker_open, then task_pull to take work from a station, or "
             "task_lease_acquire for this task by id. Sessions share one credential, so "
             "a task nobody has taken reads as free to every other session"
+        ),
+        # Says what is missing (``missing``: lease | handoff) and the way
+        # through, because the caller meeting it is usually an agent that
+        # finished the work and is about to report it done.
+        MessageCode.WORKFLOW_PERSON_ONLY: (
+            "Workflows are edited by a person, from the web app: they decide "
+            "where an agent's work needs another worker's check. Propose the change "
+            "to the person instead."
+        ),
+        MessageCode.TASK_CLOSE_REQUIRES_CHECK: (
+            "An agent declares work done only after a check by another worker "
+            "(missing: {missing}). Move the task to the checking station instead; "
+            "another worker takes it from there with task_pull and closes it while "
+            "holding it. The person can close it directly"
         ),
         MessageCode.WORKER_NOT_FOUND: (
             "No open worker with this id in this workspace. A worker is closed by worker_close, "

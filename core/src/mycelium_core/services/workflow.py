@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import ConflictError, DomainError
+from mycelium_core.errors import ConflictError, DomainError, ForbiddenError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.project_profile import ProjectProfile
@@ -26,6 +26,7 @@ from mycelium_core.models.workflow import (
     WorkflowTransition,
 )
 from mycelium_core.services import audit
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services.rbac import require_role
 
 
@@ -37,6 +38,28 @@ class StateSpec:
     is_terminal: bool = False
     is_hidden: bool = False
     description: str | None = None
+    # None: the state closes work exactly when it is terminal. See
+    # ``_closes_work`` and migration 0029.
+    closes_work: bool | None = None
+
+
+def _closes_work(
+    requested: bool | None, *, is_terminal: bool, current: WorkflowState | None = None
+) -> bool:
+    """The ``closes_work`` a state is written with.
+
+    Stated, it is taken as stated. Left out, a new state closes work when it
+    is terminal, the safe reading (a model is asked for a check it could
+    have skipped, never the reverse). An existing state keeps the value it
+    has, because a client that does not know the attribute -- an older web
+    app saving the editor -- must not reset a ``wontfix`` somebody turned off;
+    unless the save changes whether the state is terminal, in which case the
+    old value described a different state and it is derived again."""
+    if requested is not None:
+        return requested
+    if current is not None and current.is_terminal == is_terminal:
+        return current.closes_work
+    return is_terminal
 
 
 async def get_default_workflow(session: AsyncSession, org_id: uuid.UUID) -> WorkflowDefinition:
@@ -184,6 +207,25 @@ async def assert_transition(
         raise DomainError(MessageCode.TRANSITION_NOT_ALLOWED)
 
 
+async def _require_not_a_model(session: AsyncSession) -> None:
+    """Writing a workflow is a person's act (or the system's, on rules a
+    person set). Every write below asks this, whichever surface it came from.
+
+    The workflow is what governs the agents: which state declares the work
+    done (``closes_work``) and so where ``task_leases.assert_may_close``
+    asks for another worker's check, which state a task is born in, which
+    arcs exist. An agent that could edit it could clear ``closes_work`` on
+    ``done`` and close its own work, or make the initial state a closing
+    one and have every new task born done. Narrowing the refusal to the
+    edits that weaken the guard was rejected: an agent could still create a
+    workflow whose finished state is an ordinary one and point the project
+    at it. ``workflows:write`` was retired from the scope catalogue in the
+    same change (migration 0029), so no grant promises what this refuses.
+    """
+    if (await caller_svc.current(session)).is_model:
+        raise ForbiddenError(MessageCode.WORKFLOW_PERSON_ONLY)
+
+
 async def create_workflow(
     session: AsyncSession,
     *,
@@ -195,6 +237,7 @@ async def create_workflow(
     description: str | None = None,
 ) -> WorkflowDefinition:
     await require_role(session, org_id, actor_id, Role.admin)
+    await _require_not_a_model(session)
     if sum(1 for s in states if s.is_initial) != 1:
         raise DomainError(MessageCode.WORKFLOW_INVALID)
     wf = WorkflowDefinition(
@@ -218,6 +261,7 @@ async def create_workflow(
             ord=spec.ord,
             is_initial=spec.is_initial,
             is_terminal=spec.is_terminal,
+            closes_work=_closes_work(spec.closes_work, is_terminal=spec.is_terminal),
             is_hidden=spec.is_hidden,
             description=spec.description,
         )
@@ -256,6 +300,7 @@ class StateEdit:
     is_hidden: bool = False
     description: str | None = None
     id: uuid.UUID | None = None  # None = new state
+    closes_work: bool | None = None  # None: see ``_closes_work``
 
 
 async def set_default_workflow(
@@ -268,6 +313,7 @@ async def set_default_workflow(
     """Exactly one default. Promoting another keeps the >=1 invariant
     and is the supported way to retire the previous default."""
     await require_role(session, org_id, actor_id, Role.admin)
+    await _require_not_a_model(session)
     wf = (
         await session.execute(
             select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
@@ -303,6 +349,7 @@ async def delete_workflow(
     >=1 invariant) and for a workflow whose states still hold tasks.
     Project overrides pointing here fall back to the default."""
     await require_role(session, org_id, actor_id, Role.admin)
+    await _require_not_a_model(session)
     wf = (
         await session.execute(
             select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
@@ -358,6 +405,7 @@ async def update_workflow(
     dropped only if no task uses them) + replace transitions. Exactly
     one initial state."""
     await require_role(session, org_id, actor_id, Role.admin)
+    await _require_not_a_model(session)
     wf = (
         await session.execute(
             select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
@@ -393,6 +441,9 @@ async def update_workflow(
             for spec in states:
                 if spec.id is not None and spec.id in existing:
                     st = existing[spec.id]
+                    st.closes_work = _closes_work(
+                        spec.closes_work, is_terminal=spec.is_terminal, current=st
+                    )
                     st.name = spec.name
                     st.ord = spec.ord
                     st.is_initial = spec.is_initial
@@ -408,6 +459,7 @@ async def update_workflow(
                         ord=spec.ord,
                         is_initial=spec.is_initial,
                         is_terminal=spec.is_terminal,
+                        closes_work=_closes_work(spec.closes_work, is_terminal=spec.is_terminal),
                         is_hidden=spec.is_hidden,
                         description=spec.description,
                     )
@@ -451,6 +503,7 @@ async def set_project_workflow(
     expected_version: int,
 ) -> int:
     await require_role(session, org_id, actor_id, Role.admin)
+    await _require_not_a_model(session)
     if workflow_id is not None:
         exists = (
             await session.execute(

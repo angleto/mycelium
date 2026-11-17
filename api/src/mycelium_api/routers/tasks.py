@@ -914,6 +914,7 @@ async def task_states(
             ord=s.ord,
             is_initial=s.is_initial,
             is_terminal=s.is_terminal,
+            closes_work=s.closes_work,
             is_hidden=s.is_hidden,
         )
         for s in states

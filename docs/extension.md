@@ -133,7 +133,8 @@ attachments:write
 It cannot read your account, list your other workspaces, create or rename
 clients and projects, edit or delete workflows, or delete anything. Two of
 those keys exist because this list was written: `tasks:state` was carved out
-of `workflows:write`, and `tags:assign` out of `tags:write`, because each of
+of `workflows:write` (since retired: only a person edits a workflow), and
+`tags:assign` out of `tags:write`, because each of
 the wide keys was doing two jobs and a client that needed the small power had
 to be granted the large one.
 

@@ -864,7 +864,10 @@ async def test_the_person_can_still_unstick_a_task_an_agent_is_holding(
         )
 
     rows = await _lease_rows(org, user, task_id)
-    assert rows[0].release_reason == LeaseRelease.handoff.value
+    # The person took it back: the holder handed nothing over, and recording
+    # it as the holder's handoff would let the close guard read a handover
+    # nobody made.
+    assert rows[0].release_reason == LeaseRelease.preempted.value
 
 
 async def test_a_worker_that_is_shut_down_frees_its_tasks_at_once(_embedder: None) -> None:

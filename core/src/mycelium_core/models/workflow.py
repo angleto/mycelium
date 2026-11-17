@@ -45,6 +45,11 @@ class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     ord: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     is_initial: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     is_terminal: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Entering this state declares the work done (migration 0029): a model
+    # enters it only after a check made by another worker (``tasks.set_state``).
+    # Not the same as terminal: ``wontfix`` ends the work without claiming it
+    # was done, and needs no check.
+    closes_work: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     # UI hint: hidden columns are skipped in the kanban view by default
     # (the SPA reveals them with a "Show hidden" toggle). Storage-level
     # boolean only — the scheduler / dispatch / transitions don't read it,

@@ -775,15 +775,17 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
         "/issuer-profiles/{issuer_profile_id}/webhook-endpoints/{endpoint_id}/rotate-secret",
     ): HUMAN_ONLY,
     # --- workflows ---
-    ("PATCH", "/projects/{project_tag_id}/workflow"): "workflows:write",
+    # Writing one is a person's act: it decides where an agent's work needs
+    # another worker's check (``workflow._require_not_a_model``).
+    ("PATCH", "/projects/{project_tag_id}/workflow"): HUMAN_ONLY,
     ("GET", "/workflows"): "workflows:read",
-    ("POST", "/workflows"): "workflows:write",
-    ("POST", "/workflows/import"): "workflows:write",
-    ("POST", "/workflows/{workflow_id}/import"): "workflows:write",
+    ("POST", "/workflows"): HUMAN_ONLY,
+    ("POST", "/workflows/import"): HUMAN_ONLY,
+    ("POST", "/workflows/{workflow_id}/import"): HUMAN_ONLY,
     ("GET", "/workflows/{workflow_id}/export"): "workflows:read",
-    ("PATCH", "/workflows/{workflow_id}"): "workflows:write",
-    ("DELETE", "/workflows/{workflow_id}"): "workflows:write",
-    ("POST", "/workflows/{workflow_id}/default"): "workflows:write",
+    ("PATCH", "/workflows/{workflow_id}"): HUMAN_ONLY,
+    ("DELETE", "/workflows/{workflow_id}"): HUMAN_ONLY,
+    ("POST", "/workflows/{workflow_id}/default"): HUMAN_ONLY,
     ("GET", "/workflows/{workflow_id}/states"): "workflows:read",
     ("GET", "/workflows/{workflow_id}/transitions"): "workflows:read",
     # --- workspace ---

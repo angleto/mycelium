@@ -468,4 +468,7 @@ async def test_the_sweep_waiting_on_a_state_change_logs_once(_embedder: None) ->
     assert swept == []
     rows = await _lease_log(org, user, lease_id)
     assert len(rows) == 1 and rows[0].diff is not None
-    assert rows[0].diff["reason"] == LeaseRelease.handoff.value
+    # The person moved it, not the holder, and the deadline had passed: the
+    # same reason the sweep would have written. A ``handoff`` here would be
+    # words in the dead session's mouth, which the close guard reads.
+    assert rows[0].diff["reason"] == LeaseRelease.expired.value

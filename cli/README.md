@@ -32,6 +32,23 @@ mycelium auth whoami     # show identity behind the saved PAT
 mycelium auth logout     # forget + server-side revoke
 ```
 
+That token is readable by every process you run, agents included, so the
+server treats the CLI as an agent: it moves a task only while holding it,
+and it holds it as a *worker*, one per shell. Open one before moving tasks:
+
+```sh
+eval "$(mycelium worker open --label term-1)"   # exports MYCELIUM_WORKER
+mycelium task to a1b2 in_progress               # takes the task, then moves it
+mycelium worker list                            # your open sessions
+eval "$(mycelium worker close)"                 # gives back what it holds, unsets it
+```
+
+The worker lives in the shell, not in the profile: a profile is shared by
+every terminal and agent on the machine, and one worker for all of them
+would make them indistinguishable. A task moves to `done` from the CLI only
+when another worker handed it over; your own work you hand over, and a
+person closes it from the web app.
+
 ## Daily flow
 
 ```sh
@@ -71,10 +88,7 @@ mycelium schedule list                      # AI-computed plan
 # Workflows (states + transitions, portable between workspaces)
 mycelium workflow list
 mycelium workflow export 4a1b -f delivery.json   # portable doc, no database ids
-mycelium workflow import -f delivery.json        # create a new workflow
-mycelium workflow import -f delivery.json --name "Delivery (staging)"
-mycelium workflow import -f delivery.json --into 4a1b  # REPLACES that workflow
-mycelium workflow export 4a1b -f - | jq .states  # '-' is stdin/stdout
+mycelium workflow export 4a1b -f - | jq .states  # '-' is stdout
 
 # Browsing
 mycelium client list
@@ -97,6 +111,9 @@ Every command supports `--json` for piping into `jq`, scripts, or the
 
 - **Invoicing** (issuer profiles, line items, SDI XML/PDF). Visual and
   monthly; the CLI deliberately doesn't replicate it.
+- **Writing a workflow**, import included. A workflow says where an agent's
+  work needs another worker's check, so a person writes it, and the CLI's
+  token is not a person's.
 - **MFA QR scan** when an authenticator can't take a paste of the
   otpauth URI. `mycelium auth mfa setup` renders an ASCII QR; fall back to
   the browser SPA if your authenticator is on the same device.

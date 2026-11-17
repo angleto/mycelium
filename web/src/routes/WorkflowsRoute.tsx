@@ -13,9 +13,14 @@ type StateRow = {
   name: string
   is_initial: boolean
   is_terminal: boolean
+  // null/absent: follows is_terminal (the server's rule, migration 0029).
+  closes_work?: boolean | null
   is_hidden: boolean
   description?: string | null
 }
+
+// What the "work done" box shows for a row that has not stated it.
+const closesWork = (s: StateRow) => s.closes_work ?? s.is_terminal
 type Transition = { from_state: string; to_state: string }
 type EditRow = StateRow & { id?: string }
 type Edit = {
@@ -225,6 +230,7 @@ export function WorkflowsRoute() {
           ord: i,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          closes_work: s.closes_work ?? null,
           is_hidden: s.is_hidden,
           description: s.description || null,
         })),
@@ -256,6 +262,7 @@ export function WorkflowsRoute() {
           name: s.name,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          closes_work: s.closes_work ?? null,
           // ``is_hidden`` is optional in the OpenAPI schema (default
           // false at the DB level, defaulted to ?: in TS); coerce so
           // EditRow's strict bool stays consistent.
@@ -291,6 +298,7 @@ export function WorkflowsRoute() {
           ord: i,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          closes_work: s.closes_work ?? null,
           is_hidden: s.is_hidden,
           description: s.description || null,
         })),
@@ -357,6 +365,7 @@ export function WorkflowsRoute() {
                         {s.name}
                         {s.is_initial ? ` · ${t('workflows.defaultState')}` : ''}
                         {s.is_terminal ? ` · ${t('workflows.terminal')}` : ''}
+                        {s.closes_work ? ` · ${t('workflows.closesWork')}` : ''}
                         {s.is_hidden ? ` · ${t('workflows.hidden')}` : ''}
                       </span>
                     ))}
@@ -461,6 +470,22 @@ export function WorkflowsRoute() {
                             }
                           />{' '}
                           {t('workflows.terminal')}
+                        </label>
+                        <label title={t('workflows.closesWorkHint')}>
+                          <input
+                            type="checkbox"
+                            checked={closesWork(s)}
+                            onChange={(e) =>
+                              patchE({
+                                states: editing.states.map((x, j) =>
+                                  j === i
+                                    ? { ...x, closes_work: e.target.checked }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />{' '}
+                          {t('workflows.closesWork')}
                         </label>
                         <label title={t('workflows.hiddenHint')}>
                           <input
@@ -767,6 +792,14 @@ export function WorkflowsRoute() {
                 onChange={(e) => setState(i, { is_terminal: e.target.checked })}
               />{' '}
               {t('workflows.terminal')}
+            </label>
+            <label title={t('workflows.closesWorkHint')}>
+              <input
+                type="checkbox"
+                checked={closesWork(s)}
+                onChange={(e) => setState(i, { closes_work: e.target.checked })}
+              />{' '}
+              {t('workflows.closesWork')}
             </label>
             <label title={t('workflows.hiddenHint')}>
               <input

@@ -54,6 +54,7 @@ from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.annotation import Annotation
 from mycelium_core.models.task import ExecKind, Task
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import time_tracking as time_svc
 
@@ -63,8 +64,6 @@ from mycelium_core.services import time_tracking as time_svc
 #: to the age of the workspace.
 MAX_WINDOW = dt.timedelta(days=92)
 
-#: Actor kinds that are an agent acting for the user it is recorded under.
-_AGENT_KINDS = frozenset({"agent_run", "mcp_token"})
 
 #: Activity-log actions on a task that the digest reads, and nothing else:
 #: an assignment, a reschedule or a priority edit is not progress.
@@ -234,7 +233,8 @@ async def _task_events(
                 DigestEvent(
                     at=row.ts,
                     kind=kind,
-                    via_agent=row.actor_kind in _AGENT_KINDS,
+                    # A model made the change: an agent, or a Telegram turn.
+                    via_agent=caller_svc.classify(row.actor_kind, row.actor_subject_id).is_model,
                     from_state=_state(diff.get("from_state_id"))
                     if kind is EventKind.state_changed
                     else None,

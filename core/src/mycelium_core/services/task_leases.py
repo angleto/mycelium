@@ -44,7 +44,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select, text, true, update
+from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
@@ -59,6 +59,7 @@ from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.user import User
 from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import audit
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services.rbac import require_role
 
 # How many times ``pull`` re-picks after losing a candidate. It is small
@@ -82,7 +83,7 @@ class Holder:
     invented.
     """
 
-    __slots__ = ("identity_id", "token_id", "user_id", "worker_id")
+    __slots__ = ("caller", "identity_id", "token_id", "user_id", "worker_id")
 
     def __init__(
         self,
@@ -90,12 +91,13 @@ class Holder:
         worker_id: uuid.UUID | None,
         user_id: uuid.UUID,
         identity_id: uuid.UUID | None,
-        token_id: uuid.UUID | None,
+        caller: caller_svc.Caller,
     ) -> None:
         self.worker_id = worker_id
         self.user_id = user_id
         self.identity_id = identity_id
-        self.token_id = token_id
+        self.caller = caller
+        self.token_id = caller.token_id
 
     def holds(self, lease: TaskLease) -> bool:
         """Is this lease mine?
@@ -109,8 +111,8 @@ class Holder:
         share one credential, and that is the exact failure the worker
         exists to prevent.
 
-        A lease taken with NO worker -- the UI, the CLI, anything that
-        predates this -- is matched by its user, because that is the only
+        A lease taken with NO worker -- the UI, anything that predates
+        this -- is matched by its user, because that is the only
         identity such a caller has. A caller holding a worker never
         matches one of those: it has a worker, so it is asked the first
         question.
@@ -144,22 +146,11 @@ async def resolve_holder(
     session and does not is about to take a lease under an identity it
     cannot renew.
     """
-    row = (
-        await session.execute(
-            text(
-                "SELECT current_setting('app.current_actor_kind', true),"
-                "       current_setting('app.current_actor_subject', true)"
-            )
-        )
-    ).one()
-    actor_kind = row[0] or "human_direct"
-    subject_raw = row[1] or ""
-    token_id: uuid.UUID | None = None
-    if actor_kind == "mcp_token" and subject_raw:
-        try:
-            token_id = uuid.UUID(subject_raw)
-        except ValueError:
-            token_id = None
+    caller = await caller_svc.current(session)
+    # The token an agent presented, over MCP or over REST. Reading the kind
+    # alone took only MCP: REST publishes an agent token as ``human_api``
+    # with the token as subject, and that agent was held as a person.
+    token_id = caller.token_id
 
     identity_id: uuid.UUID | None = None
     if token_id is not None:
@@ -194,7 +185,7 @@ async def resolve_holder(
         worker_id=worker_id,
         user_id=actor_id,
         identity_id=identity_id,
-        token_id=token_id,
+        caller=caller,
     )
 
 
@@ -692,6 +683,9 @@ async def pull(
                 task_id=task.id,
                 expected_version=task.version,
                 state_id=transition_to,
+                # The worker that pulls is the one moving it: checked as such
+                # on a close (``assert_may_close``) and recorded on the move.
+                worker_id=holder.worker_id,
                 _lease_checked=True,
             )
             await session.refresh(task)
@@ -900,9 +894,10 @@ async def assert_may_move(
     """Refuse a state transition by somebody who is not holding the task.
 
     An unheld task is movable by anyone, which keeps every path that
-    predates possession working: the web UI, the CLI, the scheduler, and
-    an agent that never took a lease. Possession constrains only what it
-    actually covers, and a lease nobody took covers nothing.
+    predates possession working: the web UI, the scheduler, and a
+    dispatched run. An agent credential, the CLI's included, is the
+    exception below. Possession constrains only what it actually covers,
+    and a lease nobody took covers nothing.
 
     **The owner exemption is narrower than "the owner", and the first
     version of it was useless.** Somebody has to be able to unstick a
@@ -910,12 +905,11 @@ async def assert_may_move(
     person whose workspace it is. But exempting `task.owner_id ==
     actor_id` exempts the AGENTS too: they authenticate as that same
     user, and in a workspace where one person owns every task the
-    exemption swallowed the whole rule. So it is narrowed by actor kind:
-    an agent credential never takes it, whoever it authenticates as. That
-    is a distinction the system already draws -- ``actor_kind`` is on the
-    session and the audit log has written it since it existed -- and it
-    is the one that separates the person from the sessions working for
-    them.
+    exemption swallowed the whole rule. So it is narrowed by the kind of
+    credential (``services.caller``): the person's own session takes it, and
+    so does the server acting for itself. An agent token over MCP or REST, a
+    dispatched run and a Telegram turn do not, whoever they authenticate as,
+    because each of them is a model deciding to take somebody else's work.
     """
     lease = await live_lease(session, task_id=task_id)
     if lease is None or not lease.is_live(_now()):
@@ -949,7 +943,7 @@ async def assert_may_move(
     holder = await resolve_holder(session, org_id=org_id, actor_id=actor_id, worker_id=worker_id)
     if holder.holds(lease):
         return lease
-    if holder.token_id is None:
+    if not holder.caller.is_model:
         owner_id = (
             await session.execute(select(Task.owner_id).where(Task.id == task_id))
         ).scalar_one_or_none()
@@ -962,6 +956,86 @@ async def assert_may_move(
     )
 
 
+async def assert_may_close(
+    session: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    worker_id: uuid.UUID | None,
+) -> dict[str, str | None] | None:
+    """Refuse a model declaring work done that it did, or that nobody else
+    handed over. Returns what the activity row records about the check, or
+    None when the caller is not a model.
+
+    Called by ``tasks.set_state`` when the move enters a ``closes_work``
+    state. The Default workflow said it in prose -- a task enters ``done``
+    after a check passed, or by the person's explicit decision, and an
+    agent does not take that second decision alone -- and nothing applied
+    it: an agent could move its own work to ``done``, and
+    ``pull(transition_to=done)`` did it in one call.
+
+    A person and the system are not asked anything here: the person's
+    decision is the second way in, and the system acts on rules a person
+    set. A model (an agent, or a Telegram turn, ``services.caller``) needs
+    all three of:
+
+    - a live lease on the task held by the worker it names. A check is done
+      by a session that took the task; a Telegram turn has no worker, so it
+      closes nothing until the person confirms through a channel the model
+      does not write (task 04d8b905).
+    - no handoff of this task by that worker, ever: whoever passed the work
+      on for checking is its author, and may not be its checker.
+    - the task was handed into the state it is in now by another worker
+      (``tasks.handed_over_by_worker_id``): the check is of work somebody
+      else passed on, in this round. A handoff from before the task was
+      last reopened does not count; the work since then is unchecked. A
+      person moving the task does not count, and that is a choice, not an
+      oversight: a person moving a task into a working state and a person
+      moving it into a checking one are the same write, and only the
+      workflow's prose says which is which. Counting it let a worker take a
+      task the person had queued, do it and close it.
+      Work a person did and an agent checked is closed by the person.
+
+    What it does not prove: the same model can open a second worker and
+    check its own work. On the agent side this is hygiene, not evidence of
+    independence.
+    """
+    caller = await caller_svc.current(session)
+    if not caller.is_model:
+        return None
+    lease = await live_lease(session, task_id=task_id)
+    if (
+        worker_id is None
+        or lease is None
+        or not lease.is_live(_now())
+        or lease.holder_worker_id != worker_id
+    ):
+        raise ConflictError(MessageCode.TASK_CLOSE_REQUIRES_CHECK, missing="lease")
+    own_handoff = (
+        await session.execute(
+            select(TaskLease.id)
+            .where(
+                TaskLease.task_id == task_id,
+                TaskLease.holder_worker_id == worker_id,
+                TaskLease.release_reason == LeaseRelease.handoff.value,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if own_handoff is not None:
+        raise ConflictError(MessageCode.LEASE_SELF_VERIFICATION)
+    handed_over_by = (
+        await session.execute(select(Task.handed_over_by_worker_id).where(Task.id == task_id))
+    ).scalar_one_or_none()
+    if handed_over_by == worker_id:
+        raise ConflictError(MessageCode.LEASE_SELF_VERIFICATION)
+    if handed_over_by is None:
+        raise ConflictError(MessageCode.TASK_CLOSE_REQUIRES_CHECK, missing="handoff")
+    return {
+        "checked_by_worker": str(worker_id),
+        "handed_over_by_worker": str(handed_over_by),
+    }
+
+
 async def release_on_transition(
     session: AsyncSession,
     *,
@@ -969,10 +1043,11 @@ async def release_on_transition(
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
     new_state_id: uuid.UUID,
-    now_terminal: bool,
-) -> None:
+    ends_work: bool,
+    worker_id: uuid.UUID | None = None,
+) -> LeaseRelease | None:
     """A lease is held for the duration of ONE state; leaving it ends the
-    possession.
+    possession. Returns why it ended, or None when nothing was held.
 
     This is where "moved it on and kept working" stops being a matter of
     discipline. The rule is stated without naming a state, which is not
@@ -983,19 +1058,37 @@ async def release_on_transition(
 
     ``done`` and ``handoff`` are told apart because a reader asking what
     a worker handed off for checking must not be answered with work the
-    worker finished.
+    worker finished. ``ends_work`` is a terminal state or one that declares
+    the work done (``closes_work``), which a workflow may leave non-terminal:
+    the checker that closes into it has handed nothing on.
+
+    Both are what the HOLDER did, so they are recorded only when the holder
+    is the one moving the task. A move by somebody else (the owner taking
+    the task back, or anyone moving it off a lease whose deadline passed)
+    ends the possession as ``preempted`` or ``expired``. Recording it as the
+    holder's handoff put words in its mouth, and ``assert_may_close`` reads
+    those words: the holder could never check that task again, and any
+    other worker could close it as if the dead session had passed it on.
     """
     lease = await live_lease(session, task_id=task_id)
     if lease is None or lease.state_id == new_state_id:
-        return
+        return None
+    holder = await resolve_holder(session, org_id=org_id, actor_id=actor_id, worker_id=worker_id)
+    if holder.holds(lease):
+        reason = LeaseRelease.done if ends_work else LeaseRelease.handoff
+    elif lease.is_live(_now()):
+        reason = LeaseRelease.preempted
+    else:
+        reason = LeaseRelease.expired
     await release(
         session,
         org_id=org_id,
         actor_id=actor_id,
         task_id=task_id,
-        reason=LeaseRelease.done if now_terminal else LeaseRelease.handoff,
+        reason=reason,
         require_holder=False,
     )
+    return reason
 
 
 async def labels_for(session: AsyncSession, leases: Sequence[TaskLease]) -> dict[uuid.UUID, str]:

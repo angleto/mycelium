@@ -25,13 +25,14 @@ import datetime
 import uuid
 from typing import Any, Literal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
 from mycelium_core.errors import QuotaExceededError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.event_outbox import EventOutbox
+from mycelium_core.services import caller as caller_svc
 
 ActorKind = Literal["human", "agent", "system"]
 EventKind = Literal["read", "propose", "commit", "reject", "snapshot"]
@@ -83,12 +84,17 @@ def coarse_actor_kind(raw: str | None) -> ActorKind:
 
 
 async def session_actor_kind(session: AsyncSession) -> ActorKind:
-    """The coarse actor class of the current session, from the GUC set by
-    ``db.tenant_session`` / ``db.admin_session`` (same source as audit.log)."""
-    raw = (
-        await session.execute(text("SELECT current_setting('app.current_actor_kind', true)"))
-    ).scalar()
-    return coarse_actor_kind(raw)
+    """The coarse actor class of the current session, from the GUCs set by
+    ``db.tenant_session`` / ``db.admin_session`` (same source as audit.log).
+
+    An agent is whatever ``services.caller`` says is one, which reads the
+    subject too: an agent token over REST is ``human_api`` with the token as
+    subject, and by the kind alone it was a human here, outside the quota
+    that exists for agents."""
+    caller = await caller_svc.current(session)
+    if caller.cls is caller_svc.CallerClass.agent:
+        return "agent"
+    return coarse_actor_kind(caller.kind)
 
 
 async def _count_events_since(

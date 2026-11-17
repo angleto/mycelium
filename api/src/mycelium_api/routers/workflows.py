@@ -47,6 +47,7 @@ async def create_workflow(
                 ord=s.ord,
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
+                closes_work=s.closes_work,
                 is_hidden=s.is_hidden,
                 description=s.description,
             )
@@ -77,6 +78,7 @@ def _document(body: WorkflowDocIn) -> wf_io.WorkflowDoc:
                 name=s.name,
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
+                closes_work=s.closes_work,
                 is_hidden=s.is_hidden,
                 description=s.description,
             )
@@ -180,6 +182,7 @@ async def update_workflow(
                 ord=s.ord,
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
+                closes_work=s.closes_work,
                 is_hidden=s.is_hidden,
                 description=s.description,
             )
@@ -247,6 +250,7 @@ async def workflow_states(
             ord=s.ord,
             is_initial=s.is_initial,
             is_terminal=s.is_terminal,
+            closes_work=s.closes_work,
             is_hidden=s.is_hidden,
             description=s.description,
         )

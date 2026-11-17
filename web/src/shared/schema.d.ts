@@ -15037,6 +15037,11 @@ export interface components {
             /** Is Terminal */
             is_terminal: boolean;
             /**
+             * Closes Work
+             * @default false
+             */
+            closes_work?: boolean;
+            /**
              * Is Hidden
              * @default false
              */
@@ -16414,6 +16419,8 @@ export interface components {
             is_hidden?: boolean;
             /** Description */
             description?: string | null;
+            /** Closes Work */
+            closes_work?: boolean | null;
         };
         /** WorkflowDocTransitionIn */
         WorkflowDocTransitionIn: {
@@ -16477,6 +16484,8 @@ export interface components {
             is_hidden?: boolean;
             /** Description */
             description?: string | null;
+            /** Closes Work */
+            closes_work?: boolean | null;
         };
         /** WorkflowStateSpecIn */
         WorkflowStateSpecIn: {
@@ -16504,6 +16513,8 @@ export interface components {
             is_hidden?: boolean;
             /** Description */
             description?: string | null;
+            /** Closes Work */
+            closes_work?: boolean | null;
         };
         /**
          * WorkspaceBinding

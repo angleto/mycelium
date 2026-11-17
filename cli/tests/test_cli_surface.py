@@ -58,7 +58,10 @@ _CASES = [
     (["task", "graph", "--help"], "predecessors"),
     (["workflow", "--help"], "export"),
     (["workflow", "export", "--help"], "--file"),
-    (["workflow", "import", "--help"], "--into"),
+    (["worker", "--help"], "open"),
+    (["worker", "close", "--help"], "MYCELIUM_WORKER"),
+    (["task", "done", "--help"], "--worker"),
+    (["task", "to", "--help"], "--worker"),
 ]
 
 

@@ -615,3 +615,13 @@ async def test_a_person_below_owner_cannot_revoke_someone_elses_token() -> None:
 
         listed = (await c.get("/agent-tokens", headers=owner)).json()
         assert {str(t["id"]): t for t in listed}[tid]["revoked_at"] is None
+
+
+def test_no_route_lets_a_scoped_credential_write_a_workflow() -> None:
+    """Writing a workflow decides where an agent's work needs another
+    worker's check, so it is a person's act on REST as on MCP."""
+    from mycelium_api.route_scopes import ROUTE_SCOPES
+    from mycelium_core.mcp_scopes import HUMAN_ONLY
+
+    writes = {k: v for k, v in ROUTE_SCOPES.items() if "workflow" in k[1] and k[0] != "GET"}
+    assert len(writes) == 7 and all(v is HUMAN_ONLY for v in writes.values()), writes

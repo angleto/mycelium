@@ -169,7 +169,10 @@ open is not portable in the sense that mattered. Reversing it also
 removed the staging step the browser version had (import filled the
 form, Save applied it), which was pleasant and is genuinely lost --
 paid for the fact that `mycelium workflow import` exists at all, and
-that there is exactly one definition of a valid document.
+that there is exactly one definition of a valid document. (ADR-0072 later
+made writing a workflow a person's act, and the CLI's token an agent's, so
+the CLI kept export and lost import; the endpoint and its single
+definition of a valid document remain.)
 
 **Coerce a malformed file instead of refusing it.** A `"is_terminal":
 "true"` read as false, or a missing initial state defaulted to the first

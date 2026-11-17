@@ -119,14 +119,10 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Upload attachments",
         "Upload files to tasks or notes. The bytes leave the workspace boundary on read.",
     ),
-    ScopeDef(
-        "workflows:write",
-        "danger",
-        "Edit workflows",
-        "Create, change and delete the workflow state machines every task "
-        "runs on, and choose which one a project uses — invariants matter "
-        "here. Moving one task between states is tasks:state.",
-    ),
+    # ``workflows:write`` was retired (migration 0029): writing a workflow is
+    # a person's act, because it decides where an agent's work needs another
+    # worker's check, so no grant can reach it. Moving one task between
+    # states is tasks:state.
     ScopeDef(
         "delete:taxonomy",
         "danger",
@@ -435,11 +431,10 @@ SELF_SERVICE_SCOPES: frozenset[str] = frozenset(
 # ceiling did. The subset relation is asserted in
 # core/tests/test_extension_scopes.py rather than assumed here.
 #
-# Two keys are deliberately ABSENT and the absence is the design:
-# ``workflows:write`` would let it delete the state machine every task in
-# the workspace runs on (advancing one task is ``tasks:state``), and
-# ``tags:write`` would let it invent, rename and rescope the taxonomy
-# (filing into a client or project that already exists is ``tags:assign``).
+# ``tags:write`` is deliberately ABSENT and the absence is the design: it
+# would let it invent, rename and rescope the taxonomy (filing into a
+# client or project that already exists is ``tags:assign``). Editing a
+# workflow is not a key at all any more; only a person does it.
 EXTENSION_SCOPES: tuple[str, ...] = (
     "tasks:read",
     "tasks:write",
