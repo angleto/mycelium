@@ -125,6 +125,38 @@ class _BearerAuthMiddleware:
             _PRINCIPAL.reset(token)
 
 
+class _NoStandaloneStream:
+    """Answer ``GET`` with 405: this gateway offers no server-to-client stream.
+
+    A streamable-http client opens ``GET /mcp`` to receive messages the
+    server sends on its own; the transport lets a server that sends none
+    answer 405 instead, and the client then simply does not hold a stream.
+    This gateway is stateless and pure request/response (see
+    ``make_mcp_app``), so the stream the SDK would serve carries nothing,
+    ever. Held open, it was idle long enough for the production load
+    balancer to cut it after 10 seconds, and Claude Code counted each cut as
+    a dropped connection: it reconnected about every 33 seconds, and when a
+    reconnection met a network blip (a laptop waking, DNS not up yet) it
+    gave up and the server stayed down until reconnected by hand (measured
+    on 2026-11-17: 2578 reconnections in one session's log).
+
+    Inside the bearer middleware, so an unauthenticated ``GET`` still gets
+    the 401 that points a client at sign-in."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "GET":
+            await JSONResponse(
+                {"error": "This server sends no messages of its own; use POST."},
+                status_code=405,
+                headers={"Allow": "POST"},
+            )(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def make_mcp_app() -> Starlette:
     """Build the streamable-http Starlette app + bearer auth middleware.
     Idempotent: re-invoking returns a fresh app sharing the same FastMCP
@@ -165,6 +197,8 @@ def make_mcp_app() -> Starlette:
     # request; this brings MCP in line.
     gateway.settings.stateless_http = True
     app = gateway.streamable_http_app()
+    # Starlette wraps the last one added outermost: bearer auth runs first.
+    app.add_middleware(_NoStandaloneStream)
     app.add_middleware(_BearerAuthMiddleware)
     return app
 

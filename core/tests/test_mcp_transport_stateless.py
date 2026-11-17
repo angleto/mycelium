@@ -13,13 +13,15 @@ Two things are pinned:
    silently reintroduce the freeze);
 2. end to end over the real transport, a self-contained ``tools/call`` with NO
    prior ``initialize`` is answered (only a pre-initialized stateless session
-   does that) and each request is authenticated on its own bearer.
+   does that) and each request is authenticated on its own bearer;
+3. ``GET`` is refused with 405, so no client holds an idle stream open.
 """
 
 from __future__ import annotations
 
 import uuid
 
+import anyio
 from httpx import ASGITransport, AsyncClient
 
 from mycelium_core.db import admin_session, tenant_session
@@ -83,3 +85,23 @@ async def test_standalone_tool_call_needs_no_session() -> None:
                 json=call,
             )
             assert bad.status_code == 401, bad.text
+
+            # GET asks for a stream of server-initiated messages. This
+            # gateway sends none, and the idle stream was cut by the
+            # production load balancer every 10 seconds, which Claude Code
+            # counted as a dropped connection (2026-11-17). 405 says there
+            # is no such stream. Without _NoStandaloneStream this GET is
+            # served as a stream that never ends; the in-process transport
+            # ignores httpx timeouts, hence the explicit bound. Seen failing
+            # on 2026-11-17 with the middleware removed: TimeoutError here.
+            with anyio.fail_after(5):
+                got = await c.get(
+                    "/",
+                    headers={"Authorization": f"Bearer {raw}", "Accept": "text/event-stream"},
+                )
+            assert got.status_code == 405, got.text
+            assert got.headers["allow"] == "POST"
+            # Unauthenticated, it still gets the 401 that leads to sign-in.
+            anon = await c.get("/", headers={"Accept": "text/event-stream"})
+            assert anon.status_code == 401
+            assert "resource_metadata" in anon.headers["www-authenticate"]
