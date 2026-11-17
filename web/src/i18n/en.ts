@@ -255,7 +255,7 @@ export const en = {
     undoReject: 'Undo rejection',
     facts: {
       title: 'Facts read from your notes',
-      hint: 'Relations a model found in your notes on its own. None of them counts until you approve it; a rejected fact is not proposed again.',
+      hint: 'Relations a model found in your notes, on its own or because someone asked. None of them counts until you approve it; a rejected fact is not proposed again unless someone asks for that note to be read.',
       source: 'from',
     },
   },

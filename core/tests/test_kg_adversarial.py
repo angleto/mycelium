@@ -28,7 +28,7 @@ from sqlalchemy.exc import DBAPIError  # noqa: E402
 from mycelium_core.ai_providers import LLMResult  # noqa: E402
 from mycelium_core.db import admin_session, tenant_session  # noqa: E402
 from mycelium_core.errors import DomainError  # noqa: E402
-from mycelium_core.models.kg import KgEdge, KgEntity, KgEntitySource  # noqa: E402
+from mycelium_core.models.kg import KgEdge, KgEntity  # noqa: E402
 from mycelium_core.models.note import NoteKind  # noqa: E402
 from mycelium_core.services import auth, kg  # noqa: E402
 from mycelium_core.services import notes as nt  # noqa: E402
@@ -465,7 +465,7 @@ async def test_unicode_nfc_nfd_names_dedupe_to_one_entity() -> None:
         assert e1.id == e2.id
 
 
-async def test_same_name_different_type_in_extraction_stay_distinct() -> None:
+async def test_same_name_extraction_binds_the_first_declared_type() -> None:
     org, user = await _org()
     payload = json.dumps(
         {
@@ -495,9 +495,11 @@ async def test_same_name_different_type_in_extraction_stay_distinct() -> None:
             .scalars()
             .all()
         )
-        assert {e.entity_type for e in apples} == {"organization", "product"}  # not merged
-        # the relation endpoint bound to the first typed 'Apple' (organization)
-        org_apple = next(e for e in apples if e.entity_type == "organization")
+        # The relation endpoint takes the first declared type, and the
+        # product a relation never uses is not created: an entity no proposed
+        # fact explains would be visible before anyone approved it (ADR-0071).
+        assert {e.entity_type for e in apples} == {"organization"}
+        org_apple = apples[0]
         edge = (await s.execute(select(KgEdge).where(KgEdge.org_id == org))).scalar_one()
         assert edge.object_id == org_apple.id
 
@@ -529,10 +531,11 @@ async def _n_entities(s: object, org: uuid.UUID) -> int:
     ).scalar_one()
 
 
-async def test_gdpr_erase_removes_edge_less_extracted_entity() -> None:
-    """An entity extracted into entities[] but never used in a relation has no
-    kg_edge; the edge-orphan prune alone never reached it. With provenance links
-    (0069), GDPR note-erase now deletes it."""
+async def test_a_reading_with_no_relation_creates_no_entity() -> None:
+    """An entity named in entities[] but used by no relation used to be
+    created with no kg_edge, which is why GDPR erase reaches entities through
+    their provenance links (0069). A reading no longer creates one: nothing
+    would put it up for review (ADR-0071)."""
     org, user = await _org()
     payload = json.dumps({"entities": [{"name": "Solo", "type": "person"}], "relations": []})
     async with tenant_session(str(org), str(user)) as s:
@@ -542,15 +545,21 @@ async def test_gdpr_erase_removes_edge_less_extracted_entity() -> None:
         res = await kg.extract_facts(
             s, org_id=org, actor_id=user, note_id=note.id, llm=_FakeExtractLLM(payload)
         )
-        assert res.facts == 0 and res.entities == 1  # edge-less entity
+        assert res.facts == 0 and res.entities == 0
+        assert await _n_entities(s, org) == 0
+
+
+async def test_gdpr_erase_removes_edge_less_entity_via_provenance() -> None:
+    """An entity with a provenance link and no kg_edge (made before ADR-0071,
+    or whose facts are gone) is still reached by GDPR note-erase."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="t", text="Solo."
+        )
+        solo = await kg.ensure_entity(s, org_id=org, name="Solo", entity_type="person")
+        await kg._link_entity_source(s, org_id=org, entity_id=solo.id, source_note_id=note.id)
         assert await _n_entities(s, org) == 1
-        # provenance link recorded
-        n_links = (
-            await s.execute(
-                select(func.count()).select_from(KgEntitySource).where(KgEntitySource.org_id == org)
-            )
-        ).scalar_one()
-        assert n_links == 1
         await nt.gdpr_erase_note(s, org_id=org, actor_id=user, note_id=note.id)
         assert await _n_entities(s, org) == 0  # the edge-less PII entity is gone
 

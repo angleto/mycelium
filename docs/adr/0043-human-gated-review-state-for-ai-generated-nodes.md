@@ -3,7 +3,7 @@
 Status: Accepted (2026-06-21) — D1–D3 + D5 implemented behind
 `garden_review_gate_enabled` (default off; the setting was retired on
 2026-11-16 by [ADR-0071](0071-the-graph-reads-the-notes-and-a-person-decides.md),
-which makes autonomous knowledge-graph facts always proposed). Task: e87daff4 (pattern/season +
+which makes every extracted knowledge-graph fact proposed). Task: e87daff4 (pattern/season +
 distill human-approval gate). Driven by Angelo's requirement: a summary the
 system generates AUTONOMOUSLY (unsolicited) must NOT enter the corpus until a
 human approves it; the model that produced it must be visible; reject must

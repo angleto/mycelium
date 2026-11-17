@@ -254,7 +254,7 @@ export const it: Catalog = {
     undoReject: 'Annulla rifiuto',
     facts: {
       title: 'Fatti letti dalle tue note',
-      hint: 'Relazioni che un modello ha trovato da solo nelle tue note. Nessuna vale finché non la approvi; un fatto rifiutato non viene riproposto.',
+      hint: 'Relazioni che un modello ha trovato nelle tue note, da solo o su richiesta. Nessuna vale finché non la approvi; un fatto rifiutato non viene riproposto, a meno che qualcuno chieda di rileggere quella nota.',
       source: 'da',
     },
   },

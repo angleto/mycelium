@@ -115,6 +115,7 @@ async def test_extract_creates_entities_and_facts_idempotently() -> None:
         assert edge.predicate == "works_at"  # open vocab normalized
         assert edge.valid_from == dt.datetime(2020, 1, 1, tzinfo=dt.UTC)
         assert edge.source_note_id == note.id
+        assert edge.review_state == "proposed"  # a person's request vouches for nothing
         # Re-extraction is idempotent on the triple: still exactly one edge.
         await kg.extract_facts(
             s, org_id=org, actor_id=user, note_id=note.id, llm=_FakeExtractLLM(payload)

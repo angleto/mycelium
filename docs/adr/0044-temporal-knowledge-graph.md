@@ -38,7 +38,7 @@ Two new org-scoped, FORCE-RLS tables (migration 0067), modelled on
   - transaction-time `created_at` (asserted) … `invalidated_at` (stopped
     believing; NULL = currently believed) + `invalidated_by` +
     `superseded_by_edge_id`.
-  - `review_state` ('proposed' when extracted autonomously, ADR-0043).
+  - `review_state` ('proposed' for every extracted fact, ADR-0043, ADR-0071).
 
 Invariants enforced at the DB:
 
@@ -67,6 +67,8 @@ Extraction (`services/kg.extract_facts`) runs the per-org **metered** LLM
 (`resolve_llm`, op='extract'), parses triples defensively (no provider
 JSON-mode), resolves entities, and writes facts — born 'proposed' when
 autonomous (adjudicated via the ADR-0043 gate), effective when user-initiated.
+Superseded by ADR-0071: since 2026-11-17 every extracted fact is born
+'proposed', user-initiated or not.
 Multi-hop / as-of query is exposed over MCP: `kg_extract`, `kg_entities`,
 `kg_neighbors(entity, depth, as_of)`.
 

@@ -35,11 +35,15 @@ calls. Three facts made "just switch on the autonomous pass" wrong:
 
 ## Decision
 
-1. **An autonomous read is always proposed.** `_review_state_for(True)`
-   returns `proposed` unconditionally. `garden_review_gate_enabled` is
-   retired: after ADR-0043's amendment it governed only this, and a setting
-   whose one effect is to let a model's output through unseen is not one to
-   keep.
+1. **Every fact a model reads out of a note is born proposed, whoever
+   asked.** The autonomous pass and a person's `kg_extract` write the same
+   way: `review_state='proposed'`, effective only once a person approves.
+   The amendment to ADR-0043 says asking for a summary is not vouching for
+   it, and asking for an extraction is not vouching for what it finds
+   (decided by Angelo on 2026-11-17; until then `kg_extract` wrote effective
+   facts). `garden_review_gate_enabled` is retired: after ADR-0043's
+   amendment it governed only the autonomous case, and a setting whose one
+   effect is to let a model's output through unseen is not one to keep.
 2. **A person decides, on every surface.** `kg.review.pending` (`kg:read`),
    `kg.review.approve` and `kg.review.reject` (`HUMAN_ONLY`) are registry
    operations, so REST (`/kg/review/*`) and MCP (`kg_review_*`) carry them
@@ -53,7 +57,9 @@ calls. Three facts made "just switch on the autonomous pass" wrong:
    excludes `rejected` as well as `proposed`: with only `invalidated_at` to
    go on, a transaction-time read before the rejection would have shown a
    proposal as a past belief. The autonomous pass does not propose a triple
-   a person rejected.
+   a person rejected; a `kg_extract` a person runs does propose it again,
+   since that is them asking anew, and it is the only way back for a triple
+   rejected by mistake.
 4. **The pass reads what a person wrote and wants seen, once per text.**
    It is a step of the garden loop (`kg_autonomous_extract_enabled`, off by
    default, and `garden_loop_enabled`), after every other step, so a pass
@@ -98,11 +104,14 @@ calls. Three facts made "just switch on the autonomous pass" wrong:
    `kg_extract:<org>:<note>`, so a re-read after an edit replayed the first
    debit and was never charged; it is now `kg_extract:<org>:<note>:<hash of
    the body>`.
-8. **Nothing the pass writes shows before a person approves it.** The pass
-   creates an entity only for a fact it proposes, and `kg_entities` lists an
-   entity only when an effective fact touches it or no fact touches it at
-   all. A fact a person retracted (`invalidate_fact`) is remembered like a
-   rejected one and not proposed again.
+8. **Nothing a reading writes shows before a person approves it.** A
+   reading, autonomous or not, creates an entity only for a fact it
+   proposes: an entity the model named in `entities[]` without using it in
+   any relation is not created, since nothing would ever put it up for
+   review. `kg_entities` lists an entity only when an effective fact touches
+   it or no fact touches it at all. A fact a person retracted
+   (`invalidate_fact`) is remembered like a rejected one and not proposed
+   again by the pass.
 
 ## What the pass writes and deletes
 
@@ -119,23 +128,18 @@ entity. The only delete path into the graph remains `erase_by_source`,
 unchanged. A person's decision updates one `kg_edge` row (`review_state`,
 and on reject `invalidated_at`); nothing is deleted then either.
 
-## Open
-
-**Should `kg_extract`, asked by a person, also be born proposed?** Today it
-writes effective facts, as it always has. The amendment to ADR-0043 says
-"asking for a summary is not vouching for it" for notes, and the same
-argument applies to facts; against it, `kg_extract` is the only way a person
-can put facts into the graph at all, and making it proposed turns every
-manual extraction into a second step. A related consequence follows from the
-current answer: when a person runs `kg_extract` on a triple the pass has
-already proposed, the open triple is reused and stays proposed, so the
-person's own extraction does not make it effective. This record does not
-decide either; it is Angelo's call.
-
 ## Consequences
 
 - The graph can fill up without anyone remembering to ask, and nothing a
   model reads into it counts until a person approves it.
+- A manual extraction is now two steps, `kg_extract` and then a decision on
+  the review page or with `kg_review_approve`. No surface puts a fact into
+  the graph as effective in one step. A person's `kg_extract` on a triple
+  the pass already proposed reuses the open proposal, which stays proposed.
+- An entity the model declared but related to nothing is not kept. Such an
+  entity used to be created by `kg_extract` (and reached by GDPR erase
+  through its provenance link, migration 0069); the erase path is
+  unchanged and still covers entities created before this.
 - An edited note is read again and may propose new facts; facts proposed or
   approved from its earlier text stay as they are. Retiring facts whose
   source text changed is not done here.

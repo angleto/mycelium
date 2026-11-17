@@ -6,7 +6,8 @@ Asserts, against the real Postgres:
   person's decision is the only way it becomes effective;
 - approve and reject act on proposals only, guard the version the reviewer
   read, are idempotent, and a rejection is never read as a past belief;
-- a rejected triple is not proposed again;
+- a rejected triple is not proposed again by the pass, and is by a person's
+  ``kg_extract``, whose facts are proposals too;
 - the pass reads only what a person could have written and wants seen, in
   its current form, once, and within its token budget.
 
@@ -24,6 +25,12 @@ back alone into ``services/kg.py`` and only its test run:
   -> test_the_pass_reads_once_and_again_only_after_an_edit (and, before it
   was fixed, test_a_rejected_triple_is_not_proposed_again);
 - no ``index_scope`` filter -> test_the_pass_skips_what_a_person_kept_out.
+
+Seen failing on 2026-11-17, same method: ``kg_extract`` writing effective
+facts -> both test_a_persons_extraction_* tests; ``kg_extract`` creating
+the entities it only declared -> test_a_persons_extraction_is_proposed_too;
+the rejected-triple check applied to ``kg_extract`` too
+-> test_a_persons_extraction_proposes_a_rejected_triple_again.
 """
 
 from __future__ import annotations
@@ -50,7 +57,7 @@ from mycelium_core.errors import ConflictError, DomainError, NotFoundError  # no
 from mycelium_core.i18n import MessageCode  # noqa: E402
 from mycelium_core.models.billing import UsageRecord  # noqa: E402
 from mycelium_core.models.index_scope import IndexScope  # noqa: E402
-from mycelium_core.models.kg import KgEdge, KgNoteExtraction  # noqa: E402
+from mycelium_core.models.kg import KgEdge, KgEntity, KgNoteExtraction  # noqa: E402
 from mycelium_core.models.note import Note, NoteKind  # noqa: E402
 from mycelium_core.models.note_part import NotePart  # noqa: E402
 from mycelium_core.services import billing, kg  # noqa: E402
@@ -267,6 +274,51 @@ async def test_a_rejected_triple_is_not_proposed_again() -> None:
     assert await _read_all(org, user, _ExtractLLM()) == ["ok"]
     async with tenant_session(str(org), str(user)) as s:
         assert await kg.list_proposed_facts(s, org_id=org, actor_id=user, limit=10) == []
+
+
+async def test_a_persons_extraction_is_proposed_too() -> None:
+    """Decided 2026-11-17: asking for an extraction is not vouching for what
+    it finds, so ``kg_extract`` writes the same proposals the pass does, and
+    an entity the model named without relating it is not created."""
+    org, user = await _org()
+    nid = await _note(org, user)
+    payload = json.dumps(
+        {
+            "entities": [
+                {"name": "Bob", "type": "person"},
+                {"name": "Globex", "type": "organization"},
+                {"name": "Solo", "type": "person"},
+            ],
+            "relations": [{"subject": "Bob", "predicate": "works at", "object": "Globex"}],
+        }
+    )
+    async with tenant_session(str(org), str(user)) as s:
+        res = await kg.extract_facts(
+            s, org_id=org, actor_id=user, note_id=nid, llm=_ExtractLLM(payload)
+        )
+        edge = (await s.execute(select(KgEdge).where(KgEdge.id == res.edge_ids[0]))).scalar_one()
+        assert edge.review_state == "proposed"
+        assert await kg.entity_facts(s, org_id=org, actor_id=user, entity_id=edge.subject_id) == []
+        assert await kg.search_entities(s, org_id=org, actor_id=user, query="") == []
+        names = (await s.execute(select(KgEntity.name).where(KgEntity.org_id == org))).scalars()
+        assert set(names) == {"Bob", "Globex"}
+        listed = await kg.list_proposed_facts(s, org_id=org, actor_id=user, limit=10)
+        assert [f.edge_id for f in listed] == [edge.id]
+
+
+async def test_a_persons_extraction_proposes_a_rejected_triple_again() -> None:
+    """The pass leaves a rejected triple alone; a person running
+    ``kg_extract`` is asking anew, and it is the only way back for a triple
+    rejected by mistake."""
+    org, user = await _org()
+    nid = await _note(org, user)
+    async with tenant_session(str(org), str(user)) as s:
+        first = await kg.extract_facts(s, org_id=org, actor_id=user, note_id=nid, llm=_ExtractLLM())
+        await kg.reject_fact(s, org_id=org, actor_id=user, edge_id=first.edge_ids[0])
+        again = await kg.extract_facts(s, org_id=org, actor_id=user, note_id=nid, llm=_ExtractLLM())
+        assert len(again.edge_ids) == 1 and again.edge_ids != first.edge_ids
+        listed = await kg.list_proposed_facts(s, org_id=org, actor_id=user, limit=10)
+        assert [f.edge_id for f in listed] == again.edge_ids
 
 
 async def test_proposed_listing_pages_by_cursor_without_overlap() -> None:

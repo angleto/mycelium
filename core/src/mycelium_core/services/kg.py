@@ -4,8 +4,8 @@ Builds and queries a typed, bi-temporal knowledge graph over the org's notes:
 
 - ``extract_facts`` runs the per-org METERED LLM (resolve_llm, op='extract')
   over a note body, parses (entity, relation, entity) triples defensively,
-  resolves/dedupes entities, and writes facts -- born ``review_state=
-  'proposed'`` when autonomous (ADR-0043), else effective.
+  resolves/dedupes entities, and writes facts -- always born ``review_state=
+  'proposed'`` (ADR-0043, ADR-0071), effective only once a person approves.
 - ``ensure_entity`` is the idempotent get-or-create resolver (one canonical
   node per (org, type, normalized name), the identities.ensure_* race pattern).
 - ``add_fact`` is idempotent on the current triple; ``supersede_fact`` closes
@@ -109,18 +109,14 @@ _APPROVED = "approved"
 _REJECTED = "rejected"
 
 
-def _review_state_for(autonomous: bool) -> str | None:
-    """Autonomous extraction is ALWAYS born 'proposed', withheld from every
-    read until a person approves it. It used to follow
-    ``garden_review_gate_enabled``, which defaults to off, so the first
-    autonomous pass would have written effective facts about the notes with
-    nobody having read them: the opposite of ADR-0043's amendment, which says
-    nothing a model writes about the notes takes effect before approval.
-
-    User-initiated extraction (``kg_extract``) stays effective. Whether it
-    should be born proposed too is an open decision recorded in ADR-0071,
-    not settled here."""
-    return _PROPOSED if autonomous else None
+# Every fact a model reads out of a note is born 'proposed', withheld from every
+# read until a person approves it, whoever asked for the reading: the
+# amendment to ADR-0043 says nothing a model writes about the notes takes
+# effect before approval, and asking for an extraction is not vouching for
+# what it finds (ADR-0071, decided 2026-11-17). It used to follow
+# ``garden_review_gate_enabled`` for the autonomous pass, which defaults to off,
+# and to be effective for ``kg_extract``.
+_MODEL_REVIEW_STATE = _PROPOSED
 
 
 @dataclass(frozen=True)
@@ -432,7 +428,6 @@ async def _write_reading(
     """Persist what a reading states as entities and facts."""
     parsed = reading.parsed
     identity_id = await _actor_identity_id(session, org_id, actor_id)
-    review = _review_state_for(autonomous)
 
     # Cache mirrors the DB dedupe key (type, normalized_name) so two same-name
     # entities of DIFFERENT types (e.g. "Apple" the org vs the product) stay
@@ -442,11 +437,11 @@ async def _write_reading(
     # a spurious 'other' duplicate.
     by_key: dict[tuple[str, str], KgEntity] = {}
     by_name: dict[str, KgEntity] = {}
-    # The types the reading declared, by normalized name. An autonomous
-    # reading creates an entity only when a relation uses it, typed from here:
-    # an entity is visible to every search as soon as it exists, and one that
-    # no proposed fact explains would be a model's output in effect before
-    # anyone approved it.
+    # The types the reading declared, by normalized name. A reading creates an
+    # entity only when a relation uses it, typed from here: an entity is
+    # visible to every search as soon as it exists, and one that no proposed
+    # fact explains would be a model's output in effect before anyone
+    # approved it.
     declared: dict[str, Any] = {}
 
     async def _entity(name: str, entity_type: Any) -> KgEntity:
@@ -479,10 +474,7 @@ async def _write_reading(
                 and isinstance(spec.get("name"), str)
                 and spec["name"].strip()
             ):
-                if autonomous:
-                    declared.setdefault(normalize_entity_name(spec["name"]), spec.get("type"))
-                else:
-                    await _entity(spec["name"], spec.get("type"))
+                declared.setdefault(normalize_entity_name(spec["name"]), spec.get("type"))
 
     edge_ids: list[uuid.UUID] = []
     entity_ids: set[uuid.UUID] = set()
@@ -522,8 +514,10 @@ async def _write_reading(
             ):
                 # A person already turned this triple down, or retracted it.
                 # Proposing it again on every re-read would ask the same
-                # question until they gave in; the answer stands until someone
-                # asserts the fact themselves.
+                # question until they gave in. A reading a person asks for
+                # with kg_extract does propose it again: that is them asking
+                # the question anew, and the only way back for a triple
+                # rejected by mistake.
                 continue
             edge = await add_fact(
                 session,
@@ -536,7 +530,7 @@ async def _write_reading(
                 confidence=_parse_confidence(rel.get("confidence")),
                 source_note_id=note_id,
                 origin_model_id=reading.model_id,
-                review_state=review,
+                review_state=_MODEL_REVIEW_STATE,
                 created_by=identity_id,
             )
             edge_ids.append(edge.id)
@@ -581,8 +575,8 @@ async def extract_facts(
     autonomous: bool = False,
 ) -> ExtractionResult:
     """Extract a typed knowledge graph from a note's body via the per-org
-    metered LLM and persist entities + facts. Facts are born 'proposed' when
-    ``autonomous``, else effective. An answer with no JSON in it yields an
+    metered LLM and persist entities + facts. Facts are born 'proposed'
+    whoever asked, and only entities a fact uses are created. An answer with no JSON in it yields an
     empty extraction here; the unattended pass, which must tell the two
     apart, calls :func:`read_autonomously` instead. ``llm`` is an explicit
     test/override injection (decomposition pattern)."""
@@ -1065,10 +1059,10 @@ async def search_entities(
     """Entities whose normalized name contains ``query`` (RLS-scoped).
 
     An entity shows when at least one effective fact touches it, or when no
-    fact touches it at all (an entity a person extracted on its own). One
-    whose every fact is still proposed, or was rejected, stays hidden: the
-    autonomous pass creates entities only for the facts it proposes, and
-    listing them would put a model's reading in effect before a person
+    fact touches it at all (one made directly with ``ensure_entity``, never
+    by a reading). One whose every fact is still proposed, or was rejected,
+    stays hidden: a reading creates entities only for the facts it proposes,
+    and listing them would put a model's reading in effect before a person
     approved any of it."""
     await require_role(session, org_id, actor_id, Role.member)
     norm = normalize_entity_name(query)

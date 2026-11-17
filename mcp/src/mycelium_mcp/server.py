@@ -5513,9 +5513,11 @@ async def graph_focus_context(
 async def kg_extract(token: str, org_id: str, note_id: str) -> dict[str, Any]:
     """Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts)
     from a note's body using the org's metered LLM (ADR-0044). Entities are
-    resolved/deduped; facts are written EFFECTIVE (user-initiated) with
-    bi-temporal validity (valid_from/valid_to) and are idempotent per triple.
-    Returns the entity/fact counts + new edge ids."""
+    resolved/deduped; facts are born PROPOSED and take effect only once a
+    person approves them (kg_review_pending / kg_review_approve, ADR-0071),
+    with bi-temporal validity (valid_from/valid_to), idempotent per triple.
+    Only entities a fact uses are created. Returns the entity/fact counts +
+    the edge ids."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await kg_svc.extract_facts(s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id))
         return {
