@@ -12,6 +12,7 @@ provenance; erasure cascades there.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 import uuid
 from collections.abc import Mapping, Sequence
@@ -61,6 +62,8 @@ class _Unset:
 
 
 _UNSET = _Unset()
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -1750,6 +1753,40 @@ async def run_command(
     )
 
 
+_LAST_ERROR_MAX_CHARS = 500
+
+
+async def _transcription_failed(
+    session: AsyncSession,
+    *,
+    note: Note,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    stage: str,
+    exc: BaseException,
+) -> Note:
+    """Record a failed transcription on the note and return it.
+
+    ``stage`` says which step failed, so the reason reads on its own:
+    ``audio_unreadable`` (the attachment behind ``audio_ref`` could not be
+    read) or ``stt_failed`` (the provider raised).
+    """
+    _log.warning("transcription of note %s failed at %s", note.id, stage, exc_info=exc)
+    note.status = NoteStatus.error
+    note.last_error = f"{stage}: {type(exc).__name__}: {exc}"[:_LAST_ERROR_MAX_CHARS]
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note.id,
+        action="transcribe_failed",
+        diff={"stage": stage, "error": type(exc).__name__},
+    )
+    return note
+
+
 async def transcribe(
     session: AsyncSession,
     *,
@@ -1783,6 +1820,14 @@ async def transcribe(
     seconds = note.audio_seconds or 0
     audio_bytes: bytes | None = None
     mime_type: str | None = None
+    # From here on a failure is an outcome of this note, not an exception
+    # for the caller. ``transcribing`` is already flushed, and the Telegram
+    # webhook catches whatever this raises inside the same session and
+    # commits: a raise here left the note ``transcribing`` for good, out of
+    # the knowledge graph (which skips that status) and with nothing to say
+    # why. So a failure lands as ``error`` with the reason in ``last_error``,
+    # nothing is metered, and the note is returned like a success would be.
+    # The audio stays attached and a later call retries from ``error``.
     if note.audio_ref.startswith("attachment:"):
         try:
             att_id = uuid.UUID(note.audio_ref.split(":", 1)[1])
@@ -1791,27 +1836,55 @@ async def transcribe(
             att = await att_svc.get_attachment(session, org_id=org_id, attachment_id=att_id)
             audio_bytes = await att_svc.read_attachment_bytes(att)
             mime_type = att.mime_type
-        except Exception:
-            # Resolution failure leaves audio_bytes None; providers
-            # that don't need raw bytes (e.g. cloud STT keyed on a
-            # public URL) keep working.
-            audio_bytes = None
-    res = await provider.transcribe(
-        audio_ref=note.audio_ref,
-        audio_seconds=seconds,
-        audio_bytes=audio_bytes,
-        mime_type=mime_type,
-    )
-    await billing.meter(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        operation_id=operation_id,
-        op="stt",
-        model_id=res.model_id,
-        units_in=Decimal(res.audio_seconds) / Decimal(60),
-        basis=CostBasis.local,
-    )
+        except Exception as exc:
+            # A provider called without the bytes can only fail with a
+            # message about its own arguments, which hides the cause.
+            return await _transcription_failed(
+                session,
+                note=note,
+                org_id=org_id,
+                actor_id=actor_id,
+                stage="audio_unreadable",
+                exc=exc,
+            )
+    try:
+        res = await provider.transcribe(
+            audio_ref=note.audio_ref,
+            audio_seconds=seconds,
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+        )
+    except Exception as exc:
+        return await _transcription_failed(
+            session,
+            note=note,
+            org_id=org_id,
+            actor_id=actor_id,
+            stage="stt_failed",
+            exc=exc,
+        )
+    try:
+        await billing.meter(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            operation_id=operation_id,
+            op="stt",
+            model_id=res.model_id,
+            units_in=Decimal(res.audio_seconds) / Decimal(60),
+            basis=CostBasis.local,
+        )
+    except Exception as exc:
+        # A transcript that could not be metered is not kept: storing it
+        # would hand out work the metering refused to record.
+        return await _transcription_failed(
+            session,
+            note=note,
+            org_id=org_id,
+            actor_id=actor_id,
+            stage="metering_failed",
+            exc=exc,
+        )
     # Phase 6 final: the STT body lands in note_part(ord=0), not a
     # transcript column. Status flips to ``ready`` so the rest of the
     # flow (memory write, audit) sees a finalised note.
@@ -1824,6 +1897,7 @@ async def transcribe(
     if res.text:
         await _upsert_part_zero(session, org_id=org_id, note_id=note.id, body=res.text)
     note.status = NoteStatus.ready
+    note.last_error = None
     await session.flush()
     # Indexing convergence (task 9fc94327): the transcript now lives in
     # note_part(ord=0), and the per-part search index

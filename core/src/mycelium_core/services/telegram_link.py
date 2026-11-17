@@ -36,7 +36,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode, render
-from mycelium_core.models.note import NoteKind
+from mycelium_core.models.note import NoteKind, NoteStatus
 from mycelium_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
 from mycelium_core.services import attachments as att_svc
 from mycelium_core.services import notes as notes_svc
@@ -410,15 +410,18 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 # body (no transcript -> empty task description).
                 from mycelium_core.services import note_parts as parts_svc
 
-                tr_parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
-                transcript_text = (tr_parts[0].body if tr_parts else "") or ""
-                transcribed_ok = True
+                # A failed transcription comes back as a note in ``error``
+                # (the reason is on ``last_error``), not as an exception.
+                transcribed_ok = tr_note.status is NoteStatus.ready
+                if transcribed_ok:
+                    tr_parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
+                    transcript_text = (tr_parts[0].body if tr_parts else "") or ""
             except Exception:
-                # Best-effort: an unconfigured STT (faster-whisper extra
-                # missing from the image) raises here; the audio is still
-                # saved on the note for later replay. We tell the user the
-                # transcript is unavailable rather than silently implying
-                # success (task 44ba3f14).
+                # What still raises is refused before any work starts (role,
+                # a credential that may not write this note). The audio is
+                # saved on the note for later replay either way, and the
+                # reply says the transcript is unavailable rather than
+                # implying success (task 44ba3f14).
                 logger.exception("telegram voice transcribe failed for note=%s", note.id)
             # Caption-driven promotion (task 44ba3f14).
             if as_task:

@@ -405,6 +405,22 @@ async def test_voice_transcription_failure_tells_user(_fake_tg: FakeTelegramApi)
     assert "transcription is unavailable" in outcome.reply_text
     # The audio is still saved as a note for later replay.
     assert outcome.note_id is not None
+    # And the note says what happened. Before, it stayed ``transcribing``
+    # for good: the webhook caught the raise and committed the half-done
+    # status, which also kept the note out of the knowledge graph.
+    from mycelium_core.models.note import NoteStatus
+
+    async with tenant_session(str(org), str(user)) as s:
+        status, last_error, audio_ref = (
+            await s.execute(
+                select(Note.status, Note.last_error, Note.audio_ref).where(
+                    Note.id == outcome.note_id
+                )
+            )
+        ).one()
+    assert status is NoteStatus.error
+    assert last_error == "stt_failed: RuntimeError: STT unavailable"
+    assert audio_ref is not None and audio_ref.startswith("attachment:")
 
 
 # ---------------------------------------------------------------------------

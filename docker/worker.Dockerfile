@@ -26,15 +26,21 @@ COPY api/pyproject.toml api/pyproject.toml
 COPY mcp/pyproject.toml mcp/pyproject.toml
 COPY worker/pyproject.toml worker/pyproject.toml
 COPY sdi-inbound/pyproject.toml sdi-inbound/pyproject.toml
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-install-workspace
-# Heavy ML extras the worker's jobs need: bge-m3 (sentence-transformers) for
-# the embedding backfill (embedding_migration), igraph/leidenalg for the
-# garden loop's Leiden + auto-promote (gated by garden_loop_enabled). bge-m3
-# weights are NOT baked (download at runtime to HF_HOME; the bake exploded
-# node disk, 30c570c).
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python \
-      "sentence-transformers>=3" "python-igraph>=0.11" "leidenalg>=0.10"
+# The CLI is a workspace member too. Its manifest is here so the workspace is
+# whole and ``--locked`` can check uv.lock against it; the CLI itself is not
+# installed (``--no-install-package`` below), the image has no use for it.
+COPY cli/pyproject.toml cli/pyproject.toml
+# Heavy ML extras the worker's jobs need, installed from the lock like
+# everything else: bge-m3 (``local-embedder``: sentence-transformers) for the
+# embedding backfill (embedding_migration), igraph/leidenalg (``clustering``)
+# for the garden loop's Leiden + auto-promote (gated by garden_loop_enabled).
+# They used to come from an unpinned ``uv pip install`` outside the lock, which
+# resolved whatever was newest on the day of the build. ``--locked`` also
+# refuses a uv.lock that no longer matches the manifests. bge-m3 weights are
+# NOT baked (download at runtime to HF_HOME; the bake exploded node disk,
+# 30c570c).
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --locked --no-install-workspace \
+      --extra local-embedder --extra clustering
 
 # --- App layer: workspace source; thin, rebuilt every commit ---
 COPY core core
@@ -42,9 +48,9 @@ COPY api api
 COPY mcp mcp
 COPY worker worker
 COPY sdi-inbound sdi-inbound
-# ``--inexact`` so installing the workspace members does not prune the ML
-# extras added above (they are optional, not in the default lock resolution).
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
+# The same extras again, so this exact sync keeps them rather than pruning them.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --locked \
+      --no-install-package mycelium-cli --extra local-embedder --extra clustering
 # Build-time guard: fail the build (not prod) if the final sync ever pruned
 # the ML extras or the workspace install broke their import.
 RUN /app/.venv/bin/python -c "import sentence_transformers, igraph, leidenalg, mycelium_worker; print('worker ml deps ok')"

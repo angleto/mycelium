@@ -28,15 +28,22 @@ COPY api/pyproject.toml api/pyproject.toml
 COPY mcp/pyproject.toml mcp/pyproject.toml
 COPY worker/pyproject.toml worker/pyproject.toml
 COPY sdi-inbound/pyproject.toml sdi-inbound/pyproject.toml
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-install-workspace
-# Heavy ML extras: bge-m3 (sentence-transformers, embeddings); faster-whisper
-# / CTranslate2 (Telegram voice STT, task 44ba3f14); igraph/leidenalg (garden
-# /clusters Leiden + ADR-0035 modularity, task 8c0a8f08). bge-m3 weights are
-# NOT baked (download at runtime to HF_HOME; the bake exploded node disk,
-# 30c570c — a prior line wrongly prefetched e5-small/384 vs runtime bge-m3/1024).
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python \
-      "sentence-transformers>=3" "faster-whisper>=1.0" "python-igraph>=0.11" "leidenalg>=0.10"
+# The CLI is a workspace member too. Its manifest is here so the workspace is
+# whole and ``--locked`` can check uv.lock against it; the CLI itself is not
+# installed (``--no-install-package`` below), the image has no use for it.
+COPY cli/pyproject.toml cli/pyproject.toml
+# Heavy ML extras, installed from the lock like everything else: bge-m3
+# (``local-embedder``: sentence-transformers), faster-whisper / CTranslate2
+# (``stt``: voice transcription, task 44ba3f14), igraph/leidenalg
+# (``clustering``: garden /clusters Leiden + ADR-0035 modularity, task
+# 8c0a8f08). They used to come from an unpinned ``uv pip install`` outside the
+# lock, which resolved whatever was newest on the day of the build: from 2.4.1
+# that was av 19, with which faster-whisper cannot decode a single file.
+# ``--locked`` also refuses a uv.lock that no longer matches the manifests.
+# bge-m3 weights are NOT baked (download at runtime to HF_HOME; the bake
+# exploded node disk, 30c570c).
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --locked --no-install-workspace \
+      --extra local-embedder --extra stt --extra clustering
 # STT (faster-whisper) weights are NOT baked. Like bge-m3, the model downloads
 # at runtime to HF_HOME, which prod points at the shared model-cache PVC
 # (HF_HOME=/models, deploy 08174ab) so it persists across restarts/rollouts and
@@ -52,12 +59,16 @@ COPY sdi-inbound sdi-inbound
 # The maintained docs ship in the image so the MCP ``help`` tool can serve them
 # as the system's own knowledge (docs are the source of truth; no separate FAQ).
 COPY docs docs
-# ``--inexact`` so installing the workspace members does not prune the ML
-# extras added above (optional, not in the default lock resolution).
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
-# Build-time guard: fail the build (not prod) if the final sync ever pruned
-# the ML extras or the workspace install broke their import.
+# The same extras again, so this exact sync keeps them rather than pruning them.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --locked \
+      --no-install-package mycelium-cli --extra local-embedder --extra stt --extra clustering
+# Build-time guards. The import catches a sync that dropped an extra or a
+# workspace install that broke one. The STT smoke decodes the containers the
+# channels deliver (ogg/opus, webm/opus, mp4/aac, wav) through faster-whisper's
+# own decoder: an import alone passed on the images that could not transcribe.
 RUN /app/.venv/bin/python -c "import sentence_transformers, faster_whisper, igraph, leidenalg, mycelium_api; print('backend ml deps ok')"
+COPY docker/stt_smoke.py /tmp/stt_smoke.py
+RUN /app/.venv/bin/python /tmp/stt_smoke.py
 
 # ---
 

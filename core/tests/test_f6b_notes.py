@@ -28,7 +28,7 @@ from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.models.note import NoteKind
+from mycelium_core.models.note import NoteKind, NoteStatus
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.services import billing, taxonomy
@@ -206,6 +206,109 @@ async def test_transcription_metered_feeds_memory_and_erases(
         assert erased.memory_blobs_deleted >= 1
         with pytest.raises(NotFoundError):
             await nt.get_note(s, org_id=org, note_id=note_id)
+
+
+class _RaisingSTT:
+    """An STT that fails the way the av-19 images did: before any text."""
+
+    model_id = "raising-stt"
+
+    async def transcribe(self, **_: object) -> object:
+        raise TypeError("open() got an unexpected keyword argument 'metadata_errors'")
+
+
+async def test_failed_transcription_is_an_error_not_a_stuck_note(
+    _providers: None,
+) -> None:
+    """A provider that raises leaves the note in ``error`` with the reason,
+    charges nothing, and a later call with a working provider recovers it.
+    Before, the note stayed ``transcribing`` for good."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        note = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.voice,
+            audio_ref="s3://audio/a.webm",
+            audio_seconds=60,
+        )
+        before = await billing.balance(s, org_id=org)
+        set_stt_override(lambda: _RaisingSTT())  # type: ignore[arg-type,return-value]
+        failed = await nt.transcribe(
+            s, org_id=org, actor_id=user, note_id=note.id, operation_id="tr-fail"
+        )
+        assert failed.status is NoteStatus.error
+        assert failed.last_error is not None
+        assert failed.last_error.startswith("stt_failed: TypeError: open() got")
+        assert await billing.balance(s, org_id=org) == before
+        assert await nt.get_body(s, note_id=note.id) in (None, "")
+        note_id = note.id
+    # The outcome is committed, not just held in the session.
+    async with tenant_session(str(org), str(user)) as s:
+        reread = await nt.get_note(s, org_id=org, note_id=note_id)
+        assert reread.status is NoteStatus.error
+        set_stt_override(FakeSTT)
+        retried = await nt.transcribe(
+            s, org_id=org, actor_id=user, note_id=note_id, operation_id="tr-retry"
+        )
+        assert retried.status is NoteStatus.ready
+        assert retried.last_error is None
+        assert await nt.get_body(s, note_id=note_id)
+
+
+async def test_unreadable_audio_attachment_is_named_as_the_cause(
+    _providers: None,
+) -> None:
+    """An ``audio_ref`` pointing at an attachment that cannot be read fails
+    as ``audio_unreadable``. Before, the read error was swallowed and the
+    provider was called without bytes, so the reason recorded was wrong."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        note = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.voice,
+            audio_ref=f"attachment:{uuid.uuid4()}",
+            audio_seconds=10,
+        )
+        done = await nt.transcribe(
+            s, org_id=org, actor_id=user, note_id=note.id, operation_id="tr-missing"
+        )
+        assert done.status is NoteStatus.error
+        assert done.last_error is not None
+        assert done.last_error.startswith("audio_unreadable: ")
+
+
+async def test_unmeterable_transcription_is_not_kept(
+    _providers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transcript the metering refused is not stored, and the note says so."""
+    org, user = await _org()
+
+    async def _refuse(*_: object, **__: object) -> None:
+        raise RuntimeError("metering refused")
+
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        note = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.voice,
+            audio_ref="s3://audio/a.webm",
+            audio_seconds=30,
+        )
+        monkeypatch.setattr(billing, "meter", _refuse)
+        done = await nt.transcribe(
+            s, org_id=org, actor_id=user, note_id=note.id, operation_id="tr-unmetered"
+        )
+        assert done.status is NoteStatus.error
+        assert done.last_error == "metering_failed: RuntimeError: metering refused"
+        assert await nt.get_body(s, note_id=note.id) in (None, "")
 
 
 async def test_conversation_turn_is_metered(_providers: None) -> None:

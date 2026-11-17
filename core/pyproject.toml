@@ -47,7 +47,15 @@ local-embedder = ["sentence-transformers>=3"]
 # transcription must ship it. Enable with: uv sync --extra stt
 # Model/quantisation via MYCELIUM_STT_MODEL (default small) / MYCELIUM_STT_DEVICE
 # / MYCELIUM_STT_COMPUTE_TYPE (default int8).
-stt = ["faster-whisper>=1.0"]
+#
+# The av ceiling is load-bearing. faster-whisper 1.2.1 (the latest release)
+# asks only for av>=11, but its decode_audio passes av.open() a keyword that
+# av 19.0.0 removed, so with av>=19 every transcription raises TypeError
+# before the model runs. Images built from 2.4.1 on resolved av 19.0.2 and
+# could not transcribe anything. Lift the ceiling only together with a
+# faster-whisper release that decodes on it; the image smoke check
+# (docker/stt_smoke.py) is what proves it does.
+stt = ["faster-whisper>=1.0", "av>=11,<19"]
 # Opt-in graph clustering (task 8c0a8f08, ADR-0031 v2): Leiden community
 # detection + modularity for the garden mindmap. Lazily imported in
 # graph.compute_leiden_clusters, so CI/dev without it degrade to "no
