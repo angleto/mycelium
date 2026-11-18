@@ -209,8 +209,22 @@ async def close_worker(
     reclaims. No person is needed on either.
 
     The release reason is ``explicit`` rather than ``expired``: the sweep's
-    numbers stay a count of sessions that died, which is the signal worth
-    watching, and a clean shutdown does not pollute it.
+    numbers stay a count of sessions that died, and a clean shutdown does
+    not pollute it.
+
+    **The worker row is written first, and conditionally.** Every path that
+    takes or keeps work under a worker stamps its row first (``touch``, an
+    UPDATE refused on a closed worker) and only then writes a lease. Closing
+    used to go the other way, leases and then the worker row, and the two
+    orders deadlocked: a renewal holding the worker row and waiting on its
+    lease, against a close holding the lease and waiting on the worker row
+    (measured 3 runs out of 3). Taking the worker row first puts every path
+    in one order, and it also decides the race with an acquire of the same
+    worker. If the close's UPDATE wins, the acquire's ``touch`` waits on it,
+    then finds the worker closed and is refused. If the acquire's ``touch``
+    wins, the close waits until the acquire commits its lease, and the
+    release that follows reads after that commit, so it gives the new lease
+    back too. Either way no lease is left on a closed worker.
     """
     await require_role(session, org_id, actor_id, Role.member)
     worker = await get_worker(session, org_id=org_id, worker_id=worker_id)
@@ -218,13 +232,22 @@ async def close_worker(
     # module for holder resolution, and the cycle is real.
     from mycelium_core.services import task_leases as _leases
 
+    closed_now = (
+        await session.execute(
+            update(AgentWorker)
+            .where(AgentWorker.id == worker_id, AgentWorker.closed_at.is_(None))
+            .values(closed_at=_now(), version=AgentWorker.version + 1)
+            .returning(AgentWorker.id)
+            .execution_options(synchronize_session=False)
+        )
+    ).scalar_one_or_none()
+    # A second close still gives back whatever is left: it frees nothing
+    # when the first one did its job, and that costs one read.
     freed = await _leases.release_all_for_worker(
         session, org_id=org_id, actor_id=actor_id, worker_id=worker_id
     )
-    if worker.closed_at is None:
-        worker.closed_at = _now()
-        worker.version += 1
-        await session.flush()
+    await session.refresh(worker)
+    if closed_now is not None:
         await audit.log(
             session,
             org_id=org_id,
