@@ -42,9 +42,11 @@ one. This pairing is what review needs. With it, a verifier gets
 instructions, so an instruction nobody answered and an edit nobody asked for
 are both visible.
 
-**The person closes the instruction.** A session that writes as an assistant
-(`agent_tokens.session_writes_as_assistant`, the same predicate protected
-notes use, which answers on REST as well as MCP) is refused, with
+**The person closes the instruction.** A session a model chose the call for
+(`services.caller`, ADR-0072: an agent token, the CLI's included, a capability,
+a dispatched run, or a person's message turned into calls by a model; the same
+predicate protected notes use, which answers on REST as well as MCP) is
+refused, with
 `annotation.instruction_reserved`, when it tries to:
 
 - resolve the instruction;

@@ -38,8 +38,9 @@ logged row alike. There are four classes:
   of `tenant_session`: internal code that acts for a user without that user
   presenting anything gets it.
 
-The lease holder, the owner exemption, the bus, the digest and the
-annotations guard all ask it.
+The lease holder, the owner exemption, the bus, the digest, the
+instruction guard and the protected-note guard all ask it. The two guards
+refuse every caller a model chose the call for: agent and mediated.
 
 **A state attribute, `workflow_states.closes_work`** (migration 0029).
 Entering such a state declares the work done. The attribute is not

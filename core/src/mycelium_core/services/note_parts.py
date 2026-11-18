@@ -319,9 +319,9 @@ async def _assert_part_writable(
     if promoted_at is not None:
         raise DomainError(MessageCode.NOTE_PROMOTED_READONLY)
     if protected:
-        from mycelium_core.services.agent_tokens import session_writes_as_assistant
+        from mycelium_core.services import caller
 
-        if await session_writes_as_assistant(session):
+        if (await caller.current(session)).is_model:
             raise DomainError(MessageCode.NOTE_PROTECTED_AGENT_WRITE)
 
 

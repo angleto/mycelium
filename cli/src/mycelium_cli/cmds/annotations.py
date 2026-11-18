@@ -5,8 +5,16 @@ This is the CLI face of the annotation layer the web editor renders
 inline. A terminal cannot select a range, so a document is addressed by
 the generic ``<doc_kind> <doc_id>`` handle (``note_part`` + part id, or
 ``task_description`` + task id) and a passage by its ``--quote`` /
-``--original`` text. Proposing/accepting/listing works here exactly as
-on the web and over MCP; only the inline highlight is web-only.
+``--original`` text. Commenting, proposing and listing work here exactly
+as on the web and over MCP.
+
+Accepting or rejecting a suggestion is not here. It is a person's act, and
+the CLI's token is an agent's credential: it sits in a file every agent on
+the machine can read. A command that can only ever be refused is not
+offered; the person decides from the web app. For the same reason
+``resolve``, ``edit`` and ``rm`` on an instruction a person gave to an agent
+are refused, with a message that says so: those commands stay, because on
+an ordinary comment they are the CLI's to run.
 """
 
 from __future__ import annotations
@@ -177,18 +185,6 @@ def resolve(annotation_id: str = typer.Argument(...)) -> None:
 def reopen(annotation_id: str = typer.Argument(...)) -> None:
     """Reopen a resolved comment thread."""
     _act(annotation_id, "reopen")
-
-
-@app.command("accept")
-def accept(annotation_id: str = typer.Argument(...)) -> None:
-    """Accept a suggestion: splice it into the document body."""
-    _act(annotation_id, "accept")
-
-
-@app.command("reject")
-def reject(annotation_id: str = typer.Argument(...)) -> None:
-    """Reject a pending suggestion (document untouched)."""
-    _act(annotation_id, "reject")
 
 
 @app.command("edit")

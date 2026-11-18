@@ -342,3 +342,71 @@ async def test_the_system_session_is_open_by_construction() -> None:
             body="riscritto dal sistema",
             expected_version=part.version,
         )
+
+
+async def _cli_bearer(org: uuid.UUID, user: uuid.UUID) -> str:
+    """The token ``mycelium auth login`` mints: scope ``cli``, bound to no
+    assistant. It lives in a file every process of that user can read, so a
+    call made with it may come from any agent on the machine."""
+    async with tenant_session(str(org), str(user)) as s:
+        minted = await at_svc.mint(s, org_id=org, actor_id=user, name="cli", scope="cli")
+    return minted.raw
+
+
+async def test_the_cli_token_is_refused_on_both_note_doors() -> None:
+    """The gate asked only "is this token bound to an assistant", and the
+    CLI's token is bound to none, so it rewrote protected notes. The CLI is
+    an agent's credential like any other token now, and both the note's own
+    PATCH and the part PATCH refuse it."""
+    org, user, human = await _workspace()
+    note_id = await _protected_note(org, user)
+    cli = await _cli_bearer(org, user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        note = (await c.get(f"/notes/{note_id}", headers=_h(human, org))).json()
+        r = await c.patch(
+            f"/notes/{note_id}",
+            headers=_h(cli, org),
+            json={"expected_version": note["version"], "title": "rinominata dalla CLI"},
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["code"] == _CODE
+
+        parts = (await c.get(f"/notes/{note_id}/parts", headers=_h(human, org))).json()
+        r = await c.patch(
+            f"/notes/{note_id}/parts/{parts[0]['id']}",
+            headers=_h(cli, org),
+            json={"expected_version": parts[0]["version"], "body": "riscritto dalla CLI"},
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["code"] == _CODE
+
+        after = (await c.get(f"/notes/{note_id}", headers=_h(human, org))).json()
+        assert after["title"] == "Procedura"
+        after_parts = (await c.get(f"/notes/{note_id}/parts", headers=_h(human, org))).json()
+        assert after_parts[0]["body"] == "il corpo che non va riscritto da un agente\n"
+
+
+async def test_a_message_turned_into_calls_by_a_model_is_refused_too() -> None:
+    """Telegram: the words are a person's, but a model turns them into the
+    calls the server receives, so the write may be one the person never
+    asked for. It is not a person's write for this gate until the person
+    confirms it through a channel the model does not write."""
+    org, user, _human = await _workspace()
+    note_id = await _protected_note(org, user)
+
+    async with tenant_session(str(org), str(user)) as s:
+        part = (await parts_svc.list_parts(s, org_id=org, note_id=note_id))[0]
+        part_id, version = part.id, part.version
+
+    async with tenant_session(str(org), str(user), actor_kind="human_telegram") as s:
+        with pytest.raises(DomainError) as exc:
+            await parts_svc.update_part(
+                s,
+                org_id=org,
+                actor_id=user,
+                part_id=part_id,
+                body="scritto via telegram",
+                expected_version=version,
+            )
+        assert exc.value.code is MessageCode.NOTE_PROTECTED_AGENT_WRITE

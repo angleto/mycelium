@@ -195,6 +195,7 @@ class MessageCode(enum.StrEnum):
     RATE_LIMITED = "rate.limited"
     MCP_SCOPE_DENIED = "mcp.scope_denied"
     AGENT_SCOPE_DENIED = "agent.scope_denied"
+    AGENT_PERSON_ONLY = "agent.person_only"
     AGENT_WORKSPACE_MISMATCH = "agent.workspace_mismatch"
     MANDATE_REQUIRED = "invoice.mandate_required"
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
@@ -665,6 +666,13 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.RATE_LIMITED: "Rate limit exceeded for this API key; retry later",
         MessageCode.MCP_SCOPE_DENIED: "This assistant's scope does not permit this tool",
         MessageCode.AGENT_SCOPE_DENIED: "This assistant's scope does not permit this request",
+        # Not a scope refusal: no scope reaches these routes, so "your scope
+        # does not permit it" sent the caller looking for a grant that does
+        # not exist, and the CLI read it as a login problem.
+        MessageCode.AGENT_PERSON_ONLY: (
+            "This request is reserved to a person, and an agent's credential is not "
+            "one: neither is the CLI's token. Make it from the web app."
+        ),
         MessageCode.AGENT_WORKSPACE_MISMATCH: ("This credential belongs to another workspace"),
         MessageCode.MANDATE_REQUIRED: (
             "No active SdI transmission mandate for this issuer profile; grant one "
@@ -862,8 +870,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         # writing. Reusing it would have told an agent that its write
         # failed because of a compaction policy.
         MessageCode.NOTE_PROTECTED_AGENT_WRITE: (
-            "This note is protected: an assistant's credential may not write it. "
-            "A person can, from the app or the CLI."
+            "This note is protected: an agent's credential may not write it, and the "
+            "CLI's token is one. A person can, from the app."
         ),
         MessageCode.NOTE_PART_NOT_TRASHED: (
             "No trashed note part with this id: it was never trashed, was already "

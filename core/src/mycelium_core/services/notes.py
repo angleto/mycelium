@@ -674,12 +674,13 @@ async def _assert_writable_by_this_credential(session: AsyncSession, note: Note)
     distiller was its only reader -- so the flag said something true
     about compaction and nothing about writing.
 
-    The population this blocks is stated rather than discovered: a
-    person working THROUGH an assistant is inside it, because that
-    credential is a bound assistant's. That is the item's intent. The
-    ways left open to a person are the SPA and the CLI, both of which
-    authenticate with a human's own bearer and publish no agent-token
-    subject.
+    Who is blocked is :mod:`mycelium_core.services.caller`'s answer, the
+    same one every other guard asks: every caller a model chose the call
+    for, an agent or a person's message turned into calls by one. A
+    person working THROUGH an assistant is inside it on purpose, and so
+    is the CLI, whose token sits in a file every agent on the machine can
+    read. The person writes from the web app or stdio; the system
+    (indexer, distiller, migrations) passes.
 
     The flag guards ITSELF: the condition is "the note is protected NOW",
     so an assistant can still mark a note protected and cannot unmark
@@ -689,9 +690,9 @@ async def _assert_writable_by_this_credential(session: AsyncSession, note: Note)
     """
     if not note.protected:
         return
-    from mycelium_core.services.agent_tokens import session_writes_as_assistant
+    from mycelium_core.services import caller
 
-    if await session_writes_as_assistant(session):
+    if (await caller.current(session)).is_model:
         raise DomainError(MessageCode.NOTE_PROTECTED_AGENT_WRITE)
 
 

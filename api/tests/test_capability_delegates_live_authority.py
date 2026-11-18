@@ -218,7 +218,7 @@ async def test_revoking_the_minter_revokes_what_it_delegated() -> None:
 async def test_a_grant_minted_by_a_bare_token_is_refused_a_person_only_route() -> None:
     """A token with no assistant has no scope list, and the grant it mints
     inherits that: still an agent credential, so a route reserved to a
-    person refuses it as one (``agent.scope_denied``). The early return on a
+    person refuses it as one (``agent.person_only``). The early return on a
     minter with no scope list used to let it through the gate; with it put
     back, every test stayed green, because the route then failed later and
     for another reason (verification of task f34a0292, 2026-11-16)."""
@@ -235,4 +235,4 @@ async def test_a_grant_minted_by_a_bare_token_is_refused_a_person_only_route() -
         for method, path in (("POST", "/agent-tokens"), ("GET", "/admin/users")):
             r = await c.request(method, path, headers=cap, json={"name": "x"})
             assert r.status_code == 403, (path, r.text)
-            assert r.json()["code"] == "agent.scope_denied", (path, r.text)
+            assert r.json()["code"] == "agent.person_only", (path, r.text)

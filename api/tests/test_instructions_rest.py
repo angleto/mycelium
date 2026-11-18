@@ -27,9 +27,9 @@ def _h(token: str, org: uuid.UUID) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "X-Workspace-Id": str(org)}
 
 
-async def _setup() -> tuple[uuid.UUID, str, str, str, uuid.UUID]:
+async def _setup() -> tuple[uuid.UUID, str, str, str, uuid.UUID, uuid.UUID]:
     """An org, the person's bearer, an assistant's bound bearer and handle,
-    and a task whose description the instruction is about."""
+    a task whose description the instruction is about, and the person's id."""
     async with admin_session() as s:
         r = await signup(
             s,
@@ -48,11 +48,11 @@ async def _setup() -> tuple[uuid.UUID, str, str, str, uuid.UUID]:
         task = await tasks_svc.create_task(
             s, org_id=r.org_id, actor_id=r.user_id, title="t", description="ship on friday"
         )
-    return r.org_id, r.token, minted.raw, ident.handle, task.id
+    return r.org_id, r.token, minted.raw, ident.handle, task.id, r.user_id
 
 
 async def test_an_instruction_over_rest_is_answered_by_the_agent_and_closed_by_the_person() -> None:
-    org, person, agent, agent_handle, task_id = await _setup()
+    org, person, agent, agent_handle, task_id, _user = await _setup()
     doc = {"doc_kind": "task_description", "doc_id": str(task_id)}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -126,3 +126,35 @@ async def test_an_instruction_over_rest_is_answered_by_the_agent_and_closed_by_t
         assert by_id[ins["id"]]["status"] == "resolved"
         answers = [a for a in rows if a["instruction_id"] == ins["id"]]
         assert [a["kind"] for a in answers] == ["suggestion"]
+
+
+async def test_the_cli_token_cannot_close_an_instruction() -> None:
+    """The CLI's token is bound to no assistant, and the fence asked only
+    about bound tokens, so the CLI, or any agent on the machine reading its
+    credential file, could close the instruction its own work is checked
+    against. It is an agent's credential and is refused like one."""
+    org, person, _agent, agent_handle, task_id, user = await _setup()
+    async with tenant_session(str(org), str(user)) as s:
+        cli = (await at_svc.mint(s, org_id=org, actor_id=user, name="cli", scope="cli")).raw
+    doc = {"doc_kind": "task_description", "doc_id": str(task_id)}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        ins = (
+            await c.post(
+                "/annotations/comment",
+                headers=_h(person, org),
+                json={
+                    **doc,
+                    "body": "make the day concrete",
+                    "anchor_quote": "friday",
+                    "assignee_handle": agent_handle,
+                },
+            )
+        ).json()
+        r = await c.post(
+            f"/annotations/{ins['id']}/resolve",
+            headers=_h(cli, org),
+            json={"expected_version": ins["version"]},
+        )
+        assert r.status_code == 403, r.text
+        assert r.json()["code"] == _RESERVED

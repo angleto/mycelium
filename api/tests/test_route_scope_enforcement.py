@@ -302,7 +302,7 @@ async def test_scoped_assistant_token_is_confined_over_http() -> None:
             json={"scope": sorted(VALID_SCOPE_KEYS)},
         )
         assert r.status_code == 403, r.text
-        assert r.json()["code"] == "agent.scope_denied"
+        assert r.json()["code"] == "agent.person_only"
 
 
 async def _bare_token(
@@ -333,7 +333,7 @@ async def test_bare_agent_token_keeps_its_work_but_not_human_only_routes() -> No
 
         r = await c.post("/agent-tokens", headers=pat, json={"name": "x", "scope": "cli"})
         assert r.status_code == 403, r.text
-        assert r.json()["code"] == "agent.scope_denied"
+        assert r.json()["code"] == "agent.person_only"
 
         r = await c.post(
             "/ai-assistants",
@@ -449,7 +449,7 @@ async def test_accepting_a_suggestion_needs_the_target_family_write_scope() -> N
             json={"expected_version": sug["version"]},
         )
         assert r.status_code == 403, r.text
-        assert r.json()["code"] == "agent.scope_denied"
+        assert r.json()["code"] == "agent.person_only"
         # Nothing changed: the body is untouched and the suggestion still open.
         body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
         assert body == "The quick brown fox jumps."

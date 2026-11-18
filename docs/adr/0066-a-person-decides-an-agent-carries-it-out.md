@@ -138,4 +138,6 @@ since 2026-09-15, so that reason no longer holds.
 Not covered here, and left as follow-ups: `session_writes_as_assistant` still
 reads a bare token on REST as a person for protected notes and instructions,
 and `mycelium auth login` and the SPA's MCP panel still mint bare tokens rather
-than binding them to an assistant with a scope list.
+than binding them to an assistant with a scope list. The first is closed
+(2026-11-18): those guards now ask `services.caller` (ADR-0072), so a bare
+token, the CLI's included, is refused on them like any agent's.

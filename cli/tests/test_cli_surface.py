@@ -89,3 +89,19 @@ def test_help_runs(argv: list[str], needle: str) -> None:
     )
     if needle:
         assert needle in result.stdout, f"`flow {' '.join(argv)}` help did not mention '{needle}'."
+
+
+@pytest.mark.parametrize("verb", ["accept", "reject"])
+def test_a_suggestion_is_decided_from_the_web_app(verb: str) -> None:
+    # Deciding a suggestion is a person's act and the CLI's token is an
+    # agent's: a command the server can only refuse is not offered.
+    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "mycelium_cli", "annotate", verb, "x"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "No such command" in result.stdout + result.stderr

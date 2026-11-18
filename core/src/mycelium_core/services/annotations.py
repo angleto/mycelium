@@ -371,21 +371,22 @@ async def _guard_instruction(session: AsyncSession, *, ann: Annotation, action: 
     person keeps those acts. The agent answers instead: suggestions that cite
     the instruction, and a reply saying what it did or why it could not.
 
-    The test is the CREDENTIAL (``session_writes_as_assistant``), the same one
-    protected notes use, because it answers on REST as well as MCP. A person
-    working through an assistant is inside it on purpose: they close the
-    instruction from the app. Reopening stays open to everyone, since it
-    gives the person their instruction back rather than taking it away.
+    The test is :mod:`mycelium_core.services.caller`, the same one protected
+    notes use, because it reads the credential and so answers on REST as well
+    as MCP. Every caller a model chose the call for is refused: an agent token
+    (the CLI's included), a capability, a dispatched run, a person's message
+    turned into calls by a model. A person working through an assistant is
+    inside it on purpose: they close the instruction from the app. Reopening
+    stays open to everyone, since it gives the person their instruction back
+    rather than taking it away.
 
     Callers: :func:`resolve`, :func:`assign`, :func:`purge`, and
     :func:`_require_author_or_admin`, which covers the edit family,
     :func:`soft_delete`, :func:`restore` and :func:`restore_revision`. A new
     mutator of a comment must call it too."""
-    from mycelium_core.services.agent_tokens import session_writes_as_assistant
-
     if not await _is_instruction(session, ann):
         return
-    if await session_writes_as_assistant(session):
+    if (await caller_svc.current(session)).is_model:
         raise ForbiddenError(MessageCode.ANNOTATION_INSTRUCTION_RESERVED, action=action)
 
 

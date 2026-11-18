@@ -152,8 +152,13 @@ def raise_for_response(resp: httpx.Response) -> None:
     msg = f"{label}: {text}" if text else label
     if code == "auth.mfa_required":
         raise MfaRequired(msg)
-    if resp.status_code in (401, 403):
+    if resp.status_code == 401:
         raise AuthRequired(msg, hint="Run: mycelium auth login")
+    # A 403 is not a login problem: the credential is valid and the server
+    # refused this act to it. Logging in again stores the same kind of token
+    # and gets the same answer, so the hint would send the user in a circle.
+    # The server's message says why (an act reserved to a person, a scope,
+    # a role) and where to go instead.
     raise CLIError(msg)
 
 

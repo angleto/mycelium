@@ -137,6 +137,9 @@ def _confine_agent(request: Request, scope: list[str] | None, *, own_token_id: s
         return  # unmatched -> 404 handling; nothing to gate
     if _is_self_revocation(request, path, own_token_id):
         return
+    if route_scopes.required_scope(request.method, path) is route_scopes.HUMAN_ONLY:
+        # No scope reaches it, so the refusal names that, not a missing scope.
+        raise ForbiddenError(MessageCode.AGENT_PERSON_ONLY)
     if not route_scopes.agent_permits(request.method, path, scope):
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
 
