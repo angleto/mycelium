@@ -38,7 +38,7 @@ import json
 import os
 import socket
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -58,6 +58,11 @@ from mycelium_core.oauth import cimd
 from mycelium_mcp.gateway import gateway
 
 CALLBACK = "http://127.0.0.1:65000/callback"
+# The person's own calls (sign-up, consent, minting a key). httpx's default
+# of 5 s cut a sign-up short on a loaded machine before any MCP call was made,
+# which failed the test for a reason it does not test. The MCP client below
+# already allows 30 s to connect.
+_HELPER_TIMEOUT = httpx.Timeout(30.0)
 CIMD_ID = "https://app.example/oauth/client.json"
 
 
@@ -110,6 +115,41 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+class _InProcessServer(uvicorn.Server):
+    """A uvicorn server that leaves the process's signal handlers alone.
+
+    ``Server.serve`` installs its own SIGINT and SIGTERM handlers, bound
+    methods of the server, for as long as it runs. That is right for a
+    server that owns its process and wrong for one a test starts and stops:
+    the handlers are the process's, so a Ctrl-C during the test goes to the
+    server instead of pytest, and other code that inspects them takes this
+    short-lived server for the process's own.
+
+    sse-starlette does exactly that, and it is what hung this file. The MCP
+    transport answers a POST with its EventSourceResponse, and its shutdown
+    watcher finds the uvicorn server through the SIGTERM handler, keeps it,
+    and when it sees that server stop sets ``AppStatus.should_exit`` for the
+    whole process, for good. In production that happens once, at shutdown.
+    Here a server stops at the end of every test, and when the watcher saw
+    it, every SSE reply after it in the process ended at once, empty: the
+    client got 200, a truncated body, and an ``initialize`` that never
+    returned, because the SDK client swallows the read error and delivers
+    nothing. Measured on 2026-11-18 with a probe at each server start: the
+    flag was True when the hung test started in 2 runs out of 3, and False in
+    every run that passed. It also outlived the file: a later in-process SSE
+    test (test_oauth_public_clients) failed after it 4 runs out of 5.
+
+    Resetting the flag around each server did not hold: the watcher kept the
+    stopped server and set the flag again on its next poll, after the reset.
+    With no handler installed the watcher finds no server at all, so nothing
+    ever sets the flag.
+    """
+
+    @contextlib.contextmanager
+    def capture_signals(self) -> Iterator[None]:
+        yield
+
+
 @contextlib.asynccontextmanager
 async def _server() -> AsyncIterator[tuple[str, _NginxLike]]:
     # A loopback server on a random port has no public name to pin and no
@@ -126,7 +166,7 @@ async def _server() -> AsyncIterator[tuple[str, _NginxLike]]:
         mount = next(r for r in app.routes if isinstance(r, Mount) and r.path == "/mcp")
         edge = _NginxLike(app)
         port = _free_port()
-        server = uvicorn.Server(
+        server = _InProcessServer(
             uvicorn.Config(
                 edge,
                 host="127.0.0.1",
@@ -191,7 +231,7 @@ class _Person:
         self.consent: dict[str, Any] = {}
 
     async def sign_up(self) -> None:
-        async with httpx.AsyncClient() as h:
+        async with httpx.AsyncClient(timeout=_HELPER_TIMEOUT) as h:
             su = (
                 await h.post(
                     f"{self.base}/api/auth/signup",
@@ -209,7 +249,7 @@ class _Person:
         }
 
     async def open_authorization_url(self, url: str) -> None:
-        async with httpx.AsyncClient() as h:
+        async with httpx.AsyncClient(timeout=_HELPER_TIMEOUT) as h:
             first = await h.get(url, follow_redirects=False)
             assert first.status_code == 302, first.text
             consent = urlsplit(first.headers["location"])
@@ -355,7 +395,7 @@ async def test_a_static_bearer_on_the_slashless_url_needs_no_redirect() -> None:
     async with _server() as (base, edge):
         person = _Person(base)
         await person.sign_up()
-        async with httpx.AsyncClient() as h:
+        async with httpx.AsyncClient(timeout=_HELPER_TIMEOUT) as h:
             created = await h.post(
                 f"{base}/api/ai-assistants",
                 headers=person.headers,
@@ -368,3 +408,28 @@ async def test_a_static_bearer_on_the_slashless_url_needs_no_redirect() -> None:
     assert used["tools"] == ["describe_tools", "execute_tool", "ping", "search_tools"]
     assert used["who_error"] is False, used["who_text"]
     _assert_no_redirects(edge)
+
+
+async def test_a_stopped_test_server_leaves_no_shutdown_flag_behind() -> None:
+    """The watcher polls every half second for as long as its loop runs, so
+    the flag is read after the server has stopped AND a poll has passed. With
+    the server's signal handlers installed, the watcher kept the stopped
+    server and set the flag here; every SSE reply later in the process then
+    ended empty (see ``_InProcessServer``)."""
+    from sse_starlette.sse import AppStatus
+
+    assert AppStatus.should_exit is False
+    async with _server() as (base, _edge):
+        person = _Person(base)
+        await person.sign_up()
+        async with httpx.AsyncClient(timeout=_HELPER_TIMEOUT) as h:
+            created = await h.post(
+                f"{base}/api/ai-assistants",
+                headers=person.headers,
+                json={"label": "static", "scope": ["tasks:read"]},
+            )
+        secret = created.json()["raw_secret"]
+        # One SSE reply, which is what starts the watcher on this loop.
+        await _use_mcp(f"{base}/mcp", headers={"Authorization": f"Bearer {secret}"})
+    await asyncio.sleep(1.5)
+    assert AppStatus.should_exit is False
