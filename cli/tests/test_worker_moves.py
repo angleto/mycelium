@@ -32,7 +32,6 @@ _ME = "55555555-5555-5555-5555-555555555555"
 _OTHER = "66666666-6666-6666-6666-666666666666"
 
 
-_LATER = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=30)).isoformat()
 _EARLIER = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=30)).isoformat()
 
 
@@ -40,7 +39,7 @@ def _stub(
     cap: dict[str, Any],
     *,
     held_by: str | None = None,
-    expires_at: str = _LATER,
+    expires_at: str | None = None,
     move_status: int = 200,
     acquire_status: int = 200,
 ):
@@ -55,7 +54,13 @@ def _stub(
                 200, json=[{"id": _TODO, "name": "todo"}, {"id": _DOING, "name": "in_progress"}]
             )
         if path == f"/tasks/{_TASK}/leases" and request.method == "GET":
-            rows = [{"holder_worker_id": held_by, "expires_at": expires_at}] if held_by else []
+            # A live lease is dated when it is read, not when the module was
+            # imported: the full suite reaches this file well over half an hour
+            # after collection, and a timestamp taken then has already expired.
+            live = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=30)).isoformat()
+            rows = (
+                [{"holder_worker_id": held_by, "expires_at": expires_at or live}] if held_by else []
+            )
             return httpx.Response(200, json=rows)
         if path == f"/tasks/{_TASK}/leases" and request.method == "POST":
             if acquire_status != 200:
