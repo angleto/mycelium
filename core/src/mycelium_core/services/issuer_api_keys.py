@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core import security_events
 from mycelium_core.config import get_settings
-from mycelium_core.db import admin_session
+from mycelium_core.db import admin_session, deadline
 from mycelium_core.errors import ConflictError, NotFoundError, UnprocessableError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.invoice import IssuerProfile
@@ -181,14 +181,15 @@ def _normalize_permissions(permissions: Sequence[str]) -> list[str]:
     return sorted(perms)
 
 
-def _resolve_expiry(ttl_days: int | None) -> datetime.datetime:
+async def _resolve_expiry(session: AsyncSession, ttl_days: int | None) -> datetime.datetime:
     """Expiry is MANDATORY: never a never-expiring key. ``None`` (or a
     non-positive value) defaults to the max lifetime; a longer request is
-    clamped to it."""
+    clamped to it. On the database's clock, because
+    ``authenticate_issuer_api_key`` is what compares it."""
     max_days = max(1, get_settings().issuer_key_max_lifetime_seconds // 86400)
     requested = ttl_days if (ttl_days is not None and ttl_days > 0) else max_days
     days = min(requested, max_days)
-    return datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=days)
+    return await deadline(session, datetime.timedelta(days=days))
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +257,7 @@ async def mint(
         secret_hash=_hash(raw),
         permissions=perms,
         ip_allowlist=allowlist,
-        expires_at=_resolve_expiry(ttl_days),
+        expires_at=await _resolve_expiry(session, ttl_days),
     )
     session.add(row)
     await session.flush()
@@ -351,10 +352,11 @@ async def rotate(
         grace_seconds if grace_seconds is not None else settings.issuer_key_rotation_grace_seconds
     )
     grace = max(0, min(requested, settings.issuer_key_rotation_grace_max_seconds))
-    now = datetime.datetime.now(tz=datetime.UTC)
     if grace > 0:
         row.previous_secret_hash = row.secret_hash
-        row.previous_secret_expires_at = now + datetime.timedelta(seconds=grace)
+        # The grace window is checked inside authenticate_issuer_api_key,
+        # against now(): it is written on that clock.
+        row.previous_secret_expires_at = await deadline(session, datetime.timedelta(seconds=grace))
     else:
         # Hard rotation: the old secret dies immediately.
         row.previous_secret_hash = None
@@ -362,7 +364,7 @@ async def rotate(
     row.previous_secret_last_used_at = None
     new_raw = _generate_raw()
     row.secret_hash = _hash(new_raw)
-    row.rotated_at = now
+    row.rotated_at = datetime.datetime.now(tz=datetime.UTC)
     row.version += 1
     await session.flush()
     await audit.log(

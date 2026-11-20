@@ -52,7 +52,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
 from mycelium_core.crypto import decrypt_secret, encrypt_secret
-from mycelium_core.db import tenant_checkpoint
+from mycelium_core.db import deadline, tenant_checkpoint
 from mycelium_core.errors import (
     ConflictError,
     DomainError,
@@ -577,7 +577,10 @@ async def rotate_signing_secret(
     raw = signing_secret or generate_signing_secret()
     grace = get_settings().payment_connector_secret_grace_hours
     row.previous_signing_secret_ciphertext = row.signing_secret_ciphertext
-    row.previous_signing_secret_expires_at = _now() + datetime.timedelta(hours=grace)
+    # Compared by resolve_payment_connector with now(), so written on that clock.
+    row.previous_signing_secret_expires_at = await deadline(
+        session, datetime.timedelta(hours=grace)
+    )
     row.signing_secret_ciphertext = encrypt_secret(raw)
     row.version += 1
     await session.flush()
@@ -618,7 +621,7 @@ async def rotate_api_key(
     grace = get_settings().payment_connector_secret_grace_hours
     if row.api_key_hash is not None:
         row.previous_api_key_hash = row.api_key_hash
-        row.previous_api_key_expires_at = _now() + datetime.timedelta(hours=grace)
+        row.previous_api_key_expires_at = await deadline(session, datetime.timedelta(hours=grace))
     row.api_key_hash = _hash_key(raw)
     row.version += 1
     await session.flush()

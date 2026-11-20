@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.db import admin_session
+from mycelium_core.db import admin_session, deadline
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.capability_token import CapabilityToken
 from mycelium_core.models.membership import Role
@@ -209,7 +209,8 @@ async def mint(
         ttl_seconds = DEFAULT_TTL_SECONDS
     ttl_seconds = min(ttl_seconds, MAX_TTL_SECONDS)
     raw = _generate_raw()
-    expires_at = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(seconds=ttl_seconds)
+    # On the database's clock, because the database is what compares it.
+    expires_at = await deadline(session, datetime.timedelta(seconds=ttl_seconds))
     # Which CREDENTIAL is minting, read from the session rather than passed
     # by the caller: every mint site already runs inside the tenant session
     # that published it, so there is nothing to thread through eleven call

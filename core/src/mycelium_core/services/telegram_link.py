@@ -33,7 +33,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
-from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.db import admin_session, deadline, tenant_session
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode, render
 from mycelium_core.models.note import NoteKind, NoteStatus
@@ -119,7 +119,8 @@ async def create_link_code(
             break
     else:
         raise RuntimeError("could not mint a unique telegram link code after 5 tries")
-    expires_at = now + _CODE_TTL
+    # On the database's clock: consume_telegram_link_code compares it with now().
+    expires_at = await deadline(session, _CODE_TTL)
     session.add(
         TelegramLinkCode(
             org_id=org_id,

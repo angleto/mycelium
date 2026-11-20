@@ -14,6 +14,7 @@ GUCs used:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import random
 import ssl
@@ -515,6 +516,26 @@ async def tenant_rollback(session: AsyncSession) -> None:
     await session.rollback()
     if captured is not None:
         await _rearm_gucs(session, captured)
+
+
+async def deadline(session: AsyncSession, after: datetime.timedelta) -> datetime.datetime:
+    """The instant ``after`` from now, on the database's clock.
+
+    For a deadline the database enforces: a credential's expiry or a grace
+    window that a SQL function compares with ``now()``. Written from the
+    process's clock, it is compared with a different one: the pod's and the
+    managed Postgres's in production, the host's and the container VM's in
+    a test run. The skew between them is added to every lifetime, and a
+    ceiling the code states (a capability token lives at most an hour) is
+    exceeded by exactly that much. One clock writes and compares it.
+
+    ``now()`` is the start of the current transaction, so in a long
+    transaction the deadline comes out earlier, never later: a lifetime is
+    shortened by the time already spent, which errs on the side a bound is
+    for.
+    """
+    now: datetime.datetime = (await session.execute(text("SELECT now()"))).scalar_one()
+    return now + after
 
 
 @asynccontextmanager

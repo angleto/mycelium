@@ -29,10 +29,10 @@ import secrets
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.db import admin_session
+from mycelium_core.db import admin_session, deadline
 from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_token import AgentToken, WorkspaceBinding
@@ -130,7 +130,8 @@ async def mint(
     token_hash = _hash(raw)
     expires_at: datetime.datetime | None = None
     if ttl_days is not None and ttl_days > 0:
-        expires_at = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=ttl_days)
+        # On the database's clock: authenticate_agent_token compares it with now().
+        expires_at = await deadline(session, datetime.timedelta(days=ttl_days))
     row = AgentToken(
         org_id=org_id,
         user_id=actor_id,
@@ -364,7 +365,11 @@ async def minter_authority(session: AsyncSession, token_id: uuid.UUID) -> Minter
             .where(
                 AgentToken.id == token_id,
                 AgentToken.revoked_at.is_(None),
-                AgentToken.expires_at > datetime.datetime.now(tz=datetime.UTC),
+                # The reading authenticate_agent_token makes: NULL never
+                # expires, and the deadline is compared on the database's
+                # clock. Comparing NULL alone made a never-expiring minter
+                # read as expired, so every grant it handed on was refused.
+                or_(AgentToken.expires_at.is_(None), AgentToken.expires_at > func.now()),
             )
         )
     ).first()

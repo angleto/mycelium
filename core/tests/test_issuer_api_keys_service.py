@@ -16,7 +16,7 @@ import uuid
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from mycelium_core.config import Settings, get_settings
 from mycelium_core.db import admin_session, tenant_session
@@ -109,18 +109,20 @@ def test_t02_hash_is_keyed_hmac_with_pepper() -> None:
     assert svc._hash(raw) != other.digest()
 
 
-def test_t07_expiry_mandatory_and_capped() -> None:
-    now = datetime.datetime.now(tz=_UTC)
+async def test_t07_expiry_mandatory_and_capped() -> None:
     max_days = get_settings().issuer_key_max_lifetime_seconds // 86400
-    # Default (None) -> non-null, ~max lifetime.
-    default_exp = svc._resolve_expiry(None)
-    assert default_exp > now
-    assert (default_exp - now).days <= max_days
-    assert (default_exp - now).days >= max_days - 1
-    # Over-long request -> clamped to the cap.
-    assert (svc._resolve_expiry(100_000) - now).days <= max_days
-    # A normal request is honored.
-    assert 28 <= (svc._resolve_expiry(30) - now).days <= 30
+    async with admin_session() as s:
+        # The expiry is on the database's clock, so it is measured on it.
+        now = (await s.execute(select(func.now()))).scalar_one()
+        # Default (None) -> non-null, ~max lifetime.
+        default_exp = await svc._resolve_expiry(s, None)
+        assert default_exp > now
+        assert (default_exp - now).days <= max_days
+        assert (default_exp - now).days >= max_days - 1
+        # Over-long request -> clamped to the cap.
+        assert (await svc._resolve_expiry(s, 100_000) - now).days <= max_days
+        # A normal request is honored.
+        assert 28 <= (await svc._resolve_expiry(s, 30) - now).days <= 30
 
 
 def test_t23_public_id_independent_of_secret() -> None:
