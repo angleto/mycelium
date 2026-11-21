@@ -18504,7 +18504,7 @@ export interface operations {
             query: {
                 /** @description Start of the window, inclusive. ISO-8601 with a UTC offset (2026-11-09T00:00:00+01:00): where a day starts is the reader's call. */
                 start_from: string;
-                /** @description End of the window, exclusive, same form. At most 92 days after start_from. */
+                /** @description End of the window, exclusive, same form. At most 92 calendar days after start_from, each end read on its own offset's clock, so a quarter across a daylight-saving change is one call. */
                 start_to: string;
                 /** @description Only the tasks of this client (its client tag). */
                 client_tag_id?: string | null;

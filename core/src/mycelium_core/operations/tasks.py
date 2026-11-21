@@ -75,7 +75,9 @@ class WorkDigestIn(BaseModel):
         "(2026-11-09T00:00:00+01:00): where a day starts is the reader's call."
     )
     start_to: AwareDatetime = Field(
-        description="End of the window, exclusive, same form. At most 92 days after start_from."
+        description="End of the window, exclusive, same form. At most 92 calendar days "
+        "after start_from, each end read on its own offset's clock, so a quarter across a "
+        "daylight-saving change is one call."
     )
     client_tag_id: uuid.UUID | None = Field(
         default=None, description="Only the tasks of this client (its client tag)."
@@ -88,7 +90,7 @@ class WorkDigestIn(BaseModel):
     def _window(self) -> Self:
         if self.start_to <= self.start_from:
             raise ValueError("start_to must be after start_from")
-        if self.start_to - self.start_from > digest_svc.MAX_WINDOW:
+        if digest_svc.window_days(self.start_from, self.start_to) > digest_svc.MAX_WINDOW:
             raise ValueError(f"the window may span at most {digest_svc.MAX_WINDOW.days} days")
         return self
 

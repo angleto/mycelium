@@ -62,7 +62,26 @@ from mycelium_core.services import time_tracking as time_svc
 #: one call; the answer carries every comment of the window in full, and the
 #: bound keeps that proportional to a period somebody reports on rather than
 #: to the age of the workspace.
+#:
+#: Counted in calendar days on the reader's clock, by :func:`window_days`, and
+#: not as elapsed time. The longest quarter is 92 days, and in a zone with
+#: daylight saving Q4 is 92 days and one hour of elapsed time
+#: (2026-10-01T00:00+02:00 to 2027-01-01T00:00+01:00): measured as elapsed
+#: time, the bound refused the quarter it exists to admit.
 MAX_WINDOW = dt.timedelta(days=92)
+
+
+def window_days(start_from: dt.datetime, start_to: dt.datetime) -> dt.timedelta:
+    """The length of ``[start_from, start_to)`` on the reader's calendar.
+
+    Each end is read on the clock of its own offset, which is the reader's
+    wall clock at that instant: Oct 1 00:00 to Jan 1 00:00 is 92 days whatever
+    the offsets were. The offsets are the caller's to choose, so a caller can
+    stretch the elapsed span past 92 days by at most the difference between
+    two offsets, which is 28 hours (-14:00 to +14:00). That is slack on a
+    bound about the size of an answer, not a bound anyone's access rests on.
+    """
+    return start_to.replace(tzinfo=None) - start_from.replace(tzinfo=None)
 
 
 #: Activity-log actions on a task that the digest reads, and nothing else:

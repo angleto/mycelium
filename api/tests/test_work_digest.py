@@ -268,6 +268,112 @@ async def test_the_window_is_validated() -> None:
         assert r.status_code == 200, r.text
 
 
+async def test_a_quarter_across_a_daylight_saving_change_is_one_call() -> None:
+    """Q4 in Europe/Rome is 92 days and one hour of elapsed time, and the
+    bound counts calendar days on each end's own clock: the web picker builds
+    exactly this window for Oct 1 - Dec 31."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        q4 = {"start_from": "2026-10-01T00:00:00+02:00", "start_to": "2027-01-01T00:00:00+01:00"}
+        r = await c.get("/tasks/digest", headers=h, params=q4)
+        assert r.status_code == 200, r.text
+        # One calendar day more is refused, on the same offsets.
+        longer = {**q4, "start_to": "2027-01-02T00:00:00+01:00"}
+        r = await c.get("/tasks/digest", headers=h, params=longer)
+        assert r.status_code == 422, r.text
+
+
+async def _logged_at(c: AsyncClient, h: dict[str, str], task_id: str, action: str) -> dt.datetime:
+    """The instant the activity log stamped, read in the workspace's own
+    session: the log is under row-level security, closed to a session
+    with no workspace."""
+    from sqlalchemy import select
+
+    from mycelium_core.db import tenant_session
+    from mycelium_core.models.activity_log import ActivityLog
+
+    me = (await c.get("/auth/me", headers=h)).json()
+    async with tenant_session(h["X-Workspace-Id"], str(me["user_id"])) as s:
+        return (
+            await s.execute(
+                select(ActivityLog.ts).where(
+                    ActivityLog.entity == "task",
+                    ActivityLog.entity_id == uuid.UUID(task_id),
+                    ActivityLog.action == action,
+                )
+            )
+        ).scalar_one()
+
+
+async def test_an_event_at_the_exclusive_end_is_out_and_one_microsecond_later_is_in() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Edge")
+        t = await _task(c, h, "at the edge", proj)
+        created = await _logged_at(c, h, t["id"], "create")
+        tick = dt.timedelta(microseconds=1)
+
+        d = await _digest(
+            c, h, **_window(created - dt.timedelta(hours=1), created, client_tag_id=cli)
+        )
+        assert d["tasks"] == []
+        d = await _digest(
+            c, h, **_window(created - dt.timedelta(hours=1), created + tick, client_tag_id=cli)
+        )
+        assert [e["kind"] for e in d["tasks"][0]["events"]] == ["task_created"]
+
+        note = await _comment(c, h, t["id"], "written on the boundary")
+        said = dt.datetime.fromisoformat(note["created_at"])
+        d = await _digest(c, h, **_window(created + tick, said, client_tag_id=cli))
+        assert d["tasks"] == []
+        d = await _digest(c, h, **_window(created + tick, said + tick, client_tag_id=cli))
+        assert [e["text"] for e in d["tasks"][0]["events"]] == ["written on the boundary"]
+
+
+async def test_a_deleted_comment_is_not_in_the_diary() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Retract")
+        t = await _task(c, h, "commented twice", proj)
+        start = await _now()
+        await _comment(c, h, t["id"], "kept")
+        gone = await _comment(c, h, t["id"], "withdrawn")
+        r = await c.delete(
+            f"/annotations/{gone['id']}",
+            headers=h,
+            params={"expected_version": gone["version"]},
+        )
+        assert r.status_code == 200, r.text
+        end = await _now() + dt.timedelta(minutes=5)
+
+        d = await _digest(c, h, **_window(start, end, client_tag_id=cli))
+        assert [e["text"] for e in d["tasks"][0]["events"]] == ["kept"]
+
+
+async def test_hours_on_a_task_in_the_bin_are_not_reported() -> None:
+    """The time entries come from the time service, which does not know
+    about the bin: only the digest's own scope keeps the task out."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Binned")
+        kept = await _task(c, h, "still here", proj)
+        binned = await _task(c, h, "thrown away with its hours", proj)
+        week = dt.datetime(2026, 11, 2, tzinfo=UTC)
+        await _entry(c, h, kept["id"], week + dt.timedelta(days=1), 60, "kept")
+        await _entry(c, h, binned["id"], week + dt.timedelta(days=2), 45, "binned")
+        fresh = (await c.get(f"/tasks/{binned['id']}", headers=h)).json()
+        r = await c.post(
+            f"/tasks/{binned['id']}/delete",
+            headers=h,
+            json={"expected_version": fresh["version"]},
+        )
+        assert r.status_code == 200, r.text
+
+        d = await _digest(c, h, **_window(week, week + dt.timedelta(days=7), client_tag_id=cli))
+        assert [x["title"] for x in d["tasks"]] == ["still here"]
+        assert d["seconds"] == 60 * 60
+
+
 async def _assistant(c: AsyncClient, owner: dict[str, str], scope: list[str]) -> dict[str, str]:
     created = (
         await c.post(
