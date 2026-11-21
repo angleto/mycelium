@@ -3711,7 +3711,8 @@ async def worker_open(
 
     It grants nothing. A worker is a label with provenance, never an
     authorization input, and you can do exactly what you could do
-    without one.
+    without one. It answers only to the assistant that opened it: a
+    worker id another assistant opened is refused as not found.
 
     ``label`` is for a human reading a board ("verify-3", a pane name);
     it is never matched on, so two sessions may share one and still be

@@ -41,15 +41,87 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
+from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task_lease import TaskLease
 from mycelium_core.services import audit
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services.rbac import require_role
 
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
+
+
+async def caller_identity(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    token_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    """The identity behind the calling credential: token -> assistant ->
+    identity, the chain ``whoami`` walks, else the user's own identity.
+
+    A bare or legacy token has no assistant row and falls through to the
+    user, which is recorded as what it is rather than guessed at. One
+    function, because the identity recorded when a worker is opened and
+    the identity a later call is compared with must be the same answer
+    to the same question (:func:`belongs_to`).
+    """
+    identity_id: uuid.UUID | None = None
+    if token_id is not None:
+        identity_id = (
+            await session.execute(
+                select(Identity.id)
+                .select_from(AgentToken)
+                .join(Identity, Identity.ai_assistant_id == AgentToken.assistant_id)
+                .where(AgentToken.id == token_id, Identity.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+    if identity_id is None:
+        identity_id = (
+            await session.execute(
+                select(Identity.id).where(Identity.user_id == actor_id, Identity.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+    return identity_id
+
+
+def belongs_to(
+    worker: AgentWorker,
+    *,
+    actor_id: uuid.UUID,
+    identity_id: uuid.UUID | None,
+    token_id: uuid.UUID | None,
+) -> bool:
+    """Was this worker opened by the caller asking to act under it?
+
+    A worker id is visible to every member (``list_workers``), and the
+    close check records it as the session that checked the work. Accepting
+    any id in the workspace let one assistant name another assistant's
+    worker and be recorded as it, which made that record forgeable.
+
+    The binding is to the IDENTITY, not to the token. Every session of one
+    assistant shares its identity, so naming a sibling session's worker is
+    still possible, and that is the limit ADR-0072 already states: one
+    model can open two workers. The token would be finer and wrong: a
+    credential is refreshed under a running session, and the session's
+    worker must survive that.
+
+    A worker opened before the identity was recorded carries none. It is
+    matched on its user and, where both sides have one, its token: the
+    finest key it has, for the short time such a worker can still be open.
+    """
+    if worker.opened_by_user_id != actor_id:
+        return False
+    if worker.opened_by_identity_id is not None:
+        return worker.opened_by_identity_id == identity_id
+    if worker.opened_by_token_id is not None and token_id is not None:
+        return worker.opened_by_token_id == token_id
+    return True
 
 
 async def open_worker(
@@ -59,7 +131,6 @@ async def open_worker(
     actor_id: uuid.UUID,
     label: str | None = None,
     operation_id: str | None = None,
-    identity_id: uuid.UUID | None = None,
     token_id: uuid.UUID | None = None,
 ) -> AgentWorker:
     """Mint a worker for the calling session and return it.
@@ -74,8 +145,17 @@ async def open_worker(
     rather than a second worker. The uniqueness is per credential, not
     global: two different credentials may use the same key and mean
     different sessions.
+
+    Who opened it is read from the session, not taken from the caller:
+    it is what :func:`belongs_to` compares every later use with, and a
+    provenance the caller supplies is one it can choose.
     """
     await require_role(session, org_id, actor_id, Role.member)
+    if token_id is None:
+        token_id = (await caller_svc.current(session)).token_id
+    identity_id = await caller_identity(
+        session, org_id=org_id, actor_id=actor_id, token_id=token_id
+    )
     if operation_id and token_id is not None:
         existing = (
             await session.execute(

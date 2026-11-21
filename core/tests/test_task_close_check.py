@@ -298,9 +298,12 @@ async def test_pulling_straight_into_done_is_refused(_embedder: None) -> None:
 async def test_a_worker_pulling_its_work_into_checking_is_its_own_handover(
     _embedder: None,
 ) -> None:
-    """``pull(transition_to=...)`` moves the task as the worker that pulls it,
-    and the move is recorded with that worker: it cannot then close what it
-    brought to the checking station itself."""
+    """``pull(transition_to=...)`` is a take and a move, and the move is
+    recorded as the puller passing the task on, like any other handoff: the
+    puller may not close it, and another worker that takes it may.
+
+    Before, the move ran before any lease existed and recorded nobody, so
+    no agent at all could close a task pulled into checking."""
     o = await _org()
     task_id = await o.task()
     w = await o.worker("puller")
@@ -316,8 +319,117 @@ async def test_a_worker_pulling_its_work_into_checking_is_its_own_handover(
         )
     with pytest.raises(ConflictError) as exc:
         await o.move(AGENT, task_id, "closed", w)
-    assert exc.value.code == MessageCode.TASK_CLOSE_REQUIRES_CHECK
-    assert exc.value.params == {"missing": "handoff"}
+    assert exc.value.code == MessageCode.LEASE_SELF_VERIFICATION
+
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        released = (
+            await s.execute(
+                select(TaskLease.release_reason).where(
+                    TaskLease.task_id == task_id, TaskLease.holder_worker_id == w
+                )
+            )
+        ).scalars()
+        assert LeaseRelease.handoff.value in set(released)
+
+    checker = await o.worker("checker")
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        # The puller still holds it in checking; it gives it back first.
+        await leases_svc.release(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            task_id=task_id,
+            reason=LeaseRelease.explicit,
+            require_holder=False,
+        )
+    await o.take(AGENT, task_id, checker)
+    await o.move(AGENT, task_id, "closed", checker)
+
+
+async def test_the_task_records_who_handed_it_over_even_without_a_lease_row(
+    _embedder: None,
+) -> None:
+    """``tasks.handed_over_by_worker_id`` is read on its own, not only through
+    the worker's handoff leases. Every path that writes it today also writes
+    such a lease, so this state is built by hand: it is the one a lease row
+    lost to a race between the sweep and the move would leave, and the record
+    on the task must still refuse the author."""
+    from sqlalchemy import update
+
+    from mycelium_core.models.task import Task
+
+    o = await _org()
+    task_id = await o.task()
+    w = await o.worker("author")
+    await o.move(PERSON, task_id, "working")
+    await o.move(PERSON, task_id, "checking")
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        await s.execute(update(Task).where(Task.id == task_id).values(handed_over_by_worker_id=w))
+    await o.take(AGENT, task_id, w)
+    with pytest.raises(ConflictError) as exc:
+        await o.move(AGENT, task_id, "closed", w)
+    assert exc.value.code == MessageCode.LEASE_SELF_VERIFICATION
+
+
+async def _assistant_session(o: _Org, label: str) -> tuple[dict[str, str], uuid.UUID]:
+    """A session as a real assistant's MCP token: the token resolves to the
+    assistant's own identity, as the adapters publish it. Returns the
+    session and the assistant."""
+    from mycelium_core.services import ai_assistants
+
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        made = await ai_assistants.create_assistant(
+            s, org_id=o.org, actor_id=o.user, label=label, scope=["tasks:read", "tasks:write"]
+        )
+    return await _live_token_session(o, made.assistant.id), made.assistant.id
+
+
+async def _live_token_session(o: _Org, assistant_id: uuid.UUID) -> dict[str, str]:
+    from mycelium_core.models.agent_token import AgentToken
+
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        token_id = (
+            await s.execute(
+                select(AgentToken.id).where(
+                    AgentToken.assistant_id == assistant_id, AgentToken.revoked_at.is_(None)
+                )
+            )
+        ).scalar_one()
+    return {"actor_kind": "mcp_token", "actor_subject_id": str(token_id)}
+
+
+async def test_a_worker_answers_only_to_the_assistant_that_opened_it(_embedder: None) -> None:
+    """Worker ids are visible to every member. Naming another assistant's
+    worker used to be accepted, and the close recorded the caller as that
+    session: the record of who checked the work could be forged."""
+    o = await _org()
+    task_id = await o.task()
+    author = await o.worker("author")
+    await o.work_and_hand_off(task_id, author)
+    (alice, _), (bob, bob_id) = (
+        await _assistant_session(o, "alice"),
+        await _assistant_session(o, "bob"),
+    )
+    async with o.session(bob) as s:  # type: ignore[attr-defined]
+        bobs = (await workers_svc.open_worker(s, org_id=o.org, actor_id=o.user, label="b")).id
+
+    from mycelium_core.errors import NotFoundError
+    from mycelium_core.services import ai_assistants
+
+    with pytest.raises(NotFoundError) as exc:
+        await o.take(alice, task_id, bobs)
+    assert exc.value.code == MessageCode.WORKER_NOT_FOUND
+    # The assistant that opened it is unaffected, and stays so when its
+    # credential is replaced under the running session: the binding is to
+    # the assistant's identity, not to one token.
+    await o.take(bob, task_id, bobs)
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        await ai_assistants.rotate_secret(s, org_id=o.org, actor_id=o.user, assistant_id=bob_id)
+    rotated = await _live_token_session(o, bob_id)
+    assert rotated != bob
+    with pytest.raises(NotFoundError):
+        await o.move(alice, task_id, "closed", bobs)
+    await o.move(rotated, task_id, "closed", bobs)
 
 
 async def test_a_handoff_from_before_a_reopen_does_not_check_the_new_work(

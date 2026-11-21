@@ -334,12 +334,17 @@ async def test_moving_a_task_to_another_state_releases_the_possession(
             worker_id=implementer_w,
         )
 
-    rows = await _lease_rows(org, user, task_id)
-    assert len(rows) == 1
-    assert rows[0].released_at is not None
+    # Two rows: the pull is a take in ``queued`` and a move to ``working``,
+    # recorded as this worker's handoff like any other move it makes, and
+    # then the lease it held in ``working``.
+    rows = {r.state_id: r for r in await _lease_rows(org, user, task_id)}
+    assert set(rows) == {states["queued"], states["working"]}
+    assert rows[states["queued"]].release_reason == LeaseRelease.handoff.value
+    held = rows[states["working"]]
+    assert held.released_at is not None
     # ``handoff`` and not ``done``: a reader asking what this worker
     # passed on for checking must not be answered with work it finished.
-    assert rows[0].release_reason == LeaseRelease.handoff.value
+    assert held.release_reason == LeaseRelease.handoff.value
 
     # And it really is gone: renewing it now says so rather than
     # quietly succeeding.

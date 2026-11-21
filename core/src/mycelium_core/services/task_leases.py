@@ -50,13 +50,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mycelium_core.config import get_settings
 from mycelium_core.errors import ConflictError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
-from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.user import User
+from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import audit
 from mycelium_core.services import caller as caller_svc
@@ -141,8 +140,8 @@ async def resolve_holder(
     sessions one holder -- the very failure the mechanism exists to
     prevent, reintroduced by its own default.
 
-    A worker id that does not resolve, or that has been closed, is
-    refused rather than ignored. A caller that believes it holds a
+    A worker id that does not resolve, that has been closed, or that
+    another caller opened, is refused rather than ignored. A caller that believes it holds a
     session and does not is about to take a lease under an identity it
     cannot renew.
     """
@@ -152,32 +151,21 @@ async def resolve_holder(
     # with the token as subject, and that agent was held as a person.
     token_id = caller.token_id
 
-    identity_id: uuid.UUID | None = None
-    if token_id is not None:
-        # token -> assistant -> identity, the chain ``whoami`` walks. A
-        # bare/legacy token has no assistant row and yields nothing,
-        # which is recorded as nothing rather than guessed at.
-        identity_id = (
-            await session.execute(
-                select(Identity.id)
-                .select_from(AgentToken)
-                .join(Identity, Identity.ai_assistant_id == AgentToken.assistant_id)
-                .where(AgentToken.id == token_id, Identity.org_id == org_id)
-            )
-        ).scalar_one_or_none()
-    if identity_id is None:
-        identity_id = (
-            await session.execute(
-                select(Identity.id).where(Identity.user_id == actor_id, Identity.org_id == org_id)
-            )
-        ).scalar_one_or_none()
+    identity_id = await workers_svc.caller_identity(
+        session, org_id=org_id, actor_id=actor_id, token_id=token_id
+    )
 
     if worker_id is not None:
         # Checked here, once, rather than in each caller. A closed worker
         # has already given its work back; taking new work under it would
         # put a lease on a session that has announced it is gone.
         worker = await workers_svc.get_worker(session, org_id=org_id, worker_id=worker_id)
-        if worker.closed_at is not None:
+        # Another caller's worker is refused as not found, the same answer
+        # as an id that does not exist: acting under it would record this
+        # caller as that session (``workers_svc.belongs_to``).
+        if worker.closed_at is not None or not workers_svc.belongs_to(
+            worker, actor_id=actor_id, identity_id=identity_id, token_id=token_id
+        ):
             raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
         await workers_svc.touch(session, worker_id=worker_id)
 
@@ -191,6 +179,19 @@ async def resolve_holder(
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
+
+
+async def _ends_work(session: AsyncSession, state_id: uuid.UUID) -> bool:
+    """Does entering this state end the work: terminal, or declared done
+    (``closes_work``)? The same two flags ``tasks.set_state`` reads."""
+    row = (
+        await session.execute(
+            select(WorkflowState.is_terminal, WorkflowState.closes_work).where(
+                WorkflowState.id == state_id
+            )
+        )
+    ).one_or_none()
+    return row is not None and bool(row[0] or row[1])
 
 
 def _deadline(now: dt.datetime, ttl_seconds: int | None) -> dt.datetime:
@@ -676,6 +677,26 @@ async def pull(
         if transition_to is not None and transition_to != task.state_id:
             from mycelium_core.services import tasks as tasks_svc
 
+            if not await _ends_work(session, transition_to):
+                # Taken where it was found, then moved: the same two acts as
+                # take and set_state, so the move is recorded as this
+                # worker passing the task on, a handoff lease and
+                # ``handed_over_by_worker_id``, like any other. Moving it
+                # before any lease existed recorded nobody, and a task
+                # pulled into a checking station could then be closed by no
+                # agent at all. A move that ends the work is left without a
+                # lease on purpose: ``assert_may_close`` must find none, and
+                # refuse the take-and-close in one call.
+                await _insert_lease(
+                    session,
+                    org_id=org_id,
+                    task_id=task.id,
+                    state_id=task.state_id,
+                    holder=holder,
+                    now=now,
+                    expires_at=_deadline(now, ttl_seconds),
+                    fence=await _next_fence(session, task.id),
+                )
             await tasks_svc.set_state(
                 session,
                 org_id=org_id,

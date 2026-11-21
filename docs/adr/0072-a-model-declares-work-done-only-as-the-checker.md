@@ -147,6 +147,20 @@ inline button), a Telegram turn closes nothing that needs a check.
 The same model can open a second worker and check its own work. On the
 agent side this is hygiene, not evidence of independence.
 
+A worker answers only to the identity that opened it (an assistant's, or
+a person's). Until 2026-11-21 any worker id of the workspace was accepted,
+and the ids are listed to every member, so one assistant could name
+another's worker and be recorded as the session that checked the work.
+The binding is to the identity and not to the token, because a credential
+is replaced under a running session. Sessions of the same assistant share
+the identity, so the limit above is unchanged.
+
+`pull` with `transition_to` is a take followed by a move, and the move is
+recorded as the puller's handoff like any other. Before that date it ran
+before any lease existed and recorded nobody, so a task pulled into a
+checking station could be closed by no agent. A pull whose move ends the
+work is still refused, as rule 1 requires.
+
 Rule 3 does not tell a handoff to a working station from a handoff to a
 checking one. Suppose a worker takes a task in `todo`, moves it to
 `in_progress` and stops (its session died, say). Another worker that picks
