@@ -1016,10 +1016,11 @@ async def assert_may_close(
       station (``workflow_states.checks_work``): the check is of work
       somebody else passed on for checking, in this round. A handoff from before the task was
       last reopened does not count; the work since then is unchecked. A
-      person moving the task does not count, and that is a choice, not an
-      oversight: counting it let a worker take a task the person had
-      queued, do it and close it.
-      Work a person did and an agent checked is closed by the person.
+      person moving the task with no worker names no author, so it does not
+      count: counting it let a worker take a task the person had queued, do
+      it and close it. Work a person moved by hand and an agent checked is
+      closed by the person. A person who hands it over through a worker of
+      their own is its author like anyone else, and the checker closes it.
 
     What it does not prove: the same model can open a second worker and
     check its own work. On the agent side this is hygiene, not evidence of

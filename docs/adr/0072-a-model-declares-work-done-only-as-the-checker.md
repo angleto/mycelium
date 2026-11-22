@@ -139,12 +139,19 @@ workflow whose finished state is an ordinary one and points the project at
 it. Telling such a workflow apart from a legitimate one is the question
 the guard exists not to ask a model.
 
-**Counting a person's move as the handover.** A person moving a task into
-a working state and a person moving it into a checking state are the same
-write. Only the workflow's prose says which station is which. Counting the
-move let a worker take a task the person had queued, do it and close it,
-which is the case the rule exists for. Work a person did and an agent
-checked is therefore closed by the person, and the refusal says so.
+**Counting a person's move without a worker as the handover.** Before the
+station was an attribute, a person moving a task into a working state and
+into a checking state were the same write, and counting it let a worker take
+a task the person had queued, do it and close it, which is the case the rule
+exists for. The station is stated now, but a move with no worker still
+records nobody: the guard reads a worker as the author, and there is none to
+read. Work a person moved by hand and an agent checked is closed by the
+person, and the refusal says so. A person who passes work on through a
+worker of their own is its author like any other: the move into the station
+records that worker, and the agent that checks the work closes it. The rule
+exists so that a model does not close its own unchecked work, and this work
+is not the model's; a model cannot forge the case, because it cannot act
+under the person's worker.
 
 **Leaving the station implicit**, which this ADR did until 2026-11-22. The
 objection to a second attribute was that a project override which forgot
@@ -191,7 +198,17 @@ recorded as the puller's handoff like any other. Before 2026-11-21 it ran
 before any lease existed and recorded nobody, so a task pulled into a
 checking station could be closed by no agent. A pull whose move ends the
 work is still refused, as rule 1 requires. A pull into a working state
-records no handoff, because the state is not a station.
+records no handoff, because the state is not a station. A pull with
+`transition_to` a station records the handoff even though nothing was done
+between the take and the move: the guard sees who handed the task over and
+who closes it, not whether work happened in between, and a check of nothing
+is left to the checker to notice.
+
+Between migration 0030 and the rollout of the code that reads it, pods still
+running the previous release record a handoff into any state, and their guard
+accepts any handoff as before. A value written in that window into a state
+that is not a station survives the migration's cleanup, and becomes evidence
+if a person flags that state later. The window lasts as long as the rollout.
 
 The stdio MCP transport opens its session as `human_api` with no subject,
 because only a person's session token may open it. It is a person to this

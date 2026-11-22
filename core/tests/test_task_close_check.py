@@ -513,10 +513,9 @@ async def test_moving_a_task_off_a_dead_session_is_not_its_handoff(_embedder: No
     assert exc.value.params == {"missing": "handoff"}
 
 
-async def test_work_a_person_handed_over_is_closed_by_the_person(_embedder: None) -> None:
-    """A person's move into the checking station is the same write as a move
-    into a working one, so it is not taken as a handover: the agent checks,
-    and the person closes."""
+async def test_work_a_person_moved_by_hand_is_closed_by_the_person(_embedder: None) -> None:
+    """A person's move with no worker names nobody as the author, so it is not
+    taken as a handover: the agent checks, and the person closes."""
     o = await _org()
     task_id = await o.task()
     checker = await o.worker("checker")
@@ -527,6 +526,23 @@ async def test_work_a_person_handed_over_is_closed_by_the_person(_embedder: None
         await o.move(AGENT, task_id, "closed", checker)
     assert exc.value.params == {"missing": "handoff"}
     await o.move(PERSON, task_id, "closed")
+
+
+async def test_work_a_person_handed_over_through_a_worker_is_closed_by_the_checker(
+    _embedder: None,
+) -> None:
+    """A person who passes work into the station through a worker of their own
+    is its author like any other: the work is not the model's, so the agent
+    that checks it closes it."""
+    o = await _org()
+    task_id = await o.task()
+    author = await o.worker("author", PERSON)
+    checker = await o.worker("checker")
+    await o.move(PERSON, task_id, "working")
+    await o.take(PERSON, task_id, author)
+    await o.move(PERSON, task_id, "checking", author)
+    await o.take(AGENT, task_id, checker)
+    await o.move(AGENT, task_id, "closed", checker)
 
 
 async def test_a_person_closes_directly(_embedder: None) -> None:
