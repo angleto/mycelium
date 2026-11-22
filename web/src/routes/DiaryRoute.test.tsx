@@ -143,7 +143,23 @@ describe('digestWindow', () => {
     expect(new Date(w.start_from).getTime()).toBe(new Date(2026, 10, 9).getTime())
     expect(new Date(w.start_to).getTime()).toBe(new Date(2026, 10, 16).getTime())
     // An offset is always present: the server refuses a naive instant.
-    expect(w.start_from.endsWith('Z')).toBe(true)
+    expect(w.start_from).toMatch(/[+-]\d\d:\d\d$/)
+  })
+
+  it('writes each end with its own local offset, so a quarter across DST is 92 days', () => {
+    // The server counts wall-clock days from each end's offset. In UTC the
+    // Q4 of Europe/Rome was 92 days and one hour, and it was refused.
+    // stubEnv assigns process.env.TZ, and Node re-reads the zone on that.
+    vi.stubEnv('TZ', 'Europe/Rome')
+    try {
+      const w = digestWindow('2026-10-01', '2026-12-31')!
+      expect(w).toEqual({
+        start_from: '2026-10-01T00:00:00+02:00',
+        start_to: '2027-01-01T00:00:00+01:00',
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('refuses an inverted or unparseable range', () => {
@@ -174,7 +190,7 @@ describe('DiaryRoute', () => {
     const host = await render()
     expect(digestCalls.length).toBeGreaterThan(0)
     const first = digestCalls[digestCalls.length - 1]
-    expect(first.get('start_from')).toMatch(/Z$/)
+    expect(first.get('start_from')).toMatch(/[+-]\d\d:\d\d$/)
     expect(first.get('client_tag_id')).toBeNull()
     const days =
       (new Date(first.get('start_to')!).getTime() - new Date(first.get('start_from')!).getTime()) /

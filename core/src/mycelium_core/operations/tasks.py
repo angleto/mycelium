@@ -71,8 +71,9 @@ async def unpin(ctx: OpCtx, p: TaskPinIn) -> TaskPinOut:
 
 class WorkDigestIn(BaseModel):
     start_from: AwareDatetime = Field(
-        description="Start of the window, inclusive. ISO-8601 with a UTC offset "
-        "(2026-11-09T00:00:00+01:00): where a day starts is the reader's call."
+        description="Start of the window, inclusive. ISO-8601 with a UTC offset between "
+        "-12:00 and +14:00 (2026-11-09T00:00:00+01:00): where a day starts is the reader's "
+        "call."
     )
     start_to: AwareDatetime = Field(
         description="End of the window, exclusive, same form. At most 92 calendar days "
@@ -90,6 +91,10 @@ class WorkDigestIn(BaseModel):
     def _window(self) -> Self:
         if self.start_to <= self.start_from:
             raise ValueError("start_to must be after start_from")
+        if not (
+            digest_svc.offset_is_real(self.start_from) and digest_svc.offset_is_real(self.start_to)
+        ):
+            raise ValueError("each end's UTC offset must be between -12:00 and +14:00")
         if digest_svc.window_days(self.start_from, self.start_to) > digest_svc.MAX_WINDOW:
             raise ValueError(f"the window may span at most {digest_svc.MAX_WINDOW.days} days")
         return self

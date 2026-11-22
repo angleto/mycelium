@@ -71,15 +71,28 @@ from mycelium_core.services import time_tracking as time_svc
 MAX_WINDOW = dt.timedelta(days=92)
 
 
+#: The offsets a place on Earth uses (UTC-12:00 to UTC+14:00). ISO 8601 and
+#: Python accept up to 23:59 either way, and an end outside this range
+#: describes no reader's clock.
+MIN_OFFSET = dt.timedelta(hours=-12)
+MAX_OFFSET = dt.timedelta(hours=14)
+
+
+def offset_is_real(at: dt.datetime) -> bool:
+    off = at.utcoffset()
+    return off is not None and MIN_OFFSET <= off <= MAX_OFFSET
+
+
 def window_days(start_from: dt.datetime, start_to: dt.datetime) -> dt.timedelta:
     """The length of ``[start_from, start_to)`` on the reader's calendar.
 
     Each end is read on the clock of its own offset, which is the reader's
     wall clock at that instant: Oct 1 00:00 to Jan 1 00:00 is 92 days whatever
-    the offsets were. The offsets are the caller's to choose, so a caller can
-    stretch the elapsed span past 92 days by at most the difference between
-    two offsets, which is 28 hours (-14:00 to +14:00). That is slack on a
-    bound about the size of an answer, not a bound anyone's access rests on.
+    the offsets were. The offsets are the caller's to choose, within the range
+    :func:`offset_is_real` admits, so a caller can stretch the elapsed span
+    past 92 days by at most the difference between two such offsets: 26 hours
+    (-12:00 to +14:00). That is slack on a bound about the size of an answer,
+    not a bound anyone's access rests on.
     """
     return start_to.replace(tzinfo=None) - start_from.replace(tzinfo=None)
 

@@ -20,8 +20,25 @@ function parseYmd(s: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : null
 }
 
+/** An instant as ISO 8601 with the browser's own offset AT THAT INSTANT,
+ *  e.g. `2026-10-01T00:00:00+02:00`. Not `toISOString()`, which writes UTC:
+ *  the server bounds a window in wall-clock days, read from each end's own
+ *  offset, and two ends in UTC make a quarter across a daylight saving
+ *  change 92 days and an hour, which it refuses. */
+function localIso(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const off = -d.getTimezoneOffset()
+  const sign = off >= 0 ? '+' : '-'
+  const abs = Math.abs(off)
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  )
+}
+
 /** The half-open instant window `[from 00:00, day after to 00:00)` in the
- *  browser's timezone, as ISO strings with an offset (UTC). The server
+ *  browser's timezone, each end with its own local offset. The server
  *  refuses a window without one: where a day starts is the reader's call,
  *  and the reader is here. Null for an unparseable or inverted range. */
 export function digestWindow(
@@ -34,7 +51,7 @@ export function digestWindow(
   const start = new Date(a[0], a[1], a[2], 0, 0, 0, 0)
   const end = new Date(b[0], b[1], b[2] + 1, 0, 0, 0, 0)
   if (!(end > start)) return null
-  return { start_from: start.toISOString(), start_to: end.toISOString() }
+  return { start_from: localIso(start), start_to: localIso(end) }
 }
 
 export async function fetchWorkDigest(q: {

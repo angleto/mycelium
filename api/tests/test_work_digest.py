@@ -12,6 +12,7 @@ leaks a title, and the MCP tool is the same operation.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
 from typing import Any
 
@@ -270,8 +271,10 @@ async def test_the_window_is_validated() -> None:
 
 async def test_a_quarter_across_a_daylight_saving_change_is_one_call() -> None:
     """Q4 in Europe/Rome is 92 days and one hour of elapsed time, and the
-    bound counts calendar days on each end's own clock: the web picker builds
-    exactly this window for Oct 1 - Dec 31."""
+    bound counts calendar days on each end's own clock. The web picker builds
+    exactly this window for Oct 1 - Dec 31 (web/src/routes/DiaryRoute.test.tsx
+    asserts it in Europe/Rome); until 2026-11-22 it sent both ends in UTC and
+    the quarter was refused."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         h = await _owner(c)
         q4 = {"start_from": "2026-10-01T00:00:00+02:00", "start_to": "2027-01-01T00:00:00+01:00"}
@@ -518,3 +521,158 @@ async def test_an_accepted_suggestion_is_a_description_edit_not_a_comment() -> N
         )
         assert [e["kind"] for e in d["tasks"][0]["events"]] == ["description_edited"]
         assert d["tasks"][0]["description"] == "ship on friday 30 October"
+
+
+async def test_an_offset_no_clock_on_earth_uses_is_refused() -> None:
+    """ISO 8601 admits offsets up to 23:59 either way. Accepted, they let the
+    elapsed span exceed the 92-day bound by almost two days."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        for start, end in (
+            ("2026-01-01T00:00:00+23:59", "2026-04-03T00:00:00-23:59"),
+            ("2026-01-01T00:00:00+14:01", "2026-01-02T00:00:00+14:01"),
+            ("2026-01-01T00:00:00-12:01", "2026-01-02T00:00:00-12:01"),
+        ):
+            r = await c.get(
+                "/tasks/digest", headers=h, params={"start_from": start, "start_to": end}
+            )
+            assert r.status_code == 422, (start, r.text)
+        r = await c.get(
+            "/tasks/digest",
+            headers=h,
+            params={
+                "start_from": "2026-01-01T00:00:00+14:00",
+                "start_to": "2026-04-03T00:00:00-12:00",
+            },
+        )
+        assert r.status_code == 200, r.text
+
+
+async def test_only_billable_time_counts_as_billable() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Bill")
+        t = await _task(c, h, "billed", proj)
+        start = await _now() - dt.timedelta(hours=3)
+        await _entry(c, h, t["id"], start, 30, "billable")
+        r = await c.post(
+            "/time/entries",
+            headers=h,
+            json={
+                "task_id": t["id"],
+                "started_at": (start + dt.timedelta(hours=1)).isoformat(),
+                "ended_at": (start + dt.timedelta(hours=1, minutes=20)).isoformat(),
+                "memo": "internal",
+                "billable": False,
+            },
+        )
+        assert r.status_code == 200, r.text
+        d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
+        (task,) = d["tasks"]
+        assert (task["seconds"], task["billable_seconds"]) == (50 * 60, 30 * 60)
+        assert (d["seconds"], d["billable_seconds"]) == (50 * 60, 30 * 60)
+        assert [e["billable"] for e in task["events"] if e["kind"] == "time_entry"] == [
+            True,
+            False,
+        ]
+
+
+async def test_an_archived_task_is_kept_and_says_so() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Arch")
+        start = await _now()
+        t = await _task(c, h, "archived one", proj)
+        r = await c.post(
+            f"/tasks/{t['id']}/archive", headers=h, json={"expected_version": t["version"]}
+        )
+        assert r.status_code == 200, r.text
+        d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
+        assert [(x["title"], x["is_archived"]) for x in d["tasks"]] == [("archived one", True)]
+
+
+async def test_terminal_state_order_and_reply_are_reported() -> None:
+    """The newest activity first; a finished task says it is finished; a
+    reply names the comment it answers."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Order")
+        start = await _now()
+        older = await _task(c, h, "older", proj)
+        newer = await _task(c, h, "newer", proj)
+        states = {
+            s["name"]: s["id"]
+            for s in (await c.get(f"/tasks/{older['id']}/states", headers=h)).json()
+        }
+        version = older["version"]
+        for st in ("in_progress", "done"):
+            r = await c.post(
+                f"/tasks/{older['id']}/state",
+                headers=h,
+                json={"expected_version": version, "state_id": states[st]},
+            )
+            assert r.status_code == 200, r.text
+            version = r.json()["version"]
+        first = await _comment(c, h, newer["id"], "a question")
+        r = await c.post(
+            "/annotations/comment",
+            headers=h,
+            json={
+                "doc_kind": "task_description",
+                "doc_id": newer["id"],
+                "body": "the answer",
+                "parent_id": first["id"],
+            },
+        )
+        assert r.status_code == 200, r.text
+        d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
+        assert [x["title"] for x in d["tasks"]] == ["newer", "older"]
+        by_title = {x["title"]: x for x in d["tasks"]}
+        assert by_title["older"]["state_is_terminal"] is True
+        assert by_title["newer"]["state_is_terminal"] is False
+        comments = [e for e in by_title["newer"]["events"] if e["kind"] == "comment"]
+        assert [(e["text"], e["reply_to"]) for e in comments] == [
+            ("a question", None),
+            ("the answer", first["id"]),
+        ]
+
+
+async def test_re_entering_the_same_state_is_not_a_transition() -> None:
+    """A write that sets the state a task is already in leaves a log row
+    with the same state on both sides. It is not progress."""
+    from sqlalchemy import create_engine, text
+
+    from mycelium_core.config import get_settings
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Same")
+        t = await _task(c, h, "stays", proj)
+        start = await _now()
+        eng = create_engine(get_settings().database_url_sync)
+        try:
+            with eng.begin() as conn:
+                row = conn.execute(
+                    text("SELECT org_id, state_id, owner_id FROM tasks WHERE id = :t"),
+                    {"t": t["id"]},
+                ).one()
+                conn.execute(
+                    text(
+                        "INSERT INTO activity_log (id, org_id, actor_id, entity, entity_id, "
+                        "action, diff, ts) VALUES (gen_random_uuid(), :o, :a, 'task', :t, "
+                        "'set_state', CAST(:d AS jsonb), clock_timestamp())"
+                    ),
+                    {
+                        "o": row.org_id,
+                        "a": row.owner_id,
+                        "t": t["id"],
+                        "d": json.dumps(
+                            {"from_state_id": str(row.state_id), "state_id": str(row.state_id)}
+                        ),
+                    },
+                )
+        finally:
+            eng.dispose()
+        await _comment(c, h, t["id"], "so the task is listed")
+        d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
+        assert [e["kind"] for e in d["tasks"][0]["events"]] == ["comment"]

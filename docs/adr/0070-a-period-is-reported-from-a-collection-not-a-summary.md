@@ -35,10 +35,14 @@ The existing reads could not do it together. Measured on 2026-11-16:
 
 1. **One read, `tasks.work_digest`**, bound as `GET /tasks/digest` and as the
    MCP tool `work_digest`. It takes a half-open window `[start_from,
-   start_to)` whose ends must carry a UTC offset, at most 92 calendar days
-   long, each end read on its own offset's clock (so Q4 across the end of
-   daylight saving, 92 days and one hour of elapsed time, is one call), and a
-   client tag, a project tag, or neither (the whole workspace). It answers
+   start_to)` whose ends must carry a UTC offset between -12:00 and +14:00,
+   at most 92 calendar days long, each end read on its own offset's clock (so
+   Q4 across the end of daylight saving, 92 days and one hour of elapsed time,
+   is one call), and a client tag, a project tag, or neither (the whole
+   workspace). The web app sends each end with the browser's offset at that
+   instant; sending both in UTC turned that quarter back into 92 days and an
+   hour, refused. The offsets are the caller's, so the elapsed span can exceed
+   92 days by at most 26 hours. It answers
    every task of that scope with something in the window, most recent
    activity first, each with its events in order and its hours.
 
