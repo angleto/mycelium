@@ -162,6 +162,30 @@ describe('digestWindow', () => {
     }
   })
 
+  it.each([
+    // A change of clock at the midnight that ends the range: the end is the
+    // close of the last day, on that day's clock, not 01:00 on the next.
+    ['America/Santiago', '2025-06-07', '2025-09-06', '2025-06-07T00:00:00-04:00', '2025-09-07T00:00:00-04:00'],
+    // The same at the start: midnight does not exist, the day begins at 01:00.
+    ['America/Santiago', '2025-09-07', '2025-09-08', '2025-09-07T01:00:00-03:00', '2025-09-09T00:00:00-03:00'],
+    // Offsets that are not whole hours keep their minutes.
+    ['Asia/Kathmandu', '2026-01-01', '2026-01-01', '2026-01-01T00:00:00+05:45', '2026-01-02T00:00:00+05:45'],
+    ['Pacific/Chatham', '2026-07-01', '2026-07-01', '2026-07-01T00:00:00+12:45', '2026-07-02T00:00:00+12:45'],
+    ['America/St_Johns', '2026-01-01', '2026-01-01', '2026-01-01T00:00:00-03:30', '2026-01-02T00:00:00-03:30'],
+    ['UTC', '2026-01-01', '2026-01-01', '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00'],
+  ])('in %s, %s..%s is %s .. %s', (tz, from, to, start, end) => {
+    vi.stubEnv('TZ', tz)
+    try {
+      const w = digestWindow(from, to)!
+      expect(w).toEqual({ start_from: start, start_to: end })
+      // Each string names the instant the browser means by that midnight.
+      const [y, m, d] = to.split('-').map(Number)
+      expect(Date.parse(w.start_to)).toBe(new Date(y, m - 1, d + 1).getTime())
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('refuses an inverted or unparseable range', () => {
     expect(digestWindow('2026-11-15', '2026-11-09')).toBeNull()
     expect(digestWindow('', '2026-11-09')).toBeNull()

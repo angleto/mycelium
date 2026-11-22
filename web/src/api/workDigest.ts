@@ -20,27 +20,40 @@ function parseYmd(s: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : null
 }
 
-/** An instant as ISO 8601 with the browser's own offset AT THAT INSTANT,
- *  e.g. `2026-10-01T00:00:00+02:00`. Not `toISOString()`, which writes UTC:
- *  the server bounds a window in wall-clock days, read from each end's own
- *  offset, and two ends in UTC make a quarter across a daylight saving
- *  change 92 days and an hour, which it refuses. */
-function localIso(d: Date): string {
+/** An instant as ISO 8601, written on the clock whose UTC offset is
+ *  `offsetMin`, e.g. `2026-10-01T00:00:00+02:00`. The wall time is derived
+ *  from the instant and that offset, never read from the local getters, so
+ *  the string names exactly the instant whatever the offset is (a zone's
+ *  historic offset with seconds is truncated by `getTimezoneOffset`, and
+ *  pairing it with local fields would move the instant). Not
+ *  `toISOString()`, which writes UTC: the server bounds a window in
+ *  wall-clock days, read from each end's own offset, and two ends in UTC
+ *  make a quarter across a daylight saving change 92 days and an hour,
+ *  which it refuses. */
+function isoOnClock(d: Date, offsetMin: number): string {
   const pad = (n: number) => String(n).padStart(2, '0')
-  const off = -d.getTimezoneOffset()
-  const sign = off >= 0 ? '+' : '-'
-  const abs = Math.abs(off)
+  const w = new Date(d.getTime() + offsetMin * 60_000)
+  const sign = offsetMin >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMin)
   return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `${w.getUTCFullYear()}-${pad(w.getUTCMonth() + 1)}-${pad(w.getUTCDate())}` +
+    `T${pad(w.getUTCHours())}:${pad(w.getUTCMinutes())}:${pad(w.getUTCSeconds())}` +
     `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
   )
 }
 
 /** The half-open instant window `[from 00:00, day after to 00:00)` in the
- *  browser's timezone, each end with its own local offset. The server
- *  refuses a window without one: where a day starts is the reader's call,
- *  and the reader is here. Null for an unparseable or inverted range. */
+ *  browser's timezone. The server refuses a window without offsets: where a
+ *  day starts is the reader's call, and the reader is here.
+ *
+ *  The start is written on the clock in force at that instant. The end is
+ *  the close of the last day, so it is written on THAT day's clock, the
+ *  offset in force just before it. They differ only when a change of clock
+ *  falls at the midnight that ends the range: in America/Santiago the
+ *  midnight of 2025-09-07 does not exist, the instant is 01:00-03:00, and
+ *  written so a 92-day range read 92 days and an hour on the server's wall
+ *  clock. The same instant is 00:00-04:00, the 24:00 of the day that ends.
+ *  Null for an unparseable or inverted range. */
 export function digestWindow(
   from: string,
   to: string,
@@ -51,7 +64,11 @@ export function digestWindow(
   const start = new Date(a[0], a[1], a[2], 0, 0, 0, 0)
   const end = new Date(b[0], b[1], b[2] + 1, 0, 0, 0, 0)
   if (!(end > start)) return null
-  return { start_from: localIso(start), start_to: localIso(end) }
+  const endClock = -new Date(end.getTime() - 1).getTimezoneOffset()
+  return {
+    start_from: isoOnClock(start, -start.getTimezoneOffset()),
+    start_to: isoOnClock(end, endClock),
+  }
 }
 
 export async function fetchWorkDigest(q: {

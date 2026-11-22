@@ -532,6 +532,12 @@ async def test_an_offset_no_clock_on_earth_uses_is_refused() -> None:
             ("2026-01-01T00:00:00+23:59", "2026-04-03T00:00:00-23:59"),
             ("2026-01-01T00:00:00+14:01", "2026-01-02T00:00:00+14:01"),
             ("2026-01-01T00:00:00-12:01", "2026-01-02T00:00:00-12:01"),
+            # Each end is checked on its own: one in range does not carry
+            # the other.
+            ("2026-01-01T00:00:00+14:01", "2026-01-02T00:00:00+00:00"),
+            ("2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+14:01"),
+            ("2026-01-01T00:00:00-12:01", "2026-01-02T00:00:00+00:00"),
+            ("2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00-12:01"),
         ):
             r = await c.get(
                 "/tasks/digest", headers=h, params={"start_from": start, "start_to": end}
@@ -676,3 +682,40 @@ async def test_re_entering_the_same_state_is_not_a_transition() -> None:
         await _comment(c, h, t["id"], "so the task is listed")
         d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
         assert [e["kind"] for e in d["tasks"][0]["events"]] == ["comment"]
+
+
+async def test_time_an_agent_logged_says_so() -> None:
+    """An entry carries who did the work, from the task's executor at the
+    time it was logged; the digest reports it as ``via_agent``."""
+    import sqlalchemy as sa
+
+    from mycelium_core.config import get_settings
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _owner(c)
+        cli, proj = await _client_and_project(c, h, "Exec")
+        mine = await _task(c, h, "by me", proj)
+        theirs = await _task(c, h, "by an agent", proj)
+        # The routing hint has no public writer; set as the scheduler's
+        # data would have it, by the owner role RLS does not filter.
+        engine = sa.create_engine(get_settings().database_url_sync)
+        try:
+            with engine.begin() as conn:
+                n = conn.execute(
+                    sa.text("UPDATE tasks SET executor_kind = 'llm_agent' WHERE id = :t"),
+                    {"t": theirs["id"]},
+                ).rowcount
+        finally:
+            engine.dispose()
+        assert n == 1
+        start = await _now() - dt.timedelta(hours=2)
+        await _entry(c, h, mine["id"], start, 10, "human")
+        await _entry(c, h, theirs["id"], start, 10, "agent")
+        d = await _digest(c, h, **_window(start, await _now(), client_tag_id=cli))
+        got = {
+            e["text"]: e["via_agent"]
+            for t in d["tasks"]
+            for e in t["events"]
+            if e["kind"] == "time_entry"
+        }
+        assert got == {"human": False, "agent": True}

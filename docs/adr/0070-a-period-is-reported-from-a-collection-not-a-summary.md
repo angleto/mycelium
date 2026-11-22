@@ -39,10 +39,14 @@ The existing reads could not do it together. Measured on 2026-11-16:
    at most 92 calendar days long, each end read on its own offset's clock (so
    Q4 across the end of daylight saving, 92 days and one hour of elapsed time,
    is one call), and a client tag, a project tag, or neither (the whole
-   workspace). The web app sends each end with the browser's offset at that
-   instant; sending both in UTC turned that quarter back into 92 days and an
-   hour, refused. The offsets are the caller's, so the elapsed span can exceed
-   92 days by at most 26 hours. It answers
+   workspace). The web app sends the start with the browser's offset at that
+   instant and the end, the close of the last day, with the offset of the day
+   that closes: where a change of clock skips the midnight after the range
+   (America/Santiago, 2025-09-07), that instant is written 00:00-04:00 rather
+   than 01:00-03:00, which read 92 days and an hour. Sending both in UTC
+   turned the DST quarter back into 92 days and an hour, refused. The offsets
+   are the caller's, so the elapsed span can exceed 92 days by at most 26
+   hours. It answers
    every task of that scope with something in the window, most recent
    activity first, each with its events in order and its hours.
 
