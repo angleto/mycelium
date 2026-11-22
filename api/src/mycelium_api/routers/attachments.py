@@ -35,6 +35,9 @@ def att_out(a: svc.AttachmentMeta | Attachment) -> AttachmentOut:
         mime_type=a.mime_type,
         size_bytes=a.size_bytes,
         created_at=a.created_at,
+        markdown_ref=svc.markdown_ref(
+            attachment_id=a.id, filename=a.filename, mime_type=a.mime_type
+        ),
     )
 
 

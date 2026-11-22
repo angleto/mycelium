@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import mimetypes
 import os
 import shutil
 import subprocess
@@ -17,11 +16,11 @@ from typing import Any
 import typer
 
 from mycelium_cli.cmds._common import (
-    attachment_markdown_ref,
     client,
     get_json,
     resolve_id,
     short_id,
+    upload_attachments,
 )
 from mycelium_cli.completion import complete_note_id, complete_task_id
 from mycelium_cli.http import CLIError, raise_for_response
@@ -379,22 +378,21 @@ def tag_rm(note_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -
 @attach_app.command("add")
 def attach_add(
     note_id: str = typer.Argument(..., autocompletion=complete_note_id),
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    paths: list[Path] = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="One or more files."
+    ),
 ) -> None:
-    """Upload a file (image, PDF, ...) as an attachment on a note."""
+    """Upload one or more files as attachments on a note, printing a
+    paste-ready markdown reference for each."""
     with client() as c:
         full = _resolve_note(c, note_id)
-        with path.open("rb") as fh:
-            files = {"file": (path.name, fh, _guess_mime(path))}
-            res = get_json(c.post(f"/notes/{full}/attachments", files=files))
-    ref = attachment_markdown_ref(res)
-    if isinstance(res, dict):
-        res["markdown_ref"] = ref
+        uploaded = upload_attachments(c, collection="notes", parent_id=full, paths=paths)
     if json_mode():
-        emit_json(res)
+        emit_json(uploaded)
         return
-    success(f"uploaded '{path.name}' to note {short_id(full)}")
-    typer.echo(f"markdown: {ref}")
+    for att in uploaded:
+        success(f"uploaded '{att['filename']}' to note {short_id(full)}")
+        typer.echo(f"markdown: {att['markdown_ref']}")
 
 
 @attach_app.command("list")
@@ -1115,10 +1113,6 @@ def _build_record_cmd(recorder: str, out_path: Path, *, seconds: int | None) -> 
         cmd += ["-t", str(seconds)]
     cmd += ["-ac", "1", "-ar", "16000", str(out_path)]
     return cmd
-
-
-def _guess_mime(path: Path) -> str:
-    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
 def _truncate(s: str, n: int) -> str:

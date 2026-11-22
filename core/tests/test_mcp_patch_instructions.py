@@ -10,6 +10,7 @@ target ids are enough: ``mint`` does not require the resource to exist.
 
 from __future__ import annotations
 
+import shlex
 import uuid
 from typing import Any
 
@@ -62,11 +63,78 @@ async def test_upload_attachment_capability_recipe() -> None:
     out = await mcp_server.upload_attachment_capability(
         token=token, org_id=str(org), parent_kind="task", parent_id=str(tid)
     )
-    _assert_capability_curl(out, method="POST", token=token)
-    assert f"/api/tasks/{tid}/attachments" in out["endpoint"]
-    assert "-X POST" in out["curl"]
-    assert "-F 'file=@<path-to-file>'" in out["curl"]
+    assert len(out["uploads"]) == 1
+    up = out["uploads"][0]
+    _assert_capability_curl(up, method="POST", token=token)
+    assert up["file"] is None
+    assert f"/api/tasks/{tid}/attachments" in up["endpoint"]
+    assert "-X POST" in up["curl"]
+    assert "-F 'file=@<path-to-file>'" in up["curl"]
     assert out["max_bytes"] == get_settings().attachment_max_bytes
+    assert token not in repr(out)
+
+
+def _form_value(curl: str) -> str:
+    """The ``-F`` value exactly as curl receives it, after the shell unquotes."""
+    argv = shlex.split(curl.replace("\\\n", " "))
+    return argv[argv.index("-F") + 1]
+
+
+async def test_upload_attachment_capability_mints_one_token_per_named_file() -> None:
+    """Four files, four single-use tokens: one token per upload, because each is
+    consumed by the first upload it authenticates. The paths come back filled
+    in and typed, so the caller runs the curls as they are."""
+    org, _user, token = await _signup()
+    tid = uuid.uuid4()
+    files = [
+        "/home/me/a/fattura.pdf",
+        "/home/me/a/scan.png",
+        "/home/me/a/estratto.pdf",
+        "/home/me/a/x.unknownext",
+    ]
+    out = await mcp_server.upload_attachment_capability(
+        token=token, org_id=str(org), parent_kind="task", parent_id=str(tid), files=files
+    )
+    uploads = out["uploads"]
+    assert [u["file"] for u in uploads] == files
+    for u in uploads:
+        _assert_capability_curl(u, method="POST", token=token)
+    assert len({u["headers"]["Authorization"] for u in uploads}) == len(files)
+    assert _form_value(uploads[0]["curl"]) == 'file=@"/home/me/a/fattura.pdf";type=application/pdf'
+    assert _form_value(uploads[1]["curl"]) == 'file=@"/home/me/a/scan.png";type=image/png'
+    # No type is guessed for an unknown extension: the server sniffs the bytes.
+    assert _form_value(uploads[3]["curl"]) == 'file=@"/home/me/a/x.unknownext"'
+
+
+async def test_upload_attachment_capability_quotes_a_hostile_path() -> None:
+    """A path is user data reaching a shell, and then curl's own ``-F`` parser,
+    which splits an unquoted value on ``;`` and ``,``. Both layers must read
+    the path back whole: the shell through ``shlex.quote``, curl through its
+    double quotes with ``\\`` and ``"`` escaped.
+
+    Observed failing (2026-11-22) with the path interpolated into single
+    quotes and left unescaped inside curl's double quotes."""
+    org, _user, token = await _signup()
+    path = """/home/me/it's a;b,"c" $(touch pwned) `id`.pdf"""
+    out = await mcp_server.upload_attachment_capability(
+        token=token, org_id=str(org), parent_kind="note", parent_id=str(uuid.uuid4()), files=[path]
+    )
+    value = _form_value(out["uploads"][0]["curl"])
+    escaped = path.replace('"', '\\"')
+    assert value == f'file=@"{escaped}";type=application/pdf'
+
+
+@pytest.mark.parametrize("files", [[], [f"/home/me/f{i}.pdf" for i in range(21)]])
+async def test_upload_attachment_capability_bounds_the_batch(files: list[str]) -> None:
+    org, _user, token = await _signup()
+    with pytest.raises(ValueError):
+        await mcp_server.upload_attachment_capability(
+            token=token,
+            org_id=str(org),
+            parent_kind="task",
+            parent_id=str(uuid.uuid4()),
+            files=files,
+        )
 
 
 async def test_upload_attachment_capability_rejects_bad_parent() -> None:

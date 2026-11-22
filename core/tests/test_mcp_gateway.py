@@ -454,6 +454,25 @@ def test_registry_and_gateway_instructions_share_a_body_not_a_convention() -> No
     assert _CALLING_REGISTRY not in (gateway.instructions or "")
 
 
+async def test_every_tool_the_instructions_name_exists() -> None:
+    """The instructions name tools as ``'name'``, and an agent goes looking for
+    each. A renamed or removed tool left there sends it after something the
+    catalogue will not find. The attachments sentence (2026-11-22) is the one
+    that made this worth a test: it is how an agent learns that files have a
+    path of their own, and it is only useful while that tool is real."""
+    import re
+
+    from mycelium_mcp.server import _INSTRUCTIONS_BODY
+
+    registry = {t.name for t in await gw._registry.list_tools()}
+    quoted = set(re.findall(r"'([a-z][a-z0-9_]*)'", _INSTRUCTIONS_BODY))
+    # 'agent' is a memory channel, named the same way; it is the only quoted
+    # word that is not meant to be a tool.
+    named_tools = quoted - {"agent"}
+    assert "upload_attachment_capability" in named_tools
+    assert named_tools <= registry, sorted(named_tools - registry)
+
+
 async def test_bootstrap_payloads_never_write_a_non_meta_tool_as_a_call() -> None:
     """``whoami`` and ``help`` are what an agent reads BEFORE it has learned
     anything, and they arrive after the instructions, so a call written there

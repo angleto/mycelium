@@ -29,7 +29,7 @@ from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import embedder_available
 from mycelium_core.errors import AuthError, DomainError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.markdown_inline import md_link, md_link_label
+from mycelium_core.markdown_inline import md_link_label
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.agent_run import AgentRun
 from mycelium_core.models.agent_worker import AgentWorker
@@ -138,7 +138,12 @@ _INSTRUCTIONS_BODY = (
     "(ADR-0049) -- do not store scratch/session state here. NEVER write secrets, "
     "credentials, production/operator runbooks, deploy commands or personal data into "
     "this shared store (it is org+project shared, without per-actor read isolation): "
-    "keep those machine-local. The human steers and gives direction; agents execute and "
+    "keep those machine-local. FILES never travel as tool arguments: to attach local "
+    "files to a task or note, run the 'upload_attachment_capability' tool and execute "
+    "the curl commands it returns. Each carries a single-use upload token minted from "
+    "your own authenticated session, so you need no personal access token, and each "
+    "upload answers with a markdown_ref to paste. "
+    "The human steers and gives direction; agents execute and "
     "PROPOSE, never impose."
 )
 
@@ -6087,15 +6092,22 @@ def _note_part(p: Any) -> dict[str, Any]:
 
 
 # The tools a large body should have travelled through instead. Named
-# rather than described, so the hint is actionable by a model. The two
-# capability-mint tools are deliberately NOT here: whether an agent may
-# call them at all is still open (task 1428a184), and a hint that points
-# at a door about to be closed teaches the wrong habit.
+# rather than described, so the hint is actionable by a model. The
+# capability twin is named beside the recipe because the recipe needs a
+# personal access token an agent usually lacks; whether an agent may mint
+# a capability at all was settled by task 1428a184 (TTL ceiling, scope key),
+# so the hint no longer points at a door about to close. Creating a part
+# has no capability twin, so its hint names the PAT recipe and the
+# MCP-native fallback.
 # The replacement twin: a whole-body rewrite has its own recipe.
-_SET_BODY_HINT = "set_note_part_body_instructions (a token-free whole-body upload recipe)"
+_SET_BODY_HINT = (
+    "set_note_part_body_capability (a whole-body upload from a local file, "
+    "authenticated by a single-use token it mints), "
+    "or set_note_part_body_instructions if a PAT is at hand"
+)
 
 _STREAM_PART_HINT = (
-    "add_note_part_instructions (a token-free upload recipe), or "
+    "add_note_part_instructions (an upload from a local file, needs a PAT), or "
     "append_note_part (MCP-native, chunked) if there is no shell"
 )
 
@@ -7344,7 +7356,14 @@ async def upload_attachment(
     task_id: str | None = None,
     mime_type: str | None = None,
 ) -> dict[str, Any]:
-    """Attach a file (base64-encoded bytes) to a note OR a task.
+    """Attach a few KB the model wrote, as base64; files on disk: upload_attachment_capability.
+
+    Every byte of ``data_b64`` is spent as model tokens (base64 adds a third
+    on top), so this is for content the model itself produced and that weighs
+    a few KB. A file that already sits on disk, from tens of KB up, goes
+    through ``upload_attachment_capability``: a single-use token and a
+    ``curl`` that sends the bytes outside the conversation, authenticated by
+    a single-use token minted from this session (no personal access token).
 
     Exactly one of ``note_id`` / ``task_id`` must be set. ``data_b64``
     is base64 of the raw file contents; the server decodes and enforces
@@ -7379,12 +7398,8 @@ async def upload_attachment(
             mime_type=mime_type,
             data=raw,
         )
-        # The label is a filename, i.e. user data: one containing `]` used to
-        # emit a string that is not a link at all (mycelium_core.markdown_inline).
-        markdown_ref = md_link(
-            att.filename,
-            f"/attachments/{att.id}/download",
-            image=att.mime_type.startswith("image/"),
+        markdown_ref = attachments_svc.markdown_ref(
+            attachment_id=att.id, filename=att.filename, mime_type=att.mime_type
         )
         return {
             "id": str(att.id),
@@ -7407,7 +7422,14 @@ async def upload_attachment_instructions(
     task_id: str | None = None,
     mime_type: str | None = None,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...).
+    """Stream a huge file (GB, DICOM, MRI) as attachment; needs s3 and a personal access token.
+
+    Not the default path for an agent. ``upload_attachment_capability``
+    uploads any local file with a single-use token minted from the caller's
+    session (no personal access token of its own), up to the
+    workspace attachment cap; this recipe exists for files past that cap,
+    on a deployment with the s3 backend, run by a caller that already holds
+    a personal access token to put in ``$MYCELIUM_TOKEN``.
 
     ``upload_attachment`` carries the bytes as base64 inside the tool
     call, so a large file blows the context budget (a few MB of base64 is
@@ -7470,9 +7492,10 @@ async def upload_attachment_instructions(
         "notes": (
             "Streams the raw body through the backend gateway to object "
             "storage; the file is never buffered server-side and S3 is "
-            "never exposed. Fill $MYCELIUM_TOKEN with your token and "
-            "<path-to-file> with the local path. Token-free: no bytes go "
-            "through MCP."
+            "never exposed. Fill $MYCELIUM_TOKEN with a personal access "
+            "token and <path-to-file> with the local path; no bytes go "
+            "through the conversation. Without a PAT, use "
+            "upload_attachment_capability instead."
         ),
         # ``<id>`` is a placeholder the caller substitutes, so the destination
         # is built by hand; only the user-supplied label needs escaping.
@@ -7483,7 +7506,7 @@ async def upload_attachment_instructions(
 def _text_stream_recipe(
     *, url: str, org: uuid.UUID, method: str, max_bytes: int, returns: str
 ) -> dict[str, Any]:
-    """Shared shape for the TOKEN-FREE inline-body recipes: a ready-to-run
+    """Shared shape for the PAT-based inline-body recipes: a ready-to-run
     ``curl`` that streams a local UTF-8 markdown file as the raw request
     body (``--data-binary``), so the body never rides a tool argument.
     Mirrors ``upload_attachment_instructions`` but the bytes land in a
@@ -7510,8 +7533,9 @@ def _text_stream_recipe(
         "max_bytes": max_bytes,
         "notes": (
             "Streams the file as the raw request body straight into the "
-            "document's TEXT column: no bytes go through MCP (token-free) "
-            "and no S3 backend is needed. Fill $MYCELIUM_TOKEN with your token "
+            "document's TEXT column: the body never passes through the "
+            "conversation and no S3 backend is needed. Fill $MYCELIUM_TOKEN "
+            "with a personal access token "
             "and <path-to-file> with the local markdown file. On success "
             f"the endpoint returns {returns}."
         ),
@@ -7527,7 +7551,9 @@ async def add_note_part_instructions(
     lang: str | None = None,
     ord: int | None = None,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE note-part create: stream a local markdown
+    """Create a note part from a local markdown file (body kept out of the model); needs a PAT.
+
+    Streams a local markdown
     file straight into a NEW part's body instead of sending it as an
     ``add_note_part`` argument (which spends tokens proportional to the
     body size). The body rides the HTTP request body; the metadata
@@ -7568,8 +7594,9 @@ async def set_note_part_body_instructions(
     part_id: str,
     expected_version: int,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE full-body REPLACE of an existing note part:
-    stream the whole new markdown from a local file into the part's body
+    """Replace a note part body from a local file; needs a PAT, else set_note_part_body_capability.
+
+    Streams the whole new markdown from a local file into the part's body
     column without resending it as a tool argument. ``expected_version``
     is the optimistic cursor (a mismatch is stale_version -> 409); an
     empty file clears the part. For incremental growth use
@@ -7841,68 +7868,126 @@ def _text_block_segment(kind: str, resource_id: str) -> str:
     return f"{collection}/{resource_id}/{leaf}"
 
 
+#: How many uploads one ``upload_attachment_capability`` call mints. Each is a
+#: database row and an audit entry, and the TTL runs from the mint, so a batch
+#: larger than a caller can push through in ``MAX_TTL_SECONDS`` only produces
+#: expired tokens. Twenty covers the observed case (four PDFs in one go) with
+#: a wide margin; past it the caller makes a second call, which costs nothing
+#: a twenty-first token in this one would not.
+_UPLOAD_CAPABILITY_MAX_FILES = 20
+
+
+def _curl_form_file(path: str | None) -> str:
+    """The ``-F`` argument of a multipart file upload, shell-quoted.
+
+    ``None`` keeps the ``<path-to-file>`` placeholder for a caller that did
+    not name its files. A named path goes inside curl's own double quotes,
+    because curl splits an unquoted ``-F`` value on ``;`` and ``,`` (a file
+    called ``a;b.pdf`` would otherwise be read as ``a`` plus a ``b.pdf``
+    option), and the whole argument through ``shlex.quote``, because the path
+    is user data reaching a shell. ``;type=`` is added when the extension
+    names one; the server sniffs the bytes and overrides a wrong hint, so a
+    missing or wrong type costs nothing but the label curl would print."""
+    import mimetypes
+    import shlex
+
+    if path is None:
+        return "'file=@<path-to-file>'"
+    inner = path.replace("\\", "\\\\").replace('"', '\\"')
+    form = f'file=@"{inner}"'
+    mime, _enc = mimetypes.guess_type(path)
+    if mime:
+        form += f";type={mime}"
+    return shlex.quote(form)
+
+
 @mcp.tool()
 async def upload_attachment_capability(
     token: str,
     org_id: str,
     parent_kind: str,
     parent_id: str,
+    files: list[str] | None = None,
     ttl_seconds: int = 300,
 ) -> dict[str, Any]:
-    """Mint ONE single-use capability token that UPLOADS a file to a note or
-    task with NO long-lived PAT and NO ``X-Workspace-Id`` (the org is baked
-    into the token), and return a ready multipart ``curl``. The symmetric
-    counterpart of ``download_attachment_capability``.
+    """Upload a file (PDF, image, any type) from disk to a note or task: the default way to attach.
 
-    ``parent_kind`` is ``"task"`` or ``"note"``; ``parent_id`` its id. The
-    token is scoped to ``attachment:write`` on that parent and consumed on
-    the first successful upload; it expires in ``ttl_seconds`` (default
-    300). Backend-agnostic: the upload lands through the backend gateway on
-    the default ``pg`` store, so no S3 is needed and the file bytes never
-    ride a tool argument. If the agent DOES have the Mycelium CLI, prefer it:
-    there the credential never leaves the machine."""
+    Mints one single-use capability token per file, from the caller's own
+    authenticated session, and returns for each a ready multipart ``curl``
+    that carries it. The upload is authenticated like every other call; what
+    the caller does not need is a personal access token of its own, nor an
+    ``X-Workspace-Id`` (the org is baked into the token). The bytes never
+    pass through the conversation, so they cost no model tokens. The
+    symmetric counterpart of ``download_attachment_capability``.
+
+    ``parent_kind`` is ``"task"`` or ``"note"``; ``parent_id`` its id.
+    ``files`` lists the local paths to upload, up to twenty per call, and
+    each ``curl`` comes back with its path and content type filled in; omit
+    it for a single upload with a ``<path-to-file>`` placeholder. Each token
+    is scoped to ``attachment:write`` on that parent, consumed on its first
+    successful upload, and expires in ``ttl_seconds`` (default 300, at most
+    3600). The upload answers with the attachment JSON, including
+    ``markdown_ref`` to paste into a description or a note body.
+    Backend-agnostic: it lands on the default ``pg`` store, no S3 needed. If
+    the Mycelium CLI is installed, ``mycelium task attach add <id> FILE...``
+    (or ``mycelium note attach add``) does the whole round without minting
+    anything, and prints the ``markdown_ref`` of each file."""
     from mycelium_core.config import get_settings
     from mycelium_core.services import capability_tokens as cap_svc
 
     kind = parent_kind.strip().lower()
     if kind not in ("note", "task"):
         raise ValueError("parent_kind must be 'note' or 'task'")
+    if files is not None and not files:
+        raise ValueError("files, when given, must name at least one path")
+    if files is not None and len(files) > _UPLOAD_CAPABILITY_MAX_FILES:
+        raise ValueError(
+            f"at most {_UPLOAD_CAPABILITY_MAX_FILES} files per call; split the rest into another"
+        )
     pid = uuid.UUID(parent_id)
     resource_kind = cap_svc.RESOURCE_NOTE if kind == "note" else cap_svc.RESOURCE_TASK
-    async with _tenant(token, org_id) as (session, org, user):
-        grant = await cap_svc.mint(
-            session,
-            org_id=org,
-            actor_id=user,
-            action=cap_svc.ACTION_ATTACHMENT_WRITE,
-            resource_kind=resource_kind,
-            resource_id=pid,
-            ttl_seconds=ttl_seconds,
-        )
+    targets: list[str | None] = list(files) if files is not None else [None]
     settings = get_settings()
     base = settings.frontend_base_url.rstrip("/")
     collection = "notes" if kind == "note" else "tasks"
     url = f"{base}/api/{collection}/{pid}/attachments"
-    auth = f"Bearer {grant.raw}"
-    curl = (
-        f"curl -fsS -X POST '{url}' \\\n"
-        f"  -H 'Authorization: {auth}' \\\n"
-        f"  -F 'file=@<path-to-file>'"
-    )
+    uploads: list[dict[str, Any]] = []
+    async with _tenant(token, org_id) as (session, org, user):
+        for path in targets:
+            grant = await cap_svc.mint(
+                session,
+                org_id=org,
+                actor_id=user,
+                action=cap_svc.ACTION_ATTACHMENT_WRITE,
+                resource_kind=resource_kind,
+                resource_id=pid,
+                ttl_seconds=ttl_seconds,
+            )
+            auth = f"Bearer {grant.raw}"
+            uploads.append(
+                {
+                    "file": path,
+                    "endpoint": url,
+                    "method": "POST",
+                    "curl": (
+                        f"curl -fsS -X POST '{url}' \\\n"
+                        f"  -H 'Authorization: {auth}' \\\n"
+                        f"  -F {_curl_form_file(path)}"
+                    ),
+                    "headers": {"Authorization": auth},
+                    "expires_at": grant.expires_at.isoformat(),
+                }
+            )
     return {
-        "endpoint": url,
-        "method": "POST",
-        "curl": curl,
-        "headers": {"Authorization": auth},
+        "uploads": uploads,
         "max_bytes": settings.attachment_max_bytes,
-        "expires_at": grant.expires_at.isoformat(),
         "notes": (
-            "multipart/form-data upload (field 'file'); the Authorization "
-            "header carries a single-use attachment:write capability scoped to "
-            "this " + kind + ", consumed on first success. No PAT and no "
-            "X-Workspace-Id. Fill <path-to-file> with the local path. "
-            "Backend-agnostic (works on the default pg store; no S3 needed). "
-            "The bytes never pass through MCP."
+            "Run each curl once: multipart/form-data upload (field 'file'), the "
+            "Authorization header carries a single-use attachment:write "
+            "capability scoped to this " + kind + ", consumed on first success. "
+            "No PAT and no X-Workspace-Id. The response is the attachment JSON; "
+            "its markdown_ref is ready to paste. Works on the default pg store; "
+            "no S3 needed. The bytes never pass through the conversation."
         ),
     }
 
@@ -8127,7 +8212,9 @@ async def add_comment_instructions(
     parent_id: str | None = None,
     assignee_handle: str | None = None,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE inline comment: stream the comment text
+    """Add a comment whose text comes from a local file (kept out of the model); needs a PAT.
+
+    Streams the comment text
     from a local file into ``annotation.body`` instead of spending it as
     an ``add_annotation`` argument. ``doc_kind`` is ``note_part`` (doc_id
     = note-part id) or ``task_description`` (doc_id = task id);
@@ -8172,7 +8259,9 @@ async def propose_suggestion_instructions(
     rationale: str = "",
     instruction_id: str | None = None,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE suggestion: stream the PROPOSED replacement
+    """Propose a suggestion whose text comes from a local file (kept out of the model); needs a PAT.
+
+    Streams the PROPOSED replacement
     text (the large free-form field) from a local file as the request
     body; the struck ``original_text`` it replaces is a bounded query
     param (the agent already holds it, capped to keep the URL short). An
@@ -8217,7 +8306,9 @@ async def edit_annotation_body_instructions(
     annotation_id: str,
     expected_version: int,
 ) -> dict[str, Any]:
-    """Recipe for a TOKEN-FREE replace of an annotation's body (a
+    """Replace an annotation's body from a local file; needs a PAT, else set_text_block_capability.
+
+    Replaces the body of an annotation (a
     comment's text or a suggestion's rationale): stream the new text from
     a local file instead of spending it as an ``edit_annotation``
     argument. ``expected_version`` is the optimistic cursor (a mismatch is

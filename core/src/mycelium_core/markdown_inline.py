@@ -12,10 +12,10 @@ literal text ``final.pdf](/attachments/...)``. ``_sanitize_filename``
 strips path separators and leading dots only, so ``]``, ``[`` and ``\\``
 all reach the emitter intact.
 
-Mirrored, deliberately duplicated, in two other emitters that cannot
-share this module: ``web/src/lib/markdownInline.ts`` (the SPA) and
-``mycelium_cli.cmds._common`` (the CLI ships standalone, with no
-dependency on core). Change one, change all three.
+Mirrored, deliberately duplicated, in the one other emitter that cannot
+share this module: ``web/src/lib/markdownInline.ts`` (the SPA). Change one,
+change both. The CLI used to hold a third copy; since 2026-11-22 it prints
+the ``markdown_ref`` the upload response carries, built here.
 """
 
 from __future__ import annotations

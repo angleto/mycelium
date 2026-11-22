@@ -12,11 +12,11 @@ import typer
 
 from mycelium_cli.cmds import worker as worker_cmd
 from mycelium_cli.cmds._common import (
-    attachment_markdown_ref,
     client,
     get_json,
     resolve_id,
     short_id,
+    upload_attachments,
 )
 from mycelium_cli.completion import complete_task_id
 from mycelium_cli.http import CLIError
@@ -601,22 +601,21 @@ def remind_rm(
 @attach_app.command("add")
 def attach_add(
     task_id: str = typer.Argument(..., autocompletion=complete_task_id),
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    paths: list[Path] = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="One or more files."
+    ),
 ) -> None:
-    """Upload a file attachment to a task."""
+    """Upload one or more files as attachments on a task, printing a
+    paste-ready markdown reference for each."""
     with client() as c:
         full = _resolve_task(c, task_id)
-        with path.open("rb") as fh:
-            files = {"file": (path.name, fh, _guess_mime(path))}
-            res = get_json(c.post(f"/tasks/{full}/attachments", files=files))
-    ref = attachment_markdown_ref(res)
-    if isinstance(res, dict):
-        res["markdown_ref"] = ref
+        uploaded = upload_attachments(c, collection="tasks", parent_id=full, paths=paths)
     if json_mode():
-        emit_json(res)
+        emit_json(uploaded)
         return
-    success(f"uploaded '{path.name}' to task {short_id(full)}")
-    typer.echo(f"markdown: {ref}")
+    for att in uploaded:
+        success(f"uploaded '{att['filename']}' to task {short_id(full)}")
+        typer.echo(f"markdown: {att['markdown_ref']}")
 
 
 @attach_app.command("list")
@@ -965,9 +964,3 @@ def _parse_due(spec: str | None) -> dt.date | None:
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
-
-
-def _guess_mime(path: Path) -> str:
-    import mimetypes
-
-    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"

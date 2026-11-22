@@ -71,7 +71,7 @@ mycelium task edit a1b2 --description @     # opens $EDITOR pre-loaded with curr
 mycelium task tag add a1b2 urgent
 mycelium task comment add a1b2 -m "blocked on staging"
 mycelium task remind add a1b2 60            # 60 min before due
-mycelium task attach add a1b2 ./scan.pdf
+mycelium task attach add a1b2 ./scan.pdf ./referto.pdf   # one markdown ref per file
 mycelium note edit n9z3 --task -            # '-' clears the link
 
 # Reports + graph

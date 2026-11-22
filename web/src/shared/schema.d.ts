@@ -8936,6 +8936,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Markdown Ref */
+            markdown_ref: string;
         };
         /**
          * AutonomousDispatch

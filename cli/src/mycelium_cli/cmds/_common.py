@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import contextlib
-import re
+import mimetypes
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -102,31 +103,39 @@ def short_id(uid: str | None) -> str:
     return str(uid).split("-")[0]
 
 
-def attachment_markdown_ref(att: dict[str, Any]) -> str:
-    """A paste-ready markdown reference to an uploaded attachment.
+def upload_attachments(
+    c: httpx.Client, *, collection: str, parent_id: str, paths: list[Path]
+) -> list[dict[str, Any]]:
+    """Upload each file to ``/<collection>/<parent_id>/attachments`` in order
+    and return the server's attachment JSON for each.
 
-    Images become an inline embed (``![name](...)``), everything else a
-    download link (``[name](...)``). The url is the bearer-auth
-    ``/attachments/<id>/download`` route the SPA renderer and editor
-    resolve through authFetch; it is never public. Same convention the
-    web editor inserts, so a body written from the CLI/MCP renders
-    identically in the app."""
-    att_id = att.get("id", "")
-    name = att.get("filename") or "file"
-    mime = att.get("mime_type") or ""
-    url = f"/attachments/{att_id}/download"
-    bang = "!" if mime.startswith("image/") else ""
-    # The label is a filename, i.e. user data: `Report ]final.pdf` used to
-    # emit `[Report ]final.pdf](...)`, which parses as the link `[Report ]`
-    # followed by literal text. Escape `\`, then the brackets, and collapse
-    # newline runs (a blank line inside a label truncates the link).
-    #
-    # Duplicated on purpose from ``mycelium_core.markdown_inline`` and
-    # ``web/src/lib/markdownInline.ts``: the CLI ships standalone, with no
-    # dependency on core. Change one, change all three.
-    label = name.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-    label = re.sub(r"\s*[\r\n]+\s*", " ", label)
-    return f"{bang}[{label}]({url})"
+    The paste-ready ``markdown_ref`` comes from the server, which builds it in
+    one place for every surface. Until 2026-11-22 the CLI rebuilt it from the
+    id, filename and mime type with a copy of the escaping rule, kept in step
+    by a comment asking whoever changed one copy to change the others.
+
+    Stops at the first failure and raises with the files already uploaded
+    named, so a retry knows what not to send twice; uploads are not
+    idempotent, and resending a file that landed would attach it twice."""
+    done: list[dict[str, Any]] = []
+    for path in paths:
+        try:
+            with path.open("rb") as fh:
+                mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+                files = {"file": (path.name, fh, mime)}
+                res = get_json(c.post(f"/{collection}/{parent_id}/attachments", files=files))
+        except CLIError as exc:
+            landed = ", ".join(str(d.get("filename")) for d in done) or "none"
+            raise CLIError(
+                f"upload of '{path.name}' failed: {exc}", hint=f"already uploaded: {landed}"
+            ) from exc
+        if not isinstance(res, dict) or "markdown_ref" not in res:
+            raise CLIError(
+                "the server did not return markdown_ref for the upload",
+                hint="the server predates this CLI; upgrade the server",
+            )
+        done.append(res)
+    return done
 
 
 def get_json(resp: httpx.Response) -> Any:

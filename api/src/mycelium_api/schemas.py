@@ -2735,6 +2735,10 @@ class AttachmentOut(BaseModel):
     mime_type: str
     size_bytes: int
     created_at: datetime.datetime
+    # Paste-ready reference for a note body or a task description (an image
+    # embed for image/*, a link otherwise), so a caller that uploaded a file
+    # does not rebuild the download url by hand.
+    markdown_ref: str
 
 
 class AttachmentCapabilityIn(BaseModel):

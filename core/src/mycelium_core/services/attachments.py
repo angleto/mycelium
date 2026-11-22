@@ -35,6 +35,7 @@ from mycelium_core.attachment_store import (
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.markdown_inline import md_link
 from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
@@ -123,6 +124,24 @@ class AttachmentMeta:
     size_bytes: int
     created_at: datetime
     uploaded_by: uuid.UUID
+
+
+def markdown_ref(*, attachment_id: uuid.UUID, filename: str, mime_type: str) -> str:
+    """The paste-ready reference to an attachment from a note body or a task
+    description: an image embed for ``image/*``, a plain link otherwise.
+
+    One place, because two surfaces hand it out: the MCP base64 upload and the
+    REST multipart upload an agent reaches through a capability token. Before
+    this the REST response carried no reference, and an agent that uploaded
+    four PDFs had to build ``[name](/attachments/<id>/download)`` by hand for
+    each (2026-11-22). The url is the bearer-auth download route the app
+    resolves through authFetch; it is never public. The label is a filename,
+    i.e. user data, so it goes through ``md_link``, which escapes it."""
+    return md_link(
+        filename,
+        f"/attachments/{attachment_id}/download",
+        image=mime_type.startswith("image/"),
+    )
 
 
 def _sanitize_filename(name: str) -> str:

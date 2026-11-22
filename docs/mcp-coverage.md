@@ -120,7 +120,7 @@ over-fetch the org table and filter in its head.
 | `list_note_task_links` | Traverse typed note↔task links. Pass ``task_id`` to get every note |
 | `list_task_relations` | List symmetric "related task" links (a pure navigation aid, |
 | `propose_suggestion` | Propose an edit to a markdown document: replace ``original_text`` |
-| `propose_suggestion_instructions` | Recipe for a TOKEN-FREE suggestion: stream the PROPOSED replacement |
+| `propose_suggestion_instructions` | Propose a suggestion whose text comes from a local file (kept out of the model); needs a PAT. |
 | `reject_suggestion` | Reject a pending suggestion; the document body is untouched. |
 | `remove_dependency` | Remove a task dependency edge. |
 | `remove_task_relation` | Remove a symmetric task relation by its id (from |
@@ -222,7 +222,7 @@ over-fetch the org table and filter in its head.
 | Tool | Summary |
 |---|---|
 | `add_note_part` | Append a markdown block to a note (task 7070a456 Phase 3). |
-| `add_note_part_instructions` | Recipe for a TOKEN-FREE note-part create: stream a local markdown |
+| `add_note_part_instructions` | Create a note part from a local markdown file (body kept out of the model); needs a PAT. |
 | `add_note_tag` | Attach a free-form tag (generic / memory channel) to a note, |
 | `add_task_participant` | Pin an identity to an appointment-task (the task must carry |
 | `append_message` | Append a user message; returns the metered LLM reply turn. |
@@ -270,7 +270,7 @@ over-fetch the org table and filter in its head.
 | `set_note_client` | Re-point a note at a client. A note has exactly one client, so |
 | `set_note_maturity` | Manual override of a note's garden lifecycle (seed \| growing \| |
 | `set_note_part_body_capability` | Like ``set_note_part_body_instructions`` but needs NO long-lived |
-| `set_note_part_body_instructions` | Recipe for a TOKEN-FREE full-body REPLACE of an existing note part: |
+| `set_note_part_body_instructions` | Replace a note part body from a local file; needs a PAT, else set_note_part_body_capability. |
 | `set_text_block_capability` | Mint a single-use ``<kind>:write`` capability for a task description |
 | `start_conversation_session` | Start a new conversation session (a conversation Note). |
 | `start_task_on_note` | Watering: this task is the work of growing the note. Records a |
@@ -348,7 +348,7 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `add_checklist_item` | Append a checklist item to a task ("alexa, add bread to the |
 | `add_comment` | Add a comment to a task (a chronological work-diary entry on the |
-| `add_comment_instructions` | Recipe for a TOKEN-FREE inline comment: stream the comment text |
+| `add_comment_instructions` | Add a comment whose text comes from a local file (kept out of the model); needs a PAT. |
 | `append_to_comment` | Append ``text`` to the END of a comment without reading or |
 | `append_to_task_description` | Append ``text`` to ``task.description`` without first reading the |
 | `archive_task` | Archive (or unarchive with ``archived=False``) a task. |
@@ -397,9 +397,9 @@ over-fetch the org table and filter in its head.
 | `unpin_task` | Clear the person's pin on a task. Idempotent, and it works on any |
 | `update_comment` | EDIT a comment: replace its whole body. Completes the |
 | `update_task` | Edit task fields (only the given ones). ``priority`` is a |
-| `upload_attachment` | Attach a file (base64-encoded bytes) to a note OR a task. |
-| `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
-| `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
+| `upload_attachment` | Attach a few KB the model wrote, as base64; files on disk: upload_attachment_capability. |
+| `upload_attachment_capability` | Upload a file (PDF, image, any type) from disk to a note or task: the default way to attach. |
+| `upload_attachment_instructions` | Stream a huge file (GB, DICOM, MRI) as attachment; needs s3 and a personal access token. |
 | `work_digest` | What happened on the tasks of a client or project in a window: the |
 
 ### misc (29)
@@ -414,7 +414,7 @@ over-fetch the org table and filter in its head.
 | `create_recurrence` | Make a task recurring (mutually exclusive with dependencies). |
 | `delete_annotation` | Soft-delete an annotation / withdraw a pending suggestion (author |
 | `edit_annotation` | Edit an annotation's body (author or admin only). ``expected_version`` |
-| `edit_annotation_body_instructions` | Recipe for a TOKEN-FREE replace of an annotation's body (a |
+| `edit_annotation_body_instructions` | Replace an annotation's body from a local file; needs a PAT, else set_text_block_capability. |
 | `errands` | Place/context matcher: tasks for an errand run at a location and/or |
 | `extract_cluster_pattern` | Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note |
 | `help` | Answer questions about Mycelium ITSELF -- its features, configuration and |

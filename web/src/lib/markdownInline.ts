@@ -17,10 +17,10 @@
 // IS the markdown, so a reference pasted into a body is already the bytes
 // that get stored, and nothing has to recover a label back out of them.
 //
-// Mirrored, deliberately duplicated, in two other emitters that cannot
-// share this code: `mycelium_core.markdown_inline` (used by the MCP
-// `attach_file` tools) and `mycelium_cli.cmds._common` (the CLI ships
-// standalone, with no dependency on core). Change one, change all three.
+// Mirrored, deliberately duplicated, in the one other emitter that cannot
+// share this code: `mycelium_core.markdown_inline`, which builds the
+// `markdown_ref` every upload response carries (REST, MCP, and through them
+// the CLI). Change one, change both.
 
 /**
  * Escape a string for use as a markdown link/image label, i.e. the text
