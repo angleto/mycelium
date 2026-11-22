@@ -50,13 +50,25 @@ because a model asked for a check it could have skipped is the safe error.
 An edit that omits the attribute keeps the stored value, so an editor that
 does not know the flag cannot reset it.
 
+**A second state attribute, `workflow_states.checks_work`** (migration
+0030, 2026-11-22). It marks a checking station: the only state a handoff
+into counts as work passed on for a check. It is stated, never derived
+from a name, and a terminal or closing state cannot carry it (a check
+happens before the close, in a state the task then leaves). Unstated, a
+state is not a station, so a workflow that names none lets no model close
+anything and the person closes: forgetting the flag makes the guard
+stricter, never weaker. The migration flags `verify` in each workspace's
+default workflow, the one place the station was known; the workflow
+`create_default_workflow` makes has none.
+
 **The guard, `task_leases.assert_may_close`.** `set_state` calls it whenever
 a move enters a `closes_work` state, including on the pull path. A person
 and the system are not asked anything. A model needs all three of:
 
 1. a live lease on the task, held by the worker it names;
 2. no handoff of this task by that worker, ever;
-3. the task was handed into the state it is in now by another worker.
+3. the task was handed into the state it is in now by another worker, and
+   that state is a checking station (`checks_work`).
 
 **A handoff is what the holder did, and the task records the last one.**
 Leaving a state ends its lease (ADR-0063). The release is a `handoff` only
@@ -125,12 +137,14 @@ move let a worker take a task the person had queued, do it and close it,
 which is the case the rule exists for. Work a person did and an agent
 checked is therefore closed by the person, and the refusal says so.
 
-**A role on the state (`is_check_station`) to tell those two moves apart,
-for now.** It would close the limit below, at the cost of a second
-attribute every workflow must set correctly for the first to mean
-anything; a project override that forgot it would weaken the guard
-silently. It is the next step if the limit shows up in practice, not a
-rejected design.
+**Leaving the station implicit**, which this ADR did until 2026-11-22. The
+objection to a second attribute was that a project override which forgot
+it would weaken the guard silently. With the attribute defaulting to off,
+forgetting it refuses the close instead. Meanwhile the implicit rule was
+reached on the ordinary path: `pull` from `queued` into `working`
+recorded the puller's handoff, and once it let go another worker closed
+the task from `working`, checked by nobody (measured by the verifier of
+task 84311afb on 2.4.14).
 
 **Keying on the state name `done`.** The workflow is configuration and a
 project can override it. `set_state` already refuses to hardcode a state
@@ -147,28 +161,26 @@ inline button), a Telegram turn closes nothing that needs a check.
 The same model can open a second worker and check its own work. On the
 agent side this is hygiene, not evidence of independence.
 
-A worker answers only to the identity that opened it (an assistant's, or
-a person's). Until 2026-11-21 any worker id of the workspace was accepted,
-and the ids are listed to every member, so one assistant could name
-another's worker and be recorded as the session that checked the work.
-The binding is to the identity and not to the token, because a credential
-is replaced under a running session. Sessions of the same assistant share
-the identity, so the limit above is unchanged.
+A worker answers only to the credential that opened it. An assistant's token
+is bound through the assistant's identity, because its secret is replaced
+under a running session; sessions of the same assistant share it, so the
+limit above is unchanged. Any other token (the CLI's, a legacy one) is bound
+by the token itself: those credentials have only the person's identity,
+which every other credential of that person shares, and binding on it let
+one CLI token act under another's worker. A caller with no token (a person's
+session, a Telegram turn) uses only a worker no token opened. Until
+2026-11-21 any worker id of the workspace was accepted; until 2026-11-22 the
+binding was the identity for every credential, and closing a worker checked
+nothing. A model now closes only its own worker; a person closes any, which
+is how a stuck session is cleared.
 
 `pull` with `transition_to` is a take followed by a move, and the move is
-recorded as the puller's handoff like any other. Before that date it ran
+recorded as the puller's handoff like any other. Before 2026-11-21 it ran
 before any lease existed and recorded nobody, so a task pulled into a
 checking station could be closed by no agent. A pull whose move ends the
-work is still refused, as rule 1 requires.
-
-Rule 3 does not tell a handoff to a working station from a handoff to a
-checking one. Suppose a worker takes a task in `todo`, moves it to
-`in_progress` and stops (its session died, say). Another worker that picks
-it up there, does the work and closes it passes all three conditions. The
-Default workflow of this workspace allows `in_progress -> done` and
-`todo -> done`, because the person closes from there, so the case is
-reachable. Removing those arcs would close it for agents and for the person
-alike; the station role above would close it for agents alone.
+work is still refused, as rule 1 requires. A pull into a working state
+records a handoff too, and rule 3 does not count it, because the state is
+not a station.
 
 The stdio MCP transport opens its session as `human_api` with no subject,
 because only a person's session token may open it. It is a person to this

@@ -164,7 +164,12 @@ async def resolve_holder(
         # as an id that does not exist: acting under it would record this
         # caller as that session (``workers_svc.belongs_to``).
         if worker.closed_at is not None or not workers_svc.belongs_to(
-            worker, actor_id=actor_id, identity_id=identity_id, token_id=token_id
+            worker,
+            actor_id=actor_id,
+            assistant_identity_id=await workers_svc.assistant_identity(
+                session, org_id=org_id, token_id=token_id
+            ),
+            token_id=token_id,
         ):
             raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
         await workers_svc.touch(session, worker_id=worker_id)
@@ -1006,14 +1011,13 @@ async def assert_may_close(
     - no handoff of this task by that worker, ever: whoever passed the work
       on for checking is its author, and may not be its checker.
     - the task was handed into the state it is in now by another worker
-      (``tasks.handed_over_by_worker_id``): the check is of work somebody
-      else passed on, in this round. A handoff from before the task was
+      (``tasks.handed_over_by_worker_id``), and that state is a checking
+      station (``workflow_states.checks_work``): the check is of work
+      somebody else passed on for checking, in this round. A handoff from before the task was
       last reopened does not count; the work since then is unchecked. A
       person moving the task does not count, and that is a choice, not an
-      oversight: a person moving a task into a working state and a person
-      moving it into a checking one are the same write, and only the
-      workflow's prose says which is which. Counting it let a worker take a
-      task the person had queued, do it and close it.
+      oversight: counting it let a worker take a task the person had
+      queued, do it and close it.
       Work a person did and an agent checked is closed by the person.
 
     What it does not prove: the same model can open a second worker and
@@ -1044,11 +1048,24 @@ async def assert_may_close(
     ).scalar_one_or_none()
     if own_handoff is not None:
         raise ConflictError(MessageCode.LEASE_SELF_VERIFICATION)
-    handed_over_by = (
-        await session.execute(select(Task.handed_over_by_worker_id).where(Task.id == task_id))
-    ).scalar_one_or_none()
+    row = (
+        await session.execute(
+            select(Task.handed_over_by_worker_id, WorkflowState.checks_work)
+            .join(WorkflowState, WorkflowState.id == Task.state_id)
+            .where(Task.id == task_id)
+        )
+    ).one_or_none()
+    handed_over_by, at_station = (row[0], row[1]) if row is not None else (None, False)
     if handed_over_by == worker_id:
         raise ConflictError(MessageCode.LEASE_SELF_VERIFICATION)
+    # The handoff counts only into a checking station. Any other one is a
+    # worker passing work along, not up for a check: a pull from queued into
+    # working records the puller as having handed it over, and once it let
+    # go another worker could close the task from working with nothing ever
+    # checked. Which state checks is the workflow's to say
+    # (``checks_work``), never a name.
+    if not at_station:
+        raise ConflictError(MessageCode.TASK_CLOSE_REQUIRES_CHECK, missing="check_station")
     if handed_over_by is None:
         raise ConflictError(MessageCode.TASK_CLOSE_REQUIRES_CHECK, missing="handoff")
     return {

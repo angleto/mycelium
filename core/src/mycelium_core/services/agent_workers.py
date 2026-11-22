@@ -55,6 +55,28 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
+async def assistant_identity(
+    session: AsyncSession, *, org_id: uuid.UUID, token_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """The identity of the assistant a token is bound to, or None.
+
+    None for no token, and for a token bound to no assistant: a bare token
+    (the CLI's), a legacy one. Those are not an assistant's sessions, and
+    standing in the user's identity for them is what let every such
+    credential of one person name every other one's worker.
+    """
+    if token_id is None:
+        return None
+    return (
+        await session.execute(
+            select(Identity.id)
+            .select_from(AgentToken)
+            .join(Identity, Identity.ai_assistant_id == AgentToken.assistant_id)
+            .where(AgentToken.id == token_id, Identity.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+
+
 async def caller_identity(
     session: AsyncSession,
     *,
@@ -62,25 +84,15 @@ async def caller_identity(
     actor_id: uuid.UUID,
     token_id: uuid.UUID | None,
 ) -> uuid.UUID | None:
-    """The identity behind the calling credential: token -> assistant ->
-    identity, the chain ``whoami`` walks, else the user's own identity.
+    """The identity behind the calling credential, as provenance: the
+    assistant's when the token is bound to one, else the user's own.
 
-    A bare or legacy token has no assistant row and falls through to the
-    user, which is recorded as what it is rather than guessed at. One
-    function, because the identity recorded when a worker is opened and
-    the identity a later call is compared with must be the same answer
-    to the same question (:func:`belongs_to`).
+    This is what a worker records as who opened it and what a lease records
+    as its holder's identity. It is NOT the binding a later call is checked
+    against: several credentials share the user's identity, and
+    :func:`belongs_to` tells them apart by the token.
     """
-    identity_id: uuid.UUID | None = None
-    if token_id is not None:
-        identity_id = (
-            await session.execute(
-                select(Identity.id)
-                .select_from(AgentToken)
-                .join(Identity, Identity.ai_assistant_id == AgentToken.assistant_id)
-                .where(AgentToken.id == token_id, Identity.org_id == org_id)
-            )
-        ).scalar_one_or_none()
+    identity_id = await assistant_identity(session, org_id=org_id, token_id=token_id)
     if identity_id is None:
         identity_id = (
             await session.execute(
@@ -94,34 +106,39 @@ def belongs_to(
     worker: AgentWorker,
     *,
     actor_id: uuid.UUID,
-    identity_id: uuid.UUID | None,
+    assistant_identity_id: uuid.UUID | None,
     token_id: uuid.UUID | None,
 ) -> bool:
-    """Was this worker opened by the caller asking to act under it?
+    """Was this worker opened by the credential asking to act under it?
 
     A worker id is visible to every member (``list_workers``), and the
     close check records it as the session that checked the work. Accepting
-    any id in the workspace let one assistant name another assistant's
-    worker and be recorded as it, which made that record forgeable.
+    any id in the workspace let one credential name another's worker and be
+    recorded as it, which made that record forgeable.
 
-    The binding is to the IDENTITY, not to the token. Every session of one
-    assistant shares its identity, so naming a sibling session's worker is
-    still possible, and that is the limit ADR-0072 already states: one
-    model can open two workers. The token would be finer and wrong: a
-    credential is refreshed under a running session, and the session's
-    worker must survive that.
+    The key is the finest one that survives what a session legitimately
+    goes through:
 
-    A worker opened before the identity was recorded carries none. It is
-    matched on its user and, where both sides have one, its token: the
-    finest key it has, for the short time such a worker can still be open.
+    - an assistant's token: the assistant's identity. Its secret is rotated
+      under a running session, and the session's worker must survive that.
+      Naming a sibling session's worker is still possible, and that is the
+      limit ADR-0072 states: one model can open two workers.
+    - any other token (the CLI's, a legacy one): the token itself. Those
+      credentials have no identity of their own, only the user's, which
+      every other credential of that person shares.
+    - no token (a person's session, a Telegram turn): only a worker that no
+      token opened either.
+
+    A worker opened before the identity was recorded carries none, and is
+    matched on its token.
     """
     if worker.opened_by_user_id != actor_id:
         return False
-    if worker.opened_by_identity_id is not None:
-        return worker.opened_by_identity_id == identity_id
-    if worker.opened_by_token_id is not None and token_id is not None:
+    if assistant_identity_id is not None and worker.opened_by_identity_id is not None:
+        return worker.opened_by_identity_id == assistant_identity_id
+    if token_id is not None:
         return worker.opened_by_token_id == token_id
-    return True
+    return worker.opened_by_token_id is None
 
 
 async def open_worker(
@@ -308,6 +325,20 @@ async def close_worker(
     """
     await require_role(session, org_id, actor_id, Role.member)
     worker = await get_worker(session, org_id=org_id, worker_id=worker_id)
+    # Closing frees every task the worker holds, so a model may close only
+    # its own: another credential's worker is refused as not found, the
+    # answer ``resolve_holder`` gives for acting under it. A person closes
+    # any worker of the workspace, which is how a stuck session is cleared.
+    caller = await caller_svc.current(session)
+    if caller.is_model and not belongs_to(
+        worker,
+        actor_id=actor_id,
+        assistant_identity_id=await assistant_identity(
+            session, org_id=org_id, token_id=caller.token_id
+        ),
+        token_id=caller.token_id,
+    ):
+        raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
     # Imported here rather than at module scope: task_leases imports this
     # module for holder resolution, and the cycle is real.
     from mycelium_core.services import task_leases as _leases

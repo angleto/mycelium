@@ -116,8 +116,8 @@ async def _task(c: AsyncClient, h: dict[str, str]) -> str:
     return str((await c.post("/tasks", headers=h, json={"title": "t"})).json()["id"])
 
 
-# The new workspace's Default workflow is todo -> in_progress -> done, so
-# in_progress is both where the work is done and where it is handed over.
+# The new workspace's Default workflow is todo -> in_progress -> done: no
+# checking station, so an agent closes nothing there and the person does.
 
 
 async def test_without_a_worker_the_server_refuses_the_cli_token() -> None:
@@ -135,21 +135,56 @@ async def test_without_a_worker_the_server_refuses_the_cli_token() -> None:
         assert r.json()["code"] == "task.lease.required"
 
 
+async def _add_verify_station(c: AsyncClient, owner: dict[str, str]) -> None:
+    """The person gives the Default workflow a checking station, which the
+    one a new workspace is born with does not have."""
+    wf = next(w for w in (await c.get("/workflows", headers=owner)).json() if w["is_default"])
+    states = (await c.get(f"/workflows/{wf['id']}/states", headers=owner)).json()
+    edits = [{k: s[k] for k in ("id", "name", "ord", "is_initial", "is_terminal")} for s in states]
+    edits.append({"name": "verify", "ord": 10, "checks_work": True})
+    pairs = [
+        ("todo", "in_progress"),
+        ("in_progress", "verify"),
+        ("in_progress", "done"),
+        ("verify", "done"),
+    ]
+    r = await c.patch(
+        f"/workflows/{wf['id']}",
+        headers=owner,
+        json={
+            "name": wf["name"],
+            "states": edits,
+            "transitions": [{"from_state": a, "to_state": b} for a, b in pairs],
+        },
+    )
+    assert r.status_code == 204, r.text
+
+
 async def test_a_cli_worker_moves_its_work_and_another_closes_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        cli = await _cli_token(c, await _owner(c))
+        owner = await _owner(c)
+        cli = await _cli_token(c, owner)
         _as_cli(monkeypatch, c, cli)
         author = await _worker_open(c, cli)
         checker = await _worker_open(c, cli)
         tid = await _task(c, cli)
         assert await _move(tid, "in_progress", author) == "ok"
         assert await _held(c, cli, tid) == 0
-        assert "task.lease.self_verification" in await _move(tid, "done", author)
+        # The Default workflow has no checking station: what the author left
+        # in in_progress is nobody's to close but the person's.
+        assert "missing: check_station" in await _move(tid, "done", checker)
+        assert await _held(c, cli, tid) == 0
+
+        await _add_verify_station(c, owner)
+        assert await _move(tid, "verify", checker) == "ok"
+        assert "task.lease.self_verification" in await _move(tid, "done", checker)
         # The refused close gave back the hold it took to try.
         assert await _held(c, cli, tid) == 0
-        assert await _move(tid, "done", checker) == "ok"
+        # Both have passed this task on; a third session checks it.
+        third = await _worker_open(c, cli)
+        assert await _move(tid, "done", third) == "ok"
 
 
 async def test_an_expired_hold_of_the_same_worker_is_taken_again(

@@ -755,7 +755,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.TASK_CLOSE_REQUIRES_CHECK: (
             "An agent declares work done only after a check by another worker "
-            "(missing: {missing}). Move the task to the checking station instead; "
+            "(missing: {missing}). Move the task to the checking station (a state "
+            "marked checks_work) instead; "
             "another worker takes it from there with task_pull and closes it while "
             "holding it. The person can close it directly"
         ),

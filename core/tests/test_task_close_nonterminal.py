@@ -62,7 +62,7 @@ async def test_entering_a_nonterminal_closing_state_is_not_a_handoff(_embedder: 
             states=[
                 wf_svc.StateSpec(name="queued", ord=0, is_initial=True),
                 wf_svc.StateSpec(name="working", ord=1),
-                wf_svc.StateSpec(name="checking", ord=2),
+                wf_svc.StateSpec(name="checking", ord=2, checks_work=True),
                 wf_svc.StateSpec(name="accepted", ord=3, closes_work=True),
                 wf_svc.StateSpec(name="archived", ord=4, is_terminal=True),
             ],

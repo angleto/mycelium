@@ -62,8 +62,9 @@ class AgentWorker(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Bas
     # Provenance, and the binding. A human reads it to ask which credential
     # a worker came in on, and every use of the worker id is compared with
     # it (``agent_workers.belongs_to``): the id names a session, and only
-    # the identity that opened the session may speak as it. It grants
-    # nothing beyond that.
+    # the credential that opened the session may speak as it (an assistant
+    # through its identity, any other token by itself). It grants nothing
+    # beyond that.
     opened_by_user_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

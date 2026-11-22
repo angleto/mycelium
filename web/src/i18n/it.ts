@@ -1657,6 +1657,9 @@ export const it: Catalog = {
     closesWork: 'Lavoro fatto',
     closesWorkHint:
       "Entrare in questo stato dichiara il lavoro fatto, quindi un agente ci arriva solo dopo una verifica di un altro worker. Spegnilo su uno stato finale che chiude il lavoro senza farlo (wontfix, duplicato).",
+    checksWork: 'Stazione di verifica',
+    checksWorkHint:
+      "Il lavoro che un altro worker passa in questo stato e' da verificare: un agente chiude un task solo da una stazione di verifica, tenendolo, dopo che un altro worker ce l'ha passato. Non ammesso su uno stato finale o di lavoro fatto.",
     hidden: 'Nascosto',
     hiddenHint:
       'Salta la colonna di questo stato nella vista kanban di default. Attiva "Mostra nascosti" sulla board per rivelarla.',

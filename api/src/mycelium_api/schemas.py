@@ -812,6 +812,9 @@ class StateOut(BaseModel):
     is_initial: bool
     is_terminal: bool
     closes_work: bool = False
+    # A checking station: the only state a handoff into counts as up for a
+    # check (migration 0030).
+    checks_work: bool = False
     is_hidden: bool = False
     description: str | None = None
 
@@ -1141,6 +1144,8 @@ class WorkflowStateSpecIn(BaseModel):
     description: str | None = None
     # Omitted: closes work exactly when terminal (migration 0029).
     closes_work: bool | None = None
+    # Omitted: not a checking station (migration 0030).
+    checks_work: bool | None = None
 
 
 class TransitionIn(BaseModel):
@@ -1166,6 +1171,9 @@ class WorkflowStateEditIn(BaseModel):
     # Omitted: an existing state keeps its value, a new one closes work
     # when terminal (``workflow._closes_work``).
     closes_work: bool | None = None
+    # Omitted: an existing state keeps its value, a new one is not a
+    # checking station (``workflow._checks_work``).
+    checks_work: bool | None = None
 
 
 class WorkflowPatchIn(BaseModel):
@@ -1194,6 +1202,7 @@ class WorkflowDocStateIn(BaseModel):
     is_hidden: bool = False
     description: str | None = None
     closes_work: bool | None = None
+    checks_work: bool | None = None
 
 
 class WorkflowDocTransitionIn(BaseModel):

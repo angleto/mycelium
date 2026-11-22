@@ -117,7 +117,7 @@ async def _states(org: uuid.UUID, user: uuid.UUID) -> dict[str, uuid.UUID]:
     return {r.name: r.id for r in rows}
 
 
-async def _worker(org: uuid.UUID, user: uuid.UUID, label: str) -> uuid.UUID:
+async def _worker(org: uuid.UUID, user: uuid.UUID, label: str, **who: str) -> uuid.UUID:
     """A working session, minted by the server.
 
     The tests call this instead of inventing a string, which is the
@@ -126,7 +126,9 @@ async def _worker(org: uuid.UUID, user: uuid.UUID, label: str) -> uuid.UUID:
     the holder of the other's lease. The label is only for a human
     reading a failure.
     """
-    async with tenant_session(str(org), str(user)) as s:
+    # A worker answers only to the credential that opened it, so a test
+    # that acts under a token opens the worker under that token.
+    async with tenant_session(str(org), str(user), **who) as s:  # type: ignore[arg-type]
         w = await workers_svc.open_worker(s, org_id=org, actor_id=user, label=label)
         return w.id
 
@@ -809,16 +811,15 @@ async def test_an_agent_credential_cannot_move_a_task_another_worker_holds(
     states = await _states(org, user)
     (task_id,) = await _make_tasks(org, user, 1)
     holder_w = await _worker(org, user, "holder")
-    intruder_w = await _worker(org, user, "intruder")
+    tok = {"actor_kind": "mcp_token", "actor_subject_id": str(uuid.uuid4())}
+    intruder_w = await _worker(org, user, "intruder", **tok)
 
     async with tenant_session(str(org), str(user)) as s:
         await leases_svc.acquire(s, org_id=org, actor_id=user, task_id=task_id, worker_id=holder_w)
         task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
         version = task.version
 
-    async with tenant_session(
-        str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
-    ) as s:
+    async with tenant_session(str(org), str(user), **tok) as s:
         with pytest.raises(ConflictError) as err:
             await tasks_svc.set_state(
                 s,
@@ -985,7 +986,8 @@ async def test_the_refusal_names_who_is_holding_it_and_until_when(_embedder: Non
     states = await _states(org, user)
     (task_id,) = await _make_tasks(org, user, 1)
     holder_w = await _worker(org, user, "verify-3")
-    other_w = await _worker(org, user, "verify-4")
+    tok = {"actor_kind": "mcp_token", "actor_subject_id": str(uuid.uuid4())}
+    other_w = await _worker(org, user, "verify-4", **tok)
 
     async with tenant_session(str(org), str(user)) as s:
         lease = await leases_svc.acquire(
@@ -993,7 +995,7 @@ async def test_the_refusal_names_who_is_holding_it_and_until_when(_embedder: Non
         )
         deadline = lease.expires_at
 
-    async with tenant_session(str(org), str(user)) as s:
+    async with tenant_session(str(org), str(user), **tok) as s:  # type: ignore[arg-type]
         with pytest.raises(ConflictError) as err:
             await leases_svc.acquire(
                 s, org_id=org, actor_id=user, task_id=task_id, worker_id=other_w
@@ -1012,9 +1014,7 @@ async def test_the_refusal_names_who_is_holding_it_and_until_when(_embedder: Non
 
     # And the transition refusal carries it too, which is the path the
     # web UI takes.
-    async with tenant_session(
-        str(org), str(user), actor_kind="mcp_token", actor_subject_id=str(uuid.uuid4())
-    ) as s:
+    async with tenant_session(str(org), str(user), **tok) as s:
         task = await tasks_svc.get_task(s, org_id=org, task_id=task_id)
         with pytest.raises(ConflictError) as err2:
             await tasks_svc.set_state(
@@ -1330,8 +1330,8 @@ async def test_the_same_agent_moves_it_once_it_has_taken_it(_embedder: None) -> 
     org, user = await _org()
     states = await _states(org, user)
     (task_id,) = await _make_tasks(org, user, 1)
-    holder = await _worker(org, user, "taker")
     token = str(uuid.uuid4())
+    holder = await _worker(org, user, "taker", actor_kind="mcp_token", actor_subject_id=token)
 
     async with tenant_session(
         str(org), str(user), actor_kind="mcp_token", actor_subject_id=token

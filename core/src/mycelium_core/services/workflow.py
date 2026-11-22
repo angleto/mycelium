@@ -41,6 +41,44 @@ class StateSpec:
     # None: the state closes work exactly when it is terminal. See
     # ``_closes_work`` and migration 0029.
     closes_work: bool | None = None
+    # None: a new state is not a checking station. See ``_checks_work`` and
+    # migration 0030.
+    checks_work: bool | None = None
+
+
+def _checks_work(
+    requested: bool | None,
+    *,
+    is_terminal: bool,
+    closes_work: bool,
+    current: WorkflowState | None = None,
+) -> bool:
+    """The ``checks_work`` a state is written with.
+
+    A checking station is where work another worker passed on is checked,
+    and ``task_leases.assert_may_close`` accepts a handoff as evidence of a
+    check only into such a state. It is stated, never derived from a name:
+    which station checks is what the workflow says, and a project can call
+    it anything.
+
+    Left out, a new state is not one, the safe reading: a model is asked for
+    a check it could have skipped, never the reverse. An existing state
+    keeps the value it has, so a client that does not know the attribute
+    does not reset it.
+
+    A state that ends the work cannot be one: a check happens before the
+    close, in a state the task then leaves, and a terminal or closing state
+    marked as checking would let the close accept a handoff into the very
+    state it is entering."""
+    if requested is not None:
+        value = requested
+    elif current is not None:
+        value = current.checks_work
+    else:
+        value = False
+    if value and (is_terminal or closes_work):
+        raise DomainError(MessageCode.WORKFLOW_INVALID)
+    return value
 
 
 def _closes_work(
@@ -254,6 +292,7 @@ async def create_workflow(
         raise DomainError(MessageCode.DOMAIN_ERROR) from exc
     by_name: dict[str, uuid.UUID] = {}
     for spec in states:
+        closes = _closes_work(spec.closes_work, is_terminal=spec.is_terminal)
         st = WorkflowState(
             org_id=org_id,
             workflow_id=wf.id,
@@ -261,7 +300,10 @@ async def create_workflow(
             ord=spec.ord,
             is_initial=spec.is_initial,
             is_terminal=spec.is_terminal,
-            closes_work=_closes_work(spec.closes_work, is_terminal=spec.is_terminal),
+            closes_work=closes,
+            checks_work=_checks_work(
+                spec.checks_work, is_terminal=spec.is_terminal, closes_work=closes
+            ),
             is_hidden=spec.is_hidden,
             description=spec.description,
         )
@@ -301,6 +343,7 @@ class StateEdit:
     description: str | None = None
     id: uuid.UUID | None = None  # None = new state
     closes_work: bool | None = None  # None: see ``_closes_work``
+    checks_work: bool | None = None  # None: see ``_checks_work``
 
 
 async def set_default_workflow(
@@ -441,9 +484,16 @@ async def update_workflow(
             for spec in states:
                 if spec.id is not None and spec.id in existing:
                     st = existing[spec.id]
-                    st.closes_work = _closes_work(
+                    closes = _closes_work(
                         spec.closes_work, is_terminal=spec.is_terminal, current=st
                     )
+                    st.checks_work = _checks_work(
+                        spec.checks_work,
+                        is_terminal=spec.is_terminal,
+                        closes_work=closes,
+                        current=st,
+                    )
+                    st.closes_work = closes
                     st.name = spec.name
                     st.ord = spec.ord
                     st.is_initial = spec.is_initial
@@ -452,6 +502,7 @@ async def update_workflow(
                     st.description = spec.description
                     by_name[spec.name] = st.id
                 else:
+                    closes = _closes_work(spec.closes_work, is_terminal=spec.is_terminal)
                     st = WorkflowState(
                         org_id=org_id,
                         workflow_id=workflow_id,
@@ -459,7 +510,10 @@ async def update_workflow(
                         ord=spec.ord,
                         is_initial=spec.is_initial,
                         is_terminal=spec.is_terminal,
-                        closes_work=_closes_work(spec.closes_work, is_terminal=spec.is_terminal),
+                        closes_work=closes,
+                        checks_work=_checks_work(
+                            spec.checks_work, is_terminal=spec.is_terminal, closes_work=closes
+                        ),
                         is_hidden=spec.is_hidden,
                         description=spec.description,
                     )

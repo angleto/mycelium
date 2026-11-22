@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,7 +33,14 @@ class WorkflowDefinition(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMix
 
 class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "workflow_states"
-    __table_args__ = (UniqueConstraint("workflow_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "name"),
+        # Migration 0030: a station that ends the work would let the close
+        # accept a handoff into the very state it is entering.
+        CheckConstraint(
+            "NOT (checks_work AND (is_terminal OR closes_work))", name="checks_work_not_ending"
+        ),
+    )
 
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -50,6 +57,11 @@ class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # Not the same as terminal: ``wontfix`` ends the work without claiming it
     # was done, and needs no check.
     closes_work: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # A checking station (migration 0030): a handoff into it by another
+    # worker is the only one ``task_leases.assert_may_close`` reads as a
+    # check. Never terminal and never closing; the workflow says which state
+    # it is, the schema does not guess from a name.
+    checks_work: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     # UI hint: hidden columns are skipped in the kanban view by default
     # (the SPA reveals them with a "Show hidden" toggle). Storage-level
     # boolean only — the scheduler / dispatch / transitions don't read it,

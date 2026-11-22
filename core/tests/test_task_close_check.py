@@ -59,8 +59,10 @@ class _Org:
     def session(self, who: dict[str, str]) -> object:
         return tenant_session(str(self.org), str(self.user), **who)  # type: ignore[arg-type]
 
-    async def worker(self, label: str) -> uuid.UUID:
-        async with self.session(AGENT) as s:  # type: ignore[attr-defined]
+    async def worker(self, label: str, who: dict[str, str] = AGENT) -> uuid.UUID:
+        """A worker is bound to the credential that opens it, so a test that
+        acts as another credential opens it as that one."""
+        async with self.session(who) as s:  # type: ignore[attr-defined]
             return (
                 await workers_svc.open_worker(s, org_id=self.org, actor_id=self.user, label=label)
             ).id
@@ -125,7 +127,7 @@ async def _org() -> _Org:
             states=[
                 wf_svc.StateSpec(name="queued", ord=0, is_initial=True),
                 wf_svc.StateSpec(name="working", ord=1),
-                wf_svc.StateSpec(name="checking", ord=2),
+                wf_svc.StateSpec(name="checking", ord=2, checks_work=True),
                 # Left to the default: terminal, so it closes work.
                 wf_svc.StateSpec(name="closed", ord=3, is_terminal=True),
                 wf_svc.StateSpec(name="dropped", ord=4, is_terminal=True, closes_work=False),
@@ -199,7 +201,8 @@ async def test_an_agent_cannot_close_work_nobody_handed_over(_embedder: None) ->
     with pytest.raises(ConflictError) as exc:
         await o.move(AGENT, task_id, "closed", w)
     assert exc.value.code == MessageCode.TASK_CLOSE_REQUIRES_CHECK
-    assert exc.value.params == {"missing": "handoff"}
+    # Working is not a checking station: nothing in it is up for a check.
+    assert exc.value.params == {"missing": "check_station"}
 
 
 async def test_a_second_worker_closes_what_the_first_handed_off(_embedder: None) -> None:
@@ -448,7 +451,7 @@ async def test_a_handoff_from_before_a_reopen_does_not_check_the_new_work(
     await o.take(AGENT, task_id, checker)
     with pytest.raises(ConflictError) as exc:
         await o.move(AGENT, task_id, "closed", checker)
-    assert exc.value.params == {"missing": "handoff"}
+    assert exc.value.params == {"missing": "check_station"}
     # The second round handed over by its own author is checkable again,
     # by a worker that authored neither round.
     await o.move(AGENT, task_id, "checking", checker)
@@ -564,7 +567,7 @@ async def test_an_agent_token_over_rest_is_an_agent(_embedder: None) -> None:
     like the same token over MCP."""
     o = await _org()
     task_id = await o.task()
-    w = await o.worker("rest")
+    w = await o.worker("rest", REST_AGENT)
     with pytest.raises(ConflictError) as exc:
         await o.move(REST_AGENT, task_id, "working", w)
     assert exc.value.code == MessageCode.LEASE_REQUIRED
@@ -580,7 +583,7 @@ async def test_an_agent_token_over_rest_does_not_take_the_owner_exemption(
 ) -> None:
     o = await _org()
     task_id = await o.task()
-    holder, other = await o.worker("holder"), await o.worker("other")
+    holder, other = await o.worker("holder"), await o.worker("other", REST_AGENT)
     await o.take(AGENT, task_id, holder)
     with pytest.raises(ConflictError) as exc:
         await o.move(REST_AGENT, task_id, "working", other)
@@ -716,7 +719,7 @@ async def test_the_digest_marks_a_move_by_an_agent_token_over_rest_as_an_agent_s
 
     o = await _org()
     by_person, by_rest_agent = await o.task(), await o.task()
-    w = await o.worker("rest")
+    w = await o.worker("rest", REST_AGENT)
     await o.move(PERSON, by_person, "working")
     await o.take(REST_AGENT, by_rest_agent, w)
     await o.move(REST_AGENT, by_rest_agent, "working", w)
@@ -833,3 +836,169 @@ def test_no_tool_lets_a_scoped_credential_write_a_workflow() -> None:
         "set_project_workflow",
     ):
         assert TOOL_SCOPES[tool] is HUMAN_ONLY, tool
+
+
+async def test_a_pull_into_a_working_state_is_not_work_handed_over_for_a_check(
+    _embedder: None,
+) -> None:
+    """The ordinary pull, queued into working in one call, records the puller
+    as having passed the task on. That handoff is into a working state, not
+    a checking station: once the puller lets go, another worker that takes
+    the task and closes it from working has checked nothing."""
+    o = await _org()
+    task_id = await o.task()
+    w1, w2 = await o.worker("w1"), await o.worker("w2")
+    async with o.session(AGENT) as s:  # type: ignore[attr-defined]
+        pulled, _ = await leases_svc.pull(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            state_id=o.states["queued"],
+            worker_id=w1,
+            transition_to=o.states["working"],
+        )
+    assert pulled.id == task_id
+    async with o.session(AGENT) as s:  # type: ignore[attr-defined]
+        await leases_svc.release(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            task_id=task_id,
+            reason=LeaseRelease.explicit,
+            worker_id=w1,
+        )
+    await o.take(AGENT, task_id, w2)
+    with pytest.raises(ConflictError) as exc:
+        await o.move(AGENT, task_id, "closed", w2)
+    assert exc.value.code == MessageCode.TASK_CLOSE_REQUIRES_CHECK
+    assert exc.value.params == {"missing": "check_station"}
+    # Passed on for a check, the same task closes.
+    await o.move(AGENT, task_id, "checking", w2)
+    w3 = await o.worker("w3")
+    await o.take(AGENT, task_id, w3)
+    await o.move(AGENT, task_id, "closed", w3)
+
+
+async def test_a_model_closes_only_its_own_worker_and_a_person_any(_embedder: None) -> None:
+    """Closing a worker frees what it holds. Another assistant closing it
+    freed bob's task and, after a pull, recorded bob as having handed over
+    work he never passed on."""
+    from mycelium_core.errors import NotFoundError
+
+    o = await _org()
+    task_id = await o.task()
+    (alice, _), (bob, _) = (
+        await _assistant_session(o, "alice"),
+        await _assistant_session(o, "bob"),
+    )
+    bobs = await o.worker("b", bob)
+    await o.move(PERSON, task_id, "working")
+    await o.take(bob, task_id, bobs)
+    async with o.session(alice) as s:  # type: ignore[attr-defined]
+        with pytest.raises(NotFoundError) as exc:
+            await workers_svc.close_worker(s, org_id=o.org, actor_id=o.user, worker_id=bobs)
+    assert exc.value.code == MessageCode.WORKER_NOT_FOUND
+    async with o.session(REST_AGENT) as s:  # type: ignore[attr-defined]
+        with pytest.raises(NotFoundError):
+            await workers_svc.close_worker(s, org_id=o.org, actor_id=o.user, worker_id=bobs)
+    async with o.session(bob) as s:  # type: ignore[attr-defined]
+        assert (await leases_svc.live_lease(s, task_id=task_id)) is not None
+    # The person clears a session that is stuck, whoever opened it.
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        _, freed = await workers_svc.close_worker(s, org_id=o.org, actor_id=o.user, worker_id=bobs)
+    assert freed == [task_id]
+
+
+async def test_two_bare_tokens_of_one_person_do_not_share_workers(_embedder: None) -> None:
+    """A bare token (the CLI's) has no identity of its own, only the
+    person's, which every other credential of theirs shares. Binding on that
+    identity let one such token act under the other's worker."""
+    from mycelium_core.errors import NotFoundError
+
+    o = await _org()
+    task_id = await o.task()
+    token_a = {"actor_kind": "human_api", "actor_subject_id": str(uuid.uuid4())}
+    token_b = {"actor_kind": "human_api", "actor_subject_id": str(uuid.uuid4())}
+    a = await o.worker("a", token_a)
+    await o.move(PERSON, task_id, "working")
+    with pytest.raises(NotFoundError) as exc:
+        await o.take(token_b, task_id, a)
+    assert exc.value.code == MessageCode.WORKER_NOT_FOUND
+    # Nor does a caller with no token at all, a Telegram turn for one.
+    with pytest.raises(NotFoundError):
+        await o.take(TELEGRAM, task_id, a)
+    await o.take(token_a, task_id, a)
+
+
+async def test_a_session_without_a_token_uses_only_a_worker_no_token_opened(
+    _embedder: None,
+) -> None:
+    from mycelium_core.errors import NotFoundError
+
+    o = await _org()
+    task_id = await o.task()
+    mine = await o.worker("person", PERSON)
+    an_agents = await o.worker("agent", AGENT)
+    await o.move(PERSON, task_id, "working")
+    with pytest.raises(NotFoundError):
+        await o.take(REST_AGENT, task_id, mine)
+    # The other direction: no token may not speak as a session a token opened.
+    for who in (PERSON, TELEGRAM):
+        with pytest.raises(NotFoundError):
+            await o.take(who, task_id, an_agents)
+    await o.take(PERSON, task_id, mine)
+
+
+async def test_a_checking_station_is_stated_and_never_ends_the_work(_embedder: None) -> None:
+    """Which state checks is the workflow's to say. A terminal or closing one
+    cannot: the close would accept a handoff into the state it is entering.
+    An edit that leaves the attribute out keeps it."""
+    from mycelium_core.errors import DomainError
+
+    o = await _org()
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        for bad in (
+            wf_svc.StateSpec(name="end", ord=1, is_terminal=True, checks_work=True),
+            wf_svc.StateSpec(name="end", ord=1, closes_work=True, checks_work=True),
+        ):
+            with pytest.raises(DomainError) as exc:
+                await wf_svc.create_workflow(
+                    s,
+                    org_id=o.org,
+                    actor_id=o.user,
+                    name=f"bad-{uuid.uuid4().hex[:6]}",
+                    states=[wf_svc.StateSpec(name="start", ord=0, is_initial=True), bad],
+                    transitions=[("start", "end")],
+                )
+            assert exc.value.code == MessageCode.WORKFLOW_INVALID
+        rows = {
+            r.name: r
+            for r in (
+                await s.execute(
+                    select(WorkflowState).where(WorkflowState.id.in_(list(o.states.values())))
+                )
+            ).scalars()
+        }
+        assert rows["checking"].checks_work is True
+        assert rows["working"].checks_work is False
+        wf_id = rows["checking"].workflow_id
+        await wf_svc.update_workflow(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            workflow_id=wf_id,
+            name="renamed",
+            states=[
+                wf_svc.StateEdit(
+                    id=r.id,
+                    name=r.name,
+                    ord=r.ord,
+                    is_initial=r.is_initial,
+                    is_terminal=r.is_terminal,
+                )
+                for r in sorted(rows.values(), key=lambda r: r.ord)
+            ],
+            transitions=[("queued", "working"), ("working", "checking"), ("checking", "closed")],
+        )
+        await s.refresh(rows["checking"])
+        assert rows["checking"].checks_work is True

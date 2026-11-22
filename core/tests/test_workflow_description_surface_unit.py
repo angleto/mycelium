@@ -112,6 +112,7 @@ def test_the_serialisers_expose_every_field_a_caller_reasons_from() -> None:
         "is_initial",
         "is_terminal",
         "closes_work",
+        "checks_work",
         "is_hidden",
         "description",
     }

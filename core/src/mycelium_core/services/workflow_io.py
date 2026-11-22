@@ -71,6 +71,8 @@ class DocState:
     # Optional, so a file written before it existed still loads: absent
     # means "closes work when terminal" (``workflow._closes_work``).
     closes_work: bool | None = None
+    # Absent means "not a checking station" (``workflow._checks_work``).
+    checks_work: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +148,7 @@ def normalize(
                 is_hidden=spec.is_hidden,
                 description=_text(spec.description),
                 closes_work=spec.closes_work,
+                checks_work=spec.checks_work,
             )
         )
 
@@ -194,6 +197,7 @@ def to_json(doc: WorkflowDoc) -> dict[str, Any]:
                 "is_initial": s.is_initial,
                 "is_terminal": s.is_terminal,
                 "closes_work": s.closes_work,
+                "checks_work": s.checks_work,
                 "is_hidden": s.is_hidden,
                 "description": s.description,
             }
@@ -229,6 +233,7 @@ async def export_workflow(session: AsyncSession, *, workflow_id: uuid.UUID) -> W
                 is_hidden=s.is_hidden,
                 description=s.description,
                 closes_work=s.closes_work,
+                checks_work=s.checks_work,
             )
             for s in states
         ],
@@ -272,6 +277,7 @@ def _reuse_ids(
                 is_hidden=state.is_hidden,
                 description=state.description,
                 closes_work=state.closes_work,
+                checks_work=state.checks_work,
             )
         )
     named = {s.name for s in doc.states}
@@ -354,6 +360,7 @@ async def import_as_new_workflow(
                 is_hidden=s.is_hidden,
                 description=s.description,
                 closes_work=s.closes_work,
+                checks_work=s.checks_work,
             )
             for ord_, s in enumerate(doc.states)
         ],
