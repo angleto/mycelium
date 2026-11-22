@@ -232,6 +232,7 @@ class MessageCode(enum.StrEnum):
     TASK_CLOSE_REQUIRES_CHECK = "task.close_requires_check"
     WORKFLOW_PERSON_ONLY = "workflow.person_only"
     WORKER_NOT_FOUND = "worker.not_found"
+    WORKER_NEEDS_CREDENTIAL = "worker.needs_credential"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -764,6 +765,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "No open worker with this id in this workspace. A worker is closed by worker_close, "
             "or by the server once it has gone unseen for hours holding nothing. Open a new one "
             "with worker_open and pass the id it returns"
+        ),
+        MessageCode.WORKER_NEEDS_CREDENTIAL: (
+            "A worker is bound to the credential that opens it, and this session has none "
+            "of its own: it acts for the person without a token. Connect with a token "
+            "(MCP or the CLI) to open a worker"
         ),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"

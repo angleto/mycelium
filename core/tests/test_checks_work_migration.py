@@ -18,7 +18,10 @@ from sqlalchemy import select
 
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.task import Task
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import agent_workers as workers_svc
+from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import workflow as wf_svc
 from mycelium_core.services.auth import signup
 
@@ -113,3 +116,63 @@ async def test_the_backfill_flags_verify_in_the_default_workflow_only() -> None:
     # A verify state outside the default workflow is not known to be a
     # station: it is left for the person to flag.
     assert not any((await _states(*elsewhere)).values())
+
+
+async def test_a_handoff_recorded_outside_a_station_is_cleared() -> None:
+    """Before 0030 a handoff was recorded into any state. Left on a task in a
+    state that is not a station, a person flagging that state later would
+    make it a check nobody made."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        default = await wf_svc.get_default_workflow(s, org)
+        current = await wf_svc.get_states(s, default.id)
+        await wf_svc.update_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            workflow_id=default.id,
+            name=default.name,
+            states=[
+                *(
+                    wf_svc.StateEdit(
+                        id=st.id,
+                        name=st.name,
+                        ord=st.ord,
+                        is_initial=st.is_initial,
+                        is_terminal=st.is_terminal,
+                    )
+                    for st in current
+                ),
+                wf_svc.StateEdit(name="verify", ord=10),
+            ],
+            transitions=[("todo", "in_progress"), ("in_progress", "verify"), ("verify", "done")],
+        )
+        states = {st.name: st.id for st in await wf_svc.get_states(s, default.id)}
+        worker = (await workers_svc.open_worker(s, org_id=org, actor_id=user, label="w")).id
+        stale = (await tasks_svc.create_task(s, org_id=org, actor_id=user, title="stale")).id
+        kept = (await tasks_svc.create_task(s, org_id=org, actor_id=user, title="kept")).id
+
+    engine = sa.create_engine(get_settings().database_url_sync)
+    mig = _migration()
+    try:
+        with engine.begin() as conn:
+            for task_id, state in ((stale, "in_progress"), (kept, "verify")):
+                conn.execute(
+                    sa.text(
+                        "UPDATE tasks SET state_id = :s, handed_over_by_worker_id = :w "
+                        "WHERE id = :t"
+                    ),
+                    {"s": states[state], "w": worker, "t": task_id},
+                )
+        with engine.begin() as conn:
+            conn.execute(sa.text(mig.BACKFILL))
+            conn.execute(sa.text(mig.CLEAR_STALE_HANDOFFS))
+    finally:
+        engine.dispose()
+
+    async with tenant_session(str(org), str(user)) as s:
+        got = {
+            t.id: t.handed_over_by_worker_id
+            for t in (await s.execute(select(Task).where(Task.id.in_([stale, kept])))).scalars()
+        }
+    assert got == {stale: None, kept: worker}

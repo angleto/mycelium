@@ -71,7 +71,8 @@ class DocState:
     # Optional, so a file written before it existed still loads: absent
     # means "closes work when terminal" (``workflow._closes_work``).
     closes_work: bool | None = None
-    # Absent means "not a checking station" (``workflow._checks_work``).
+    # Absent means "not stated": a new state is not a checking station, an
+    # existing one keeps what it had (``workflow._checks_work``).
     checks_work: bool | None = None
 
 

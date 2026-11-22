@@ -235,3 +235,79 @@ async def test_a_workflow_from_another_workspace_is_not_exportable() -> None:
         # rather than being the one route that answers differently.
         assert r.status_code == 400, r.text
         assert r.json()["code"] == "workflow.not_found"
+
+
+async def test_a_checking_station_travels_through_every_surface() -> None:
+    """Create, read, export, import as new and import into: the flag that
+    says where a model's work is checked survives each, and an import that
+    leaves it out keeps what the state had."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _owner(c)
+
+        async def flags(wf_id: str) -> dict[str, bool]:
+            st = (await c.get(f"/workflows/{wf_id}/states", headers=h)).json()
+            return {s["name"]: s["checks_work"] for s in st}
+
+        made = await c.post(
+            "/workflows",
+            headers=h,
+            json={
+                "name": "Stations",
+                "states": [
+                    {"name": "open", "ord": 0, "is_initial": True},
+                    {"name": "review", "ord": 1, "checks_work": True},
+                    {"name": "shut", "ord": 2, "is_terminal": True},
+                ],
+                "transitions": [
+                    {"from_state": "open", "to_state": "review"},
+                    {"from_state": "review", "to_state": "shut"},
+                ],
+            },
+        )
+        assert made.status_code in (200, 201), made.text
+        wf_id = made.json()["id"]
+        assert await flags(wf_id) == {"open": False, "review": True, "shut": False}
+
+        exported = json.loads((await c.get(f"/workflows/{wf_id}/export", headers=h)).text)
+        assert {s["name"]: s["checks_work"] for s in exported["states"]} == {
+            "open": False,
+            "review": True,
+            "shut": False,
+        }
+
+        copy = await c.post("/workflows/import", headers=h, params={"name": "Copy"}, json=exported)
+        assert copy.status_code == 200, copy.text
+        assert await flags(copy.json()["id"]) == {"open": False, "review": True, "shut": False}
+
+        silent = {
+            **exported,
+            "states": [
+                {k: v for k, v in s.items() if k != "checks_work"} for s in exported["states"]
+            ],
+        }
+        r = await c.post(f"/workflows/{wf_id}/import", headers=h, json=silent)
+        assert r.status_code == 204, r.text
+        assert await flags(wf_id) == {"open": False, "review": True, "shut": False}
+
+        moved = {
+            **exported,
+            "states": [{**s, "checks_work": s["name"] == "open"} for s in exported["states"]],
+        }
+        r = await c.post(f"/workflows/{wf_id}/import", headers=h, json=moved)
+        assert r.status_code == 204, r.text
+        assert await flags(wf_id) == {"open": True, "review": False, "shut": False}
+
+        # A station that ends the work is refused, not stored.
+        bad = await c.post(
+            "/workflows/import",
+            headers=h,
+            json=_doc(
+                states=[
+                    {"name": "todo", "is_initial": True},
+                    {"name": "in_progress"},
+                    {"name": "done", "is_terminal": True, "checks_work": True},
+                ]
+            ),
+        )
+        assert bad.status_code in (400, 422), bad.text

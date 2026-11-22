@@ -1357,18 +1357,21 @@ async def set_state(
         await wf.assert_transition(session, workflow.id, old_state_id, state_id)
     # Terminal detection reuses the SAME notion the scheduler uses
     # (``WorkflowState.is_terminal``), never a hardcoded state name.
-    flags: dict[uuid.UUID, tuple[bool, bool]] = {
-        sid: (is_term, closes)
-        for sid, is_term, closes in (
+    flags: dict[uuid.UUID, tuple[bool, bool, bool]] = {
+        sid: (is_term, closes, checks)
+        for sid, is_term, closes, checks in (
             await session.execute(
                 select(
-                    WorkflowState.id, WorkflowState.is_terminal, WorkflowState.closes_work
+                    WorkflowState.id,
+                    WorkflowState.is_terminal,
+                    WorkflowState.closes_work,
+                    WorkflowState.checks_work,
                 ).where(WorkflowState.id.in_({old_state_id, state_id}))
             )
         ).all()
     }
-    was_terminal = flags.get(old_state_id, (False, False))[0]
-    now_terminal, closes_work = flags.get(state_id, (False, False))
+    was_terminal = flags.get(old_state_id, (False, False, False))[0]
+    now_terminal, closes_work, into_station = flags.get(state_id, (False, False, False))
     # Declaring the work done is checked even on the pull path
     # (``_lease_checked``): that is the path that let an agent take a task
     # and close it in one call.
@@ -1396,9 +1399,13 @@ async def set_state(
     )
     values: dict[str, Any] = {"state_id": state_id}
     if old_state_id != state_id:
-        # Who passed the task into this state: the holder's worker on a
-        # handoff, nobody on any other move (``Task.handed_over_by_worker_id``).
-        values["handed_over_by_worker_id"] = worker_id if released is LeaseRelease.handoff else None
+        # Who passed the task into this checking station: the holder's
+        # worker on a handoff into a state that is one at the time of the
+        # move, nobody on any other move (``Task.handed_over_by_worker_id``).
+        # Read now rather than at the close: a state flagged later would
+        # otherwise turn an old pull into it into work passed on for a check.
+        handed_over = released is LeaseRelease.handoff and into_station
+        values["handed_over_by_worker_id"] = worker_id if handed_over else None
     new_version = await optimistic_update(
         session,
         Task,

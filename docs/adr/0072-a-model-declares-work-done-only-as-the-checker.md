@@ -61,6 +61,15 @@ stricter, never weaker. The migration flags `verify` in each workspace's
 default workflow, the one place the station was known; the workflow
 `create_default_workflow` makes has none.
 
+Whether a state is a station is read when the task enters it, not when it
+is closed. `tasks.handed_over_by_worker_id` is written only on a handoff
+into a state flagged at that moment. Read at the close instead, a person
+flagging a state later would turn an old pull into it into work passed on
+for a check, and nobody checked it. The migration clears the value on every
+task whose state is not a station after the backfill, for the same reason.
+Turning the flag off on a state a task is already in makes the guard refuse
+that task, which is the safe direction.
+
 **The guard, `task_leases.assert_may_close`.** `set_state` calls it whenever
 a move enters a `closes_work` state, including on the pull path. A person
 and the system are not asked anything. A model needs all three of:
@@ -167,8 +176,11 @@ under a running session; sessions of the same assistant share it, so the
 limit above is unchanged. Any other token (the CLI's, a legacy one) is bound
 by the token itself: those credentials have only the person's identity,
 which every other credential of that person shares, and binding on it let
-one CLI token act under another's worker. A caller with no token (a person's
-session, a Telegram turn) uses only a worker no token opened. Until
+one CLI token act under another's worker. A person's own session, which has
+no token, uses only a worker no token opened. A model with no token (a
+Telegram turn, a dispatched run) has no credential of its own to be bound
+to: it is refused a worker, and uses none, because it would otherwise share
+the person's workers and two runs each other's. Until
 2026-11-21 any worker id of the workspace was accepted; until 2026-11-22 the
 binding was the identity for every credential, and closing a worker checked
 nothing. A model now closes only its own worker; a person closes any, which
@@ -179,8 +191,7 @@ recorded as the puller's handoff like any other. Before 2026-11-21 it ran
 before any lease existed and recorded nobody, so a task pulled into a
 checking station could be closed by no agent. A pull whose move ends the
 work is still refused, as rule 1 requires. A pull into a working state
-records a handoff too, and rule 3 does not count it, because the state is
-not a station.
+records no handoff, because the state is not a station.
 
 The stdio MCP transport opens its session as `human_api` with no subject,
 because only a person's session token may open it. It is a person to this

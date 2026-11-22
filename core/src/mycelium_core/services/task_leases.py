@@ -170,6 +170,7 @@ async def resolve_holder(
                 session, org_id=org_id, token_id=token_id
             ),
             token_id=token_id,
+            is_model=caller.is_model,
         ):
             raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
         await workers_svc.touch(session, worker_id=worker_id)

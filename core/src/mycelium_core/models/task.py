@@ -99,14 +99,16 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         nullable=False,
         index=True,
     )
-    # The worker that passed the task into the state it is in now, when the
-    # move was a handoff: the worker held the task and moved it on to a
-    # station that does not end the work. Any other move clears it -- a
-    # person's, the system's, a pull, a reopen. The close guard
+    # The worker that passed the task into the checking station it is in
+    # now: the worker held the task and moved it on, by set_state or by a
+    # pull, into a state flagged ``checks_work`` at the time of the move.
+    # Any other move clears it -- into a state that is not a station, a
+    # person's, the system's, a reopen. The close guard
     # (``task_leases.assert_may_close``) reads it: a model declares work
     # done only on work another worker passed to the station it holds, and
     # a handoff from before the task was last reopened is not that
-    # (migration 0029). A position, not a history, so it needs no clock.
+    # (migrations 0029 and 0030). A position, not a history, so it needs no
+    # clock.
     handed_over_by_worker_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("agent_workers.id", ondelete="SET NULL"),

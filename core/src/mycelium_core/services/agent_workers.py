@@ -39,7 +39,7 @@ from collections.abc import Sequence
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import NotFoundError
+from mycelium_core.errors import ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
@@ -108,6 +108,7 @@ def belongs_to(
     actor_id: uuid.UUID,
     assistant_identity_id: uuid.UUID | None,
     token_id: uuid.UUID | None,
+    is_model: bool,
 ) -> bool:
     """Was this worker opened by the credential asking to act under it?
 
@@ -126,8 +127,12 @@ def belongs_to(
     - any other token (the CLI's, a legacy one): the token itself. Those
       credentials have no identity of their own, only the user's, which
       every other credential of that person shares.
-    - no token (a person's session, a Telegram turn): only a worker that no
-      token opened either.
+    - no token, a person's own session: only a worker that no token opened
+      either.
+    - no token, a model (a Telegram turn, a dispatched run): none. Such a
+      caller has no credential of its own to be told apart by: it would
+      share the person's workers, and two runs would share each other's.
+      ``open_worker`` refuses it one for the same reason.
 
     A worker opened before the identity was recorded carries none, and is
     matched on its token.
@@ -138,7 +143,7 @@ def belongs_to(
         return worker.opened_by_identity_id == assistant_identity_id
     if token_id is not None:
         return worker.opened_by_token_id == token_id
-    return worker.opened_by_token_id is None
+    return not is_model and worker.opened_by_token_id is None
 
 
 async def open_worker(
@@ -168,8 +173,13 @@ async def open_worker(
     provenance the caller supplies is one it can choose.
     """
     await require_role(session, org_id, actor_id, Role.member)
+    caller = await caller_svc.current(session)
     if token_id is None:
-        token_id = (await caller_svc.current(session)).token_id
+        token_id = caller.token_id
+    if caller.is_model and token_id is None:
+        # A model with no token of its own: the worker would carry no
+        # credential, and :func:`belongs_to` would hand it to the person.
+        raise ForbiddenError(MessageCode.WORKER_NEEDS_CREDENTIAL)
     identity_id = await caller_identity(
         session, org_id=org_id, actor_id=actor_id, token_id=token_id
     )
@@ -337,6 +347,7 @@ async def close_worker(
             session, org_id=org_id, token_id=caller.token_id
         ),
         token_id=caller.token_id,
+        is_model=True,
     ):
         raise NotFoundError(MessageCode.WORKER_NOT_FOUND)
     # Imported here rather than at module scope: task_leases imports this

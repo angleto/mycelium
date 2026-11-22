@@ -841,10 +841,10 @@ def test_no_tool_lets_a_scoped_credential_write_a_workflow() -> None:
 async def test_a_pull_into_a_working_state_is_not_work_handed_over_for_a_check(
     _embedder: None,
 ) -> None:
-    """The ordinary pull, queued into working in one call, records the puller
-    as having passed the task on. That handoff is into a working state, not
-    a checking station: once the puller lets go, another worker that takes
-    the task and closes it from working has checked nothing."""
+    """The ordinary pull, queued into working in one call, is the puller
+    passing the task on, into a working state and not a checking station:
+    once the puller lets go, another worker that takes the task and closes
+    it from working has checked nothing."""
     o = await _org()
     task_id = await o.task()
     w1, w2 = await o.worker("w1"), await o.worker("w2")
@@ -1002,3 +1002,148 @@ async def test_a_checking_station_is_stated_and_never_ends_the_work(_embedder: N
         )
         await s.refresh(rows["checking"])
         assert rows["checking"].checks_work is True
+
+
+async def test_a_state_flagged_later_does_not_turn_an_old_pull_into_a_check(
+    _embedder: None,
+) -> None:
+    """Whether a state is a station is read when the task enters it. Read at
+    the close, a person flagging ``working`` after the fact turned the pull
+    into it into work passed on for a check, and the next worker closed it."""
+    o = await _org()
+    task_id = await o.task()
+    w1, w2 = await o.worker("w1"), await o.worker("w2")
+    async with o.session(AGENT) as s:  # type: ignore[attr-defined]
+        await leases_svc.pull(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            state_id=o.states["queued"],
+            worker_id=w1,
+            transition_to=o.states["working"],
+        )
+    async with o.session(AGENT) as s:  # type: ignore[attr-defined]
+        await leases_svc.release(
+            s,
+            org_id=o.org,
+            actor_id=o.user,
+            task_id=task_id,
+            reason=LeaseRelease.explicit,
+            worker_id=w1,
+        )
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        working = await s.get(WorkflowState, o.states["working"])
+        assert working is not None
+        working.checks_work = True
+    await o.take(AGENT, task_id, w2)
+    with pytest.raises(ConflictError) as exc:
+        await o.move(AGENT, task_id, "closed", w2)
+    assert exc.value.params == {"missing": "handoff"}
+
+
+async def test_a_model_with_no_token_of_its_own_has_no_worker(_embedder: None) -> None:
+    """A Telegram turn and a dispatched run act for the person with no token.
+    Bound on "no token", they shared the person's workers, acted under them
+    and closed them, and two runs shared each other's."""
+    from mycelium_core.errors import NotFoundError
+
+    o = await _org()
+    task_id = await o.task()
+    run = {"actor_kind": "agent_run", "actor_subject_id": str(uuid.uuid4())}
+    for who in (TELEGRAM, run):
+        with pytest.raises(ForbiddenError) as refused:
+            await o.worker("mine", who)
+        assert refused.value.code == MessageCode.WORKER_NEEDS_CREDENTIAL
+    persons = await o.worker("person", PERSON)
+    await o.move(PERSON, task_id, "working")
+    for who in (TELEGRAM, run):
+        with pytest.raises(NotFoundError):
+            await o.take(who, task_id, persons)
+        async with o.session(who) as s:  # type: ignore[attr-defined]
+            with pytest.raises(NotFoundError):
+                await workers_svc.close_worker(s, org_id=o.org, actor_id=o.user, worker_id=persons)
+    await o.take(PERSON, task_id, persons)
+
+
+async def test_another_member_s_worker_is_not_found(_embedder: None) -> None:
+    """The credential is compared only once the person is: two people's
+    sessions without a token look alike on every other column."""
+    from mycelium_core.errors import NotFoundError
+    from mycelium_core.services.memberships import add_member
+
+    o = await _org()
+    task_id = await o.task()
+    email = f"{uuid.uuid4().hex[:10]}@example.test"
+    async with admin_session() as s:
+        await signup(s, email=email, password="pw-strong-123", org_name="throwaway")
+    async with o.session(PERSON) as s:  # type: ignore[attr-defined]
+        member = await add_member(s, org_id=o.org, actor_id=o.user, email=email, role="member")
+    async with tenant_session(str(o.org), str(member), **PERSON) as s:  # type: ignore[arg-type]
+        theirs = (
+            await workers_svc.open_worker(s, org_id=o.org, actor_id=member, label="theirs")
+        ).id
+    await o.move(PERSON, task_id, "working")
+    with pytest.raises(NotFoundError):
+        await o.take(PERSON, task_id, theirs)
+
+
+async def test_the_mcp_workflow_tools_carry_the_checking_station(_embedder: None) -> None:
+    """``create_workflow`` and ``update_workflow`` over MCP pass the flag to
+    the service, and an update that leaves it out keeps it. Writing a
+    workflow is a person's act, so the path is stdio, with a person's
+    session token: the HTTP gateway refuses both tools to an assistant."""
+    from mycelium_mcp import server as mcp_server
+
+    async with admin_session() as s:
+        r = await signup(
+            s,
+            email=f"{uuid.uuid4().hex[:10]}@example.test",
+            password="pw-strong-123",
+            org_name="MCPWF",
+        )
+    assert r.token is not None
+    token, org = r.token, str(r.org_id)
+    states: list[dict[str, object]] = [
+        {"name": "open", "ord": 0, "is_initial": True},
+        {"name": "review", "ord": 1, "checks_work": True},
+        {"name": "shut", "ord": 2, "is_terminal": True},
+    ]
+    transitions = [["open", "review"], ["review", "shut"]]
+
+    async def flags(wf_id: str) -> dict[str, bool]:
+        rows = await mcp_server.workflow_states(token=token, org_id=org, workflow_id=wf_id)
+        return {st["name"]: st["checks_work"] for st in rows}
+
+    made = await mcp_server.create_workflow(
+        token=token, org_id=org, name="stations", states=states, transitions=transitions
+    )
+    wf_id = str(made["id"])
+    assert await flags(wf_id) == {"open": False, "review": True, "shut": False}
+    ids = {
+        st["name"]: st["id"]
+        for st in await mcp_server.workflow_states(token=token, org_id=org, workflow_id=wf_id)
+    }
+    edited = [
+        {**{k: v for k, v in st.items() if k != "checks_work"}, "id": ids[str(st["name"])]}
+        for st in states
+    ]
+    await mcp_server.update_workflow(
+        token=token,
+        org_id=org,
+        workflow_id=wf_id,
+        name="stations",
+        states=edited,
+        transitions=transitions,
+    )
+    assert await flags(wf_id) == {"open": False, "review": True, "shut": False}
+    edited[0]["checks_work"] = True
+    edited[1]["checks_work"] = False
+    await mcp_server.update_workflow(
+        token=token,
+        org_id=org,
+        workflow_id=wf_id,
+        name="stations",
+        states=edited,
+        transitions=transitions,
+    )
+    assert await flags(wf_id) == {"open": True, "review": False, "shut": False}

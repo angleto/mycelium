@@ -25,6 +25,14 @@ nothing and a person does. That is the safe reading, the same as 0029's: a
 model is asked for a check it could have skipped, never the reverse. A
 workspace turns the flag on for its own stations with ``update_workflow``,
 which is a person's act.
+
+``tasks.handed_over_by_worker_id`` changes meaning with it: from now on it is
+written only on a handoff INTO a station, judged when the move happens. A
+value written before, on a task whose state is not a station after the
+backfill, records a move into a state that was not one; left in place, a
+person flagging that state later would turn it into a check that never
+happened. It is cleared. The downgrade does not restore it: the old reading
+accepted any handoff, and a cleared one only asks for a check again.
 """
 
 from __future__ import annotations
@@ -46,6 +54,12 @@ BACKFILL = (
     "WHERE d.id = s.workflow_id AND d.is_default "
     "AND s.name = 'verify' AND NOT s.is_terminal AND NOT s.closes_work"
 )
+CLEAR_STALE_HANDOFFS = (
+    "UPDATE tasks t SET handed_over_by_worker_id = NULL "
+    "FROM workflow_states s "
+    "WHERE s.id = t.state_id AND NOT s.checks_work "
+    "AND t.handed_over_by_worker_id IS NOT NULL"
+)
 
 
 def upgrade() -> None:
@@ -57,6 +71,7 @@ def upgrade() -> None:
         sa.Column("checks_work", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
     op.execute(BACKFILL)
+    op.execute(CLEAR_STALE_HANDOFFS)
     # ``op.f``: the name is final. The metadata's naming convention would
     # otherwise prefix it a second time.
     op.create_check_constraint(
