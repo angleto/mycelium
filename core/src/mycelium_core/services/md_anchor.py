@@ -391,6 +391,33 @@ def render_text(body: str) -> str:
     return _render_with_map(norm)[0]
 
 
+def parse(norm_body: str) -> list[Token]:
+    """The token stream of an LF-normalised body under the editor's
+    markdown configuration: what a fence, inline code or a link IS, for any
+    reader that has to agree with the editor about it."""
+    return _MD.parse(norm_body)
+
+
+def normalise_line_endings(body: str) -> str:
+    """``body`` with CRLF and CR turned into LF: the coordinate system every
+    source offset in this module is expressed in."""
+    return _normalize(body)[0]
+
+
+def rendered_source_spans(norm_body: str) -> tuple[str, list[tuple[int, int]]]:
+    """The rendered text of an LF-normalised body and, for each rendered
+    character, the ``[start, end)`` span of ``norm_body`` it comes from.
+
+    This is what lets a caller that found something in the SOURCE (a
+    reference token, say) quote it in the RENDERED domain a reader sees: the
+    rendered characters of a source span ``[s, e)`` are those whose own span
+    lies inside it. A block separator has an empty span (``start == end``,
+    at the block it precedes), so a caller selecting non-empty spans never
+    picks one up at the edge of a reference that opens a block."""
+    rendered, chars, _ = _render_with_map(norm_body)
+    return rendered, [(c.src_start, c.src_end) for c in chars]
+
+
 @dataclass(frozen=True)
 class Located:
     """Source span ``[src_start, src_end)`` of the ORIGINAL body to replace."""

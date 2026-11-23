@@ -60,6 +60,9 @@ const META: Record<string, Meta> = {
   // the fuel_retention sweep should have pruned. Healthy ~0; growing means
   // the pruner is not running and the fuel table accumulates unbounded.
   trace_backlog: { kind: 'scalar', dir: 'lower' },
+  // ADR-0073: bodies whose written-reference projection does not match the
+  // text. Expected 0; the garden loop repairs what it finds.
+  reference_drift: { kind: 'scalar', dir: 'lower' },
 }
 const ORDER = Object.keys(META)
 

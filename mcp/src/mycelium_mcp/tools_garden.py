@@ -35,6 +35,8 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("garden_clusters", "garden.clusters", None),
     ("graph_walk", "garden.walk.reading_set", None),
     ("suggest_note_links", "garden.link_suggestions", _suggestions),
+    ("list_written_backlinks", "garden.references.backlinks", None),
+    ("choose_reference_target", "garden.references.choose", None),
     # proposals
     ("garden_classify", "garden.classify", None),
     ("garden_apply", "garden.apply", None),

@@ -38,7 +38,7 @@ type Resolution = {
 /** One resolved prefix, pushed in when its lookup settles. */
 const setResolution = StateEffect.define<{ prefix: string; res: Resolution }>()
 
-type Hit = { from: number; to: number; prefix: string }
+export type Hit = { from: number; to: number; prefix: string }
 
 /**
  * Every inline code span whose content is a resolvable prefix.
@@ -48,10 +48,19 @@ type Hit = { from: number; to: number; prefix: string }
  * navigate instantly, and a chip scrolled out of sight is exactly the one
  * whose lookup is worth having ready. The scan is cheap and only reruns when
  * the document changes.
+ *
+ * Exported for the agreement test with the server's reference extractor
+ * (web/src/shared/fixtures/body_references.json, ADR-0073): the two must read
+ * the same bodies the same way, and a disagreement is a failing test.
  */
-function collectHits(state: EditorState): Hit[] {
+export function collectHits(state: EditorState): Hit[] {
   const hits: Hit[] = []
-  const doc = state.sliceDoc()
+  // ``state.doc.sliceString``, not a slice of ``sliceDoc()``: the joined
+  // string carries the document's line separator, which is two characters in
+  // a CRLF body while every position counts a line break as one. Slicing it
+  // drifted by one per line, so no chip after the first line of a CRLF body
+  // was decorated (found by the agreement corpus, ADR-0073).
+  const doc = state.doc
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name !== 'InlineCode') return
@@ -64,7 +73,7 @@ function collectHits(state: EditorState): Hit[] {
         if (c.to === node.to) to = c.from
       }
       if (to <= from) return
-      const raw = doc.slice(from, to)
+      const raw = doc.sliceString(from, to)
       const trimmed = raw.trim()
       if (!isPrefixCandidate(trimmed)) return
       const lead = raw.length - raw.trimStart().length

@@ -81,6 +81,7 @@ from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
+from mycelium_core.services import body_references
 from mycelium_core.services.fts_language import detect_fts_language
 from mycelium_core.services.note_effective import note_is_effective
 from mycelium_core.services.retrieval.stages.rerank import combine_outcomes
@@ -129,6 +130,10 @@ def _record_dirty(session: Session | None, task_id: uuid.UUID | None) -> None:
     if session is None or task_id is None:
         return
     session.info.setdefault(_DIRTY_KEY, set()).add(task_id)
+    # The written-reference projection (ADR-0073) reads the description from
+    # the same marks; its own digest skips a task whose description did not
+    # change.
+    body_references.record_task(session, task_id)
 
 
 def _record_deleted(session: Session | None, task_id: uuid.UUID | None) -> None:

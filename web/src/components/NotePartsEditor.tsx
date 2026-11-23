@@ -109,6 +109,18 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     useEffect(() => {
       partsRef.current = parts
     }, [parts])
+    // A written backlink opens the citing note at ``#part-<id>`` (ADR-0073):
+    // once the parts are on screen, bring that part into view, once per
+    // hash, so later reloads of the list do not keep yanking the scroll.
+    const scrolledTo = useRef<string | null>(null)
+    useEffect(() => {
+      const hash = window.location.hash
+      if (!hash.startsWith('#part-') || scrolledTo.current === hash) return
+      const el = document.getElementById(hash.slice(1))
+      if (!el) return
+      scrolledTo.current = hash
+      el.scrollIntoView({ block: 'center' })
+    }, [parts])
     useEffect(() => {
       editingBodyRef.current = editingBody
     }, [editingBody])
@@ -595,7 +607,7 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
             // sparse ords after a reorder.
             const insertAfterOrd = p.ord + 1
             return (
-              <li key={p.id} className="parts-editor__item">
+              <li key={p.id} id={`part-${p.id}`} className="parts-editor__item">
                 <header className="parts-editor__item-head">
                   <button
                     type="button"

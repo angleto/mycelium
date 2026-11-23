@@ -60,6 +60,8 @@ from mycelium_core.operations.garden_views import (
     GardenNoArgs,
     GardenReadingSetIn,
     GardenReadingStep,
+    GardenReferenceChooseIn,
+    GardenReferenceChooseOut,
     GardenRejectHotspotOut,
     GardenRestoreSourceIn,
     GardenRestoreSourceOut,
@@ -74,7 +76,11 @@ from mycelium_core.operations.garden_views import (
     GardenWalkIn,
     GardenWalkOut,
     GardenWalkStep,
+    GardenWrittenBacklink,
+    GardenWrittenBacklinksIn,
+    GardenWrittenBacklinksOut,
 )
+from mycelium_core.services import body_references as references_svc
 from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import event_bus, focus_context, graph_local
 from mycelium_core.services import garden_classify as classify_svc
@@ -932,3 +938,95 @@ async def learning_rollback(ctx: OpCtx, p: GardenLearningRollbackIn) -> GardenLe
 
 review_approve_on_decision.__doc__ = _ON_DECISION_DOC.format(Verb="Approve", verb="approve")
 review_reject_on_decision.__doc__ = _ON_DECISION_DOC.format(Verb="Reject", verb="reject")
+
+
+# --------------------------------------------------------------------------
+# Written references (ADR-0073)
+# --------------------------------------------------------------------------
+
+
+async def _assert_target_readable(ctx: OpCtx, kind: str, target_id: uuid.UUID) -> None:
+    """The target must be one the caller can open: a note on the usual
+    terms (not in the bin, not awaiting review), a task, a tag."""
+    from mycelium_core.services import notes as notes_svc
+    from mycelium_core.services import tasks as tasks_svc
+    from mycelium_core.services import taxonomy as taxonomy_svc
+
+    if kind == "note":
+        await notes_svc.get_note(ctx.session, org_id=ctx.org_id, note_id=target_id)
+    elif kind == "task":
+        await tasks_svc.get_task(ctx.session, org_id=ctx.org_id, task_id=target_id)
+    else:
+        await taxonomy_svc.get_tag(ctx.session, org_id=ctx.org_id, tag_id=target_id)
+
+
+@operation(
+    "garden.references.backlinks",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenWrittenBacklinksIn,
+    result=GardenWrittenBacklinksOut,
+)
+async def written_backlinks(ctx: OpCtx, p: GardenWrittenBacklinksIn) -> GardenWrittenBacklinksOut:
+    """Where people WROTE a reference to a note, task or tag: a mention, a
+    code chip or a bare code in a note part or a task description, with the
+    sentence it sits in. This is the written layer beside the typed links of
+    ``list_note_links``; ``also_typed`` says where the two overlap. Sources in
+    the bin or awaiting review are left out, archived ones are labelled. An
+    ``ambiguous`` entry is a code that names this target among others; a
+    person resolves it with ``choose_reference_target``."""
+    await _assert_target_readable(ctx, p.target_kind, p.target_id)
+    rows = await references_svc.written_backlinks(
+        ctx.session, org_id=ctx.org_id, target_kind=p.target_kind, target_id=p.target_id
+    )
+    return GardenWrittenBacklinksOut(
+        backlinks=[
+            GardenWrittenBacklink(
+                reference_id=r.reference_id,
+                status=r.status,
+                syntax=r.syntax,
+                source_kind=r.source_kind,
+                note_id=r.note_id,
+                part_id=r.part_id,
+                task_id=r.task_id,
+                title=r.title,
+                source_archived=r.source_archived,
+                quote_exact=r.quote_exact,
+                quote_prefix=r.quote_prefix,
+                quote_suffix=r.quote_suffix,
+                also_typed=r.also_typed,
+                first_seen_at=r.first_seen_at,
+            )
+            for r in rows
+        ]
+    )
+
+
+@operation(
+    "garden.references.choose",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenReferenceChooseIn,
+    result=GardenReferenceChooseOut,
+)
+async def choose_reference(ctx: OpCtx, p: GardenReferenceChooseIn) -> GardenReferenceChooseOut:
+    """Say which entity an ambiguous written code means (ADR-0073): its id
+    must start with the code. The choice is kept on that occurrence for as
+    long as the code stays in the text; the text itself is not changed. A
+    person's act: no rule or model picks a target for them."""
+    ref = await references_svc.choose_target(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        reference_id=p.reference_id,
+        target_kind=p.target_kind,
+        target_id=p.target_id,
+    )
+    return GardenReferenceChooseOut(
+        reference_id=ref.id,
+        status="resolved",
+        target_kind=p.target_kind,
+        target_id=p.target_id,
+    )

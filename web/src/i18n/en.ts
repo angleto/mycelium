@@ -94,6 +94,11 @@ export const en = {
         explain:
           'Retrieval-trace rows older than the retention window: rows the fuel-retention sweep should have pruned. Healthy near zero; a growing count means the pruner is not running and the telemetry table accumulates unbounded.',
       },
+      reference_drift: {
+        label: 'Reference drift',
+        explain:
+          'Bodies whose written references (mentions, code chips, bare codes) are not projected from their current text. Healthy at zero: the garden loop repairs what it finds, so a count that stays above zero means some write path does not record the bodies it changes.',
+      },
     },
     timeline: {
       title: 'What changed',
@@ -1441,6 +1446,18 @@ export const en = {
     fruits: 'Tasks (fruits)',
     none: 'None.',
     unlink: 'Unlink',
+  },
+  writtenBacklinks: {
+    title: 'Written here',
+    headHint: 'where a note or task cites this in its text',
+    empty: 'No text cites this yet.',
+    untitled: '(untitled)',
+    archived: 'archived',
+    alsoTyped: 'also linked',
+    alsoTypedHint: 'The two also hold a typed link.',
+    chooseThis: 'Means this one',
+    ambiguousHint:
+      'This code also names other notes or tasks. Choose it if the writer meant this one; the text is not changed.',
   },
   noteLinks: {
     title: 'Linked ideas',

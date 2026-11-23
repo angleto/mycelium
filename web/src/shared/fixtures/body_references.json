@@ -1,0 +1,333 @@
+{
+  "description": "Shared corpus for ADR-0073 decision 2. Each case lists the references a body carries, as [syntax, token, ordinal] plus the mention kind for mentions. The Python extractor must produce exactly this list. The web suite checks the chip and mention entries against the renderer's recognisers; bare codes are not recognised by the renderer and are checked by Python only.",
+  "cases": [
+    {
+      "name": "chip in prose",
+      "body": "See `91cf6aaa` here.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip full uuid",
+      "body": "Ref `9cf6bc7f-1111-2222-3333-444455556666`.",
+      "expected": [
+        [
+          "chip",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip short prefix",
+      "body": "Short `abcd` code.",
+      "expected": [
+        [
+          "chip",
+          "abcd",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip uppercase is lowercased",
+      "body": "Ref `91CF6AAA`.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "code that is not hex",
+      "body": "Use `xyz` and `npm run`.",
+      "expected": []
+    },
+    {
+      "name": "colour is not a chip",
+      "body": "Colour `#ffc800`.",
+      "expected": []
+    },
+    {
+      "name": "trailing dash is not a chip",
+      "body": "Half `91cf6aaa-` typed.",
+      "expected": []
+    },
+    {
+      "name": "repeated chips count ordinals",
+      "body": "`91cf6aaa` then `abcd1234` then `91cf6aaa`.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ],
+        [
+          "chip",
+          "abcd1234",
+          0
+        ],
+        [
+          "chip",
+          "91cf6aaa",
+          1
+        ]
+      ]
+    },
+    {
+      "name": "double backtick span",
+      "body": "Ref ``91cf6aaa`` here.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "padded code span",
+      "body": "Ref ` 91cf6aaa ` here.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip in heading list quote",
+      "body": "# Head `11112222`\n\n- item `33334444`\n\n> quote `55556666`",
+      "expected": [
+        [
+          "chip",
+          "11112222",
+          0
+        ],
+        [
+          "chip",
+          "33334444",
+          0
+        ],
+        [
+          "chip",
+          "55556666",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip in table cell",
+      "body": "| a | b |\n|---|---|\n| `91cf6aaa` | x |",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "chip in bold",
+      "body": "Is **`91cf6aaa`** bold.",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "escaped backticks are text",
+      "body": "Not \\`91cf6aaa\\` a chip.",
+      "expected": []
+    },
+    {
+      "name": "fenced code holds nothing",
+      "body": "```\n`91cf6aaa` 91cf6aaa\n```",
+      "expected": []
+    },
+    {
+      "name": "tilde fence holds nothing",
+      "body": "~~~\n`91cf6aaa`\n~~~",
+      "expected": []
+    },
+    {
+      "name": "indented code holds nothing",
+      "body": "Text.\n\n    `91cf6aaa` 91cf6aaa",
+      "expected": []
+    },
+    {
+      "name": "math holds nothing",
+      "body": "Math $91cf6aaa$ here.",
+      "expected": []
+    },
+    {
+      "name": "mention note",
+      "body": "See [the duct](@note:9cf6bc7f-1111-2222-3333-444455556666).",
+      "expected": [
+        [
+          "mention",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0,
+          "note"
+        ]
+      ]
+    },
+    {
+      "name": "mention task and tag",
+      "body": "[t](@task:9cf6bc7f-1111-2222-3333-444455556666) and [g](@tag:0a1b2c3d-aaaa-bbbb-cccc-ddddeeeeffff)",
+      "expected": [
+        [
+          "mention",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0,
+          "task"
+        ],
+        [
+          "mention",
+          "0a1b2c3d-aaaa-bbbb-cccc-ddddeeeeffff",
+          0,
+          "tag"
+        ]
+      ]
+    },
+    {
+      "name": "mention uppercase uuid",
+      "body": "[x](@note:9CF6BC7F-1111-2222-3333-444455556666)",
+      "expected": [
+        [
+          "mention",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0,
+          "note"
+        ]
+      ]
+    },
+    {
+      "name": "mention with a prefix only is not a mention",
+      "body": "[x](@note:91cf6aaa)",
+      "expected": []
+    },
+    {
+      "name": "unknown mention kind",
+      "body": "[x](@user:9cf6bc7f-1111-2222-3333-444455556666)",
+      "expected": []
+    },
+    {
+      "name": "chip inside a mention label",
+      "body": "[`91cf6aaa`](@note:9cf6bc7f-1111-2222-3333-444455556666)",
+      "expected": [
+        [
+          "mention",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0,
+          "note"
+        ],
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "ordinary link with hex label",
+      "body": "[91cf6aaa](https://example.test/x)",
+      "expected": []
+    },
+    {
+      "name": "autolink holds nothing",
+      "body": "<https://example.test/91cf6aaa>",
+      "expected": []
+    },
+    {
+      "name": "bare url holds nothing",
+      "body": "Go to https://example.test/91cf6aaa now.",
+      "expected": []
+    },
+    {
+      "name": "bare code in prose",
+      "body": "done: 91cf6aaa, c8651969",
+      "expected": [
+        [
+          "bare",
+          "91cf6aaa",
+          0
+        ],
+        [
+          "bare",
+          "c8651969",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "bare full uuid",
+      "body": "id 9cf6bc7f-1111-2222-3333-444455556666 here",
+      "expected": [
+        [
+          "bare",
+          "9cf6bc7f-1111-2222-3333-444455556666",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "longer hex run is not a code",
+      "body": "sha deadbeef12 and 0123456789abcdef",
+      "expected": []
+    },
+    {
+      "name": "dashed run is not a code",
+      "body": "part 91cf6aaa-12 here",
+      "expected": []
+    },
+    {
+      "name": "word-adjacent is not a code",
+      "body": "x91cf6aaa and 91cf6aaay",
+      "expected": []
+    },
+    {
+      "name": "bare in bold",
+      "body": "**91cf6aaa** done",
+      "expected": [
+        [
+          "bare",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "crlf body",
+      "body": "line one\r\nline `91cf6aaa` two\r\n91cf6aaa",
+      "expected": [
+        [
+          "chip",
+          "91cf6aaa",
+          0
+        ],
+        [
+          "bare",
+          "91cf6aaa",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "empty body",
+      "body": "",
+      "expected": []
+    }
+  ]
+}

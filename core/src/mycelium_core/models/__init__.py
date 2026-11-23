@@ -42,6 +42,7 @@ from mycelium_core.models.billing import (
     UsageRecord,
     Wallet,
 )
+from mycelium_core.models.body_reference import BodyReference, BodyReferenceSource
 from mycelium_core.models.budget import Budget, BudgetPeriod
 from mycelium_core.models.calendar import (
     CalendarHoliday,
@@ -213,6 +214,8 @@ __all__ = [
     "Base",
     "BillingConfig",
     "BlobSource",
+    "BodyReference",
+    "BodyReferenceSource",
     "Budget",
     "BudgetPeriod",
     "BuyerVerdict",

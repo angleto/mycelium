@@ -1970,6 +1970,21 @@ button.btn--danger:hover {
   white-space: nowrap;
 }
 .linkedpanel__picker { margin-top: var(--sp-6); }
+/* Written backlinks (ADR-0073): the citing source over the sentence that
+   cites, the cited words marked. */
+.writtenref { align-items: flex-start; }
+.writtenref__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.writtenref__quote {
+  font-size: 0.85rem;
+  color: var(--muted);
+  quotes: none;
+}
 /* Kind chips: a faint background + matching text, distinct per kind so
    the four sections read at a glance. Subject = active green, artifact
    = neutral, derived = blue, promoted = purple. */

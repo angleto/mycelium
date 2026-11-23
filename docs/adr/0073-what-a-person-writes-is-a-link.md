@@ -99,6 +99,14 @@ uses: outside fenced and inline code, links and URLs, and only when it
 resolves. Reading it in place is what the normaliser's rewrite was for,
 so the projection makes that rewrite of a person's text unnecessary.
 
+A chip that resolves to nothing is recorded as `dangling` only when it has
+at least eight hex digits, the convention of ADR-0038. The renderer shows a
+shorter code such as `cafe` or `1234` as plain code when it names nothing,
+so it is not a reference a person wrote, and a row for every such span
+would bury the dangling references that matter. A chip inside a link label
+is still a chip, because both web recognisers decorate inline code
+wherever it sits.
+
 ### 2. One rule for what a reference is
 
 The extraction lives in one core module. The renderer keeps its own
@@ -128,11 +136,15 @@ committed, in the same transaction.
 
 Completeness of that mechanism depends on every write path marking its
 part, and a forgotten path is the failure it cannot see by itself. So
-each source records the body hash its rows were computed from, and the
-garden loop runs a verifier that compares it with the live body, rebuilds
-what differs and reports how many it found. The count is a garden-health
-sensor whose expected value is zero; a non-zero value names a write path
-to fix where it originates.
+each source records the body hash its rows were computed from, and a
+worker sweep compares it with the live body, rebuilds what differs and
+logs how many it found. The sweep runs in every deployment, not inside the
+garden loop: the garden loop is opt-in and paused by the autonomy budget,
+while this repair calls no model and a stale projection would show
+backlinks that are not in the text. The live count of bodies that do not
+match is a garden-health sensor, `reference_drift`, whose expected value
+is zero; a value that stays above zero names a write path to fix where it
+originates.
 
 ### 5. Backlinks are a registry operation with context
 

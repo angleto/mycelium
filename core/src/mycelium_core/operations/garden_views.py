@@ -521,3 +521,57 @@ class GardenReadingStep(BaseModel):
 class GardenLinkSuggestionsIn(BaseModel):
     note_id: uuid.UUID
     k: int = Field(5, ge=1, le=20)
+
+
+# --- Written references (ADR-0073) -----------------------------------
+
+
+class GardenWrittenBacklinksIn(BaseModel):
+    target_kind: Literal["note", "task", "tag"] = Field(
+        description="What the backlinks point at: a note, a task or a tag."
+    )
+    target_id: uuid.UUID
+
+
+class GardenWrittenBacklink(BaseModel):
+    """One place where a person wrote a reference to the target. ``status``
+    is ``resolved``, or ``ambiguous`` when the written code also names other
+    entities and nobody has chosen; ``reference_id`` is what a person passes
+    to choose. ``quote_prefix`` + ``quote_exact`` + ``quote_suffix`` is the
+    sentence as a reader sees it. ``also_typed`` says whether the two ends
+    also hold a typed link. ``first_seen_at`` is null for references found by
+    the backfill, whose writing time is not known."""
+
+    reference_id: uuid.UUID
+    status: Literal["resolved", "ambiguous"]
+    syntax: Literal["mention", "chip", "bare"]
+    source_kind: Literal["note_part", "task"]
+    note_id: uuid.UUID | None = None
+    part_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    title: str | None = None
+    source_archived: bool = False
+    quote_exact: str | None = None
+    quote_prefix: str | None = None
+    quote_suffix: str | None = None
+    also_typed: bool = False
+    first_seen_at: datetime.datetime | None = None
+
+
+class GardenWrittenBacklinksOut(BaseModel):
+    backlinks: list[GardenWrittenBacklink]
+
+
+class GardenReferenceChooseIn(BaseModel):
+    reference_id: uuid.UUID
+    target_kind: Literal["note", "task"]
+    target_id: uuid.UUID = Field(
+        description="The entity the person means; its id must start with the written code."
+    )
+
+
+class GardenReferenceChooseOut(BaseModel):
+    reference_id: uuid.UUID
+    status: Literal["resolved"]
+    target_kind: Literal["note", "task"]
+    target_id: uuid.UUID

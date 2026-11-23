@@ -81,6 +81,7 @@ from mycelium_core.models.memory_blob import BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.services import body_references
 from mycelium_core.services.chunker import (
     Chunk,
     approx_tokens,
@@ -112,6 +113,10 @@ def _record_dirty(session: Session | None, part_id: uuid.UUID | None) -> None:
     if session is None or part_id is None:
         return
     session.info.setdefault(_DIRTY_KEY, set()).add(part_id)
+    # The written-reference projection (ADR-0073) consumes the same marks:
+    # every listener and every explicit choke-point mark lands here, so a
+    # part the index is told about is a part the projection is told about.
+    body_references.record_part(session, part_id)
 
 
 def _record_deleted(session: Session | None, part_id: uuid.UUID | None) -> None:

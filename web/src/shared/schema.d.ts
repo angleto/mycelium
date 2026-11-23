@@ -6069,6 +6069,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/references/backlinks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Written Backlinks
+         * @description Where people WROTE a reference to a note, task or tag: a mention, a
+         *     code chip or a bare code in a note part or a task description, with the
+         *     sentence it sits in. This is the written layer beside the typed links of
+         *     ``list_note_links``; ``also_typed`` says where the two overlap. Sources in
+         *     the bin or awaiting review are left out, archived ones are labelled. An
+         *     ``ambiguous`` entry is a code that names this target among others; a
+         *     person resolves it with ``choose_reference_target``.
+         */
+        get: operations["garden_written_backlinks_garden_references_backlinks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/references/choose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Reference Choose
+         * @description Say which entity an ambiguous written code means (ADR-0073): its id
+         *     must start with the code. The choice is kept on that occurrence for as
+         *     long as the code stays in the text; the text itself is not changed. A
+         *     person's act: no rule or model picks a target for them.
+         */
+        post: operations["garden_reference_choose_garden_references_choose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/classify/{node_id}": {
         parameters: {
             query?: never;
@@ -10817,6 +10866,48 @@ export interface components {
             /** Auto Apply */
             auto_apply: boolean;
         };
+        /** GardenReferenceChooseIn */
+        GardenReferenceChooseIn: {
+            /**
+             * Reference Id
+             * Format: uuid
+             */
+            reference_id: string;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "note" | "task";
+            /**
+             * Target Id
+             * Format: uuid
+             * @description The entity the person means; its id must start with the written code.
+             */
+            target_id: string;
+        };
+        /** GardenReferenceChooseOut */
+        GardenReferenceChooseOut: {
+            /**
+             * Reference Id
+             * Format: uuid
+             */
+            reference_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "resolved";
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "note" | "task";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+        };
         /**
          * GardenRejectHotspotOut
          * @description A suggestion feature the caller keeps declining (ADR-0037 reject-
@@ -11044,6 +11135,69 @@ export interface components {
             weight: number;
             /** Provenance */
             provenance?: string | null;
+        };
+        /**
+         * GardenWrittenBacklink
+         * @description One place where a person wrote a reference to the target. ``status``
+         *     is ``resolved``, or ``ambiguous`` when the written code also names other
+         *     entities and nobody has chosen; ``reference_id`` is what a person passes
+         *     to choose. ``quote_prefix`` + ``quote_exact`` + ``quote_suffix`` is the
+         *     sentence as a reader sees it. ``also_typed`` says whether the two ends
+         *     also hold a typed link. ``first_seen_at`` is null for references found by
+         *     the backfill, whose writing time is not known.
+         */
+        GardenWrittenBacklink: {
+            /**
+             * Reference Id
+             * Format: uuid
+             */
+            reference_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "resolved" | "ambiguous";
+            /**
+             * Syntax
+             * @enum {string}
+             */
+            syntax: "mention" | "chip" | "bare";
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "note_part" | "task";
+            /** Note Id */
+            note_id?: string | null;
+            /** Part Id */
+            part_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Title */
+            title?: string | null;
+            /**
+             * Source Archived
+             * @default false
+             */
+            source_archived?: boolean;
+            /** Quote Exact */
+            quote_exact?: string | null;
+            /** Quote Prefix */
+            quote_prefix?: string | null;
+            /** Quote Suffix */
+            quote_suffix?: string | null;
+            /**
+             * Also Typed
+             * @default false
+             */
+            also_typed?: boolean;
+            /** First Seen At */
+            first_seen_at?: string | null;
+        };
+        /** GardenWrittenBacklinksOut */
+        GardenWrittenBacklinksOut: {
+            /** Backlinks */
+            backlinks: components["schemas"]["GardenWrittenBacklink"][];
         };
         /** GrantIn */
         GrantIn: {
@@ -29899,6 +30053,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenLinkSuggestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_written_backlinks_garden_references_backlinks_get: {
+        parameters: {
+            query: {
+                /** @description What the backlinks point at: a note, a task or a tag. */
+                target_kind: "note" | "task" | "tag";
+                target_id: string;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenWrittenBacklinksOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_reference_choose_garden_references_choose_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReferenceChooseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReferenceChooseOut"];
                 };
             };
             /** @description Validation Error */

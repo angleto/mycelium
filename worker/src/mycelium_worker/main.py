@@ -23,6 +23,7 @@ from mycelium_core.schema_revision import verify_schema_revision
 from mycelium_core.services.mailer import build_system_mailer, set_mailer
 from mycelium_core.services.notification_sender import build_notification_sender
 from mycelium_worker import (
+    body_references,
     dispatch,
     email_responder,
     email_sync,
@@ -66,6 +67,8 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
      - revisions snapshot/retention/summary sweeps;
      - fuel-path retention (ADR-0048: retrieval_trace / search_clicks
        windows -- hygiene, so NOT gated on the garden loop);
+     - written-reference drift repair (ADR-0073: re-projects bodies whose
+       projection does not match the text; no model, so NOT gated either);
      - embedding backfill (both tiers, per-org hosted via resolver).
 
     Opt-in:
@@ -90,6 +93,7 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
         revisions_retention.run_forever,
         revisions_summary.run_forever,
         fuel_retention.run_forever,
+        body_references.run_forever,
         embedding_migration.run_forever,
     ]
     if get_settings().garden_loop_enabled:

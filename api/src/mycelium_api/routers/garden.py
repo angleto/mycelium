@@ -29,6 +29,8 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
     ("GET", "/clusters", "garden.clusters", "garden_clusters"),
     ("GET", "/walk", "garden.walk", "garden_walk"),
     ("GET", "/link-suggestions/{note_id}", "garden.link_suggestions", "garden_link_suggestions"),
+    ("GET", "/references/backlinks", "garden.references.backlinks", "garden_written_backlinks"),
+    ("POST", "/references/choose", "garden.references.choose", "garden_reference_choose"),
     # proposals
     ("GET", "/classify/{node_id}", "garden.classify", "garden_classify"),
     ("POST", "/apply", "garden.apply", "garden_apply"),

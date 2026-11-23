@@ -837,6 +837,15 @@ class Settings(BaseSettings):
     retrieval_trace_retention_days: int = 90
     search_click_retention_days: int = 365
     fuel_retention_interval_seconds: int = 86400
+    # ADR-0073: how often the worker compares every body with its
+    # written-reference projection and re-projects what differs. Correctness
+    # maintenance with no model call, so it runs in every deployment, not
+    # inside the opt-in garden loop. Hourly: the commit-time flush keeps the
+    # projection current, and this only catches a path that does not mark.
+    body_reference_repair_interval_seconds: int = 3600
+    # Bodies re-projected per workspace per tick, so a first run on a large
+    # workspace (the backfill) spreads over several ticks.
+    body_reference_repair_batch: int = 2000
 
     # Humus retrieval branch (ADR-0034) master switch. Humus is the PARALLEL
     # source that late-fuses distilled/consolidated atoms into the focused walk

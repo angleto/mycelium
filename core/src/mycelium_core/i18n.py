@@ -131,6 +131,9 @@ class MessageCode(enum.StrEnum):
     MEMORY_DIM_MISMATCH = "memory.dim_mismatch"
     MEMORY_CROSS_SUBJECT = "memory.cross_subject"
     NOTE_NOT_FOUND = "note.not_found"
+    REFERENCE_NOT_FOUND = "reference.not_found"
+    REFERENCE_NOT_AMBIGUOUS = "reference.not_ambiguous"
+    REFERENCE_TARGET_INVALID = "reference.target_invalid"
     NOTE_NOT_LINKED_TO_TASK = "note.not_linked_to_task"
     REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
@@ -517,6 +520,13 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Consolidation cannot cross org/project (hard isolation)"
         ),
         MessageCode.NOTE_NOT_FOUND: "Note not found",
+        MessageCode.REFERENCE_NOT_FOUND: "Written reference not found",
+        MessageCode.REFERENCE_NOT_AMBIGUOUS: (
+            "Only a reference that was ambiguous when written takes a chosen target"
+        ),
+        MessageCode.REFERENCE_TARGET_INVALID: (
+            "The chosen target must be a task or note whose id starts with the written code"
+        ),
         MessageCode.NOTE_NOT_LINKED_TO_TASK: ("Link a task to the note before billing time"),
         MessageCode.REVISION_NOT_FOUND: "Revision not found",
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",

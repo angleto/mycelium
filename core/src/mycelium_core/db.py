@@ -369,6 +369,7 @@ async def tenant_session(
     # The side-effect of the import is what matters: it registers the
     # SQLAlchemy mapper-level event listeners that track task/checklist
     # and note-part mutations into ``session.info``.
+    from mycelium_core.services.body_references import flush_body_reference_dirty
     from mycelium_core.services.note_search import flush_note_search_dirty
     from mycelium_core.services.task_search import flush_task_search_dirty
 
@@ -419,6 +420,10 @@ async def tenant_session(
             # Same chokepoint for the note index: one blob per note PART,
             # resync'd atomically with the part mutation.
             await flush_note_search_dirty(session)
+            # Written references (ADR-0073): projected after the indexes, in
+            # the same transaction, so a backlink exists exactly when the
+            # body that holds it has committed.
+            await flush_body_reference_dirty(session)
             trans = session.sync_session.get_transaction()
             if trans is not None and not trans.is_active:
                 # A flush error contained by a savepoint pattern (e.g. the
@@ -492,12 +497,14 @@ async def tenant_checkpoint(session: AsyncSession) -> None:
     do not checkpoint inside a ``with_actor`` or ``kg_allow_erase`` window
     (any other transaction-local GUC is silently dropped).
     """
+    from mycelium_core.services.body_references import flush_body_reference_dirty
     from mycelium_core.services.note_search import flush_note_search_dirty
     from mycelium_core.services.task_search import flush_task_search_dirty
 
     captured = await _capture_gucs(session)
     await flush_task_search_dirty(session)
     await flush_note_search_dirty(session)
+    await flush_body_reference_dirty(session)
     await session.commit()
     await _rearm_gucs(session, captured)
 

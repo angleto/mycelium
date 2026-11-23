@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**300 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**302 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,10 +70,11 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (20)
+### garden (22)
 
 | Tool | Summary |
 |---|---|
+| `choose_reference_target` | Say which entity an ambiguous written code means (ADR-0073): its id |
 | `garden_apply` | Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037). |
 | `garden_classify` | The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and |
 | `garden_clusters` | Leiden communities over the weighted note graph: the community index |
@@ -92,6 +93,7 @@ over-fetch the org table and filter in its head.
 | `graph_walk` | Traverse the note graph from ``seed`` and return the walked notes as a |
 | `list_distillation_candidates` | Is there distillation to do? Distillation is graph maintenance, so |
 | `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |
+| `list_written_backlinks` | Where people WROTE a reference to a note, task or tag: a mention, a |
 | `note_restore_source` | Restore the original under a humus atom: un-archive the atom's |
 | `suggest_note_links` | The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared |
 

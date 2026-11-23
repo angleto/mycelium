@@ -68,6 +68,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.retrieval_trace import RetrievalTrace
 from mycelium_core.models.search_click import SearchClick
+from mycelium_core.services import body_references
 from mycelium_core.services import graph as graph_svc
 from mycelium_core.services.note_effective import effective_note_clause
 
@@ -161,6 +162,11 @@ class GardenHealth:
     # 2026-07-17 memory audit flagged). Count shown as-is, no floor:
     # "show, never judge".
     trace_backlog: Metric
+    # ADR-0073: bodies whose written-reference projection does not match
+    # the text (a write path that does not mark its source, or a workspace
+    # not yet backfilled). Expected value zero; the garden loop repairs what
+    # it finds, so a reading that stays above zero names a path to fix.
+    reference_drift: Metric
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
         return {key: asdict(metric) for key, metric in vars(self).items()}
@@ -541,6 +547,9 @@ async def compute_health(
             None if review_ratio is not None else _NO_REVIEWS,
         ),
         trace_backlog=Metric(await _trace_backlog(session, org_id=org_id, now=now), None, None),
+        reference_drift=Metric(
+            float(await body_references.count_drift(session, org_id=org_id)), None, None
+        ),
     )
 
 

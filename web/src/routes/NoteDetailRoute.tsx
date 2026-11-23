@@ -20,6 +20,7 @@ import { Attachments } from '../components/Attachments'
 import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
 import { NoteLinksPanel } from '../components/NoteLinksPanel'
+import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
@@ -912,6 +913,7 @@ export function NoteDetailRoute({
         </div>
         <div role="tabpanel" hidden={connTab !== 'ideas'}>
           <NoteLinksPanel noteId={id} />
+          <WrittenBacklinksPanel targetKind="note" targetId={id} />
         </div>
         <div role="tabpanel" hidden={connTab !== 'suggestions'}>
           <GardenSuggestionsPanel

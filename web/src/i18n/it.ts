@@ -93,6 +93,11 @@ export const it: Catalog = {
         explain:
           'Righe di retrieval_trace più vecchie della finestra di retention: quelle che lo sweep di igiene avrebbe dovuto potare. In salute è vicino a zero; se cresce, il pruner non sta girando e la tabella di telemetria accumula senza limite.',
       },
+      reference_drift: {
+        label: 'Deriva dei riferimenti',
+        explain:
+          'Corpi i cui riferimenti scritti (menzioni, chip di codice, codici nudi) non sono proiettati dal testo attuale. In salute è zero: il ciclo del garden ripara ciò che trova, quindi un conteggio che resta sopra zero vuol dire che qualche percorso di scrittura non registra i corpi che modifica.',
+      },
     },
     timeline: {
       title: 'Cosa è cambiato',
@@ -1436,6 +1441,18 @@ export const it: Catalog = {
     fruits: 'Task (frutti)',
     none: 'Nessuno.',
     unlink: 'Scollega',
+  },
+  writtenBacklinks: {
+    title: 'Citato nel testo',
+    headHint: 'dove una nota o un task lo cita nel testo',
+    empty: 'Nessun testo lo cita ancora.',
+    untitled: '(senza titolo)',
+    archived: 'archiviata',
+    alsoTyped: 'anche collegata',
+    alsoTypedHint: 'Le due hanno anche un link tipizzato.',
+    chooseThis: 'Intende questo',
+    ambiguousHint:
+      'Questo codice indica anche altre note o task. Sceglilo se chi scriveva intendeva questo; il testo non viene modificato.',
   },
   noteLinks: {
     title: 'Idee collegate',

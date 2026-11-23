@@ -22,6 +22,7 @@ import { ChecklistPanel } from '../components/ChecklistPanel'
 import { CoordinationPanel } from '../components/CoordinationPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { LinkedNotesPanel } from '../components/LinkedNotesPanel'
+import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { CopyIdButton } from '../components/CopyIdButton'
@@ -1899,6 +1900,7 @@ export function TaskDetailRoute({
         </div>
         <div role="tabpanel" hidden={connTab !== 'notes'}>
           <LinkedNotesPanel taskId={id} />
+          <WrittenBacklinksPanel targetKind="task" targetId={id} />
           <div className="row">
             <button
               type="button"
