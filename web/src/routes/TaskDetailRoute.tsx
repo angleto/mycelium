@@ -1228,7 +1228,7 @@ export function TaskDetailRoute({
               label={t('tasks.copyId')}
               copiedLabel={t('tasks.idCopied')}
             />
-            <PinButton taskId={id} />
+            <PinButton kind="task" id={id} />
             <FocusHereButton tags={task?.tags} variant="icon" />
             <button
               type="button"

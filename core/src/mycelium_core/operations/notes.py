@@ -1,4 +1,4 @@
-"""The note's operations (ADR-0068), starting with how a note is read.
+"""The note's operations (ADR-0068): how a note is read, listed and pinned.
 
 Reading a note existed twice: ``GET /notes/{id}`` built ``NoteOut`` and the
 ``get_note`` tool built its own dict, with different fields (the tool had
@@ -9,6 +9,11 @@ keeps only its default for what it does not usually want back.
 
 The mapping from the ORM row to the model lives here too, because the
 note routes that are not bound yet still build the same ``NoteOut``.
+
+A pin is a person keeping a note at hand (migration 0033), as it is for a
+task (0027). The pinned list is not an operation of its own: it is the note
+list with ``pinned=true``, so a pinned note is drawn from the same row every
+other list draws.
 """
 
 from __future__ import annotations
@@ -16,6 +21,8 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from mycelium_core.models.note import Note
 from mycelium_core.models.tag import Tag
@@ -33,6 +40,7 @@ from mycelium_core.operations.notes_views import (
 )
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import note_parts as parts_svc
+from mycelium_core.services import note_pins as pins_svc
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import text_patch
 
@@ -285,6 +293,23 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
             include_deleted=p.include_deleted or p.only == "deleted",
         )
         note_ids = linked if note_ids is None else [i for i in note_ids if i in set(linked)]
+    # The caller's own pins, newest pin first. A pin is kept until it is
+    # cleared, archived or not, so the list that shows pins shows every one
+    # of them; a note in the bin drops out like it does from every list, and
+    # comes back if restored. The pins are a handful, so the whole set is one
+    # page ordered by pin time, and a cursor (issued under the creation
+    # order) has nothing to continue.
+    pin_order: list[uuid.UUID] | None = None
+    include_archived = p.include_archived
+    if p.pinned:
+        if p.cursor:
+            raise paging.invalid("notes.list", "cursor: the pinned list is a single page")
+        pin_order = await pins_svc.pinned_note_ids(
+            ctx.session, org_id=ctx.org_id, user_id=ctx.actor_id
+        )
+        pinned_set = set(pin_order)
+        note_ids = [i for i in note_ids if i in pinned_set] if note_ids is not None else pin_order
+        include_archived = True
     if note_ids is not None and not note_ids:
         return NotesPage(items=[])
     dated = (p.created_after, p.created_before, p.updated_since)
@@ -305,10 +330,12 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
         note_ids=note_ids,
         maturities=maturities or None,
         q=p.q,
-        include_archived=p.include_archived,
+        include_archived=include_archived,
         include_deleted=p.include_deleted,
         only=p.only,
-        limit=p.limit + 1,
+        # Every pinned row is fetched so the pin order, not the creation
+        # order, decides which ones fit in the page.
+        limit=len(pin_order) if pin_order is not None else p.limit + 1,
         after=after,
         created_from=created_from,
         created_to=created_to,
@@ -316,8 +343,11 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
         order_by=order_by,
         order_desc=p.order_desc,
     )
+    if pin_order is not None and order_by is None:
+        rank = {nid: i for i, nid in enumerate(pin_order)}
+        rows = sorted(rows, key=lambda n: rank.get(n.id, len(rank)))
     items, next_cursor, truncated = paging.page(rows, p.limit, key=lambda n: [n.created_at, n.id])
-    if order_by is not None:
+    if order_by is not None or pin_order is not None:
         next_cursor = None
     ids = [n.id for n in items]
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=ids)
@@ -353,3 +383,53 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
             row.transcript = bodies.get(n.id)
         out.append(row)
     return NotesPage(items=out, next_cursor=next_cursor, truncated=truncated)
+
+
+# --------------------------------------------------------------------------
+# Pins
+# --------------------------------------------------------------------------
+
+
+class NotePinIn(BaseModel):
+    note_id: uuid.UUID = Field(description="The note to pin or unpin.")
+
+
+class NotePinOut(BaseModel):
+    note_id: uuid.UUID
+    pinned: bool
+    pinned_at: dt.datetime | None = None
+
+
+@operation(
+    "notes.pin",
+    domain=NOTES,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=NotePinIn,
+    result=NotePinOut,
+)
+async def pin(ctx: OpCtx, p: NotePinIn) -> NotePinOut:
+    """Pin a note for the person this credential acts for: it is listed
+    above the recent notes, first, until it is unpinned, archived or not.
+    Changes nothing on the note and does not count as working on it.
+    Idempotent: pinning a pinned note keeps the original pin time. A note in
+    the bin cannot be pinned."""
+    pinned_at = await pins_svc.pin(
+        ctx.session, org_id=ctx.org_id, user_id=ctx.actor_id, note_id=p.note_id
+    )
+    return NotePinOut(note_id=p.note_id, pinned=True, pinned_at=pinned_at)
+
+
+@operation(
+    "notes.unpin",
+    domain=NOTES,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=NotePinIn,
+    result=NotePinOut,
+)
+async def unpin(ctx: OpCtx, p: NotePinIn) -> NotePinOut:
+    """Clear the person's pin on a note. Idempotent, and it works on any
+    note, archived or in the bin, so a pin can always be removed."""
+    await pins_svc.unpin(ctx.session, org_id=ctx.org_id, user_id=ctx.actor_id, note_id=p.note_id)
+    return NotePinOut(note_id=p.note_id, pinned=False)

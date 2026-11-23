@@ -27,6 +27,7 @@ import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { CopyIdButton } from '../components/CopyIdButton'
 import { FocusHereButton } from '../components/FocusHereButton'
+import { PinButton } from '../components/PinButton'
 import { useEditSession } from '../lib/useEditSession'
 import { useUnsavedGuard } from '../lib/unsavedGuard'
 import { useStaleWatch } from '../lib/useStaleWatch'
@@ -658,6 +659,7 @@ export function NoteDetailRoute({
             label={t('notes.copyId')}
             copiedLabel={t('notes.idCopied')}
           />
+          <PinButton kind="note" id={note.id} />
           <FocusHereButton tags={note.tags} />
           <button
             type="button"

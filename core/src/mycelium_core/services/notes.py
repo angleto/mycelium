@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.ai_providers import (
@@ -48,7 +48,7 @@ from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
-from mycelium_core.services import audit, billing, lifecycle, tag_assignment, text_patch
+from mycelium_core.services import audit, billing, lifecycle, note_touch, tag_assignment, text_patch
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
@@ -160,6 +160,118 @@ _NOTE_ORDER: dict[str, Any] = {
 }
 
 
+#: How many touches the newest-first walk reads before it hands over to the
+#: per-note clock. A walk that has not filled the page by then is reading
+#: the history of notes outside the filter, and probing each note in it
+#: is the cheaper way from there.
+_TOUCH_WALK_BUDGET = 4000
+#: The fewest touches one step of the walk reads (it reads twice the page
+#: when that is more): a round trip per handful of rows would cost more
+#: than the rows.
+_TOUCH_WALK_BATCH = 100
+#: Up to this many notes in the filter, the clock is probed note by note;
+#: past it, one pass over the history is cheaper. Measured on 20k notes and
+#: 700k activity rows: probing all 20k took 1.8 s, the single pass 0.45 s,
+#: probing 10 notes 19 ms.
+_PER_NOTE_MAX = 2000
+
+
+async def _by_touch(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    base: Select[tuple[Note]],
+    limit: int,
+    desc: bool,
+) -> list[Note]:
+    """``limit`` notes of ``base`` (already filtered) by their liveness
+    clock, then newest-created, then id: the same total order as sorting
+    every note by ``note_touch``'s clock, at a cost that follows the page.
+
+    Newest first, the answer is read from the two ends that are cheap to
+    read: the ``limit`` newest-created notes of the filter (``created``),
+    and the touch log walked backwards from now. A note's clock is the
+    later of its creation and its last touch, so once the walk has gone
+    back to an instant ``t``, every note whose clock is after ``t`` is
+    known exactly: either a touch after ``t`` was read, or it was created
+    after ``t``, in which case it is among ``created`` (a note outside it
+    was created before all of them). The walk stops as soon as ``limit``
+    notes have a clock after ``t``; it always stops by the creation time of
+    the last of ``created``, because those are ``limit`` such notes.
+
+    Oldest first has no such end to read from, and a walk that runs past
+    its budget is reading the history of other notes. Both are answered
+    from the whole filter: by probing each note's clock
+    (``touched_at_of``) when the filter is small, else by the one pass over
+    the history the garden's sweep uses, which is what every call cost
+    before the walk and so is the bound of the worst case."""
+
+    async def ordered(clock: ColumnElement[dt.datetime], stmt: Select[tuple[Note]]) -> list[Note]:
+        rows = await session.execute(
+            stmt.order_by(
+                (clock.desc() if desc else clock.asc()).nulls_last(),
+                Note.created_at.desc(),
+                Note.id.asc(),
+            ).limit(limit)
+        )
+        return list(rows.scalars().all())
+
+    async def per_note() -> list[Note]:
+        return await ordered(note_touch.touched_at_of(org_id), base)
+
+    async def whole_filter() -> list[Note]:
+        held = await session.scalar(select(func.count()).select_from(base.subquery()))
+        if (held or 0) <= _PER_NOTE_MAX:
+            return await per_note()
+        last = note_touch.last_touch_subquery(org_id)
+        return await ordered(
+            note_touch.touched_at(last), base.outerjoin(last, last.c.note_id == Note.id)
+        )
+
+    if not desc:
+        return await whole_filter()
+    created = list(
+        (await session.execute(base.order_by(Note.created_at.desc(), Note.id.asc()).limit(limit)))
+        .scalars()
+        .all()
+    )
+    if len(created) < limit:
+        # The filter holds fewer notes than the page: probe them all.
+        return await per_note()
+    notes: dict[uuid.UUID, Note] = {n.id: n for n in created}
+    key: dict[uuid.UUID, dt.datetime] = {n.id: n.created_at for n in created}
+    outside: set[uuid.UUID] = set()
+    batch = max(2 * limit, _TOUCH_WALK_BATCH)
+    walked = 0
+    before: dt.datetime | None = None
+    while True:
+        touches = await note_touch.touches_newest_first(session, org_id, before=before, limit=batch)
+        unknown = {nid for _, nid in touches if nid not in notes and nid not in outside}
+        if unknown:
+            found = (await session.execute(base.where(Note.id.in_(unknown)))).scalars().all()
+            for n in found:
+                notes[n.id] = n
+                key[n.id] = n.created_at
+            outside |= unknown - {n.id for n in found}
+        for ts, nid in touches:
+            if nid in notes and ts > key[nid]:
+                key[nid] = ts
+        walked += len(touches)
+        if len(touches) < batch:
+            break  # the whole history is read: every clock is exact
+        before = touches[-1][0]
+        if sum(1 for k in key.values() if k > before) >= limit:
+            break
+        if walked >= _TOUCH_WALK_BUDGET:
+            return await whole_filter()
+    # Stable sorts, least significant first: id ascending, then creation
+    # and clock descending.
+    ranked = sorted(notes.values(), key=lambda n: n.id)
+    ranked.sort(key=lambda n: n.created_at, reverse=True)
+    ranked.sort(key=lambda n: key[n.id], reverse=True)
+    return ranked[:limit]
+
+
 async def list_notes(
     session: AsyncSession,
     *,
@@ -263,6 +375,13 @@ async def list_notes(
         ac, ai = after
         stmt = stmt.where(or_(Note.created_at < ac, and_(Note.created_at == ac, Note.id > ai)))
     order_col = _NOTE_ORDER.get(order_by) if order_by else None
+    if order_by == "touched_at":
+        # The garden's liveness clock (``note_touch``): the last time a
+        # person or an agent worked on the note or on one of its parts,
+        # else its creation. ``updated_at`` is the row-write clock, which an
+        # edit made only inside the parts never moves and a sweep's own
+        # label does, so "recently worked on" is read from here instead.
+        return await _by_touch(session, org_id=org_id, base=stmt, limit=limit, desc=order_desc)
     if order_col is not None:
         # id is the unique final tiebreak for a TOTAL order (stable pagination).
         stmt = stmt.order_by(

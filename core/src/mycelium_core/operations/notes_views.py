@@ -256,11 +256,23 @@ class NotesListIn(BaseModel):
     )
     created_before: str | None = None
     updated_since: str | None = None
-    order_by: Literal["created_at", "updated_at", "title"] | None = Field(
+    order_by: Literal["created_at", "updated_at", "title", "touched_at"] | None = Field(
         None,
-        description="Default newest first. Another order returns one page, no cursor.",
+        description=(
+            "Default newest first. Another order returns one page, no cursor. "
+            "touched_at is the last time a person or an agent worked on the note "
+            "or one of its parts (else its creation); updated_at moves on any "
+            "write to the note row and not on an edit made inside a part."
+        ),
     )
     order_desc: bool = False
+    pinned: bool = Field(
+        False,
+        description=(
+            "Only the notes the caller has pinned (pin_note), most recently pinned "
+            "first, archived ones included. One page, no cursor."
+        ),
+    )
     limit: int = Field(50, ge=1, le=200)
     cursor: str | None = Field(
         None, description="The next_cursor of the previous page, for the next one."

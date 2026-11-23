@@ -233,6 +233,12 @@ async def list_workspace_note_links(
 
 bind_route(router, "GET", "", "notes.list", name="list_notes")
 
+# A person's pins (migration 0033), bound to the operation registry so the
+# MCP tools ``pin_note`` / ``unpin_note`` are the same operation. One body
+# segment, so no ``/{note_id}`` route can shadow them.
+bind_route(router, "POST", "/pin", "notes.pin", name="pin_note")
+bind_route(router, "POST", "/unpin", "notes.unpin", name="unpin_note")
+
 
 bind_route(router, "GET", "/{note_id}", "notes.get", name="get_note")
 

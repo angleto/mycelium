@@ -164,6 +164,11 @@ surface gains what the other already had:
    page. The writing tools still build their answer with the old
    hand-written serialiser; they move with the note writes, the slice that
    touches the person's text and so goes last and separately.
+
+   Note pins (migration 0031) arrived on the registry directly, as task pins
+   had: `notes.pin` and `notes.unpin` serve `POST /notes/pin`,
+   `POST /notes/unpin`, `pin_note` and `unpin_note`, and the pinned list is
+   `pinned=true` on `notes.list`, one page in pin order on both surfaces.
 4. **Tasks: started with pins (2026-11-14).** A person's pins (migration
    0027) are the first task operations on the registry, new rather than
    migrated: `tasks.pin` and `tasks.unpin` serve `POST /tasks/pin`,

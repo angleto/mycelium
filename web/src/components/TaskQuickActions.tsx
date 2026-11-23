@@ -30,7 +30,7 @@ export function TaskQuickActions({
   const { t } = useTranslation()
   return (
     <>
-      <PinButton taskId={id} />
+      <PinButton kind="task" id={id} />
       <CopyIdButton
         id={id}
         variant="icon"

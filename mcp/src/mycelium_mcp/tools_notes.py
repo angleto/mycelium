@@ -70,6 +70,10 @@ TOOLS: dict[str, Any] = {
         defaults={"include_transcript": False},
         lean_answer=True,
     ),
+    # A person's pins (migration 0033); ``list_notes(pinned=true)`` reads
+    # them back.
+    "pin_note": bind_tool(mcp, op_ctx, "notes.pin", name="pin_note"),
+    "unpin_note": bind_tool(mcp, op_ctx, "notes.unpin", name="unpin_note"),
     # The outline is what this tool is for; the bodies are one flag away.
     "list_note_parts": bind_tool(
         mcp,

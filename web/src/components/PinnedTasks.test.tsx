@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { PinnedTasks } from './PinnedTasks'
 import { RecentTasks } from './RecentTasks'
 import { resetPinsForTest } from '../api/pins'
+import { api, workspaceHeader } from '../api/client'
 import { clearSession, setSession } from '../auth/session'
 import '../i18n'
 
@@ -31,6 +32,7 @@ const TASKS: Record<string, T> = {
 }
 
 let pins: string[] = []
+let binned: string[] = []
 const calls: string[] = []
 
 function row(t: T) {
@@ -63,7 +65,18 @@ function answer(): void {
     const path = url.pathname.replace(/^\/api/, '')
     calls.push(`${req.method} ${path}${url.search}`)
     if (req.method === 'GET' && path === '/tasks') {
-      return json(pins.map((id) => row(Object.values(TASKS).find((t) => t.id === id)!)))
+      // A task in the bin is not in the pinned list, as on the server.
+      return json(
+        pins
+          .filter((id) => !binned.includes(id))
+          .map((id) => row(Object.values(TASKS).find((t) => t.id === id)!)),
+      )
+    }
+    const life = /^\/tasks\/([^/]+)\/(delete|restore)$/.exec(path)
+    if (life) {
+      if (life[2] === 'delete') binned = [...binned, life[1]]
+      else binned = binned.filter((x) => x !== life[1])
+      return json({ version: 2 })
     }
     const { task_id } = (await req.json()) as { task_id: string }
     if (path === '/tasks/pin') pins = [task_id, ...pins.filter((x) => x !== task_id)]
@@ -106,6 +119,7 @@ beforeEach(() => {
   setSession({ token: 't', workspaceId: '00000000-0000-4000-8000-000000000001' })
   resetPinsForTest()
   pins = []
+  binned = []
   calls.length = 0
   answer()
   host = document.createElement('div')
@@ -168,5 +182,29 @@ describe('PinnedTasks', () => {
     })
     expect(host.querySelector('.pinnedwidget')).toBeNull()
     expect([...recent()].sort()).toEqual(['Aperto', 'Chiuso'])
+  })
+
+  it('drops a task put in the bin from another screen, and takes it back on restore', async () => {
+    pins = [TASKS.a.id, TASKS.b.id]
+    await mount()
+    expect(titles()).toEqual(['Aperto', 'Chiuso'])
+    // The delete the board or a task page makes: nothing here asks the pin
+    // store to re-read.
+    await act(async () => {
+      await api.POST('/tasks/{task_id}/delete', {
+        params: { header: workspaceHeader(), path: { task_id: TASKS.a.id } },
+        body: { expected_version: 1 },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(titles()).toEqual(['Chiuso'])
+    await act(async () => {
+      await api.POST('/tasks/{task_id}/restore', {
+        params: { header: workspaceHeader(), path: { task_id: TASKS.a.id } },
+        body: { expected_version: 2 },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(titles()).toEqual(['Aperto', 'Chiuso'])
   })
 })

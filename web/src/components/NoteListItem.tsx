@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { TagChip } from './TagChip'
-import { CopyIdButton } from './CopyIdButton'
-import { PeekButton } from './PeekButton'
+import { NoteQuickActions } from './NoteQuickActions'
 import { MoreMenu } from './MoreMenu'
 import type { components } from '../shared'
 
@@ -86,18 +85,11 @@ export function NoteListItem({
           ))}
         </span>
         <span className="noteitem__actions">
-          {/* The two that do not change the note, first: take the id, or
-              read it where it is. Then the one done often, deriving a task;
-              the rest, two of which destroy the note, behind the menu. */}
-          <CopyIdButton
-            id={note.id}
-            variant="icon"
-            label={t('notes.copyId')}
-            copiedLabel={t('notes.idCopied')}
-          />
-          <PeekButton
-            target={{ kind: 'note', id: note.id, title: note.title || note.kind }}
-          />
+          {/* The ones that do not change the note, first: pin it, take the
+              id, read it where it is, focus on its client and project. Then
+              the one done often, deriving a task; the rest, two of which
+              destroy the note, behind the menu. */}
+          <NoteQuickActions id={note.id} title={note.title || note.kind} tags={note.tags} />
           <button
             type="button"
             className="btn--ghost btn--sm"

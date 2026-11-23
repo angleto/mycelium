@@ -22,7 +22,7 @@ type Task = components['schemas']['TaskOut']
 // rest come from the pinned list itself.
 export function PinnedTasks({ tasks }: { tasks: Task[] }) {
   const { t } = useTranslation()
-  const { ids, tasks: pinned } = usePins()
+  const { ids, rows: pinned } = usePins()
   if (ids.length === 0) return null
   const fresh = new Map(tasks.map((x) => [x.id, x]))
   const stored = new Map(pinned.map((x) => [x.id, x]))

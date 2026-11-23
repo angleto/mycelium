@@ -123,6 +123,7 @@ from mycelium_core.models.note_link import (
 )
 from mycelium_core.models.note_part import NotePart, NotePartTrash, NotePartUIState
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.models.note_pin import NotePin
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.notification import (
     Notification,
@@ -290,6 +291,7 @@ __all__ = [
     "NotePartIndexPointer",
     "NotePartTrash",
     "NotePartUIState",
+    "NotePin",
     "NoteStatus",
     "NoteTag",
     "NoteTaskLink",

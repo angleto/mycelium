@@ -12,6 +12,8 @@ import { notesPage } from '../api/notes'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { NoteListItem } from '../components/NoteListItem'
+import { PinnedNotes } from '../components/PinnedNotes'
+import { RecentNotes } from '../components/RecentNotes'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { VoiceRecorder } from '../components/VoiceRecorder'
 import { useFocus } from '../lib/focus'
@@ -465,6 +467,8 @@ export function NotesRoute() {
         </div>
       )}
 
+      <PinnedNotes notes={notes} />
+      <RecentNotes query={listQuery} refreshKey={notes} />
       <h2>{t('notes.yours')}</h2>
       {focusActive && (
         <p className="banner">

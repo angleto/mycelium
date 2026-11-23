@@ -4816,6 +4816,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pin Note
+         * @description Pin a note for the person this credential acts for: it is listed
+         *     above the recent notes, first, until it is unpinned, archived or not.
+         *     Changes nothing on the note and does not count as working on it.
+         *     Idempotent: pinning a pinned note keeps the original pin time. A note in
+         *     the bin cannot be pinned.
+         */
+        post: operations["pin_note_notes_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/unpin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unpin Note
+         * @description Clear the person's pin on a note. Idempotent, and it works on any
+         *     note, archived or in the bin, so a pin can always be removed.
+         */
+        post: operations["unpin_note_notes_unpin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}": {
         parameters: {
             query?: never;
@@ -13621,6 +13666,27 @@ export interface components {
             /** Client Tag Id */
             client_tag_id?: string | null;
             index_scope?: components["schemas"]["IndexScope"] | null;
+        };
+        /** NotePinIn */
+        NotePinIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             * @description The note to pin or unpin.
+             */
+            note_id: string;
+        };
+        /** NotePinOut */
+        NotePinOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Pinned */
+            pinned: boolean;
+            /** Pinned At */
+            pinned_at?: string | null;
         };
         /** NotePromoteIn */
         NotePromoteIn: {
@@ -27677,9 +27743,11 @@ export interface operations {
                 created_after?: string | null;
                 created_before?: string | null;
                 updated_since?: string | null;
-                /** @description Default newest first. Another order returns one page, no cursor. */
-                order_by?: ("created_at" | "updated_at" | "title") | null;
+                /** @description Default newest first. Another order returns one page, no cursor. touched_at is the last time a person or an agent worked on the note or one of its parts (else its creation); updated_at moves on any write to the note row and not on an edit made inside a part. */
+                order_by?: ("created_at" | "updated_at" | "title" | "touched_at") | null;
                 order_desc?: boolean;
+                /** @description Only the notes the caller has pinned (pin_note), most recently pinned first, archived ones included. One page, no cursor. */
+                pinned?: boolean;
                 limit?: number;
                 /** @description The next_cursor of the previous page, for the next one. */
                 cursor?: string | null;
@@ -27775,6 +27843,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NoteLinkOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_note_notes_pin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePinOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_note_notes_unpin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePinOut"];
                 };
             };
             /** @description Validation Error */

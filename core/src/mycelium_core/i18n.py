@@ -137,6 +137,7 @@ class MessageCode(enum.StrEnum):
     PROPOSAL_NOT_FOUND = "link_proposal.not_found"
     PROPOSAL_DECIDED = "link_proposal.decided"
     NOTE_NOT_LINKED_TO_TASK = "note.not_linked_to_task"
+    NOTE_PIN_LIMIT = "note.pin_limit"
     REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
     ATTACHMENT_TOO_LARGE = "attachment.too_large"
@@ -532,6 +533,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The chosen target must be a task or note whose id starts with the written code"
         ),
         MessageCode.NOTE_NOT_LINKED_TO_TASK: ("Link a task to the note before billing time"),
+        MessageCode.NOTE_PIN_LIMIT: (
+            "You already have {limit} pinned notes: unpin one before pinning another."
+        ),
         MessageCode.REVISION_NOT_FOUND: "Revision not found",
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",
         MessageCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum size",
