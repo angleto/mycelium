@@ -39,8 +39,7 @@ branch) read only the typed rows of `note_note_link` and
 
 ### What was measured
 
-On production, 2026-11-23, in the one workspace in use (135 notes,
-archived included):
+On production data, 2026-11-23, archived notes included:
 
 - **No body contains a mention link.** A substring scan of every part
   for `@note` and `@task` (`list_notes(q=...)`, which is an `ILIKE` over
