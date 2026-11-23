@@ -58,6 +58,19 @@ from mycelium_core.operations.garden_views import (
     GardenListIn,
     GardenMaturitySuggestionOut,
     GardenNoArgs,
+    GardenProposalAcceptIn,
+    GardenProposalAcceptOut,
+    GardenProposalItem,
+    GardenProposalQueueIn,
+    GardenProposalQueueOut,
+    GardenProposalRejectIn,
+    GardenProposalRejectOut,
+    GardenProposalShownIn,
+    GardenProposalShownOut,
+    GardenProposalSubmitIn,
+    GardenProposalSubmitOut,
+    GardenProposerPrecision,
+    GardenProposerPrecisionOut,
     GardenReadingSetIn,
     GardenReadingStep,
     GardenReferenceChooseIn,
@@ -90,6 +103,7 @@ from mycelium_core.services import garden_review as review_svc
 from mycelium_core.services import graph as graph_svc
 from mycelium_core.services import graph_snapshot as graph_snapshot_svc
 from mycelium_core.services import link_prediction as linkpred_svc
+from mycelium_core.services import link_proposals as proposals_svc
 
 GARDEN = "garden"
 
@@ -1029,4 +1043,163 @@ async def choose_reference(ctx: OpCtx, p: GardenReferenceChooseIn) -> GardenRefe
         status="resolved",
         target_kind=p.target_kind,
         target_id=p.target_id,
+    )
+
+
+# --------------------------------------------------------------------------
+# Link proposals (ADR-0073 decision 7)
+# --------------------------------------------------------------------------
+
+
+@operation(
+    "garden.link_proposals.submit",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=GardenProposalSubmitIn,
+    result=GardenProposalSubmitOut,
+)
+async def proposal_submit(ctx: OpCtx, p: GardenProposalSubmitIn) -> GardenProposalSubmitOut:
+    """Propose a note-to-note link nobody wrote. It is born proposed and
+    takes effect only if a person accepts it, choosing the kind; the link
+    then records you as its proposer and keeps ``evidence_ref``. A pair a
+    person rejected is never accepted again from anyone. Your decisions are
+    counted: ``garden_link_proposer_precision`` reports your precision."""
+    res = await proposals_svc.submit(
+        ctx.session,
+        org_id=ctx.org_id,
+        proposer=proposals_svc.identity_proposer(ctx.actor_id),
+        source_note_id=p.source_note_id,
+        target_note_id=p.target_note_id,
+        evidence=p.evidence,
+        evidence_ref=p.evidence_ref,
+        score=p.score,
+    )
+    return GardenProposalSubmitOut(proposal_id=res.proposal_id, skipped=res.skipped)
+
+
+@operation(
+    "garden.link_proposals.queue",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenProposalQueueIn,
+    result=GardenProposalQueueOut,
+)
+async def proposal_queue(ctx: OpCtx, p: GardenProposalQueueIn) -> GardenProposalQueueOut:
+    """Open link proposals, best first, with who proposed each and why. The
+    proposer's score orders the list and is not returned: a person shown a
+    confidence anchors on it."""
+    items = await proposals_svc.queue(
+        ctx.session, org_id=ctx.org_id, note_id=p.note_id, limit=p.limit
+    )
+    return GardenProposalQueueOut(
+        proposals=[
+            GardenProposalItem(
+                proposal_id=i.proposal_id,
+                proposer=i.proposer,
+                source_note_id=i.source_note_id,
+                target_note_id=i.target_note_id,
+                evidence=i.evidence,
+                created_at=i.created_at,
+            )
+            for i in items
+        ]
+    )
+
+
+@operation(
+    "garden.link_proposals.shown",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenProposalShownIn,
+    result=GardenProposalShownOut,
+)
+async def proposal_shown(ctx: OpCtx, p: GardenProposalShownIn) -> GardenProposalShownOut:
+    """Record that these proposals were shown to the calling person, in this
+    order, on this surface. Only a person is exposed to a proposal."""
+    n = await proposals_svc.record_shown(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        surface=p.surface,
+        proposal_ids=p.proposal_ids,
+    )
+    return GardenProposalShownOut(recorded=n)
+
+
+@operation(
+    "garden.link_proposals.accept",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenProposalAcceptIn,
+    result=GardenProposalAcceptOut,
+)
+async def proposal_accept(ctx: OpCtx, p: GardenProposalAcceptIn) -> GardenProposalAcceptOut:
+    """Accept a proposed link with the kind the person chooses. A typed link
+    is created and keeps its proposer; no text is edited. A person's act."""
+    link = await proposals_svc.accept(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        proposal_id=p.proposal_id,
+        kind=p.kind,
+        swap=p.swap,
+    )
+    return GardenProposalAcceptOut(
+        link_id=link.id,
+        parent_note_id=link.parent_note_id,
+        child_note_id=link.child_note_id,
+        kind=link.kind,
+        origin_proposer=link.origin_proposer or "",
+    )
+
+
+@operation(
+    "garden.link_proposals.reject",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenProposalRejectIn,
+    result=GardenProposalRejectOut,
+)
+async def proposal_reject(ctx: OpCtx, p: GardenProposalRejectIn) -> GardenProposalRejectOut:
+    """Reject a proposed link. The pair is remembered and no proposer
+    proposes it again; a person can still link it by hand."""
+    await proposals_svc.reject(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, proposal_id=p.proposal_id
+    )
+    return GardenProposalRejectOut(proposal_id=p.proposal_id, status="rejected")
+
+
+@operation(
+    "garden.link_proposals.precision",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenNoArgs,
+    result=GardenProposerPrecisionOut,
+)
+async def proposer_precision(ctx: OpCtx, _p: GardenNoArgs) -> GardenProposerPrecisionOut:
+    """Per proposer: proposals accepted, rejected, expired and open, how
+    many showings were recorded, and precision (accepted over decided) with
+    its 95% Wilson interval."""
+    rows = await proposals_svc.precision(ctx.session, org_id=ctx.org_id)
+    return GardenProposerPrecisionOut(
+        proposers=[
+            GardenProposerPrecision(
+                proposer=r.proposer,
+                accepted=r.accepted,
+                rejected=r.rejected,
+                expired=r.expired,
+                open=r.open,
+                shown=r.shown,
+                precision=r.precision,
+                ci_low=r.ci_low,
+                ci_high=r.ci_high,
+            )
+            for r in rows
+        ]
     )

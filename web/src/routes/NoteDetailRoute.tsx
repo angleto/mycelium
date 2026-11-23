@@ -21,6 +21,7 @@ import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
 import { NoteLinksPanel } from '../components/NoteLinksPanel'
 import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
+import { LinkProposalsPanel } from '../components/LinkProposalsPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
@@ -914,6 +915,7 @@ export function NoteDetailRoute({
         <div role="tabpanel" hidden={connTab !== 'ideas'}>
           <NoteLinksPanel noteId={id} />
           <WrittenBacklinksPanel targetKind="note" targetId={id} />
+          <LinkProposalsPanel noteId={id} />
         </div>
         <div role="tabpanel" hidden={connTab !== 'suggestions'}>
           <GardenSuggestionsPanel

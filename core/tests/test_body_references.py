@@ -860,3 +860,77 @@ async def test_two_transactions_projecting_one_body_both_commit() -> None:
     release.set()
     await asyncio.gather(t1, t2)
     assert [b.note_id for b in await _backlinks(w, "note", target)] == [nid]
+
+
+# ---------------------------------------------------------------- graph (decision 6)
+
+
+async def _weights(w: W) -> dict[tuple[uuid.UUID, uuid.UUID], float]:
+    from mycelium_core.services import graph
+
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        edges = await graph.compute_note_edge_weights(s, org_id=w.org)
+    return {(e.src, e.dst): e.weight for e in edges}
+
+
+async def _local(w: W, note_id: uuid.UUID) -> dict[uuid.UUID, float]:
+    from mycelium_core.services import graph_local
+
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        return await graph_local.local_edges(s, org_id=w.org, note_id=note_id)
+
+
+async def test_written_references_enter_the_graph_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mycelium_core.config import get_settings
+    from mycelium_core.models.index_scope import IndexScope
+    from mycelium_core.services import graph
+
+    w = await _ws()
+    target = await _note(w)
+    citing = await _w_create_note(w, target)
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        hidden = await nt.create_note(
+            s,
+            org_id=w.org,
+            actor_id=w.user,
+            kind=NoteKind.text,
+            title="Private",
+            text=f"cites {_chip(target)}",
+            index_scope=IndexScope.none,
+        )
+        hidden_id = hidden.id
+    pair = graph._pair_key(citing, target)  # pyright: ignore[reportPrivateUsage]
+
+    monkeypatch.setattr(get_settings(), "graph_written_references_enabled", False)
+    assert pair not in await _weights(w)
+    assert citing not in await _local(w, target)
+
+    monkeypatch.setattr(get_settings(), "graph_written_references_enabled", True)
+    weights = await _weights(w)
+    assert weights[pair] == pytest.approx(0.45)
+    # Same weight from the bounded builder: the parity contract.
+    assert (await _local(w, target))[citing] == pytest.approx(weights[pair])
+    # A source kept out of automatic indexing is a backlink, not an edge.
+    assert graph._pair_key(hidden_id, target) not in weights  # pyright: ignore[reportPrivateUsage]
+    assert hidden_id in {b.note_id for b in await _backlinks(w, "note", target)}
+
+
+async def test_a_written_reference_from_the_bin_is_not_an_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mycelium_core.config import get_settings
+    from mycelium_core.services import graph
+
+    monkeypatch.setattr(get_settings(), "graph_written_references_enabled", True)
+    w = await _ws()
+    target = await _note(w)
+    citing = await _w_create_note(w, target)
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        n = await nt.get_note(s, org_id=w.org, note_id=citing)
+        await nt.soft_delete_note(
+            s, org_id=w.org, actor_id=w.user, note_id=citing, expected_version=n.version
+        )
+    assert graph._pair_key(citing, target) not in await _weights(w)  # pyright: ignore[reportPrivateUsage]
+    assert await _local(w, target) == {}

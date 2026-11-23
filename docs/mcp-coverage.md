@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**302 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**308 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,10 +70,11 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (22)
+### garden (28)
 
 | Tool | Summary |
 |---|---|
+| `accept_link_proposal` | Accept a proposed link with the kind the person chooses. A typed link |
 | `choose_reference_target` | Say which entity an ambiguous written code means (ADR-0073): its id |
 | `garden_apply` | Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037). |
 | `garden_classify` | The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and |
@@ -83,6 +84,7 @@ over-fetch the org table and filter in its head.
 | `garden_health_timeseries` | Daily sensor snapshots over the last ``days``, newest first. Reads the |
 | `garden_learning_rollback` | Rewind the caller's learned priors to their state at ``to`` (ADR-0037): |
 | `garden_learning_telemetry` | What the classifier learned from the caller (ADR-0037): the |
+| `garden_link_proposer_precision` | Per proposer: proposals accepted, rejected, expired and open, how |
 | `garden_review_accept_ratio` | How often a person approved, rather than rejected, each model's |
 | `garden_review_approve` | Approve a generated note (ADR-0043): it becomes effective and enters |
 | `garden_review_approve_on_decision` | Approve a generated note that a PERSON has decided to approve, on |
@@ -93,8 +95,12 @@ over-fetch the org table and filter in its head.
 | `graph_walk` | Traverse the note graph from ``seed`` and return the walked notes as a |
 | `list_distillation_candidates` | Is there distillation to do? Distillation is graph maintenance, so |
 | `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |
+| `list_link_proposals` | Open link proposals, best first, with who proposed each and why. The |
 | `list_written_backlinks` | Where people WROTE a reference to a note, task or tag: a mention, a |
 | `note_restore_source` | Restore the original under a humus atom: un-archive the atom's |
+| `propose_note_link` | Propose a note-to-note link nobody wrote. It is born proposed and |
+| `record_link_proposals_shown` | Record that these proposals were shown to the calling person, in this |
+| `reject_link_proposal` | Reject a proposed link. The pair is remembered and no proposer |
 | `suggest_note_links` | The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared |
 
 ### kg (6)

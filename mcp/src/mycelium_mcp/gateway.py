@@ -392,6 +392,9 @@ _PREFIX_ARGS_BY_KIND: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
     # An annotation's document: a note PART under 'note_part' (not expandable,
     # so absent from the inner map) or a task under 'task_description'.
     "doc_id": ("doc_kind", {"task_description": ("task",)}),
+    # A written reference's target (ADR-0073): a note or a task by
+    # ``target_kind``; a tag is not reachable by resolve_prefix.
+    "target_id": ("target_kind", {"note": ("note",), "task": ("task",)}),
 }
 
 #: A value this layer may expand: hex, dashes allowed, at least the ADR-0038

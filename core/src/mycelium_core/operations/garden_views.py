@@ -575,3 +575,105 @@ class GardenReferenceChooseOut(BaseModel):
     status: Literal["resolved"]
     target_kind: Literal["note", "task"]
     target_id: uuid.UUID
+
+
+# --- Link proposals (ADR-0073 decision 7) ----------------------------
+
+
+class GardenProposalSubmitIn(BaseModel):
+    source_note_id: uuid.UUID
+    target_note_id: uuid.UUID
+    evidence: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Why you propose it, shown to the person: a quote, a reason.",
+    )
+    evidence_ref: str | None = Field(
+        None,
+        max_length=2000,
+        description="A reference into your own evidence store, kept on the link if accepted.",
+    )
+    score: float | None = Field(
+        None, description="Orders the queue among your proposals. Never shown to the person."
+    )
+
+
+class GardenProposalSubmitOut(BaseModel):
+    """``proposal_id`` when a proposal is open for the pair; otherwise
+    ``skipped``: ``rejected`` (a person rejected this pair), ``linked``
+    (already linked), ``not_effective`` (a note is in the bin or awaiting
+    review), ``bound`` (you hold the most open proposals allowed on one of
+    these notes), ``self``."""
+
+    proposal_id: uuid.UUID | None = None
+    skipped: str | None = None
+
+
+class GardenProposalQueueIn(BaseModel):
+    note_id: uuid.UUID | None = Field(None, description="Only proposals touching this note.")
+    limit: int = Field(20, ge=1, le=100)
+
+
+class GardenProposalItem(BaseModel):
+    proposal_id: uuid.UUID
+    proposer: str
+    source_note_id: uuid.UUID
+    target_note_id: uuid.UUID
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime.datetime
+
+
+class GardenProposalQueueOut(BaseModel):
+    proposals: list[GardenProposalItem]
+
+
+class GardenProposalShownIn(BaseModel):
+    proposal_ids: list[uuid.UUID] = Field(max_length=100, description="In display order.")
+    surface: str = Field(max_length=40, description="Where they were shown, e.g. note_panel.")
+
+
+class GardenProposalShownOut(BaseModel):
+    recorded: int
+
+
+class GardenProposalAcceptIn(BaseModel):
+    proposal_id: uuid.UUID
+    kind: Literal["hypha_of", "related", "supersedes", "contradicts"]
+    swap: bool = Field(
+        False, description="Make the target the parent instead of the source (directed kinds)."
+    )
+
+
+class GardenProposalAcceptOut(BaseModel):
+    link_id: uuid.UUID
+    parent_note_id: uuid.UUID
+    child_note_id: uuid.UUID
+    kind: str
+    origin_proposer: str
+
+
+class GardenProposalRejectIn(BaseModel):
+    proposal_id: uuid.UUID
+
+
+class GardenProposalRejectOut(BaseModel):
+    proposal_id: uuid.UUID
+    status: Literal["rejected"]
+
+
+class GardenProposerPrecision(BaseModel):
+    """Accepted over decided, with its 95% Wilson interval. Expired
+    proposals are not decisions and are reported apart."""
+
+    proposer: str
+    accepted: int
+    rejected: int
+    expired: int
+    open: int
+    shown: int
+    precision: float | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+
+
+class GardenProposerPrecisionOut(BaseModel):
+    proposers: list[GardenProposerPrecision]

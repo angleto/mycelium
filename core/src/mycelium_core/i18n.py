@@ -134,6 +134,8 @@ class MessageCode(enum.StrEnum):
     REFERENCE_NOT_FOUND = "reference.not_found"
     REFERENCE_NOT_AMBIGUOUS = "reference.not_ambiguous"
     REFERENCE_TARGET_INVALID = "reference.target_invalid"
+    PROPOSAL_NOT_FOUND = "link_proposal.not_found"
+    PROPOSAL_DECIDED = "link_proposal.decided"
     NOTE_NOT_LINKED_TO_TASK = "note.not_linked_to_task"
     REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
@@ -524,6 +526,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.REFERENCE_NOT_AMBIGUOUS: (
             "Only a reference that was ambiguous when written takes a chosen target"
         ),
+        MessageCode.PROPOSAL_NOT_FOUND: "Link proposal not found",
+        MessageCode.PROPOSAL_DECIDED: "This link proposal has already been decided",
         MessageCode.REFERENCE_TARGET_INVALID: (
             "The chosen target must be a task or note whose id starts with the written code"
         ),

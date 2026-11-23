@@ -95,3 +95,50 @@ async def test_backlinks_over_http() -> None:
             },
         )
         assert refused.status_code == 409, refused.text
+
+
+async def test_link_proposal_round_trip_over_http() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        h = await _signup(c)
+        a = await _note(c, h, "first idea")
+        b = await _note(c, h, "second idea")
+        sub = await c.post(
+            "/garden/link-proposals",
+            headers=h,
+            json={
+                "source_note_id": a,
+                "target_note_id": b,
+                "evidence": {"quote": "they share a premise"},
+                "evidence_ref": "ext:42",
+                "score": 0.9,
+            },
+        )
+        assert sub.status_code == 200, sub.text
+        pid = sub.json()["proposal_id"]
+        q = await c.get("/garden/link-proposals", headers=h, params={"note_id": a})
+        (item,) = q.json()["proposals"]
+        assert item["proposal_id"] == pid
+        assert "score" not in item
+        shown = await c.post(
+            "/garden/link-proposals/shown",
+            headers=h,
+            json={"proposal_ids": [pid], "surface": "note_panel"},
+        )
+        assert shown.json() == {"recorded": 1}
+        acc = await c.post(
+            "/garden/link-proposals/accept",
+            headers=h,
+            json={"proposal_id": pid, "kind": "related"},
+        )
+        assert acc.status_code == 200, acc.text
+        links = (await c.get(f"/notes/{a}/links", headers=h)).json()
+        (link,) = links["outgoing"] + links["incoming"]
+        assert link["origin_proposer"].startswith("identity:")
+        assert link["origin_evidence_ref"] == "ext:42"
+        assert link["origin_proposal_id"] == pid
+        assert link["created_by"] is not None
+        again = await c.post("/garden/link-proposals/reject", headers=h, json={"proposal_id": pid})
+        assert again.status_code == 409
+        prec = (await c.get("/garden/link-proposals/precision", headers=h)).json()
+        (row,) = prec["proposers"]
+        assert (row["accepted"], row["shown"], row["precision"]) == (1, 1, 1.0)

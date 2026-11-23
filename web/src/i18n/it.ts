@@ -1442,6 +1442,16 @@ export const it: Catalog = {
     none: 'Nessuno.',
     unlink: 'Scollega',
   },
+  linkProposals: {
+    title: 'Link proposti',
+    headHint: 'suggeriti da un proposer; nulla cambia finché non decidi',
+    untitled: '(senza titolo)',
+    by: 'proposto da {{proposer}}',
+    kind: 'Tipo di link',
+    accept: 'Collega',
+    reject: 'Non correlate',
+    rejectHint: 'Le coppie rifiutate non vengono riproposte. Puoi sempre collegarle a mano.',
+  },
   writtenBacklinks: {
     title: 'Citato nel testo',
     headHint: 'dove una nota o un task lo cita nel testo',

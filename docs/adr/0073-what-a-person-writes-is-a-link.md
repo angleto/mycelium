@@ -159,8 +159,10 @@ ones are shown and labelled, as the chip already does.
 
 ### 6. Written references enter the graph as their own evidence
 
-`compute_note_edge_weights` gains written references as a fourth evidence
-source, soft-OR'd with the existing three, with its own base weight.
+`compute_note_edge_weights` gains written references as one more evidence
+source (beside typed links, shared tags, co-activity and search-informed
+edge usage), soft-OR'd with the others, with its own base weight, one
+contribution per pair however often it is cited.
 They also seed `graph_local.bounded_neighborhood`, and so the `graph`
 retrieval branch and PageRank. The weight is not chosen here: it starts
 equal to `related` and is fixed by the retrieval evaluation (see 8),
@@ -195,7 +197,13 @@ no proposer and works fully with none but its own.
   moved onto this seam, and an unlinked-mention proposer that matches a
   note's title in other bodies, normalised and on word boundaries, with
   a gate that refuses titles too short or too common to be evidence (a
-  title's document frequency in the workspace, not a fixed length).
+  title's document frequency in the workspace, not a fixed length). The
+  gate refuses a title found in more than 5% of the notes, and never
+  fewer than five: below about a hundred notes a share would refuse a
+  concept cited in three of them, which is the case most worth proposing.
+  The built-in proposers run in the garden loop; the `link_add` listing
+  of the candidates panel stays as it was until the panel moves onto the
+  proposal queue.
 - A proposer is shown at most a bounded number of open proposals per
   note at a time, so a noisy one cannot bury the review queue while its
   precision is still being measured.

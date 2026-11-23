@@ -6118,6 +6118,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/link-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Link Proposal Queue
+         * @description Open link proposals, best first, with who proposed each and why. The
+         *     proposer's score orders the list and is not returned: a person shown a
+         *     confidence anchors on it.
+         */
+        get: operations["garden_link_proposal_queue_garden_link_proposals_get"];
+        put?: never;
+        /**
+         * Garden Link Proposal Submit
+         * @description Propose a note-to-note link nobody wrote. It is born proposed and
+         *     takes effect only if a person accepts it, choosing the kind; the link
+         *     then records you as its proposer and keeps ``evidence_ref``. A pair a
+         *     person rejected is never accepted again from anyone. Your decisions are
+         *     counted: ``garden_link_proposer_precision`` reports your precision.
+         */
+        post: operations["garden_link_proposal_submit_garden_link_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-proposals/shown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Link Proposal Shown
+         * @description Record that these proposals were shown to the calling person, in this
+         *     order, on this surface. Only a person is exposed to a proposal.
+         */
+        post: operations["garden_link_proposal_shown_garden_link_proposals_shown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-proposals/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Link Proposal Accept
+         * @description Accept a proposed link with the kind the person chooses. A typed link
+         *     is created and keeps its proposer; no text is edited. A person's act.
+         */
+        post: operations["garden_link_proposal_accept_garden_link_proposals_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-proposals/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Link Proposal Reject
+         * @description Reject a proposed link. The pair is remembered and no proposer
+         *     proposes it again; a person can still link it by hand.
+         */
+        post: operations["garden_link_proposal_reject_garden_link_proposals_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-proposals/precision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Link Proposer Precision
+         * @description Per proposer: proposals accepted, rejected, expired and open, how
+         *     many showings were recorded, and precision (accepted over decided) with
+         *     its 95% Wilson interval.
+         */
+        get: operations["garden_link_proposer_precision_garden_link_proposals_precision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/classify/{node_id}": {
         parameters: {
             query?: never;
@@ -10866,6 +10981,194 @@ export interface components {
             /** Auto Apply */
             auto_apply: boolean;
         };
+        /** GardenProposalAcceptIn */
+        GardenProposalAcceptIn: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "hypha_of" | "related" | "supersedes" | "contradicts";
+            /**
+             * Swap
+             * @description Make the target the parent instead of the source (directed kinds).
+             * @default false
+             */
+            swap?: boolean;
+        };
+        /** GardenProposalAcceptOut */
+        GardenProposalAcceptOut: {
+            /**
+             * Link Id
+             * Format: uuid
+             */
+            link_id: string;
+            /**
+             * Parent Note Id
+             * Format: uuid
+             */
+            parent_note_id: string;
+            /**
+             * Child Note Id
+             * Format: uuid
+             */
+            child_note_id: string;
+            /** Kind */
+            kind: string;
+            /** Origin Proposer */
+            origin_proposer: string;
+        };
+        /** GardenProposalItem */
+        GardenProposalItem: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /** Proposer */
+            proposer: string;
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /**
+             * Target Note Id
+             * Format: uuid
+             */
+            target_note_id: string;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** GardenProposalQueueOut */
+        GardenProposalQueueOut: {
+            /** Proposals */
+            proposals: components["schemas"]["GardenProposalItem"][];
+        };
+        /** GardenProposalRejectIn */
+        GardenProposalRejectIn: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+        };
+        /** GardenProposalRejectOut */
+        GardenProposalRejectOut: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "rejected";
+        };
+        /** GardenProposalShownIn */
+        GardenProposalShownIn: {
+            /**
+             * Proposal Ids
+             * @description In display order.
+             */
+            proposal_ids: string[];
+            /**
+             * Surface
+             * @description Where they were shown, e.g. note_panel.
+             */
+            surface: string;
+        };
+        /** GardenProposalShownOut */
+        GardenProposalShownOut: {
+            /** Recorded */
+            recorded: number;
+        };
+        /** GardenProposalSubmitIn */
+        GardenProposalSubmitIn: {
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /**
+             * Target Note Id
+             * Format: uuid
+             */
+            target_note_id: string;
+            /**
+             * Evidence
+             * @description Why you propose it, shown to the person: a quote, a reason.
+             */
+            evidence?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Evidence Ref
+             * @description A reference into your own evidence store, kept on the link if accepted.
+             */
+            evidence_ref?: string | null;
+            /**
+             * Score
+             * @description Orders the queue among your proposals. Never shown to the person.
+             */
+            score?: number | null;
+        };
+        /**
+         * GardenProposalSubmitOut
+         * @description ``proposal_id`` when a proposal is open for the pair; otherwise
+         *     ``skipped``: ``rejected`` (a person rejected this pair), ``linked``
+         *     (already linked), ``not_effective`` (a note is in the bin or awaiting
+         *     review), ``bound`` (you hold the most open proposals allowed on one of
+         *     these notes), ``self``.
+         */
+        GardenProposalSubmitOut: {
+            /** Proposal Id */
+            proposal_id?: string | null;
+            /** Skipped */
+            skipped?: string | null;
+        };
+        /**
+         * GardenProposerPrecision
+         * @description Accepted over decided, with its 95% Wilson interval. Expired
+         *     proposals are not decisions and are reported apart.
+         */
+        GardenProposerPrecision: {
+            /** Proposer */
+            proposer: string;
+            /** Accepted */
+            accepted: number;
+            /** Rejected */
+            rejected: number;
+            /** Expired */
+            expired: number;
+            /** Open */
+            open: number;
+            /** Shown */
+            shown: number;
+            /** Precision */
+            precision?: number | null;
+            /** Ci Low */
+            ci_low?: number | null;
+            /** Ci High */
+            ci_high?: number | null;
+        };
+        /** GardenProposerPrecisionOut */
+        GardenProposerPrecisionOut: {
+            /** Proposers */
+            proposers: components["schemas"]["GardenProposerPrecision"][];
+        };
         /** GardenReferenceChooseIn */
         GardenReferenceChooseIn: {
             /**
@@ -12808,7 +13111,13 @@ export interface components {
             /** Kind */
             kind: string;
         };
-        /** NoteLinkOut */
+        /**
+         * NoteLinkOut
+         * @description A typed note-to-note link. ``created_by`` is who made it. When it was
+         *     accepted from a proposal (ADR-0073), ``origin_proposer`` names who
+         *     proposed it and ``origin_evidence_ref`` points at the proposer's
+         *     evidence; both are null on a link made by hand.
+         */
         NoteLinkOut: {
             /**
              * Id
@@ -12834,6 +13143,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Origin Proposal Id */
+            origin_proposal_id?: string | null;
+            /** Origin Proposer */
+            origin_proposer?: string | null;
+            /** Origin Evidence Ref */
+            origin_evidence_ref?: string | null;
         };
         /**
          * NoteListOut
@@ -30129,6 +30444,230 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenReferenceChooseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposal_queue_garden_link_proposals_get: {
+        parameters: {
+            query?: {
+                /** @description Only proposals touching this note. */
+                note_id?: string | null;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposalQueueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposal_submit_garden_link_proposals_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenProposalSubmitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposalSubmitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposal_shown_garden_link_proposals_shown_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenProposalShownIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposalShownOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposal_accept_garden_link_proposals_accept_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenProposalAcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposalAcceptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposal_reject_garden_link_proposals_reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenProposalRejectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposalRejectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_proposer_precision_garden_link_proposals_precision_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenProposerPrecisionOut"];
                 };
             };
             /** @description Validation Error */

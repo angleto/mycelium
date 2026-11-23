@@ -121,6 +121,38 @@ async def _kg_extraction_pass(org_id: uuid.UUID, owner: uuid.UUID) -> None:
         )
 
 
+async def _run_link_proposers(org_id: uuid.UUID, owner: uuid.UUID) -> None:
+    from mycelium_core.services import link_proposals, link_proposers
+
+    settings = get_settings()
+    runs = []
+    if settings.link_proposer_link_add_enabled:
+        runs.append(link_proposers.run_link_add)
+    if settings.link_proposer_unlinked_mention_enabled:
+        runs.append(link_proposers.run_unlinked_mention)
+    for run in runs:
+        try:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                report = await run(s, org_id=org_id)
+            if report.submitted or report.skipped:
+                _log.info(
+                    "link proposer %s org=%s submitted=%d skipped=%s",
+                    report.proposer,
+                    org_id,
+                    report.submitted,
+                    report.skipped,
+                )
+        except Exception:
+            _log.exception("link proposer failed for org=%s", org_id)
+    try:
+        async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+            expired = await link_proposals.expire(s, org_id=org_id)
+        if expired:
+            _log.info("link proposals expired org=%s n=%d", org_id, expired)
+    except Exception:
+        _log.exception("link proposal expiry failed for org=%s", org_id)
+
+
 async def run_once() -> int:
     """One sweep over all workspaces. Returns the total number of
     notes whose maturity changed in this tick (across all
@@ -168,6 +200,11 @@ async def run_once() -> int:
                     auto_matured = await garden_classify.auto_promote_mature(
                         s, org_id=org_id, actor_id=owner
                     )
+            # Link proposals (ADR-0073 decision 7): the built-in proposers
+            # submit what a person will decide, and undecided proposals past
+            # their time expire as such. Own session and try, like the
+            # snapshots: a proposer failing must not roll back anything above.
+            await _run_link_proposers(org_id, owner)
             # Garden-health daily snapshot (ADR-0035), in its OWN session
             # so a sensor-query failure can never roll back the maturity
             # transitions committed above. Idempotent per (org, day).

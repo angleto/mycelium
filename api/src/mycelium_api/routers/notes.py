@@ -116,6 +116,9 @@ def _link_out(link: Any) -> NoteLinkOut:
         kind=link.kind,
         created_by=link.created_by,
         created_at=link.created_at,
+        origin_proposal_id=link.origin_proposal_id,
+        origin_proposer=link.origin_proposer,
+        origin_evidence_ref=link.origin_evidence_ref,
     )
 
 

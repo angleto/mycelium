@@ -390,6 +390,11 @@ _NOT_AN_ENTITY_ID = {
     # A knowledge-graph fact (kg_review_*): resolve_prefix reaches tasks and
     # notes, not facts.
     "edge_id",
+    # A link proposal and a written-reference occurrence (ADR-0073): rows of
+    # their own tables, which resolve_prefix does not reach.
+    "proposal_id",
+    "proposal_ids",
+    "reference_id",
     "entity",
     "entry_id",
     "executor_id",

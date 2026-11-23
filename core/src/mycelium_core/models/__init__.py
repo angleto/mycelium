@@ -102,6 +102,7 @@ from mycelium_core.models.invoice import (
 from mycelium_core.models.issuer_api_key import IssuerApiKey
 from mycelium_core.models.issuer_key_rate_limit import IssuerKeyRateLimit
 from mycelium_core.models.kg import KG_ENTITY_TYPES, KgEdge, KgEntity
+from mycelium_core.models.link_proposal import LinkProposal, LinkProposalExposure, LinkRejection
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob, Tier
 from mycelium_core.models.note import (
@@ -273,6 +274,9 @@ __all__ = [
     "LLMProviderKind",
     "LeaseRelease",
     "LedgerEntryKind",
+    "LinkProposal",
+    "LinkProposalExposure",
+    "LinkRejection",
     "Membership",
     "MemoryBlob",
     "Necessity",

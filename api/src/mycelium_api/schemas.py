@@ -2585,12 +2585,20 @@ class NoteLinkIn(BaseModel):
 
 
 class NoteLinkOut(BaseModel):
+    """A typed note-to-note link. ``created_by`` is who made it. When it was
+    accepted from a proposal (ADR-0073), ``origin_proposer`` names who
+    proposed it and ``origin_evidence_ref`` points at the proposer's
+    evidence; both are null on a link made by hand."""
+
     id: uuid.UUID
     parent_note_id: uuid.UUID
     child_note_id: uuid.UUID
     kind: str
     created_by: uuid.UUID | None = None
     created_at: datetime.datetime
+    origin_proposal_id: uuid.UUID | None = None
+    origin_proposer: str | None = None
+    origin_evidence_ref: str | None = None
 
 
 class NoteTaskLinkOut(BaseModel):

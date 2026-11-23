@@ -37,6 +37,12 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("suggest_note_links", "garden.link_suggestions", _suggestions),
     ("list_written_backlinks", "garden.references.backlinks", None),
     ("choose_reference_target", "garden.references.choose", None),
+    ("propose_note_link", "garden.link_proposals.submit", None),
+    ("list_link_proposals", "garden.link_proposals.queue", None),
+    ("record_link_proposals_shown", "garden.link_proposals.shown", None),
+    ("accept_link_proposal", "garden.link_proposals.accept", None),
+    ("reject_link_proposal", "garden.link_proposals.reject", None),
+    ("garden_link_proposer_precision", "garden.link_proposals.precision", None),
     # proposals
     ("garden_classify", "garden.classify", None),
     ("garden_apply", "garden.apply", None),

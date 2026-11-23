@@ -48,7 +48,7 @@ from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.models.note import Note
@@ -118,6 +118,70 @@ def _coactivity_weight(session_count: int) -> float:
 # demand alone never reaches 1 -- a manual link or shared tag still
 # dominates the soft-OR.
 _USAGE_SCALE = 0.4
+
+
+# Written references (ADR-0073 decision 6): a citation a person wrote in
+# a body is evidence of its own, beside the typed links. It starts at the
+# weight of a ``related`` link, the loosest typed kind, and is fixed by the
+# retrieval evaluation, behind ``graph_written_references_enabled``.
+_WRITTEN_REFERENCE_WEIGHT: float = 0.45
+
+
+async def written_reference_pairs(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID | None = None,
+    include_tasks: bool = False,
+) -> set[tuple[uuid.UUID, uuid.UUID]]:
+    """Undirected pairs joined by at least one resolved written reference,
+    canonical by :func:`_pair_key`. Empty when the setting is off.
+
+    A source at ``index_scope='none'`` contributes nothing: it is projected
+    for backlinks, which are navigation, but the graph feeds ranking, which
+    is automatic indexing (ADR-0056). Self-citations are not pairs.
+    Endpoint effectiveness is left to the caller, which already filters
+    every other source on the same predicate. ``note_id`` restricts to
+    pairs touching that note (the bounded builder); ``include_tasks`` adds
+    task endpoints (the unified weave)."""
+    from mycelium_core.config import get_settings
+    from mycelium_core.models.body_reference import BodyReference, BodyReferenceSource
+    from mycelium_core.models.index_scope import IndexScope
+    from mycelium_core.models.note_part import NotePart
+
+    if not get_settings().graph_written_references_enabled:
+        return set()
+    kinds = ("note", "task") if include_tasks else ("note",)
+    base = (
+        BodyReference.org_id == org_id,
+        BodyReference.status == "resolved",
+        BodyReference.target_kind.in_(kinds),
+    )
+    note_q = (
+        select(Note.id, BodyReference.target_id)
+        .select_from(BodyReference)
+        .join(BodyReferenceSource, BodyReferenceSource.id == BodyReference.source_id)
+        .join(NotePart, NotePart.id == BodyReferenceSource.note_part_id)
+        .join(Note, Note.id == NotePart.note_id)
+        .where(*base, Note.index_scope != IndexScope.none)
+    )
+    if note_id is not None:
+        note_q = note_q.where(or_(Note.id == note_id, BodyReference.target_id == note_id))
+    rows = list((await session.execute(note_q)).all())
+    if include_tasks:
+        task_q = (
+            select(Task.id, BodyReference.target_id)
+            .select_from(BodyReference)
+            .join(BodyReferenceSource, BodyReferenceSource.id == BodyReference.source_id)
+            .join(Task, Task.id == BodyReferenceSource.task_id)
+            .where(*base, Task.index_scope != IndexScope.none)
+        )
+        rows.extend((await session.execute(task_q)).all())
+    out: set[tuple[uuid.UUID, uuid.UUID]] = set()
+    for src, dst in rows:
+        if dst is not None and src != dst:
+            out.add(_pair_key(src, dst))
+    return out
 
 
 def _usage_weight(decay_score: float) -> float:
@@ -442,6 +506,15 @@ async def compute_note_edge_weights(
         if w_usage <= 0:
             continue
         by_pair[_pair_key(note_a_id, note_b_id)].append(w_usage)
+
+    # Written references (ADR-0073 decision 6): one contribution per pair
+    # however many times it is cited, behind its setting (off -> nothing
+    # appended -> identical to the result without it).
+    written = await written_reference_pairs(session, org_id=org_id, include_tasks=inc)
+    for a, b in written:
+        if a in ineffective_ids or b in ineffective_ids:
+            continue
+        by_pair[(a, b)].append(_WRITTEN_REFERENCE_WEIGHT)
 
     # Task edges (ADR-0042 D1), only when the weave is unified. Both tables
     # carry their own uniqueness (TaskRelation unique per pair, NoteTaskLink

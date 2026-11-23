@@ -1447,6 +1447,16 @@ export const en = {
     none: 'None.',
     unlink: 'Unlink',
   },
+  linkProposals: {
+    title: 'Proposed links',
+    headHint: 'suggested by a proposer; nothing changes until you decide',
+    untitled: '(untitled)',
+    by: 'proposed by {{proposer}}',
+    kind: 'Link kind',
+    accept: 'Link',
+    reject: 'Not related',
+    rejectHint: 'Rejected pairs are not proposed again. You can still link them by hand.',
+  },
   writtenBacklinks: {
     title: 'Written here',
     headHint: 'where a note or task cites this in its text',

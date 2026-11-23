@@ -31,6 +31,27 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
     ("GET", "/link-suggestions/{note_id}", "garden.link_suggestions", "garden_link_suggestions"),
     ("GET", "/references/backlinks", "garden.references.backlinks", "garden_written_backlinks"),
     ("POST", "/references/choose", "garden.references.choose", "garden_reference_choose"),
+    ("POST", "/link-proposals", "garden.link_proposals.submit", "garden_link_proposal_submit"),
+    ("GET", "/link-proposals", "garden.link_proposals.queue", "garden_link_proposal_queue"),
+    ("POST", "/link-proposals/shown", "garden.link_proposals.shown", "garden_link_proposal_shown"),
+    (
+        "POST",
+        "/link-proposals/accept",
+        "garden.link_proposals.accept",
+        "garden_link_proposal_accept",
+    ),
+    (
+        "POST",
+        "/link-proposals/reject",
+        "garden.link_proposals.reject",
+        "garden_link_proposal_reject",
+    ),
+    (
+        "GET",
+        "/link-proposals/precision",
+        "garden.link_proposals.precision",
+        "garden_link_proposer_precision",
+    ),
     # proposals
     ("GET", "/classify/{node_id}", "garden.classify", "garden_classify"),
     ("POST", "/apply", "garden.apply", "garden_apply"),

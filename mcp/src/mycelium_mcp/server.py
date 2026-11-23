@@ -9489,11 +9489,18 @@ async def _note_titles(s: AsyncSession, note_ids: list[uuid.UUID]) -> dict[uuid.
 
 
 def _nn_link(link: Any) -> dict[str, Any]:
+    # Who made the link and, when it was accepted from a proposal, who
+    # proposed it and on what evidence (ADR-0073): the same three origins
+    # the REST read returns, so an agent never reads a proposer's
+    # conclusion back as a person's own.
     return {
         "link_id": str(link.id),
         "parent_note_id": str(link.parent_note_id),
         "child_note_id": str(link.child_note_id),
         "kind": link.kind,
+        "created_by": str(link.created_by) if link.created_by else None,
+        "origin_proposer": link.origin_proposer,
+        "origin_evidence_ref": link.origin_evidence_ref,
     }
 
 

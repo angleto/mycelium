@@ -26,6 +26,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -103,6 +104,18 @@ class NoteNoteLink(UUIDPKMixin, OrgScopedMixin, Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # ADR-0073 decision 7: a link accepted from a proposal keeps who proposed
+    # it and the proposer's evidence reference beside the person who accepted
+    # it (``created_by``). NULL on a link made by hand. Without these the
+    # graph would read a proposer's conclusion back as a person's own
+    # evidence for it.
+    origin_proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("link_proposal.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    origin_proposer: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    origin_evidence_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NoteTaskLink(UUIDPKMixin, OrgScopedMixin, Base):

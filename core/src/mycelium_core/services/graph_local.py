@@ -11,8 +11,9 @@ cost of assembling a distillation/reading neighbourhood no longer scales
 with the graph (plan §2: best-first thresholded, the pre-APPR phase).
 
 Weight parity is a hard contract, pinned by test: for any pair the
-soft-OR of the same four evidence sources (typed links, shared-generic-tag
-Adamic-Adar, co-activity, search-informed edge usage) must equal the full builder's weight -- the
+soft-OR of the same evidence sources (typed links, shared-generic-tag
+Adamic-Adar, co-activity, search-informed edge usage, and written
+references when enabled, ADR-0073) must equal the full builder's weight -- the
 helpers (``_KIND_WEIGHT``, ``_softor``, ``_adamic_adar_pair``,
 ``_coactivity_weight``, ``_usage_weight``) are imported from ``graph``, never duplicated.
 ``note_edge_usage`` (materialised by Fase 2's ``refresh_edge_usage``) is
@@ -45,10 +46,12 @@ from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.services.graph import (
     _KIND_WEIGHT,
+    _WRITTEN_REFERENCE_WEIGHT,
     _adamic_adar_pair,
     _coactivity_weight,
     _softor,
     _usage_weight,
+    written_reference_pairs,
 )
 from mycelium_core.services.note_effective import (
     effective_note_clause,
@@ -217,6 +220,12 @@ async def local_edges(
         w_usage = _usage_weight(decay_score)
         if w_usage > 0:
             contribs[nb].append(w_usage)
+
+    # 5) Written references (ADR-0073 decision 6), the same pairs and weight
+    #    the full builder reads, restricted to those touching X.
+    for a_id, b_id in await written_reference_pairs(session, org_id=org_id, note_id=note_id):
+        nb = b_id if a_id == note_id else a_id
+        contribs[nb].append(_WRITTEN_REFERENCE_WEIGHT)
 
     if not contribs:
         return {}

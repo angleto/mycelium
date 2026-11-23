@@ -846,6 +846,18 @@ class Settings(BaseSettings):
     # Bodies re-projected per workspace per tick, so a first run on a large
     # workspace (the backfill) spreads over several ticks.
     body_reference_repair_batch: int = 2000
+    # ADR-0073 decision 6: written references as their own evidence source
+    # in the graph weights (and so in PageRank, proximity and the graph
+    # retrieval branch). Off until the retrieval evaluation has run with and
+    # without them; backlinks do not depend on it.
+    graph_written_references_enabled: bool = False
+    # ADR-0073 decision 7: the built-in link proposers the garden loop runs
+    # (so only where the loop runs). Each submits proposals a person decides;
+    # the unlinked-mention one stays on only if, after its first 50
+    # decisions, the lower bound of its precision interval clears the floor
+    # the person sets then (garden_link_proposer_precision).
+    link_proposer_link_add_enabled: bool = True
+    link_proposer_unlinked_mention_enabled: bool = True
 
     # Humus retrieval branch (ADR-0034) master switch. Humus is the PARALLEL
     # source that late-fuses distilled/consolidated atoms into the focused walk
