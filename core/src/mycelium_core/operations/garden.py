@@ -80,8 +80,11 @@ from mycelium_core.operations.garden_views import (
     GardenRestoreSourceOut,
     GardenReviewActionIn,
     GardenReviewActionOut,
+    GardenReviewCheckIn,
+    GardenReviewCheckOut,
     GardenReviewDecisionIn,
     GardenReviewDecisionOut,
+    GardenReviewFindingIn,
     GardenReviewForSourceItem,
     GardenReviewGuardedIn,
     GardenReviewNodeIn,
@@ -89,6 +92,9 @@ from mycelium_core.operations.garden_views import (
     GardenReviewReadingOut,
     GardenReviewRejectedItem,
     GardenReviewRemoveOut,
+    GardenReviewReviseIn,
+    GardenReviewReviseOut,
+    GardenReviewRevisionRef,
     GardenReviewSourceOut,
     GardenTagSuggestionOut,
     GardenTelemetryIn,
@@ -860,17 +866,21 @@ async def review_restore_source(ctx: OpCtx, p: GardenRestoreSourceIn) -> GardenR
     "garden.review.read",
     domain=GARDEN,
     kind=Kind.READ,
-    access=HUMAN_ONLY,
+    access="notes:read",
     params=GardenReviewNodeIn,
     result=GardenReviewReadingOut,
 )
 async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingOut:
     """Read a generated note in full, pending, declined or approved, with
-    the whole text of the notes it was generated from (ADR-0075): what the
-    person deciding it needs to decide. A person's read: the text of a
-    proposal does not leave the review perimeter for a credential carrying a
-    scope list, which reads the titles and previews of garden_review_pending
-    instead."""
+    the whole text of the notes it was generated from, the checks attached
+    to it and, for a revision, the original it replaces (ADR-0075,
+    ADR-0076). This is what you read to check a proposal
+    (garden_review_check) or to write a better one (garden_review_revise).
+
+    A proposal is NOT part of the memory: ``review_state`` says so. Do not
+    ground an answer on a 'proposed' or 'declined' text, and do not quote it
+    as something the person wrote; only the person's approval makes it a
+    note."""
     r = await review_svc.read_node(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, note_id=p.note_id
     )
@@ -890,6 +900,127 @@ async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingO
             )
             for x in r.sources
         ],
+        checks=[
+            GardenReviewCheckOut(
+                check_id=c.check_id,
+                verdict=c.verdict,
+                summary=c.summary,
+                findings=[GardenReviewFindingIn(**f) for f in c.findings],
+                checker_identity_id=c.checker_identity_id,
+                checker_model_id=c.checker_model_id,
+                note_version=c.note_version,
+                stale=c.stale,
+                created_at=c.created_at,
+            )
+            for c in r.checks
+        ],
+        revises=(
+            GardenReviewRevisionRef(
+                note_id=r.revises.note_id,
+                title=r.revises.title,
+                origin_model_id=r.revises.origin_model_id,
+                review_state=r.revises.review_state,
+                body=r.revises.body,
+            )
+            if r.revises
+            else None
+        ),
+        revised_by=[
+            GardenReviewRevisionRef(
+                note_id=x.note_id,
+                title=x.title,
+                origin_model_id=x.origin_model_id,
+                review_state=x.review_state,
+            )
+            for x in r.revised_by
+        ],
+    )
+
+
+@operation(
+    "garden.review.check",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=GardenReviewCheckIn,
+    result=GardenReviewCheckOut,
+)
+async def review_check(ctx: OpCtx, p: GardenReviewCheckIn) -> GardenReviewCheckOut:
+    """Check a generated note against its sources and attach the report to
+    it (ADR-0076). Read it first with garden_review_read. List every claim
+    the note makes, and for each say whether the sources support it, do not
+    say it, or say otherwise, quoting the passage in ``evidence``. The
+    verdict is ``supported`` only if every claim is.
+
+    The check decides NOTHING: it is shown to the person beside the
+    proposal, and the person approves or declines. If the note needs fixing,
+    write the fixed version with garden_review_revise instead of describing
+    it here. ``checker_model_id`` is your model's id."""
+    check = await review_svc.submit_check(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        expected_version=p.expected_version,
+        verdict=p.verdict,
+        summary=p.summary,
+        findings=[
+            review_svc.Finding(
+                claim=f.claim, status=f.status, evidence=f.evidence, comment=f.comment
+            )
+            for f in p.findings
+        ],
+        checker_model_id=p.checker_model_id,
+        checker_identity_id=await executor_identity(ctx),
+    )
+    return GardenReviewCheckOut(
+        check_id=check.id,
+        verdict=check.verdict,
+        summary=check.summary,
+        findings=[GardenReviewFindingIn(**f) for f in check.findings],
+        checker_identity_id=check.checker_identity_id,
+        checker_model_id=check.checker_model_id,
+        note_version=check.note_version,
+        stale=False,
+        created_at=check.created_at,
+    )
+
+
+@operation(
+    "garden.review.revise",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=GardenReviewReviseIn,
+    result=GardenReviewReviseOut,
+)
+async def review_revise(ctx: OpCtx, p: GardenReviewReviseIn) -> GardenReviewReviseOut:
+    """Replace a pending or declined generated note with a better version you
+    wrote (ADR-0076): typically a distillation by a small model that missed,
+    distorted or invented something. Read it with garden_review_read, write
+    the whole new text grounded strictly in the sources, in the sources'
+    language, and pass ``origin_model_id``.
+
+    The revision is a new proposal from the same sources, born pending: the
+    person still approves it. The original is declined with the reason
+    'revised', kept and reopenable, and not counted against its model. An
+    approved note is an ordinary note and cannot be revised here."""
+    note = await review_svc.revise_node(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        expected_version=p.expected_version,
+        text=p.text,
+        origin_model_id=p.origin_model_id,
+    )
+    return GardenReviewReviseOut(
+        revision_note_id=note.id,
+        # revise_node sets both on the revision it returns; the request's id
+        # is the same value, and needs no narrowing.
+        revises_note_id=p.note_id,
+        review_state=note.review_state or "proposed",
+        version=note.version,
     )
 
 

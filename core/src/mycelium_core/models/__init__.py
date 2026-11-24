@@ -148,6 +148,7 @@ from mycelium_core.models.payment_connector import (
 from mycelium_core.models.payment_connector_refusal import PaymentConnectorRefusalBucket
 from mycelium_core.models.precomputed_suggestion import PrecomputedSuggestion
 from mycelium_core.models.project_profile import ProjectProfile
+from mycelium_core.models.proposal_check import ProposalCheck
 from mycelium_core.models.push_subscription import PushSubscription
 from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.sdi_mandate import SdiMandate, SdiMandateStatus
@@ -315,6 +316,7 @@ __all__ = [
     "PaymentWebhookDelivery",
     "PrecomputedSuggestion",
     "ProjectProfile",
+    "ProposalCheck",
     "PushSubscription",
     "RateCard",
     "RateUnit",

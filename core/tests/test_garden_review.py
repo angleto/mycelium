@@ -32,7 +32,7 @@ from sqlalchemy import select
 from mycelium_core.ai_providers import set_llm_override
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
-from mycelium_core.errors import ConflictError, NotFoundError
+from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.note import Note, NoteKind
@@ -761,3 +761,139 @@ async def test_list_pending_serves_the_version_pin(_wire: None) -> None:
         rows = await review.list_pending(s, org_id=org)
         mine = next(r for r in rows if r.note_id == nid)
         assert mine.version == note.version
+
+
+# ── ADR-0076: checks and revisions by an agent ─────────────────────────────
+
+
+def _finding(status: str) -> review.Finding:
+    from mycelium_core.models.proposal_check import ClaimStatus
+
+    return review.Finding(claim="a claim", status=ClaimStatus(status), evidence="", comment="")
+
+
+async def test_a_check_must_agree_with_its_findings_and_decides_nothing() -> None:
+    """``supported`` needs every finding supported, ``issues`` at least one
+    that is not, and an empty check is refused. A check moves no state."""
+    from mycelium_core.models.proposal_check import CheckVerdict
+
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        nid = await _proposed(s, org, user, model="m")
+        v = (await s.get(Note, nid)).version  # type: ignore[union-attr]
+        for verdict, findings in (
+            (CheckVerdict.supported, [_finding("supported"), _finding("unclear")]),
+            (CheckVerdict.issues, [_finding("supported")]),
+            (CheckVerdict.issues, []),
+        ):
+            with pytest.raises(DomainError):
+                await review.submit_check(
+                    s,
+                    org_id=org,
+                    actor_id=user,
+                    note_id=nid,
+                    expected_version=v,
+                    verdict=verdict,
+                    summary="s",
+                    findings=findings,
+                    checker_model_id=None,
+                    checker_identity_id=None,
+                )
+        with pytest.raises(ConflictError):
+            await review.submit_check(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=nid,
+                expected_version=v - 1,
+                verdict=CheckVerdict.supported,
+                summary="s",
+                findings=[_finding("supported")],
+                checker_model_id=None,
+                checker_identity_id=None,
+            )
+        check = await review.submit_check(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=nid,
+            expected_version=v,
+            verdict=CheckVerdict.supported,
+            summary="all grounded",
+            findings=[_finding("supported")],
+            checker_model_id="m-check",
+            checker_identity_id=None,
+        )
+        # A person's check is attributed to the person's own identity.
+        assert check.checker_identity_id is not None
+        note = await s.get(Note, nid)
+        assert note is not None and note.review_state == "proposed" and note.version == v
+        reading = await review.read_node(s, org_id=org, actor_id=user, note_id=nid)
+        assert [(c.verdict, c.stale) for c in reading.checks] == [("supported", False)]
+
+
+async def test_revising_a_declined_note_leaves_it_declined_and_an_approved_one_is_refused() -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        nid = await _proposed(s, org, user, model="m")
+        declined = await review.decline_node(s, org_id=org, actor_id=user, note_id=nid)
+        rev = await review.revise_node(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=nid,
+            expected_version=declined.version,
+            text="better",
+            origin_model_id="strong",
+        )
+        assert rev.review_state == "proposed" and rev.revises_note_id == nid
+        original = await s.get(Note, nid)
+        assert original is not None and original.review_state == "declined"
+        # The person's decline counted once; the revision added nothing.
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["m"].approved, by["m"].rejected) == (0, 1)
+
+        approved = await review.approve_node(s, org_id=org, actor_id=user, note_id=rev.id)
+        with pytest.raises(NotFoundError):
+            await review.revise_node(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=rev.id,
+                expected_version=approved.version,
+                text="again",
+                origin_model_id="strong",
+            )
+        with pytest.raises(DomainError):
+            await review.revise_node(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=nid,
+                expected_version=original.version,
+                text="   ",
+                origin_model_id="strong",
+            )
+
+
+async def test_an_agent_writes_a_pattern_with_its_own_model(_wire: None) -> None:
+    """``synthesized_text`` skips the internal model, as ``distilled_text``
+    does for a distillation, and records ``external:`` provenance."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        ids = [
+            (await _archived(s, org, user, title=t, body=f"soil compost {t}")).id
+            for t in ("x", "y")
+        ]
+        res = await decomp.extract_cluster_pattern(
+            s,
+            org_id=org,
+            actor_id=user,
+            source_note_ids=ids,
+            synthesized_text="Two notes about soil, and what recurs in both.",
+            origin_model_id="claude-test",
+        )
+        assert res.created and res.model_id == "external:claude-test"
+        reading = await review.read_node(s, org_id=org, actor_id=user, note_id=res.note_id)
+        assert reading.body == "Two notes about soil, and what recurs in both."
+        assert reading.review_state == "proposed"

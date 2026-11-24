@@ -317,6 +317,28 @@ export const en = {
     removeIntro: '“{{title}}” will be gone forever. This cannot be undone.',
     removeConfirm: 'Delete for good',
     removeDetail: 'The notes it comes from are not touched.',
+    revises: 'This is a revision of a proposal written by {{model}}, which is now among the declined.',
+    openOriginal: 'Open the original',
+    showOriginal: 'Show the original version',
+    revisedBy: 'This proposal was replaced by a revision:',
+    openRevision: 'open the revision by {{model}}',
+    check: {
+      title: 'Checks',
+      hint: 'An agent compared the proposal with the notes it comes from. A check decides nothing: you decide.',
+      by: 'by {{model}}, on {{when}}',
+      unknownModel: 'model not given',
+      stale: 'on an earlier version',
+      verdict: {
+        supported: 'Everything is supported',
+        issues: 'There are problems',
+      },
+      status: {
+        supported: 'Supported',
+        unsupported: 'Not in the notes',
+        contradicted: 'The notes say otherwise',
+        unclear: 'Unclear',
+      },
+    },
   },
   generatedFromNote: {
     title: 'Generated from this note',

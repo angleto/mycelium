@@ -7054,7 +7054,11 @@ async def distill_note(
 
 @mcp.tool()
 async def extract_cluster_pattern(
-    token: str, org_id: str, source_note_ids: list[str]
+    token: str,
+    org_id: str,
+    source_note_ids: list[str],
+    synthesized_text: str | None = None,
+    origin_model_id: str | None = None,
 ) -> dict[str, Any]:
     """Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note
     over a set of ARCHIVED source notes (a Leiden cluster, a cross-cluster
@@ -7062,13 +7066,19 @@ async def extract_cluster_pattern(
     asks the per-org metered LLM for the through-lines, writes a new note
     linked back to each source. Born PROPOSED, invisible until the person
     approves it, and never a mutation of the sources; needs >=2 archived
-    sources. Idempotent on the source set (``created`` false on a re-run)."""
+    sources. Idempotent on the source set (``created`` false on a re-run).
+
+    To write the pattern with YOUR OWN model instead (ADR-0076), pass
+    ``synthesized_text`` and ``origin_model_id``, as for distill_note; the
+    grounding is then yours to guarantee."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await decomposition_svc.extract_cluster_pattern(
             s,
             org_id=org,
             actor_id=user,
             source_note_ids=[uuid.UUID(n) for n in source_note_ids],
+            synthesized_text=synthesized_text,
+            origin_model_id=origin_model_id,
         )
         return {
             "pattern_note_id": str(res.note_id),
@@ -7078,12 +7088,22 @@ async def extract_cluster_pattern(
 
 
 @mcp.tool()
-async def synthesize_season(token: str, org_id: str, year: int, quarter: int) -> dict[str, Any]:
+async def synthesize_season(
+    token: str,
+    org_id: str,
+    year: int,
+    quarter: int,
+    synthesized_text: str | None = None,
+    origin_model_id: str | None = None,
+) -> dict[str, Any]:
     """Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note
     for one quarter -- "what I cultivated this season" -- over the notes
     archived in it. ``quarter`` is 1-4. Born PROPOSED, invisible until the
     person approves it, and never a mutation of the sources; metered LLM call
-    inside. Idempotent per (year, quarter)."""
+    inside. Idempotent per (year, quarter).
+
+    To write the season with YOUR OWN model instead (ADR-0076), pass
+    ``synthesized_text`` and ``origin_model_id``, as for distill_note."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await decomposition_svc.synthesize_season(
             s,
@@ -7091,6 +7111,8 @@ async def synthesize_season(token: str, org_id: str, year: int, quarter: int) ->
             actor_id=user,
             year=year,
             quarter=quarter,
+            synthesized_text=synthesized_text,
+            origin_model_id=origin_model_id,
         )
         return {
             "season_note_id": str(res.note_id),

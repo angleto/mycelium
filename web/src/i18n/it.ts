@@ -316,6 +316,28 @@ export const it: Catalog = {
     removeIntro: '«{{title}}» sparirà per sempre. Non si può annullare.',
     removeConfirm: 'Elimina definitivamente',
     removeDetail: 'Le note da cui viene non vengono toccate.',
+    revises: 'Questa è una revisione di una proposta scritta da {{model}}, che ora è tra le rifiutate.',
+    openOriginal: 'Apri l’originale',
+    showOriginal: 'Mostra la versione originale',
+    revisedBy: 'Questa proposta è stata sostituita da una revisione:',
+    openRevision: 'apri la revisione di {{model}}',
+    check: {
+      title: 'Verifiche',
+      hint: 'Un agente ha confrontato la proposta con le note da cui viene. La verifica non decide niente: decidi tu.',
+      by: 'di {{model}}, il {{when}}',
+      unknownModel: 'modello non indicato',
+      stale: 'su una versione precedente',
+      verdict: {
+        supported: 'Tutto trova riscontro',
+        issues: 'Ci sono problemi',
+      },
+      status: {
+        supported: 'Trova riscontro',
+        unsupported: 'Non è nelle note',
+        contradicted: 'Le note dicono altro',
+        unclear: 'Non chiaro',
+      },
+    },
   },
   generatedFromNote: {
     title: 'Generato da questa nota',

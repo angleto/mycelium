@@ -1,7 +1,9 @@
 # ADR-0075: A proposal is read before it is decided, and a decision never loses anything
 
 Status: Accepted (2026-11-24, Angelo approved the direction and phase 1).
-Phase 1 implemented (migration 0035); phases 2 and 3 open.
+Phase 1 implemented (migration 0035); phases 2 and 3 open. Decision 2 was
+widened by [ADR-0076](0076-an-agent-checks-and-revises-a-person-keeps-the-last-word.md):
+an assistant may read a proposal whole too, to check or revise it.
 Relates to: ADR-0032 (classify suggestions), ADR-0040 (link model), ADR-0043
 (human-gated review state, amended 2026-11-12), ADR-0068 (one operation
 registry for REST and MCP), ADR-0071 (knowledge-graph facts a person

@@ -321,3 +321,133 @@ async def test_approve_with_expected_version_guard(_wire: None) -> None:
         assert ok.status_code == 200, ok.text
         assert ok.json()["review_state"] == "approved"
         assert ok.json()["version"] == seen + 1
+
+
+async def _assistant(c: AsyncClient, h: dict[str, str]) -> dict[str, str]:
+    """An assistant credential with the scopes a garden worker holds."""
+    created = (
+        await c.post(
+            "/ai-assistants",
+            headers={**h, "X-Workspace-Role": "owner"},
+            json={
+                "label": "Checker",
+                "handle": f"c{uuid.uuid4().hex[:8]}",
+                "scope": ["notes:read", "notes:write"],
+            },
+        )
+    ).json()
+    assert "raw_secret" in created, created
+    return {
+        "Authorization": f"Bearer {created['raw_secret']}",
+        "X-Workspace-Id": h["X-Workspace-Id"],
+    }
+
+
+async def test_an_assistant_checks_and_revises_and_the_person_decides(_wire: None) -> None:
+    """ADR-0076 over HTTP, with an assistant credential carrying a scope list.
+
+    The assistant reads the proposal whole, attaches a check, cannot approve,
+    and writes a revision. The person then sees the check (stale on the
+    original, which the revision declined), the original beside the
+    revision, and approves the revision. The original's model is not charged
+    a rejection nobody made, and asking again for the same pattern finds the
+    revision."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        a = await _assistant(c, h)
+
+        read = await c.get(f"/garden/review/nodes/{nid}", headers=a)
+        assert read.status_code == 200, read.text
+        original = read.json()
+        assert original["review_state"] == "proposed" and original["body"]
+
+        finding = {
+            "claim": "the sources share a forecast",
+            "status": "unsupported",
+            "evidence": "",
+            "comment": "no source mentions a forecast",
+        }
+        mismatched = await c.post(
+            "/garden/review/check",
+            headers=a,
+            json={
+                "note_id": nid,
+                "expected_version": original["version"],
+                "verdict": "supported",
+                "summary": "fine",
+                "findings": [finding],
+            },
+        )
+        assert mismatched.status_code in (400, 422), mismatched.text
+        check = await c.post(
+            "/garden/review/check",
+            headers=a,
+            json={
+                "note_id": nid,
+                "expected_version": original["version"],
+                "verdict": "issues",
+                "summary": "one claim is not in the sources",
+                "findings": [finding],
+                "checker_model_id": "claude-test",
+            },
+        )
+        assert check.status_code == 200, check.text
+        assert check.json()["checker_identity_id"] is not None
+
+        refused = await c.post(
+            "/garden/review/approve",
+            headers=a,
+            json={"note_id": nid, "expected_version": original["version"]},
+        )
+        assert refused.status_code == 403, refused.text
+
+        rev = await c.post(
+            "/garden/review/revise",
+            headers=a,
+            json={
+                "note_id": nid,
+                "expected_version": original["version"],
+                "text": "A pattern grounded in the three sources, and nothing else.",
+                "origin_model_id": "claude-test",
+            },
+        )
+        assert rev.status_code == 200, rev.text
+        rid = rev.json()["revision_note_id"]
+        assert rev.json()["revises_note_id"] == nid and rev.json()["review_state"] == "proposed"
+
+        revision = (await c.get(f"/garden/review/nodes/{rid}", headers=h)).json()
+        assert revision["origin_model_id"] == "external:claude-test"
+        assert revision["revises"]["note_id"] == nid
+        assert revision["revises"]["body"] == original["body"]
+        assert sorted(s["note_id"] for s in revision["sources"]) == sorted(
+            s["note_id"] for s in original["sources"]
+        )
+
+        after = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()
+        assert after["review_state"] == "declined"
+        assert [x["note_id"] for x in after["revised_by"]] == [rid]
+        assert [(k["verdict"], k["stale"]) for k in after["checks"]] == [("issues", True)]
+
+        async with tenant_session(org, user) as s:
+            again = await decomp.extract_cluster_pattern(
+                s,
+                org_id=uuid.UUID(org),
+                actor_id=uuid.UUID(user),
+                source_note_ids=[uuid.UUID(x["note_id"]) for x in original["sources"]],
+            )
+        assert (str(again.note_id), again.created) == (rid, False)
+
+        ok = await c.post(
+            "/garden/review/approve",
+            headers=h,
+            json={"note_id": rid, "expected_version": revision["version"]},
+        )
+        assert ok.status_code == 200 and ok.json()["review_state"] == "approved", ok.text
+        # One decision a person made, on the revision; the decline the
+        # revision caused is not charged to the original's model.
+        ratio = (await c.get("/garden/review/accept-ratio", headers=h)).json()
+        assert [(m["model_id"], m["approved"], m["rejected"]) for m in ratio] == [
+            ("external:claude-test", 1, 0)
+        ], ratio

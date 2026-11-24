@@ -171,6 +171,11 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     review_decided_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ADR-0076: on a revision written by an agent, the proposal it replaces
+    # (migration 0036). SET NULL, so removing the original keeps the revision.
+    revises_note_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):

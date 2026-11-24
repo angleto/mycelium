@@ -59,6 +59,8 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("garden_review_read", "garden.review.read", None),
     ("garden_review_for_source", "garden.review.for_source", _under("proposals")),
     ("garden_review_reopen", "garden.review.reopen", None),
+    ("garden_review_check", "garden.review.check", None),
+    ("garden_review_revise", "garden.review.revise", None),
     ("garden_review_remove", "garden.review.remove", None),
     # what the classifier learned
     ("garden_learning_telemetry", "garden.learning.telemetry", None),

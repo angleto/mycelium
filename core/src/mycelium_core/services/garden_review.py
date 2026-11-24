@@ -49,12 +49,15 @@ from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.classification_feedback import ClassificationFeedback
 from mycelium_core.models.event_outbox import EventOutbox
+from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
-from mycelium_core.models.note import Note
+from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_part import NotePart
+from mycelium_core.models.proposal_check import CheckVerdict, ClaimStatus, ProposalCheck
 from mycelium_core.services import annotations as annotations_svc
 from mycelium_core.services import audit, event_bus, note_inert
+from mycelium_core.services import decomposition as decomposition_svc
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import trash as trash_svc
 from mycelium_core.services.note_effective import DECLINED, PROPOSED, effective_note_clause
@@ -848,9 +851,39 @@ class ProposalSource:
 
 
 @dataclass(frozen=True)
+class CheckView:
+    """A check of the proposal (ADR-0076), as shown beside it. ``stale`` when
+    it read an earlier version than the one now shown."""
+
+    check_id: uuid.UUID
+    verdict: str
+    summary: str
+    findings: list[dict[str, str]]
+    checker_identity_id: uuid.UUID | None
+    checker_model_id: str | None
+    note_version: int
+    stale: bool
+    created_at: dt.datetime
+
+
+@dataclass(frozen=True)
+class RevisionRef:
+    """The other end of a revision: the original a revision replaces, or a
+    revision that replaced this note. The body is carried for the original
+    only, so the person can compare."""
+
+    note_id: uuid.UUID
+    title: str | None
+    origin_model_id: str | None
+    review_state: str | None
+    body: str | None
+
+
+@dataclass(frozen=True)
 class ProposalReading:
     """A generated note read in full by the person who decides it, with the
-    notes it was generated from (its live ``hypha_of`` parents)."""
+    notes it was generated from (its live ``hypha_of`` parents), the checks
+    attached to it and, for a revision, the original it replaces."""
 
     note_id: uuid.UUID
     title: str | None
@@ -862,17 +895,20 @@ class ProposalReading:
     decided_at: dt.datetime | None
     version: int
     sources: list[ProposalSource]
+    checks: list[CheckView]
+    revises: RevisionRef | None
+    revised_by: list[RevisionRef]
 
 
 async def read_node(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, note_id: uuid.UUID
 ) -> ProposalReading:
     """The whole of a generated note and of its sources, for the person
-    deciding it (ADR-0075 decision 2). The review gate exists so that a
-    person decides; a person who can read 280 characters of the proposal
-    decides nothing. This is the gate's one reader: the operation is a
-    person's (``HUMAN_ONLY``), and it is not a retrieval surface -- the node
-    stays out of search, listings, agents and the graph until approved.
+    deciding it (ADR-0075 decision 2) and for an agent asked to check or
+    revise it (ADR-0076 decision 1). It is not a retrieval surface: the node
+    stays out of search, listings, the walk and the graph until approved,
+    and the answer carries its state so it is never mistaken for a note of
+    the memory.
 
     Reads a pending, declined or approved node; an ordinary note, or one in
     the trash, is 404."""
@@ -911,6 +947,61 @@ async def read_node(
     state = note.review_state
     if state is None:  # excluded by _load_proposed; narrows the type
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    checks = [
+        CheckView(
+            check_id=c.id,
+            verdict=c.verdict,
+            summary=c.summary,
+            findings=c.findings,
+            checker_identity_id=c.checker_identity_id,
+            checker_model_id=c.checker_model_id,
+            note_version=c.note_version,
+            stale=c.note_version != note.version,
+            created_at=c.created_at,
+        )
+        for c in (
+            await session.execute(
+                select(ProposalCheck)
+                .where(ProposalCheck.org_id == org_id, ProposalCheck.note_id == note.id)
+                .order_by(ProposalCheck.created_at.desc(), ProposalCheck.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    ]
+    revises = None
+    if note.revises_note_id is not None:
+        original = await session.get(Note, note.revises_note_id)
+        if original is not None and original.org_id == org_id and original.deleted_at is None:
+            revises = RevisionRef(
+                note_id=original.id,
+                title=original.title,
+                origin_model_id=original.origin_model_id,
+                review_state=original.review_state,
+                body=(await notes_svc.get_body(session, note_id=original.id)) or "",
+            )
+    revised_by = [
+        RevisionRef(
+            note_id=r.id,
+            title=r.title,
+            origin_model_id=r.origin_model_id,
+            review_state=r.review_state,
+            body=None,
+        )
+        for r in (
+            await session.execute(
+                select(Note)
+                .where(
+                    Note.org_id == org_id,
+                    Note.revises_note_id == note.id,
+                    Note.deleted_at.is_(None),
+                )
+                .order_by(Note.created_at.desc(), Note.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    ]
     return ProposalReading(
         note_id=note.id,
         title=note.title,
@@ -922,7 +1013,224 @@ async def read_node(
         decided_at=note.review_decided_at,
         version=note.version,
         sources=sources,
+        checks=checks,
+        revises=revises,
+        revised_by=revised_by,
     )
+
+
+async def _actor_identity(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> uuid.UUID | None:
+    """The person's identity row in this workspace: the attribution of a
+    check or a revision made from a person's session."""
+    return (
+        await session.execute(
+            select(Identity.id).where(Identity.org_id == org_id, Identity.user_id == actor_id)
+        )
+    ).scalar_one_or_none()
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One claim of the proposal as the checker read it against the sources."""
+
+    claim: str
+    status: ClaimStatus
+    evidence: str = ""
+    comment: str = ""
+
+
+#: Bounds on what one check may carry: a check is a report for a person to
+#: read beside the proposal, not a second copy of the sources.
+_MAX_FINDINGS = 50
+_MAX_CHECK_CHARS = 2_000
+
+
+async def submit_check(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    verdict: CheckVerdict,
+    summary: str,
+    findings: list[Finding],
+    checker_model_id: str | None,
+    checker_identity_id: uuid.UUID | None,
+) -> ProposalCheck:
+    """Attach a check to a generated note (ADR-0076 decision 2). It decides
+    nothing: no state moves, and no surface reads a check to approve or
+    decline. It records the version it read, so a later revision or edit
+    makes it visibly stale rather than silently wrong.
+
+    The verdict must agree with the findings: ``supported`` only when every
+    finding is supported, ``issues`` only when at least one is not. A check
+    with no findings is refused, since it would be a verdict with nothing
+    behind it. ``checker_identity_id`` is the assistant behind an agent
+    token; for a person's session the person's own identity is recorded."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if note.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if not findings or len(findings) > _MAX_FINDINGS:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    all_supported = all(f.status is ClaimStatus.supported for f in findings)
+    if (verdict is CheckVerdict.supported) is not all_supported:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    if not summary.strip() or len(summary) > _MAX_CHECK_CHARS:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    for f in findings:
+        if not f.claim.strip() or max(len(f.claim), len(f.evidence), len(f.comment)) > (
+            _MAX_CHECK_CHARS
+        ):
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+    identity = checker_identity_id or await _actor_identity(
+        session, org_id=org_id, actor_id=actor_id
+    )
+    check = ProposalCheck(
+        org_id=org_id,
+        note_id=note.id,
+        note_version=note.version,
+        checker_identity_id=identity,
+        checker_model_id=(checker_model_id or "").strip()[:128] or None,
+        verdict=verdict.value,
+        summary=summary.strip(),
+        findings=[
+            {
+                "claim": f.claim.strip(),
+                "status": f.status.value,
+                "evidence": f.evidence.strip(),
+                "comment": f.comment.strip(),
+            }
+            for f in findings
+        ],
+    )
+    session.add(check)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note.id,
+        action="garden_review:check",
+        diff={
+            "check_id": str(check.id),
+            "verdict": verdict.value,
+            "note_version": note.version,
+            "checker_identity_id": str(identity) if identity else None,
+        },
+    )
+    return check
+
+
+async def revise_node(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    text: str,
+    origin_model_id: str | None,
+) -> Note:
+    """Replace a pending or declined proposal with a better version of it
+    (ADR-0076 decision 3), and return the revision.
+
+    The revision is a new proposal of the same kind, drawn from the same
+    sources (every ``hypha_of`` parent of the original), in the original's
+    project, carrying ``revises_note_id`` and the provenance of the model
+    that wrote it, under the cap and the ``external:`` rule every text an
+    agent writes passes. It is born pending: the person still decides.
+
+    The original is declined with the reason ``revised``, unless it already
+    is, and the decline is not charged to the model that wrote it, since no
+    person has judged it; it stays among the declined, readable and
+    reopenable. A pattern's or a season's signature moves to the revision,
+    so asking again for that synthesis finds the revision. An approved note
+    is an ordinary note and is not revised here (404)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    original = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if original.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if original.review_state not in (_PROPOSED, _DECLINED):
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    body = decomposition_svc.external_text(text)
+    model_id = decomposition_svc.external_model_id(origin_model_id)
+    parents = list(
+        (
+            await session.execute(
+                select(NoteNoteLink.parent_note_id).where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.child_note_id == original.id,
+                    NoteNoteLink.kind == "hypha_of",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    signature = original.humus_signature
+    if signature is not None:
+        # The unique index on (org, kind, signature) admits one synthesis
+        # per source set: free it before the revision takes it.
+        original.humus_signature = None
+        await session.flush()
+    project_id = await notes_svc.project_tag_for_note(session, note_id=original.id)
+    revision = await notes_svc.create_note(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=NoteKind.text,
+        title=original.title,
+        text=body,
+        project_id=project_id,
+    )
+    revision.humus_kind = original.humus_kind
+    revision.humus_flag = original.humus_flag
+    revision.humus_signature = signature
+    revision.origin_model_id = model_id
+    revision.review_state = _PROPOSED
+    revision.revises_note_id = original.id
+    await session.flush()
+    identity = await _actor_identity(session, org_id=org_id, actor_id=actor_id)
+    for parent in parents:
+        session.add(
+            NoteNoteLink(
+                org_id=org_id,
+                parent_note_id=parent,
+                child_note_id=revision.id,
+                kind="hypha_of",
+                created_by=identity,
+            )
+        )
+    await session.flush()
+    if original.review_state == _PROPOSED:
+        await decline_node(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=original.id,
+            reason="revised",
+            expected_version=original.version,
+            attribute_to_model=False,
+        )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=revision.id,
+        action="garden_review:revise",
+        diff={
+            "revises_note_id": str(original.id),
+            "origin_model_id": model_id,
+            "original_model_id": original.origin_model_id,
+        },
+    )
+    return revision
 
 
 @dataclass(frozen=True)
@@ -1181,12 +1489,15 @@ async def accept_ratio_overall(session: AsyncSession, *, org_id: uuid.UUID) -> f
 
 
 __all__ = [
+    "CheckView",
     "Decision",
+    "Finding",
     "ModelAcceptRatio",
     "PendingNode",
     "ProposalReading",
     "ProposalSource",
     "RejectedNode",
+    "RevisionRef",
     "SourceProposal",
     "accept_ratio_by_model",
     "accept_ratio_overall",
@@ -1200,4 +1511,6 @@ __all__ = [
     "reject_node_on_decision",
     "remove_declined",
     "reopen_node",
+    "revise_node",
+    "submit_check",
 ]

@@ -91,6 +91,8 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
         "garden_review_for_source",
     ),
     ("POST", "/review/reopen", "garden.review.reopen", "garden_review_reopen"),
+    ("POST", "/review/check", "garden.review.check", "garden_review_check"),
+    ("POST", "/review/revise", "garden.review.revise", "garden_review_revise"),
     ("POST", "/review/remove", "garden.review.remove", "garden_review_remove"),
     # what the classifier learned
     ("POST", "/learning/rollback", "garden.learning.rollback", "garden_learning_rollback"),

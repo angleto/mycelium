@@ -21,6 +21,43 @@ import type { components } from '../shared'
 // ordinary note now).
 
 type Reading = components['schemas']['GardenReviewReadingOut']
+type Check = components['schemas']['GardenReviewCheckOut']
+
+// ADR-0076: an agent may have checked this proposal against its sources, or
+// written a better version of it. Neither decides anything; both are shown
+// here, in words, so the person decides with them in view.
+function CheckReport({ check, when }: { check: Check; when: (iso: string) => string }) {
+  const { t } = useTranslation()
+  return (
+    <li className="gproposal__check">
+      <p className="gproposal__checkhead">
+        <span className={`chip gproposal__verdict gproposal__verdict--${check.verdict}`}>
+          {t(`gardenProposal.check.verdict.${check.verdict}`)}
+        </span>
+        <span>
+          {t('gardenProposal.check.by', {
+            model: check.checker_model_id || t('gardenProposal.check.unknownModel'),
+            when: when(check.created_at),
+          })}
+        </span>
+        {check.stale && <span className="chip">{t('gardenProposal.check.stale')}</span>}
+      </p>
+      <p>{check.summary}</p>
+      <ul className="gproposal__findings">
+        {check.findings.map((f, i) => (
+          <li key={i} className={`gproposal__finding gproposal__finding--${f.status}`}>
+            <span className="gproposal__findingstatus">
+              {t(`gardenProposal.check.status.${f.status}`)}
+            </span>
+            <span className="gproposal__claim">{f.claim}</span>
+            {f.evidence && <blockquote className="gproposal__evidence">{f.evidence}</blockquote>}
+            {f.comment && <span className="hint">{f.comment}</span>}
+          </li>
+        ))}
+      </ul>
+    </li>
+  )
+}
 
 type Busy = 'approve' | 'decline' | 'reopen' | 'remove' | null
 
@@ -158,6 +195,35 @@ export function GardenProposalRoute() {
 
       {err && <p className="error">{err}</p>}
 
+      {reading.revised_by && reading.revised_by.length > 0 && (
+        <p className="banner">
+          {t('gardenProposal.revisedBy')}{' '}
+          {reading.revised_by.map((r) => (
+            <Link key={r.note_id} to={`/garden/review/${r.note_id}`}>
+              {t('gardenProposal.openRevision', {
+                model: r.origin_model_id || t('gardenProposal.check.unknownModel'),
+              })}
+            </Link>
+          ))}
+        </p>
+      )}
+      {reading.revises && (
+        <div className="banner gproposal__revises">
+          <p>
+            {t('gardenProposal.revises', {
+              model: reading.revises.origin_model_id || t('gardenProposal.check.unknownModel'),
+            })}{' '}
+            <Link to={`/garden/review/${reading.revises.note_id}`}>
+              {t('gardenProposal.openOriginal')}
+            </Link>
+          </p>
+          <details>
+            <summary>{t('gardenProposal.showOriginal')}</summary>
+            <MarkdownView text={reading.revises.body ?? ''} />
+          </details>
+        </div>
+      )}
+
       <div className="gproposal__actions" role="group" aria-label={t('gardenProposal.actions')}>
         {state === 'proposed' && (
           <>
@@ -204,6 +270,18 @@ export function GardenProposalRoute() {
         )}
       </div>
       <p className="hint gproposal__actionshint">{t(`gardenProposal.actionsHint.${state}`)}</p>
+
+      {reading.checks && reading.checks.length > 0 && (
+        <section className="gproposal__checks" aria-labelledby="gproposal-checks">
+          <h2 id="gproposal-checks">{t('gardenProposal.check.title')}</h2>
+          <p className="hint">{t('gardenProposal.check.hint')}</p>
+          <ul className="gproposal__checklist">
+            {reading.checks.map((c) => (
+              <CheckReport key={c.check_id} check={c} when={(iso) => when(iso)} />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="gproposal__columns">
         <article className="gproposal__col" aria-labelledby="gproposal-sources">

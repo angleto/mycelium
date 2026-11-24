@@ -52,6 +52,23 @@ from mycelium_core.services.rbac import require_role
 _MAX_EXTERNAL_DISTILL_CHARS = 20_000
 
 
+def external_text(text: str | None) -> str:
+    """The text a caller wrote with its own model, ready to store: stripped,
+    non-empty and within ``_MAX_EXTERNAL_DISTILL_CHARS``. One rule for every
+    synthesis an agent writes (a distillation, a pattern, a season, a
+    revision, ADR-0076), so the cap cannot drift between them."""
+    final = (text or "").strip()
+    if not final or len(final) > _MAX_EXTERNAL_DISTILL_CHARS:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    return final
+
+
+def external_model_id(origin_model_id: str | None) -> str:
+    """The provenance of a text a caller wrote: namespaced ``external:`` so it
+    can never pass for one of the internal, metered models."""
+    return f"external:{(origin_model_id or 'unknown').strip()[:96] or 'unknown'}"
+
+
 #: Every synthesis -- distillation, pattern, season -- is born ``proposed``
 #: and stays out of every retrieval surface until a person approves it. It
 #: used to depend on who asked (an unsolicited sweep was gated, a request
@@ -207,8 +224,8 @@ async def distill_note(
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    external_text = distilled_text.strip() if distilled_text is not None else ""
-    if external_text:
+    external = distilled_text.strip() if distilled_text is not None else ""
+    if external:
         # dec45ebc: an external MCP caller (running its OWN strong model)
         # supplied the distillation text directly, SKIPPING the internal metered
         # LLM call and the verify pass. Because this content is unverified and
@@ -219,10 +236,8 @@ async def distill_note(
         # ``review_state='proposed'`` like every synthesis. Mycelium never observes the caller's
         # model spend (only the flat mcp_io gateway fee), so no ``distill:``
         # UsageRecord is produced on this path -- by design.
-        final_text = external_text
-        if len(final_text) > _MAX_EXTERNAL_DISTILL_CHARS:
-            raise DomainError(MessageCode.DOMAIN_ERROR)
-        model_id = f"external:{(origin_model_id or 'unknown').strip()[:96] or 'unknown'}"
+        final_text = external_text(external)
+        model_id = external_model_id(origin_model_id)
     else:
         # Route through the per-org METERED seam (WS-C3): an org on a hosted
         # provider (anthropic/scaleway/openai) gets ITS model and is charged,
@@ -395,6 +410,8 @@ async def _synthesise_humus(
     sources: list[Note],
     project_id: uuid.UUID | None,
     llm: LLMProvider | None,
+    synthesized_text: str | None = None,
+    origin_model_id: str | None = None,
 ) -> HumusResult:
     """Shared core for pattern/season: idempotency check, metered LLM call,
     create the humus note (``humus_kind``/``humus_flag``/``humus_signature``)
@@ -406,28 +423,34 @@ async def _synthesise_humus(
     body = await _assemble_bodies(session, sources)
     if not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    provider = llm or await resolve_llm(
-        session,
-        org_id,
-        actor_id=actor_id,
-        operation_id=f"{op}:{org_id}:{signature}",
-        op=op,
-    )
-    res = await provider.complete(system=system_prompt, messages=[("user", body)])
+    if synthesized_text is not None and synthesized_text.strip():
+        # The external path (ADR-0076): the caller wrote it with its own
+        # model, under the same cap and provenance rule as a distillation.
+        text, model_id = external_text(synthesized_text), external_model_id(origin_model_id)
+    else:
+        provider = llm or await resolve_llm(
+            session,
+            org_id,
+            actor_id=actor_id,
+            operation_id=f"{op}:{org_id}:{signature}",
+            op=op,
+        )
+        res = await provider.complete(system=system_prompt, messages=[("user", body)])
+        text, model_id = res.text, res.model_id
     note = await notes_svc.create_note(
         session,
         org_id=org_id,
         actor_id=actor_id,
         kind=NoteKind.text,
         title=title[:300],
-        text=res.text,
+        text=text,
         project_id=project_id,
     )
     note.humus_kind = kind
     note.humus_flag = True
     note.humus_signature = signature
     # ADR-0043: model provenance on the artifact + the review gate.
-    note.origin_model_id = res.model_id
+    note.origin_model_id = model_id
     note.review_state = _BORN
     await session.flush()
     identity_id = (
@@ -449,7 +472,7 @@ async def _synthesise_humus(
             )
         )
     await session.flush()
-    return HumusResult(note_id=note.id, model_id=res.model_id, created=True)
+    return HumusResult(note_id=note.id, model_id=model_id, created=True)
 
 
 async def extract_cluster_pattern(
@@ -459,13 +482,17 @@ async def extract_cluster_pattern(
     actor_id: uuid.UUID,
     source_note_ids: list[uuid.UUID],
     llm: LLMProvider | None = None,
+    synthesized_text: str | None = None,
+    origin_model_id: str | None = None,
 ) -> HumusResult:
     """Synthesise a ``pattern`` humus note over a set of ARCHIVED source notes
     (a Leiden cluster, a cross-cluster pick, a project window -- the caller
     chooses the grouping). Reads the sources, asks the per-org metered LLM for
     the through-lines, writes a new note linked back to each source. Idempotent
     on the source set; never mutates a live note (only archived sources count).
-    Born ``proposed`` (``_BORN``).
+    Born ``proposed`` (``_BORN``). ``synthesized_text`` is the external
+    path, as for :func:`distill_note`: the caller wrote the pattern with its
+    own model (ADR-0076).
     """
     await require_role(session, org_id, actor_id, Role.member)
     sources = list(
@@ -507,6 +534,8 @@ async def extract_cluster_pattern(
         sources=sources,
         project_id=None,  # a pattern may span projects
         llm=llm,
+        synthesized_text=synthesized_text,
+        origin_model_id=origin_model_id,
     )
 
 
@@ -518,11 +547,14 @@ async def synthesize_season(
     year: int,
     quarter: int,
     llm: LLMProvider | None = None,
+    synthesized_text: str | None = None,
+    origin_model_id: str | None = None,
 ) -> HumusResult:
     """Synthesise a ``season`` humus note for one quarter -- "what I cultivated
     this season" -- over the notes archived (created) in it. Idempotent per
     (org, year, quarter); a proposal, never a mutation of live notes.
-    Born ``proposed`` (``_BORN``).
+    Born ``proposed`` (``_BORN``). ``synthesized_text`` is the external path
+    (ADR-0076).
     """
     if quarter not in (1, 2, 3, 4):
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -566,6 +598,8 @@ async def synthesize_season(
         sources=sources,
         project_id=None,
         llm=llm,
+        synthesized_text=synthesized_text,
+        origin_model_id=origin_model_id,
     )
 
 
@@ -573,6 +607,8 @@ __all__ = [
     "DistillationResult",
     "HumusResult",
     "distill_note",
+    "external_model_id",
+    "external_text",
     "extract_cluster_pattern",
     "synthesize_season",
 ]

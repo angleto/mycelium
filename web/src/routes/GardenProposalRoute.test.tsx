@@ -33,6 +33,8 @@ type State = 'proposed' | 'declined' | 'approved'
 let state: State = 'proposed'
 let version = 3
 let exists = true
+// ADR-0076: what an agent attached, served as the API serves it.
+let extra: Record<string, unknown> = {}
 const writes: { path: string; body: Record<string, unknown> }[] = []
 
 function json(body: unknown, status = 200): Promise<Response> {
@@ -63,6 +65,10 @@ function reading() {
         is_archived: true,
       },
     ],
+    checks: [],
+    revises: null,
+    revised_by: [],
+    ...extra,
   }
 }
 
@@ -141,6 +147,7 @@ beforeEach(async () => {
   state = 'proposed'
   version = 3
   exists = true
+  extra = {}
   writes.length = 0
   answer()
   host = document.createElement('div')
@@ -226,6 +233,79 @@ describe('GardenProposalRoute', () => {
     // The page now renders the current version, so the next action is valid.
     await click(button(i18n.t('gardenProposal.decline')))
     expect(writes[1].body.expected_version).toBe(9)
+  })
+
+  it("shows an agent's check in words, and marks one made on an earlier version", async () => {
+    extra = {
+      checks: [
+        {
+          check_id: '00000000-0000-4000-8000-0000000000c1',
+          verdict: 'issues',
+          summary: 'One claim is not in the source.',
+          findings: [
+            {
+              claim: 'Lisbon was visited in winter',
+              status: 'contradicted',
+              evidence: 'we left in July',
+              comment: '',
+            },
+            { claim: 'the trip lasted a week', status: 'supported', evidence: 'seven days', comment: '' },
+          ],
+          checker_identity_id: null,
+          checker_model_id: 'claude-opus-5-5',
+          note_version: 2,
+          stale: true,
+          created_at: '2026-11-22T10:00:00Z',
+        },
+      ],
+    }
+    await mount()
+    const text = host.textContent ?? ''
+    expect(text).toContain(i18n.t('gardenProposal.check.verdict.issues'))
+    expect(text).toContain(i18n.t('gardenProposal.check.status.contradicted'))
+    expect(text).toContain(i18n.t('gardenProposal.check.status.supported'))
+    expect(text).toContain('we left in July')
+    expect(text).toContain(i18n.t('gardenProposal.check.stale'))
+    expect(text).toContain('claude-opus-5-5')
+    // A check decides nothing: the decision is still the person's.
+    expect(names()).toEqual([i18n.t('gardenProposal.approve'), i18n.t('gardenProposal.decline')])
+  })
+
+  it('shows the original a revision replaces, and links a replaced note to its revision', async () => {
+    const ORIG = '00000000-0000-4000-8000-0000000000d1'
+    extra = {
+      origin_model_id: 'external:claude-opus-5-5',
+      revises: {
+        note_id: ORIG,
+        title: 'Distillation · Viaggio a Lisbona',
+        origin_model_id: 'mistral-small',
+        review_state: 'declined',
+        body: 'ORIGINAL: what the small model wrote.',
+      },
+    }
+    await mount()
+    expect(host.textContent).toContain(i18n.t('gardenProposal.revises', { model: 'mistral-small' }))
+    expect(host.querySelector('details')?.textContent).toContain('ORIGINAL: what the small model wrote.')
+    expect(host.querySelector(`a[href="/garden/review/${ORIG}"]`)).not.toBeNull()
+
+    act(() => root.unmount())
+    root = createRoot(host)
+    const REV = '00000000-0000-4000-8000-0000000000d2'
+    state = 'declined'
+    extra = {
+      revised_by: [
+        {
+          note_id: REV,
+          title: 't',
+          origin_model_id: 'external:claude-opus-5-5',
+          review_state: 'proposed',
+          body: null,
+        },
+      ],
+    }
+    await mount()
+    expect(host.textContent).toContain(i18n.t('gardenProposal.revisedBy'))
+    expect(host.querySelector(`a[href="/garden/review/${REV}"]`)).not.toBeNull()
   })
 
   it('says a note is not a proposal instead of showing an empty page', async () => {

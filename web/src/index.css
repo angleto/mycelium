@@ -3783,6 +3783,71 @@ button.btn--danger:hover {
   font-size: 0.95rem;
   margin: 0 0 var(--sp-6);
 }
+/* ADR-0076: an agent's check of the proposal, and the original a revision
+   replaces. */
+.gproposal__revises details {
+  margin-top: var(--sp-6);
+}
+.gproposal__checks {
+  margin-top: var(--sp-24);
+}
+.gproposal__checks h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--sp-4);
+}
+.gproposal__checklist,
+.gproposal__findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-8);
+}
+.gproposal__check {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  padding: var(--sp-8) var(--sp-12);
+}
+.gproposal__checkhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.gproposal__verdict--supported {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.gproposal__verdict--issues {
+  border-color: var(--err);
+  color: var(--err);
+}
+.gproposal__finding {
+  display: grid;
+  gap: var(--sp-2);
+  border-left: 2px solid var(--border);
+  padding-left: var(--sp-8);
+  font-size: 0.85rem;
+}
+.gproposal__finding--supported {
+  border-left-color: var(--ok);
+}
+.gproposal__finding--unsupported,
+.gproposal__finding--contradicted {
+  border-left-color: var(--err);
+}
+.gproposal__findingstatus {
+  font-weight: 600;
+}
+.gproposal__evidence {
+  margin: 0;
+  padding-left: var(--sp-8);
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
 /* On a source note: what the garden generated from it, with its state. */
 .generated {
   border: 1px solid var(--border);

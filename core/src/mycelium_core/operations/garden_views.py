@@ -15,6 +15,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from mycelium_core.models.proposal_check import CheckVerdict, ClaimStatus
+
 # --- Garden graph (note↔note weighted + PageRank centrality) -------
 # Tasks 4467acb4 (note_edge_strength v1) + 8c0a8f08 (PageRank Phase 1).
 # Both surfaces share one round-trip so the SPA mindmap doesn't have
@@ -364,6 +366,70 @@ class GardenReviewSourceOut(BaseModel):
     is_archived: bool
 
 
+class GardenReviewFindingIn(BaseModel):
+    """One claim of the proposal, read against its sources. ``status``:
+    ``supported`` (the source says it), ``unsupported`` (the source does not
+    say it), ``contradicted`` (the source says otherwise), ``unclear``.
+    ``evidence`` is the passage of the source the status rests on."""
+
+    claim: str = Field(min_length=1, max_length=2000)
+    status: ClaimStatus
+    evidence: str = Field("", max_length=2000)
+    comment: str = Field("", max_length=2000)
+
+
+class GardenReviewCheckIn(BaseModel):
+    """Attach a check to a generated note (ADR-0076). ``verdict`` is
+    ``supported`` when every finding is, ``issues`` otherwise; the server
+    refuses a verdict that disagrees with its findings. ``expected_version``
+    is the version you read with garden_review_read."""
+
+    note_id: uuid.UUID
+    expected_version: int
+    verdict: CheckVerdict
+    summary: str = Field(min_length=1, max_length=2000)
+    findings: list[GardenReviewFindingIn] = Field(min_length=1, max_length=50)
+    checker_model_id: str | None = Field(None, max_length=128)
+
+
+class GardenReviewCheckOut(BaseModel):
+    check_id: uuid.UUID
+    verdict: str
+    summary: str
+    findings: list[GardenReviewFindingIn]
+    checker_identity_id: uuid.UUID | None = None
+    checker_model_id: str | None = None
+    note_version: int
+    stale: bool
+    created_at: datetime.datetime
+
+
+class GardenReviewReviseIn(BaseModel):
+    """Replace a pending or declined generated note with a better version
+    (ADR-0076). ``text`` is the whole revised text; ``origin_model_id`` the
+    model that wrote it. ``expected_version`` from garden_review_read."""
+
+    note_id: uuid.UUID
+    expected_version: int
+    text: str = Field(min_length=1, max_length=20000)
+    origin_model_id: str | None = Field(None, max_length=96)
+
+
+class GardenReviewReviseOut(BaseModel):
+    revision_note_id: uuid.UUID
+    revises_note_id: uuid.UUID
+    review_state: str
+    version: int
+
+
+class GardenReviewRevisionRef(BaseModel):
+    note_id: uuid.UUID
+    title: str | None = None
+    origin_model_id: str | None = None
+    review_state: str | None = None
+    body: str | None = None
+
+
 class GardenReviewReadingOut(BaseModel):
     """A generated note read in full by the person deciding it (ADR-0075),
     with its sources. ``review_state`` is 'proposed', 'declined' or
@@ -379,6 +445,9 @@ class GardenReviewReadingOut(BaseModel):
     decided_at: datetime.datetime | None = None
     version: int
     sources: list[GardenReviewSourceOut]
+    checks: list[GardenReviewCheckOut] = []
+    revises: GardenReviewRevisionRef | None = None
+    revised_by: list[GardenReviewRevisionRef] = []
 
 
 class GardenReviewForSourceItem(BaseModel):

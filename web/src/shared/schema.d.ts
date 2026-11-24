@@ -6578,11 +6578,15 @@ export interface paths {
         /**
          * Garden Review Read
          * @description Read a generated note in full, pending, declined or approved, with
-         *     the whole text of the notes it was generated from (ADR-0075): what the
-         *     person deciding it needs to decide. A person's read: the text of a
-         *     proposal does not leave the review perimeter for a credential carrying a
-         *     scope list, which reads the titles and previews of garden_review_pending
-         *     instead.
+         *     the whole text of the notes it was generated from, the checks attached
+         *     to it and, for a revision, the original it replaces (ADR-0075,
+         *     ADR-0076). This is what you read to check a proposal
+         *     (garden_review_check) or to write a better one (garden_review_revise).
+         *
+         *     A proposal is NOT part of the memory: ``review_state`` says so. Do not
+         *     ground an answer on a 'proposed' or 'declined' text, and do not quote it
+         *     as something the person wrote; only the person's approval makes it a
+         *     note.
          */
         get: operations["garden_review_read_garden_review_nodes__note_id__get"];
         put?: never;
@@ -6632,6 +6636,64 @@ export interface paths {
          *     declines it. ``expected_version`` from the declined listing.
          */
         post: operations["garden_review_reopen_garden_review_reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Check
+         * @description Check a generated note against its sources and attach the report to
+         *     it (ADR-0076). Read it first with garden_review_read. List every claim
+         *     the note makes, and for each say whether the sources support it, do not
+         *     say it, or say otherwise, quoting the passage in ``evidence``. The
+         *     verdict is ``supported`` only if every claim is.
+         *
+         *     The check decides NOTHING: it is shown to the person beside the
+         *     proposal, and the person approves or declines. If the note needs fixing,
+         *     write the fixed version with garden_review_revise instead of describing
+         *     it here. ``checker_model_id`` is your model's id.
+         */
+        post: operations["garden_review_check_garden_review_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Revise
+         * @description Replace a pending or declined generated note with a better version you
+         *     wrote (ADR-0076): typically a distillation by a small model that missed,
+         *     distorted or invented something. Read it with garden_review_read, write
+         *     the whole new text grounded strictly in the sources, in the sources'
+         *     language, and pass ``origin_model_id``.
+         *
+         *     The revision is a new proposal from the same sources, born pending: the
+         *     person still approves it. The original is declined with the reason
+         *     'revised', kept and reopenable, and not counted against its model. An
+         *     approved note is an ordinary note and cannot be revised here.
+         */
+        post: operations["garden_review_revise_garden_review_revise_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9481,6 +9543,16 @@ export interface components {
             /** Revoked */
             revoked: boolean;
         };
+        /**
+         * CheckVerdict
+         * @enum {string}
+         */
+        CheckVerdict: "supported" | "issues";
+        /**
+         * ClaimStatus
+         * @enum {string}
+         */
+        ClaimStatus: "supported" | "unsupported" | "contradicted" | "unclear";
         /** ClientCreateIn */
         ClientCreateIn: {
             /** Name */
@@ -11442,6 +11514,56 @@ export interface components {
             version: number;
         };
         /**
+         * GardenReviewCheckIn
+         * @description Attach a check to a generated note (ADR-0076). ``verdict`` is
+         *     ``supported`` when every finding is, ``issues`` otherwise; the server
+         *     refuses a verdict that disagrees with its findings. ``expected_version``
+         *     is the version you read with garden_review_read.
+         */
+        GardenReviewCheckIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Expected Version */
+            expected_version: number;
+            verdict: components["schemas"]["CheckVerdict"];
+            /** Summary */
+            summary: string;
+            /** Findings */
+            findings: components["schemas"]["GardenReviewFindingIn"][];
+            /** Checker Model Id */
+            checker_model_id?: string | null;
+        };
+        /** GardenReviewCheckOut */
+        GardenReviewCheckOut: {
+            /**
+             * Check Id
+             * Format: uuid
+             */
+            check_id: string;
+            /** Verdict */
+            verdict: string;
+            /** Summary */
+            summary: string;
+            /** Findings */
+            findings: components["schemas"]["GardenReviewFindingIn"][];
+            /** Checker Identity Id */
+            checker_identity_id?: string | null;
+            /** Checker Model Id */
+            checker_model_id?: string | null;
+            /** Note Version */
+            note_version: number;
+            /** Stale */
+            stale: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * GardenReviewDecisionIn
          * @description Carry out a review a person wrote down (ADR-0043, 2026-11-12
          *     amendment). ``decision_comment_id`` is the person's comment on one of
@@ -11482,6 +11604,28 @@ export interface components {
              * Format: uuid
              */
             decision_comment_id: string;
+        };
+        /**
+         * GardenReviewFindingIn
+         * @description One claim of the proposal, read against its sources. ``status``:
+         *     ``supported`` (the source says it), ``unsupported`` (the source does not
+         *     say it), ``contradicted`` (the source says otherwise), ``unclear``.
+         *     ``evidence`` is the passage of the source the status rests on.
+         */
+        GardenReviewFindingIn: {
+            /** Claim */
+            claim: string;
+            status: components["schemas"]["ClaimStatus"];
+            /**
+             * Evidence
+             * @default
+             */
+            evidence?: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment?: string;
         };
         /**
          * GardenReviewForSourceItem
@@ -11582,6 +11726,17 @@ export interface components {
             version: number;
             /** Sources */
             sources: components["schemas"]["GardenReviewSourceOut"][];
+            /**
+             * Checks
+             * @default []
+             */
+            checks?: components["schemas"]["GardenReviewCheckOut"][];
+            revises?: components["schemas"]["GardenReviewRevisionRef"] | null;
+            /**
+             * Revised By
+             * @default []
+             */
+            revised_by?: components["schemas"]["GardenReviewRevisionRef"][];
         };
         /**
          * GardenReviewRejectedItem
@@ -11625,6 +11780,58 @@ export interface components {
             note_id: string;
             /** Removed */
             removed: boolean;
+        };
+        /**
+         * GardenReviewReviseIn
+         * @description Replace a pending or declined generated note with a better version
+         *     (ADR-0076). ``text`` is the whole revised text; ``origin_model_id`` the
+         *     model that wrote it. ``expected_version`` from garden_review_read.
+         */
+        GardenReviewReviseIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text: string;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+        };
+        /** GardenReviewReviseOut */
+        GardenReviewReviseOut: {
+            /**
+             * Revision Note Id
+             * Format: uuid
+             */
+            revision_note_id: string;
+            /**
+             * Revises Note Id
+             * Format: uuid
+             */
+            revises_note_id: string;
+            /** Review State */
+            review_state: string;
+            /** Version */
+            version: number;
+        };
+        /** GardenReviewRevisionRef */
+        GardenReviewRevisionRef: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Review State */
+            review_state?: string | null;
+            /** Body */
+            body?: string | null;
         };
         /**
          * GardenReviewSourceOut
@@ -31538,6 +31745,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_check_garden_review_check_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewCheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_revise_garden_review_revise_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewReviseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewReviseOut"];
                 };
             };
             /** @description Validation Error */
