@@ -245,6 +245,42 @@ async def test_an_unknown_prefix_is_refused_by_name() -> None:
     assert res["error"]["argument"] == "task_id"
 
 
+async def test_the_short_id_of_a_proposal_goes_back_to_the_review_tools() -> None:
+    """The inbox lists a proposal under its short id, and the review tools
+    must accept it back. On production 2.4.19 garden_review_read answered
+    ``id.prefix_unknown`` to the id garden_review_pending had just listed,
+    because the resolver applied the review gate, which is a listing rule,
+    to name resolution. Ordinary note tools still refuse the proposal: the
+    gate is theirs to apply."""
+    from mycelium_core.db import tenant_session
+    from mycelium_core.models.note import NoteKind
+    from mycelium_core.services import notes as nt
+
+    org = await _org()
+    _token, org_id, user_id = org
+    async with tenant_session(org_id, str(user_id)) as s:
+        n = await nt.create_note(
+            s,
+            org_id=uuid.UUID(org_id),
+            actor_id=user_id,
+            kind=NoteKind.text,
+            title="Distillation · x",
+            text="what a small model wrote",
+        )
+        n.review_state = "proposed"
+        n.origin_model_id = "small"
+        await s.flush()
+    async with _as_principal(org):
+        pending = await execute_tool(name="garden_review_pending", arguments={})
+        short = pending["pending"][0]["note_id"]
+        assert len(short) == 8
+        read = await execute_tool(name="garden_review_read", arguments={"note_id": short})
+        assert read.get("review_state") == "proposed", read
+        assert read["body"] == "what a small model wrote"
+        plain = await execute_tool(name="get_note", arguments={"note_id": short})
+    assert "error" in plain, plain
+
+
 async def test_a_full_uuid_still_works_untouched() -> None:
     """The expansion must be additive. A full uuid does not match the prefix
     shape at all, so a caller that never learned about short ids takes exactly

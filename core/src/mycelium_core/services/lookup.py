@@ -137,6 +137,7 @@ async def resolve_prefix(
     kinds: tuple[str, ...] = ("task", "note"),
     include_archived: bool = False,
     include_deleted: bool = False,
+    include_gated: bool = False,
     limit: int = 20,
 ) -> list[LookupMatch]:
     """Return at most ``limit`` matches whose UUID starts with ``prefix``.
@@ -155,6 +156,12 @@ async def resolve_prefix(
     entity; callers offering a LIST of candidates (the mention picker,
     the search surfaces) keep the default, matching what ``list_notes``
     and ``task_search`` show.
+
+    ``include_gated`` resolves the id of a note held at the review gate
+    (pending or declined) too. Only for name resolution, never for a list:
+    the MCP gateway hands out short ids for the proposals of the review
+    inbox and must be able to take them back, and whether the tool may act
+    on the note stays the tool's decision. A picker never passes it.
 
     The query relies on the existing UUID PK index: PostgreSQL can use
     a B-tree index on a text-cast UUID column only via a functional
@@ -204,7 +211,9 @@ async def resolve_prefix(
         # The effective-note predicate: a trashed note only with the opt-in,
         # a 'proposed' one (autonomously generated, pending review) never --
         # the @-mention picker must not offer a node nobody can open.
-        qn = qn.where(effective_note_clause(include_deleted=include_deleted))
+        qn = qn.where(
+            effective_note_clause(include_deleted=include_deleted, include_gated=include_gated)
+        )
         # ``is_archived`` is NOT part of that predicate (see
         # ``note_effective``: archiving is a shelf, not a bin, and an
         # archived note stays a full graph node). It is the same

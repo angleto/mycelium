@@ -175,12 +175,18 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
                 # row, and refusing to resolve its id would make them
                 # unreachable by the only id form this surface hands out.
                 # Whether the operation is legal stays the tool's decision.
+                # The same holds for a note at the review gate: the inbox
+                # hands out the short id of a proposal, and the review tools
+                # (read, check, revise, reopen) must take it back. Measured
+                # on production 2.4.19: garden_review_read on the id the
+                # inbox had just listed answered id.prefix_unknown.
                 matches = await lookup_svc.resolve_prefix(
                     session,
                     prefix=value,
                     kinds=kinds,
                     include_archived=True,
                     include_deleted=True,
+                    include_gated=True,
                 )
             except DomainError:
                 # Not a usable prefix at all (too short, not hex). Leave it
