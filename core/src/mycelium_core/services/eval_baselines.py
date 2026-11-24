@@ -58,6 +58,10 @@ SYSTEM_MYCELIUM_HUMUS_OFF = "mycelium_humus_off"
 SYSTEM_MYCELIUM_RERANK = "mycelium_rerank"
 SYSTEM_BM25 = "bm25"
 SYSTEM_DENSE = "dense_only"
+#: The ADR-0073 retrieval A/B: the graph stage on in both arms, written
+#: references read as graph edges in the second only.
+SYSTEM_GRAPH = "mycelium_graph"
+SYSTEM_GRAPH_WRITTEN = "mycelium_graph_written"
 SYSTEM_NAIVE_RAG = "naive_rag"
 
 # The two direct-channel systems double as PROXY ablations (see module
@@ -395,6 +399,126 @@ async def run_baselines(
         )
         for name in systems
     ]
+
+
+async def run_written_reference_ab(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    ws: Workspace,
+    ingest: IngestResult,
+    records: Sequence[QueryRecord],
+    embedder: Any,
+    k: int = 10,
+) -> list[SystemRun]:
+    """ADR-0073 decision 8, retrieval: the full pipeline with the graph
+    stage on, written references off (``mycelium_graph``, the base) and on
+    (``mycelium_graph_written``), over the same queries on the same
+    ingested workspace. ``ws`` should come from
+    :func:`eval_workspace.write_links_as_references`, or the written arm
+    has nothing to read. Query selection is :func:`run_baselines`'s."""
+    texts_by_unit = {u.unit_id: u.text for u in ws.units}
+    blob2unit = await build_blob_unit_map(session, org_id=org_id, ingest=ingest)
+    note_units = {uid for uid, m in ingest.units.items() if m.get("kind") == "note"}
+    arms = {SYSTEM_GRAPH: False, SYSTEM_GRAPH_WRITTEN: True}
+    recs: dict[str, list[dict[str, Any]]] = {name: [] for name in arms}
+    skipped = 0
+    for r in records:
+        if not [u for u in r.gold_unit_ids if u in note_units] and not r.expected_empty:
+            skipped += 1
+            continue
+        project_id = resolve_query_project(r, ws, ingest)
+        gold_tokens = _tokens([texts_by_unit.get(u, "") for u in r.gold_unit_ids])
+        for name, written in arms.items():
+            hits, meta = await memory.retrieve_with_meta(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                project_id=project_id,
+                query=r.query_text,
+                operation_id=f"adr0073-{name}-{r.query_id}",
+                limit=k,
+                embedder=embedder,
+                graph=True,
+                graph_written_references=written,
+                probe=True,
+            )
+            ranked = _dedup_to_units([(h.blob.id, h.rrf) for h in hits], blob2unit, k)
+            rank, top, served = _score_ranked(r, ranked, texts_by_unit)
+            rec = _record(
+                r,
+                system=name,
+                rank=rank,
+                top_score=top,
+                served_tokens=served,
+                gold_tokens=gold_tokens,
+                abstained=bool(meta.abstained),
+            )
+            # Whether the graph walk ran and what it added: an A/B in which
+            # it never ran measures nothing, and the report must say so.
+            rec["graph_ran"] = bool(meta.graph_ran)
+            rec["graph_contributed"] = int(meta.graph_contributed)
+            recs[name].append(rec)
+    return [
+        SystemRun(system=name, proxy=False, records=recs[name], skipped_non_note=skipped)
+        for name in arms
+    ]
+
+
+@dataclasses.dataclass(frozen=True)
+class WrittenReferenceVerdict:
+    """The decision-8 gate on one A/B: the setting of decision 6 may be
+    turned on only if neither recall@k nor MRR is lower beyond its
+    cluster-bootstrap interval, that is if each interval of the paired
+    difference (written minus base) reaches zero or above."""
+
+    n: int
+    d_recall: float
+    recall_ci: tuple[float, float]
+    d_mrr: float
+    mrr_ci: tuple[float, float]
+    mcnemar_p: float
+
+    @property
+    def passes(self) -> bool:
+        return self.recall_ci[1] >= 0.0 and self.mrr_ci[1] >= 0.0
+
+
+def written_reference_verdict(
+    runs: Sequence[SystemRun], *, seed: int = 42, n_resamples: int = 2000
+) -> WrittenReferenceVerdict:
+    """Paired written-vs-base statistics for :func:`run_written_reference_ab`
+    (clusters = fact_id, impossible queries excluded, as everywhere)."""
+    stats = {
+        s.system: s
+        for s in paired_stats(runs, base_system=SYSTEM_GRAPH, seed=seed, n_resamples=n_resamples)
+    }
+    written = stats.get(SYSTEM_GRAPH_WRITTEN)
+    if written is None:
+        raise ValueError("written_reference_verdict: the written arm is missing")
+    by = {
+        run.system: {rec["qid"]: rec for rec in run.records if not rec["impossible"]}
+        for run in runs
+    }
+    base, arm = by[SYSTEM_GRAPH], by[SYSTEM_GRAPH_WRITTEN]
+    qids = sorted(set(base) & set(arm))
+    clustered = [
+        (
+            str(arm[q]["fact_id"]),
+            float(arm[q]["rank"] is not None) - float(base[q]["rank"] is not None),
+        )
+        for q in qids
+    ]
+    recall_ci = cluster_bootstrap(clustered, rng=Random(seed), n_resamples=n_resamples)  # noqa: S311
+    return WrittenReferenceVerdict(
+        n=written.n,
+        d_recall=written.d_recall,
+        recall_ci=recall_ci,
+        d_mrr=written.d_mrr,
+        mrr_ci=(written.ci_lo, written.ci_hi),
+        mcnemar_p=written.mcnemar_p,
+    )
 
 
 def _rr(rank: int | None) -> float:

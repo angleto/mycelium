@@ -133,6 +133,7 @@ async def written_reference_pairs(
     org_id: uuid.UUID,
     note_id: uuid.UUID | None = None,
     include_tasks: bool = False,
+    enabled: bool | None = None,
 ) -> set[tuple[uuid.UUID, uuid.UUID]]:
     """Undirected pairs joined by at least one resolved written reference,
     canonical by :func:`_pair_key`. Empty when the setting is off.
@@ -143,13 +144,17 @@ async def written_reference_pairs(
     Endpoint effectiveness is left to the caller, which already filters
     every other source on the same predicate. ``note_id`` restricts to
     pairs touching that note (the bounded builder); ``include_tasks`` adds
-    task endpoints (the unified weave)."""
+    task endpoints (the unified weave). ``enabled`` overrides the setting
+    for one call (the retrieval A/B of decision 8 compares both on the same
+    workspace); None reads it."""
     from mycelium_core.config import get_settings
     from mycelium_core.models.body_reference import BodyReference, BodyReferenceSource
     from mycelium_core.models.index_scope import IndexScope
     from mycelium_core.models.note_part import NotePart
 
-    if not get_settings().graph_written_references_enabled:
+    if enabled is None:
+        enabled = get_settings().graph_written_references_enabled
+    if not enabled:
         return set()
     kinds = ("note", "task") if include_tasks else ("note",)
     base = (

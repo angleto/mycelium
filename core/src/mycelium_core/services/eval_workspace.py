@@ -210,6 +210,10 @@ class Unit:
     archived: bool
     fact_ids: list[str]
     comments: list[str] = dataclasses.field(default_factory=list)
+    # Units this one cites in its body instead of through a typed link
+    # (ADR-0073): ingest writes each as a code chip in a closing sentence.
+    # Empty unless :func:`write_links_as_references` moved links here.
+    written_refs: list[str] = dataclasses.field(default_factory=list)
     generation: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(GENERATION_MATRIX_V1)
     )
@@ -947,6 +951,65 @@ def _generate_once(*, seed: int, scale: int, locale_mix: float, attempt: int) ->
 # ── artifacts ───────────────────────────────────────────────────────────────
 
 
+#: The ADR-0073 retrieval A/B, pre-registered: half of the ``related``
+#: links between notes are written as references in the citing body
+#: instead of typed, drawn with this seed. Fixed here, before any run, so
+#: the fraction cannot be tuned to the outcome.
+WRITTEN_REFERENCE_FRACTION = 0.5
+WRITTEN_REFERENCE_SEED = 73
+
+
+def write_links_as_references(
+    ws: Workspace,
+    *,
+    fraction: float = WRITTEN_REFERENCE_FRACTION,
+    seed: int = WRITTEN_REFERENCE_SEED,
+    kinds: Sequence[str] = ("related",),
+) -> Workspace:
+    """The same workspace with ``fraction`` of its note-to-note links of
+    ``kinds`` moved from ``links`` to ``written_refs``: the relation is
+    still there, as a person writes it (a code in the text), and no longer
+    as a typed link. Deterministic in ``seed``; the input is not modified.
+
+    Only links between two notes move: a link to a task is not ingested as
+    a note link anyway, and the graph walk of retrieval is over notes."""
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError("write_links_as_references: fraction must be in [0, 1]")
+    rng = random.Random(seed)  # noqa: S311 - deterministic corpus, not crypto
+    kind_of = {u.unit_id: u.unit_kind for u in ws.units}
+    out: list[Unit] = []
+    for u in ws.units:
+        if u.unit_kind != "note":
+            out.append(u)
+            continue
+        keep: list[dict[str, str]] = []
+        written = list(u.written_refs)
+        for link in u.links:
+            if (
+                link["kind"] in kinds
+                and kind_of.get(link["to"]) == "note"
+                and rng.random() < fraction
+            ):
+                if link["to"] not in written:
+                    written.append(link["to"])
+            else:
+                keep.append(link)
+        out.append(dataclasses.replace(u, links=keep, written_refs=written))
+    return dataclasses.replace(ws, units=out)
+
+
+_WRITTEN_REF_FRAMES = {"it": "Vedi anche {codes}.", "en": "See also {codes}."}
+_WRITTEN_REF_AND = {"it": " e ", "en": " and "}
+
+
+def _written_ref_sentence(lang: str, note_ids: Sequence[uuid.UUID]) -> str:
+    codes = [f"`{str(n)[:8]}`" for n in note_ids]
+    joined = ", ".join(codes[:-1]) + _WRITTEN_REF_AND.get(lang, " and ") + codes[-1]
+    if len(codes) == 1:
+        joined = codes[0]
+    return _WRITTEN_REF_FRAMES.get(lang, _WRITTEN_REF_FRAMES["en"]).format(codes=joined)
+
+
 def _blank_unit(u: Unit) -> Unit:
     return dataclasses.replace(u, title=u.unit_id, text="", comments=[])
 
@@ -977,6 +1040,7 @@ def write_artifacts(ws: Workspace, out_dir: Path, *, blank_content: bool = False
             "gold_facts": sum(1 for f in ws.facts if f.queryable),
             "distributed": sum(1 for f in ws.facts if f.distributed),
             "anaphoric": sum(1 for f in ws.facts if f.anaphoric),
+            "written_refs": sum(len(u.written_refs) for u in ws.units),
             "collisions": sum(1 for f in ws.facts if f.category.startswith("collision")),
             "decoy_facts": sum(1 for f in ws.facts if f.category == "decoy"),
             "dated_facts": sum(1 for f in ws.facts if f.valid_from),
@@ -1070,7 +1134,10 @@ async def ingest_workspace(
             )
             note_ids[u.unit_id] = note.id
             mapping[u.unit_id] = {"kind": "note", "note_id": str(note.id)}
-            if u.archived:
+            # A body that cites gets its references once every note
+            # exists, through the write path a person's edit takes; it is
+            # archived after that edit, not before.
+            if u.archived and not u.written_refs:
                 await notes_svc.archive_note(
                     session,
                     org_id=org_id,
@@ -1122,6 +1189,33 @@ async def ingest_workspace(
                 parent_note_id=parent,
                 child_note_id=child,
                 kind=link["kind"],
+            )
+
+    from mycelium_core.services import note_parts as parts_svc
+
+    for u in ws.units:
+        if u.unit_kind != "note" or not u.written_refs:
+            continue
+        cited = [note_ids[t] for t in u.written_refs if t in note_ids and t != u.unit_id]
+        note_id = note_ids[u.unit_id]
+        if cited:
+            part = (await parts_svc.list_parts(session, org_id=org_id, note_id=note_id))[-1]
+            await parts_svc.append_to_part(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                part_id=part.id,
+                chunk="\n\n" + _written_ref_sentence(u.lang, cited),
+                expected_version=part.version,
+            )
+        if u.archived:
+            note = await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
+            await notes_svc.archive_note(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=note_id,
+                expected_version=note.version,
             )
 
     for f in ws.facts:

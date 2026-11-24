@@ -61,6 +61,8 @@ class GraphProximityStage(Stage):
     seeds: int = 3
     node_budget: int = 16
     gate: GraphGate | None = None
+    #: Written references as edges (ADR-0073 decision 6); None = the setting.
+    written_references: bool | None = None
 
     async def run(
         self,
@@ -96,6 +98,7 @@ class GraphProximityStage(Stage):
                 actor_id=ctx.actor_id,
                 seed_note_id=note_id,
                 node_budget=self.node_budget,
+                written_references=self.written_references,
             )
             # ``nodes`` excludes the seed and is emitted best-first, so the
             # list index IS the within-walk rank (1-based).

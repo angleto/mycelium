@@ -683,6 +683,7 @@ async def retrieve_with_meta(
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
     graph: bool | None = None,
+    graph_written_references: bool | None = None,
     probe: bool = False,
     include_deleted_sources: bool = False,
     exact_only: bool = False,
@@ -708,6 +709,11 @@ async def retrieve_with_meta(
     consolidation query is answered by no raw blob; it implies the humus
     branch off (the two knobs are mutually exclusive -- a branch over an
     excluded set could only be empty).
+
+    ``graph_written_references`` lets the graph walk read written references
+    as edges for this call (None = ``settings.graph_written_references_
+    enabled``); it is the lever of the ADR-0073 retrieval A/B and only acts
+    when the graph stage runs.
 
     ``rerank_budget_ms`` is how long this call lets the cross-encoder run
     (None = ``settings.reranker_budget_ms``), clamped to
@@ -935,6 +941,7 @@ async def retrieve_with_meta(
                     min_query_tokens=settings.graph_min_query_tokens,
                     min_candidates=settings.graph_min_candidates,
                 ),
+                written_references=graph_written_references,
             )
         )
     if use_rerank:

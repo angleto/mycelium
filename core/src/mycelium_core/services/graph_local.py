@@ -75,6 +75,7 @@ async def local_edges(
     *,
     org_id: uuid.UUID,
     note_id: uuid.UUID,
+    written_references: bool | None = None,
 ) -> dict[uuid.UUID, float]:
     """Weighted edges touching ``note_id``: ``{neighbour_id: weight}`` with
     the exact soft-OR the full builder would give the pair (parity pinned in
@@ -223,7 +224,10 @@ async def local_edges(
 
     # 5) Written references (ADR-0073 decision 6), the same pairs and weight
     #    the full builder reads, restricted to those touching X.
-    for a_id, b_id in await written_reference_pairs(session, org_id=org_id, note_id=note_id):
+    #    ``written_references`` overrides the setting for one call.
+    for a_id, b_id in await written_reference_pairs(
+        session, org_id=org_id, note_id=note_id, enabled=written_references
+    ):
         nb = b_id if a_id == note_id else a_id
         contribs[nb].append(_WRITTEN_REFERENCE_WEIGHT)
 
@@ -314,6 +318,7 @@ async def bounded_neighborhood(
     char_budget: int = DEFAULT_CHAR_BUDGET,
     tau: float = DEFAULT_TAU,
     gamma: float = DEFAULT_GAMMA,
+    written_references: bool | None = None,
 ) -> BoundedNeighborhood:
     """Best-first thresholded traversal from ``seed_note_id`` (plan §2,
     Fase 1). Path weight = product of edge weights x ``gamma`` per hop;
@@ -374,7 +379,11 @@ async def bounded_neighborhood(
             stopped_by = "node_budget"
             break
         for nb, ew in sorted(
-            (await local_edges(session, org_id=org_id, note_id=nid)).items(),
+            (
+                await local_edges(
+                    session, org_id=org_id, note_id=nid, written_references=written_references
+                )
+            ).items(),
             key=lambda kv: str(kv[0]),
         ):
             if nb in visited:
