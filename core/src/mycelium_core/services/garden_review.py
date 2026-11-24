@@ -18,13 +18,22 @@ This module owns the review lifecycle:
 - :func:`approve_node` -- ``proposed`` -> ``approved``; the note becomes
   effective. Audited; emits a bus ``commit`` event. Approving a
   distillation is also the one moment its source may become humus.
-- :func:`reject_node` -- soft-delete the note (a reject never pollutes);
-  audited; emits a bus ``reject`` event carrying ``origin_model_id``.
-  Reversible via the normal recovery/restore path like any soft-delete.
-  Rejecting a distillation takes the humus mark back off its source.
+- :func:`decline_node` -- ``proposed`` -> ``declined`` (ADR-0075): the
+  person's "no", kept as a decision rather than a deletion, so neither the
+  trash purge nor the retention sweep can reach it. Audited; emits a bus
+  ``reject`` event carrying ``origin_model_id``. Declining a distillation
+  takes the humus mark back off its source.
+- :func:`reopen_node` -- ``declined`` -> ``proposed``: the decision taken
+  back, the node pending again.
+- :func:`remove_declined` -- a declined node deleted for good: the one
+  irreversible act on this lifecycle, and a person's.
+- :func:`read_node` / :func:`for_source` -- the reading surfaces: the whole
+  proposal with its sources for the person deciding, and the proposals
+  generated from one note with their state.
 
-No ``'rejected'`` is ever stored on ``review_state`` -- a reject removes the
-node, so a rejected summary never lingers. Member role; RLS-scoped.
+A declined node is held at the review gate like a pending one
+(``note_effective.GATED_STATES``): no reading, listing or retrieval surface
+shows it. Member role; RLS-scoped.
 """
 
 from __future__ import annotations
@@ -47,13 +56,17 @@ from mycelium_core.models.note_part import NotePart
 from mycelium_core.services import annotations as annotations_svc
 from mycelium_core.services import audit, event_bus, note_inert
 from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import trash as trash_svc
+from mycelium_core.services.note_effective import DECLINED, PROPOSED, effective_note_clause
 from mycelium_core.services.rbac import require_role
 
-_PROPOSED = "proposed"
-#: ``payload["review"]`` of the event that takes a rejection back. It rides
-#: on ``kind='propose'``: after the undo the node is a pending proposal
-#: again, which is exactly what that kind means -- no new event kind, no
-#: migration of the outbox CHECK, and every existing consumer renders it.
+_PROPOSED = PROPOSED
+_DECLINED = DECLINED
+#: ``payload["review"]`` of the event that takes a rejection back (a
+#: reopen, or an approval of a declined node). It rides on
+#: ``kind='propose'``: after the undo the node is a pending proposal again,
+#: which is exactly what that kind means -- no new event kind, no migration
+#: of the outbox CHECK, and every existing consumer renders it.
 _UNREJECT = "unreject"
 _APPROVED = "approved"
 _PREVIEW_CHARS = 280
@@ -166,10 +179,10 @@ async def _mark_sources_on_approve(
             )
 
 
-async def _clear_sources_on_reject(
+async def _clear_sources_on_decline(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, atom: Note
 ) -> None:
-    """A rejected or withdrawn distillation no longer justifies its source's
+    """A declined or withdrawn distillation no longer justifies its source's
     humus mark, so the mark comes off -- unless another distillation of the
     same source is still effective. Also repairs the state the old distiller
     left behind, which marked the source when the summary was created."""
@@ -187,8 +200,7 @@ async def _clear_sources_on_reject(
                         other.c.child_note_id != atom.id,
                         other.c.child_note_id == Note.id,
                         Note.humus_kind == "distillation",
-                        Note.deleted_at.is_(None),
-                        Note.review_state.is_distinct_from(_PROPOSED),
+                        effective_note_clause(),
                     )
                 )
             )
@@ -258,11 +270,9 @@ async def list_pending(
 
 @dataclass(frozen=True)
 class RejectedNode:
-    """One REJECTED proposal: the review bin's row. ``reject_node`` rejects
-    by soft-deleting while leaving ``review_state='proposed'``, and that
-    pair of states is invisible everywhere -- the inbox filters
-    ``deleted_at IS NULL``, the trash filters the proposed leg -- so
-    without this list an undo is unreachable even though it works."""
+    """One DECLINED proposal: a row of the review history (ADR-0075). The
+    node is kept, readable through :func:`read_node`, and can be reopened or
+    approved; nothing purges it unless a person removes it for good."""
 
     note_id: uuid.UUID
     title: str | None
@@ -270,42 +280,30 @@ class RejectedNode:
     origin_model_id: str | None
     preview: str
     created_at: dt.datetime
-    #: ``notes.deleted_at``: non-NULL by construction, this IS the moment
-    #: the human declined it.
+    #: ``notes.review_decided_at``: when the person declined it.
     rejected_at: dt.datetime
-    #: The same TOCTOU pin ``PendingNode`` carries, to echo back to the
-    #: restore that undoes the rejection.
+    #: The same TOCTOU pin ``PendingNode`` carries, to echo back to a reopen,
+    #: an approval or a removal.
     version: int
 
 
 async def list_rejected(
     session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50
 ) -> list[RejectedNode]:
-    """The review BIN: proposals a human declined, most recently rejected
-    first. Mirror of :func:`list_pending` on the other leg of the
-    perimeter (``deleted_at IS NOT NULL`` instead of ``IS NULL``).
-
-    The undo is not a verb of its own: it is ``notes.restore_note``, which
-    accepts exactly this state and puts the node back in the inbox. This
-    list is what makes that reachable. RLS-scoped; a pure read.
-
-    These rows are soft-deleted notes like any other, so emptying the
-    workspace trash purges them too even though that view does not show
-    them, and the retention sweep reaches them on its own schedule.
-    """
+    """The declined proposals, most recently declined first. Mirror of
+    :func:`list_pending` on the other gated state. RLS-scoped; a pure read."""
     rows = (
         (
             await session.execute(
                 select(Note)
                 .where(
                     Note.org_id == org_id,
-                    Note.review_state == _PROPOSED,
-                    Note.deleted_at.is_not(None),
+                    Note.review_state == _DECLINED,
+                    Note.deleted_at.is_(None),
                 )
                 # Most recently declined first: the order an undo is looked
-                # for in, and the one ``note_parts.list_trashed`` uses for
-                # the other bin. The id tiebreak keeps paging stable.
-                .order_by(Note.deleted_at.desc(), Note.id.asc())
+                # for in. The id tiebreak keeps paging stable.
+                .order_by(Note.review_decided_at.desc().nulls_last(), Note.id.asc())
                 .limit(limit)
             )
         )
@@ -315,8 +313,6 @@ async def list_rejected(
     out: list[RejectedNode] = []
     for n in rows:
         body = await notes_svc.get_body(session, note_id=n.id)
-        # Non-NULL by the WHERE above; the fallback keeps the type honest.
-        rejected_at = n.deleted_at or n.created_at
         out.append(
             RejectedNode(
                 note_id=n.id,
@@ -325,7 +321,9 @@ async def list_rejected(
                 origin_model_id=n.origin_model_id,
                 preview=(body or "").strip()[:_PREVIEW_CHARS],
                 created_at=n.created_at,
-                rejected_at=rejected_at,
+                # Never NULL for a node declined through this module; the
+                # fallback keeps the type honest for a row written otherwise.
+                rejected_at=n.review_decided_at or n.created_at,
                 version=n.version,
             )
         )
@@ -333,11 +331,17 @@ async def list_rejected(
 
 
 async def _load_proposed(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
-    """Load a note for review by id (bypassing the proposed-exclusion the
-    retrieval surfaces apply). 404 if it does not exist in this org or is
-    already soft-deleted."""
+    """Load a generated note for review by id (bypassing the gate the
+    retrieval surfaces apply). 404 if it does not exist in this org, is
+    soft-deleted, or was never generated (``review_state`` NULL): an
+    ordinary note is not a proposal, whoever asks."""
     note = await session.get(Note, note_id)
-    if note is None or note.org_id != org_id or note.deleted_at is not None:
+    if (
+        note is None
+        or note.org_id != org_id
+        or note.deleted_at is not None
+        or note.review_state is None
+    ):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return note
 
@@ -453,8 +457,11 @@ async def approve_node(
     expected_version: int | None = None,
     decision: Decision | None = None,
 ) -> Note:
-    """Approve a ``proposed`` node: ``review_state`` -> ``'approved'`` so it
-    becomes effective (eligible for every retrieval/listing surface).
+    """Approve a ``proposed`` or ``declined`` node: ``review_state`` ->
+    ``'approved'`` so it becomes effective (eligible for every
+    retrieval/listing surface). Approving a declined node takes the
+    rejection back first (:func:`record_unreject`), so the model is not
+    charged a "no" the person withdrew.
     Audited; emits a bus ``commit`` event (idempotent on the note id). A
     re-approve of an already-approved node is a no-op (idempotent); a node
     that was never proposed is 404 (it is not a pending proposal).
@@ -475,11 +482,15 @@ async def approve_node(
         raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
     if note.review_state == _APPROVED:
         return note  # idempotent: already approved
-    if note.review_state != _PROPOSED:
+    if note.review_state not in (_PROPOSED, _DECLINED):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    previous = note.review_state
     note.review_state = _APPROVED
+    note.review_decided_at = dt.datetime.now(dt.UTC)
     note.version += 1
     await session.flush()
+    if previous == _DECLINED:
+        await record_unreject(session, org_id=org_id, actor_id=actor_id, note=note)
     await _mark_sources_on_approve(session, org_id=org_id, actor_id=actor_id, atom=note)
     await audit.log(
         session,
@@ -489,7 +500,7 @@ async def approve_node(
         entity_id=note_id,
         action="garden_review:approve",
         diff={
-            "review_state": {"old": _PROPOSED, "new": _APPROVED},
+            "review_state": {"old": previous, "new": _APPROVED},
             **(decision.record() if decision else {}),
         },
     )
@@ -518,7 +529,7 @@ async def approve_node(
     return note
 
 
-async def reject_node(
+async def decline_node(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
@@ -529,11 +540,14 @@ async def reject_node(
     attribute_to_model: bool = True,
     decision: Decision | None = None,
 ) -> Note:
-    """Reject a ``proposed`` node: soft-delete it (it never pollutes the
-    corpus) and emit a bus ``reject`` event carrying ``origin_model_id`` (so
-    the per-model accept-ratio / earned-autonomy signal, ADR-0043 D4, can be
-    derived later). Reversible via the normal restore path. Idempotent if
-    already soft-deleted; 404 if the node was never proposed.
+    """Decline a ``proposed`` node: ``review_state`` -> ``'declined'``
+    (ADR-0075). It stays held at the review gate, so it never pollutes the
+    corpus, and it is never deleted, so nothing purges it: it waits in the
+    review history, readable, until the person reopens it, approves it or
+    removes it for good. Emits a bus ``reject`` event carrying
+    ``origin_model_id`` (so the per-model accept-ratio / earned-autonomy
+    signal, ADR-0043 D4, can be derived later). Idempotent if already
+    declined; 404 if the node is not a pending proposal.
 
     ``expected_version`` mirrors :func:`approve_node` (TOCTOU guard, task
     2e36e732): checked before the idempotent short-circuit, ``None`` =
@@ -549,19 +563,18 @@ async def reject_node(
 
     ``decision`` mirrors :func:`approve_node`."""
     await require_role(session, org_id, actor_id, Role.member)
-    note = await session.get(Note, note_id)
-    if note is None or note.org_id != org_id:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
     if expected_version is not None and note.version != expected_version:
         raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
-    if note.deleted_at is not None:
-        return note  # idempotent: already rejected/removed
+    if note.review_state == _DECLINED:
+        return note  # idempotent: already declined
     if note.review_state != _PROPOSED:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-    note.deleted_at = dt.datetime.now(dt.UTC)
+    note.review_state = _DECLINED
+    note.review_decided_at = dt.datetime.now(dt.UTC)
     note.version += 1
     await session.flush()
-    await _clear_sources_on_reject(session, org_id=org_id, actor_id=actor_id, atom=note)
+    await _clear_sources_on_decline(session, org_id=org_id, actor_id=actor_id, atom=note)
     await audit.log(
         session,
         org_id=org_id,
@@ -570,10 +583,10 @@ async def reject_node(
         entity_id=note_id,
         action="garden_review:reject",
         diff={
+            "review_state": {"old": _PROPOSED, "new": _DECLINED},
             **({"reason": reason} if reason else {}),
             **(decision.record() if decision else {}),
-        }
-        or None,
+        },
     )
     actor_kind = await event_bus.session_actor_kind(session)
     await event_bus.emit_event(
@@ -658,7 +671,7 @@ async def reject_node_on_decision(
     decided_by = await _verify_review_decision(
         session, org_id=org_id, node=node, decision_comment_id=decision_comment_id, verb="reject"
     )
-    return await reject_node(
+    return await decline_node(
         session,
         org_id=org_id,
         actor_id=actor_id,
@@ -699,10 +712,8 @@ async def record_unreject(
     would meet a 429 on a restore -- a restore by an agent is a write and
     belongs under the same anti-runaway cap; humans are not capped.
 
-    Lives here, not in ``notes``: this is review vocabulary. ``restore_note``
-    calls it because it is the only door that clears ``deleted_at``, and it
-    already knows -- by hand, on the one state that means it -- that this
-    particular restore is an un-reject.
+    Called by :func:`reopen_node` and by :func:`approve_node` on a declined
+    node: the two ways a decline is taken back.
     """
     row = (
         await session.execute(
@@ -744,6 +755,229 @@ async def record_unreject(
     )
 
 
+async def reopen_node(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+) -> Note:
+    """Take a decline back: ``declined`` -> ``proposed`` (ADR-0075). The node
+    is pending again, exactly as it was before the person declined it, and
+    the rejection stops counting against the model (:func:`record_unreject`).
+    The humus mark of a distillation's source is not touched: it is set at
+    approval and nowhere else, and a pending node never justifies it.
+
+    ``expected_version`` is required: the person reopens the node they read.
+    Reopening an already pending node is a no-op; any other state is 404."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if note.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if note.review_state == _PROPOSED:
+        return note  # idempotent: already pending
+    if note.review_state != _DECLINED:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    note.review_state = _PROPOSED
+    note.review_decided_at = None
+    note.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="garden_review:reopen",
+        diff={"review_state": {"old": _DECLINED, "new": _PROPOSED}},
+    )
+    await record_unreject(session, org_id=org_id, actor_id=actor_id, note=note)
+    return note
+
+
+async def remove_declined(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+) -> uuid.UUID:
+    """Delete a DECLINED node for good: the one irreversible act of the
+    review lifecycle (ADR-0075), and only on a node a person has already
+    declined, so a pending proposal is never thrown away unread. The row,
+    its parts, its links and its search blobs go through the same purge
+    emptying the bin uses (``trash.purge_rows``); the audit row and the bus
+    events about it stay, so the accept ratio keeps the decline it counted.
+
+    ``expected_version`` is required: the person removes what they read."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if note.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    if note.review_state != _DECLINED:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    title = note.title
+    await trash_svc.purge_rows(session, task_ids=[], note_ids=[note_id])
+    # The ORM still holds the instance the purge deleted under it with a
+    # Core DELETE; drop it so a later flush does not try to write it back.
+    session.expunge(note)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="garden_review:remove",
+        diff={"title": title},
+    )
+    await session.flush()
+    return note_id
+
+
+@dataclass(frozen=True)
+class ProposalSource:
+    """One note a proposal was generated from, as the person reviewing it
+    reads it: whole, beside the proposal."""
+
+    note_id: uuid.UUID
+    title: str | None
+    body: str
+    is_archived: bool
+
+
+@dataclass(frozen=True)
+class ProposalReading:
+    """A generated note read in full by the person who decides it, with the
+    notes it was generated from (its live ``hypha_of`` parents)."""
+
+    note_id: uuid.UUID
+    title: str | None
+    body: str
+    humus_kind: str | None
+    origin_model_id: str | None
+    review_state: str
+    created_at: dt.datetime
+    decided_at: dt.datetime | None
+    version: int
+    sources: list[ProposalSource]
+
+
+async def read_node(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, note_id: uuid.UUID
+) -> ProposalReading:
+    """The whole of a generated note and of its sources, for the person
+    deciding it (ADR-0075 decision 2). The review gate exists so that a
+    person decides; a person who can read 280 characters of the proposal
+    decides nothing. This is the gate's one reader: the operation is a
+    person's (``HUMAN_ONLY``), and it is not a retrieval surface -- the node
+    stays out of search, listings, agents and the graph until approved.
+
+    Reads a pending, declined or approved node; an ordinary note, or one in
+    the trash, is 404."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    body = await notes_svc.get_body(session, note_id=note.id)
+    parents = (
+        (
+            await session.execute(
+                select(Note)
+                .join(NoteNoteLink, NoteNoteLink.parent_note_id == Note.id)
+                .where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.child_note_id == note.id,
+                    NoteNoteLink.kind == "hypha_of",
+                    # A source is shown only if the person could open it:
+                    # a source that is itself a pending proposal or in the
+                    # trash stays where it is.
+                    effective_note_clause(),
+                )
+                .order_by(Note.created_at.asc(), Note.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sources = [
+        ProposalSource(
+            note_id=src.id,
+            title=src.title,
+            body=(await notes_svc.get_body(session, note_id=src.id)) or "",
+            is_archived=src.is_archived,
+        )
+        for src in parents
+    ]
+    state = note.review_state
+    if state is None:  # excluded by _load_proposed; narrows the type
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    return ProposalReading(
+        note_id=note.id,
+        title=note.title,
+        body=body or "",
+        humus_kind=note.humus_kind,
+        origin_model_id=note.origin_model_id,
+        review_state=state,
+        created_at=note.created_at,
+        decided_at=note.review_decided_at,
+        version=note.version,
+        sources=sources,
+    )
+
+
+@dataclass(frozen=True)
+class SourceProposal:
+    """A note generated from a given source, with where it stands."""
+
+    note_id: uuid.UUID
+    title: str | None
+    humus_kind: str | None
+    review_state: str
+    created_at: dt.datetime
+    decided_at: dt.datetime | None
+
+
+async def for_source(
+    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+) -> list[SourceProposal]:
+    """The generated notes drawn from ``note_id`` (its ``hypha_of`` children
+    that carry a review state), newest first, so the source note can say
+    what happened to it: a distillation awaiting review, declined, approved.
+    Titles and states only, the same disclosure the pending list makes; the
+    text stays behind :func:`read_node`. The source itself must be a note the
+    caller could open."""
+    await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
+    rows = (
+        (
+            await session.execute(
+                select(Note)
+                .join(NoteNoteLink, NoteNoteLink.child_note_id == Note.id)
+                .where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.parent_note_id == note_id,
+                    NoteNoteLink.kind == "hypha_of",
+                    Note.review_state.is_not(None),
+                    Note.deleted_at.is_(None),
+                )
+                .order_by(Note.created_at.desc(), Note.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        SourceProposal(
+            note_id=n.id,
+            title=n.title,
+            humus_kind=n.humus_kind,
+            review_state=n.review_state or "",
+            created_at=n.created_at,
+            decided_at=n.review_decided_at,
+        )
+        for n in rows
+    ]
+
+
 # ── D4 earned-autonomy telemetry: per-model accept ratio ───────────────────
 
 
@@ -766,7 +1000,7 @@ async def accept_ratio_by_model(
     session: AsyncSession, *, org_id: uuid.UUID
 ) -> list[ModelAcceptRatio]:
     """Per-model accept ratio over the review bus events. Reads the durable
-    approve/reject events ``approve_node`` / ``reject_node`` emit (each
+    approve/reject events ``approve_node`` / ``decline_node`` emit (each
     carrying ``origin_model_id`` in its payload): a reject soft-deletes the
     node, so the EVENTS -- not the note table -- are the complete record of
     both outcomes. Most-decided model first. RLS-scoped.
@@ -844,17 +1078,17 @@ async def restore_source(
     hard-deleted.
 
     Retiring an EFFECTIVE (approved) atom has no direct house verb --
-    ``reject_node`` only accepts ``review_state='proposed'``, and archiving
+    ``decline_node`` only accepts ``review_state='proposed'``, and archiving
     would NOT retire it (archived blobs stay retrievable; only the
     ``proposed`` filter withholds blobs at the retrieval layer, see
     ``proposed_note_blob_exclusion``). So an approved atom is first demoted
     back to ``proposed`` (audited, the exact inverse of ``approve_node``) and
-    then rejected: the end state (``review_state='proposed'`` +
-    ``deleted_at``) is byte-identical to a normal reject -- withheld from
-    retrieval, hidden from listings, reversible via the normal restore path.
+    then declined: the end state is the one a person's decline leaves --
+    withheld from retrieval, hidden from listings, kept in the review
+    history and reopenable.
 
-    Idempotent: an already-retired atom skips the retire step but still
-    revives any archived source."""
+    Idempotent: an already-retired (declined) atom skips the retire step but
+    still revives any archived source."""
     await require_role(session, org_id, actor_id, Role.member)
     atom = await session.get(Note, atom_note_id)
     if atom is None or atom.org_id != org_id:
@@ -894,7 +1128,7 @@ async def restore_source(
             )
             restored.append(src.id)
     retired = False
-    if atom.deleted_at is None:
+    if atom.deleted_at is None and atom.review_state != _DECLINED:
         if atom.review_state == _APPROVED:
             atom.review_state = _PROPOSED
             atom.version += 1
@@ -911,7 +1145,7 @@ async def restore_source(
         # Pin the version this flow just observed (post-demote): the same
         # TOCTOU guard reviewers get, applied to the internal composition
         # (task 2e36e732).
-        await reject_node(
+        await decline_node(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -950,13 +1184,20 @@ __all__ = [
     "Decision",
     "ModelAcceptRatio",
     "PendingNode",
+    "ProposalReading",
+    "ProposalSource",
     "RejectedNode",
+    "SourceProposal",
     "accept_ratio_by_model",
     "accept_ratio_overall",
     "approve_node",
     "approve_node_on_decision",
+    "decline_node",
+    "for_source",
     "list_pending",
     "list_rejected",
-    "reject_node",
+    "read_node",
     "reject_node_on_decision",
+    "remove_declined",
+    "reopen_node",
 ]

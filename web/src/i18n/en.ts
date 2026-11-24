@@ -249,20 +249,79 @@ export const en = {
     },
     pending: {
       title: 'Awaiting review',
-      hint: 'Autonomously-produced atoms held until you approve them (ADR-0043).',
+      hint: 'Summaries the garden generated. They are not in your memory until you approve them: open one to read it beside the notes it comes from, and decide.',
       model: 'producing model',
     },
     rejected: {
       title: 'Rejected',
       at: 'rejected on',
-      hint: 'Proposals you declined: they show in no other list, not even the trash. Undo to put one back in the review queue.',
+      hint: 'Summaries you declined. They stay here, out of your memory, until you reopen, approve or delete them for good. Emptying the trash does not touch them.',
     },
-    undoReject: 'Undo rejection',
+    readAndDecide: 'Read and decide',
+    read: 'Read',
+    reopen: 'Reopen',
+    reopenHint: 'Put it back among the ones awaiting your decision.',
+    removed: '“{{title}}” was deleted for good.',
     facts: {
       title: 'Facts read from your notes',
       hint: 'Relations a model found in your notes, on its own or because someone asked. None of them counts until you approve it; a rejected fact is not proposed again unless someone asks for that note to be read.',
       source: 'from',
     },
+  },
+  gardenProposal: {
+    back: '← Review',
+    missing: 'This proposal no longer exists, or it is not a garden proposal.',
+    untitled: 'untitled',
+    state: {
+      proposed: 'Awaiting your decision',
+      declined: 'Declined',
+      approved: 'Approved',
+    },
+    kind: {
+      distillation: 'Distillation',
+      pattern: 'Pattern',
+      season: 'Season',
+    },
+    writtenBy: 'written by {{model}}',
+    createdAt: 'generated on {{when}}',
+    explain: {
+      proposed:
+        'It is not in your memory yet: it does not show in search, in lists or to agents until you approve it. Read it beside the notes it comes from, then decide.',
+      declined:
+        'You declined it on {{when}}. It stays here, out of your memory and out of reach of the trash, until you reopen, approve or delete it for good.',
+      approved: 'You approved it on {{when}}: it is now a note in your memory.',
+    },
+    actions: 'Decision',
+    approve: 'Approve',
+    decline: 'Decline',
+    reopen: 'Reopen',
+    remove: 'Delete for good…',
+    openNote: 'Open the note',
+    actionsHint: {
+      proposed:
+        'Approve: it enters your memory. Decline: it stays among the declined, and you can reopen or approve it at any time.',
+      declined:
+        'Approve: it enters your memory. Reopen: it awaits your decision again. Delete for good: it is gone, and that cannot be undone.',
+      approved: 'The notes it comes from are left untouched.',
+    },
+    sources_one: 'The note it comes from',
+    sources_other: 'The {{count}} notes it comes from',
+    noSources: 'The notes it comes from are no longer available.',
+    archived: 'archived',
+    proposalTitle: {
+      proposed: 'What the garden proposes',
+      declined: 'What the garden had proposed',
+      approved: 'The approved summary',
+    },
+    removeTitle: 'Delete for good?',
+    removeIntro: '“{{title}}” will be gone forever. This cannot be undone.',
+    removeConfirm: 'Delete for good',
+    removeDetail: 'The notes it comes from are not touched.',
+  },
+  generatedFromNote: {
+    title: 'Generated from this note',
+    readAndDecide: 'Read and decide',
+    read: 'Read',
   },
   gardenSuggest: {
     title: 'Garden suggestions',

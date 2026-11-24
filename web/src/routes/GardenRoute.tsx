@@ -417,7 +417,8 @@ export function GardenRoute() {
   // reusable atom. Idempotent server-side, so re-clicking lands on the
   // existing distillation. A new distillation is a proposal: ordinary note
   // reads do not serve it until the person approves it, so it opens in the
-  // review inbox. One that is already approved opens in the plant modal.
+  // review reading view, beside its source (ADR-0075). One that is already
+  // approved opens in the plant modal.
   async function onDistill(noteId: string) {
     setBusy(true)
     setErr('')
@@ -429,8 +430,8 @@ export function GardenRoute() {
       setErr(errMessage(error))
       return
     }
-    if (data.review_state === 'proposed') {
-      navigate('/garden/review')
+    if (data.review_state === 'proposed' || data.review_state === 'declined') {
+      navigate(`/garden/review/${data.distilled_note_id}`)
       return
     }
     await reload()
@@ -456,7 +457,11 @@ export function GardenRoute() {
   const visible = buckets[tab]
 
   return (
-    <section className="card garden" ref={sectionRef}>
+    // Wide like Tasks: the board needs four columns side by side, and under
+    // the 60rem reading cap it was squeezed while the right of the page sat
+    // empty. Applied to both views so switching list/board does not make the
+    // page jump in width.
+    <section className="card card--wide garden" ref={sectionRef}>
       <h1 ref={headingRef} tabIndex={-1}>
         {t('garden.title')}
       </h1>

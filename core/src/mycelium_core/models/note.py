@@ -158,12 +158,19 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # note AND every user-initiated creation (always effective, unchanged
     # from today); ``'proposed'`` is set ONLY by the autonomous garden sweep
     # when it generates a summary unsolicited (withheld from every retrieval
-    # surface); ``'approved'`` once a human accepts it. There is no stored
-    # ``'rejected'`` -- a reject soft-deletes the node. A note is EFFECTIVE
-    # (eligible for retrieval/listing) iff ``review_state IS DISTINCT FROM
-    # 'proposed'`` AND ``deleted_at IS NULL``.
+    # surface); ``'approved'`` once a human accepts it; ``'declined'`` once a
+    # human turns it down (ADR-0075: a decision kept and reversible, no
+    # longer a soft-delete). A note is EFFECTIVE (eligible for
+    # retrieval/listing) iff its state is not one of
+    # ``note_effective.GATED_STATES`` AND ``deleted_at IS NULL``.
+    # ``review_decided_at`` is when a person last approved or declined it,
+    # cleared when a declined proposal is reopened: the order of the review
+    # history, which ``deleted_at`` used to stand in for.
     origin_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     review_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    review_decided_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):

@@ -82,8 +82,14 @@ from mycelium_core.operations.garden_views import (
     GardenReviewActionOut,
     GardenReviewDecisionIn,
     GardenReviewDecisionOut,
+    GardenReviewForSourceItem,
+    GardenReviewGuardedIn,
+    GardenReviewNodeIn,
     GardenReviewPendingItem,
+    GardenReviewReadingOut,
     GardenReviewRejectedItem,
+    GardenReviewRemoveOut,
+    GardenReviewSourceOut,
     GardenTagSuggestionOut,
     GardenTelemetryIn,
     GardenWalkIn,
@@ -679,9 +685,10 @@ async def review_pending(ctx: OpCtx, p: GardenListIn) -> list[GardenReviewPendin
     result=list[GardenReviewRejectedItem],
 )
 async def review_rejected(ctx: OpCtx, p: GardenListIn) -> list[GardenReviewRejectedItem]:
-    """The review bin (ADR-0043): proposals a person declined, most recently
-    declined first. No other listing shows them, so this is how a rejection
-    is found again; undo one by restoring the note, echoing ``version``."""
+    """The proposals a person declined (ADR-0075), most recently declined
+    first. They are kept, not deleted: read one with garden_review_read,
+    take the decline back with garden_review_reopen, approve it directly, or
+    remove it for good with garden_review_remove, echoing ``version``."""
     rejected = await review_svc.list_rejected(ctx.session, org_id=ctx.org_id, limit=p.limit)
     return [
         GardenReviewRejectedItem(
@@ -703,7 +710,7 @@ def _action_out(note: Note) -> GardenReviewActionOut:
         note_id=note.id,
         review_state=note.review_state,
         origin_model_id=note.origin_model_id,
-        rejected=note.deleted_at is not None,
+        rejected=note.review_state == "declined",
         version=note.version,
     )
 
@@ -717,12 +724,13 @@ def _action_out(note: Note) -> GardenReviewActionOut:
     result=GardenReviewActionOut,
 )
 async def review_approve(ctx: OpCtx, p: GardenReviewActionIn) -> GardenReviewActionOut:
-    """Approve a generated note (ADR-0043): it becomes effective and enters
-    retrieval, search and listings; for a distillation, the source becomes
-    humus if it is still inert. A person's act: a credential carrying a
-    scope list cannot call it. Audited, idempotent. Pass ``expected_version``
-    from the pending listing to fail with ``stale_version`` if the note
-    changed after you read it; ``reason`` is ignored."""
+    """Approve a generated note, pending or declined (ADR-0043, ADR-0075): it
+    becomes effective and enters retrieval, search and listings; for a
+    distillation, the source becomes humus if it is still inert. A person's
+    act: a credential carrying a scope list cannot call it. Audited,
+    idempotent. Pass ``expected_version`` from the listing to fail with
+    ``stale_version`` if the note changed after you read it; ``reason`` is
+    ignored."""
     note = await review_svc.approve_node(
         ctx.session,
         org_id=ctx.org_id,
@@ -742,13 +750,13 @@ async def review_approve(ctx: OpCtx, p: GardenReviewActionIn) -> GardenReviewAct
     result=GardenReviewActionOut,
 )
 async def review_reject(ctx: OpCtx, p: GardenReviewActionIn) -> GardenReviewActionOut:
-    """Reject a generated note (ADR-0043): it is moved to the review bin,
-    restorable, so a weak summary never enters the corpus; for a
-    distillation, the source loses the humus mark unless another approved
-    distillation still justifies it. A person's act: a credential carrying a
-    scope list cannot call it. Audited, idempotent; ``expected_version`` as
-    for approve."""
-    note = await review_svc.reject_node(
+    """Decline a generated note (ADR-0043, ADR-0075): it stays out of the
+    corpus and is kept, readable and reversible, among the declined ones --
+    nothing deletes it; for a distillation, the source loses the humus mark
+    unless another approved distillation still justifies it. A person's act:
+    a credential carrying a scope list cannot call it. Audited, idempotent;
+    ``expected_version`` as for approve."""
+    note = await review_svc.decline_node(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.actor_id,
@@ -831,8 +839,8 @@ async def review_reject_on_decision(
 async def review_restore_source(ctx: OpCtx, p: GardenRestoreSourceIn) -> GardenRestoreSourceOut:
     """Restore the original under a humus atom: un-archive the atom's
     ``hypha_of`` sources (preserved, never changed) and retire the atom (an
-    approved atom is demoted, then rejected). Nothing is hard-deleted and
-    the provenance chain stays queryable. Idempotent."""
+    approved atom is demoted, then declined, and stays reopenable). Nothing
+    is hard-deleted and the provenance chain stays queryable. Idempotent."""
     res = await review_svc.restore_source(
         ctx.session,
         org_id=ctx.org_id,
@@ -846,6 +854,116 @@ async def review_restore_source(ctx: OpCtx, p: GardenRestoreSourceIn) -> GardenR
         restored_source_ids=res.restored_source_ids,
         atom_retired=res.atom_retired,
     )
+
+
+@operation(
+    "garden.review.read",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access=HUMAN_ONLY,
+    params=GardenReviewNodeIn,
+    result=GardenReviewReadingOut,
+)
+async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingOut:
+    """Read a generated note in full, pending, declined or approved, with
+    the whole text of the notes it was generated from (ADR-0075): what the
+    person deciding it needs to decide. A person's read: the text of a
+    proposal does not leave the review perimeter for a credential carrying a
+    scope list, which reads the titles and previews of garden_review_pending
+    instead."""
+    r = await review_svc.read_node(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, note_id=p.note_id
+    )
+    return GardenReviewReadingOut(
+        note_id=r.note_id,
+        title=r.title,
+        body=r.body,
+        humus_kind=r.humus_kind,
+        origin_model_id=r.origin_model_id,
+        review_state=r.review_state,
+        created_at=r.created_at,
+        decided_at=r.decided_at,
+        version=r.version,
+        sources=[
+            GardenReviewSourceOut(
+                note_id=x.note_id, title=x.title, body=x.body, is_archived=x.is_archived
+            )
+            for x in r.sources
+        ],
+    )
+
+
+@operation(
+    "garden.review.for_source",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenReviewNodeIn,
+    result=list[GardenReviewForSourceItem],
+)
+async def review_for_source(ctx: OpCtx, p: GardenReviewNodeIn) -> list[GardenReviewForSourceItem]:
+    """The notes generated from this note (distillations, patterns,
+    seasons), newest first, each with its review state: 'proposed' (waiting
+    for a person), 'declined' or 'approved'. Titles and states only."""
+    rows = await review_svc.for_source(ctx.session, org_id=ctx.org_id, note_id=p.note_id)
+    return [
+        GardenReviewForSourceItem(
+            note_id=x.note_id,
+            title=x.title,
+            humus_kind=x.humus_kind,
+            review_state=x.review_state,
+            created_at=x.created_at,
+            decided_at=x.decided_at,
+        )
+        for x in rows
+    ]
+
+
+@operation(
+    "garden.review.reopen",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=GardenReviewGuardedIn,
+    result=GardenReviewActionOut,
+)
+async def review_reopen(ctx: OpCtx, p: GardenReviewGuardedIn) -> GardenReviewActionOut:
+    """Take a decline back: the declined note is pending again, back in
+    garden_review_pending, and the decline stops counting against the model
+    that wrote it. Nothing is decided by this: a person still approves or
+    declines it. ``expected_version`` from the declined listing."""
+    note = await review_svc.reopen_node(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        expected_version=p.expected_version,
+    )
+    return _action_out(note)
+
+
+@operation(
+    "garden.review.remove",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenReviewGuardedIn,
+    result=GardenReviewRemoveOut,
+)
+async def review_remove(ctx: OpCtx, p: GardenReviewGuardedIn) -> GardenReviewRemoveOut:
+    """Delete a declined note for good, with its text, links and search
+    entries. Irreversible, and only on a note a person already declined: a
+    pending proposal cannot be thrown away unread. A person's act: a
+    credential carrying a scope list cannot call it. ``expected_version``
+    from the declined listing."""
+    nid = await review_svc.remove_declined(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        expected_version=p.expected_version,
+    )
+    return GardenReviewRemoveOut(note_id=nid, removed=True)
 
 
 @operation(

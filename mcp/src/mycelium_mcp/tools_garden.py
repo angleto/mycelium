@@ -56,6 +56,10 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("garden_review_reject_on_decision", "garden.review.reject_on_decision", None),
     ("note_restore_source", "garden.review.restore_source", None),
     ("garden_review_accept_ratio", "garden.review.accept_ratio", _under("models")),
+    ("garden_review_read", "garden.review.read", None),
+    ("garden_review_for_source", "garden.review.for_source", _under("proposals")),
+    ("garden_review_reopen", "garden.review.reopen", None),
+    ("garden_review_remove", "garden.review.remove", None),
     # what the classifier learned
     ("garden_learning_telemetry", "garden.learning.telemetry", None),
     ("garden_learning_rollback", "garden.learning.rollback", None),

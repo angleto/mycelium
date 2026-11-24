@@ -71,49 +71,7 @@ async def empty_trash(
         .all()
     )
 
-    if task_ids or note_ids:
-        # S3-backed attachments need the bucket cleanup before the row
-        # CASCADE drops their metadata (otherwise we orphan objects).
-        conds = []
-        if task_ids:
-            conds.append(Attachment.task_id.in_(task_ids))
-        if note_ids:
-            conds.append(Attachment.note_id.in_(note_ids))
-        rows = await session.execute(
-            select(Attachment.storage_key).where(or_(*conds), Attachment.storage_key.is_not(None))
-        )
-        keys = [k for k in rows.scalars().all() if k is not None]
-        if keys:
-            store = get_attachment_store(get_settings())
-            for key in keys:
-                await store.delete(key)
-
-    # Erase the search blobs by provenance BEFORE the row DELETEs (task
-    # c5da112c): the bulk Core DELETE below bypasses the ORM mapper
-    # listeners that normally clean the index blobs, and the note_part
-    # rows (whose ids the provenance carries) die in the row CASCADE --
-    # collecting them afterwards would be too late. Without this, a
-    # purged note/task leaves orphaned, still-retrievable blobs.
-    # Whole-entity pairs are included ON PURPOSE: emptying the bin is a
-    # SOVEREIGN human act (admin-gated), so it mirrors ``gdpr_erase`` --
-    # a derived memory whose only provenance was a purged row dies with
-    # it. The autonomous retention sweep deliberately does NOT do this
-    # (see ``entity_revisions.hard_delete_soft_deleted``).
-    sources: list[tuple[str, str]] = [("task", str(tid)) for tid in task_ids]
-    sources.extend(("note", str(nid)) for nid in note_ids)
-    if note_ids:
-        part_ids = (
-            (await session.execute(select(NotePart.id).where(NotePart.note_id.in_(note_ids))))
-            .scalars()
-            .all()
-        )
-        sources.extend(("note_part", str(pid)) for pid in part_ids)
-    blobs_deleted = await erase_blobs_for_sources(session, sources=sources)
-
-    if task_ids:
-        await session.execute(delete(Task).where(Task.id.in_(task_ids)))
-    if note_ids:
-        await session.execute(delete(Note).where(Note.id.in_(note_ids)))
+    blobs_deleted = await purge_rows(session, task_ids=task_ids, note_ids=note_ids)
     # Trashed note PARTS are in the bin too (migration 0089), so emptying
     # the bin empties them -- including those belonging to notes that are
     # very much alive. Entries whose note was purged above are already
@@ -145,3 +103,63 @@ async def empty_trash(
         },
     )
     return {"tasks": len(task_ids), "notes": len(note_ids), "note_parts": parts_purged}
+
+
+async def purge_rows(
+    session: AsyncSession,
+    *,
+    task_ids: list[uuid.UUID],
+    note_ids: list[uuid.UUID],
+) -> int:
+    """Hard-delete these tasks and notes with everything that hangs off them,
+    and return how many search blobs went with them. The one implementation
+    of a permanent delete, shared by emptying the bin and by removing a
+    declined proposal for good (ADR-0075). The caller has already decided,
+    and checked who may decide, that these rows go.
+
+    Off-DB attachment bytes go first, then the search blobs by provenance,
+    then the row DELETEs whose FK CASCADEs clear the satellites."""
+    if task_ids or note_ids:
+        # S3-backed attachments need the bucket cleanup before the row
+        # CASCADE drops their metadata (otherwise we orphan objects).
+        conds = []
+        if task_ids:
+            conds.append(Attachment.task_id.in_(task_ids))
+        if note_ids:
+            conds.append(Attachment.note_id.in_(note_ids))
+        rows = await session.execute(
+            select(Attachment.storage_key).where(or_(*conds), Attachment.storage_key.is_not(None))
+        )
+        keys = [k for k in rows.scalars().all() if k is not None]
+        if keys:
+            store = get_attachment_store(get_settings())
+            for key in keys:
+                await store.delete(key)
+
+    # Erase the search blobs by provenance BEFORE the row DELETEs (task
+    # c5da112c): the bulk Core DELETE below bypasses the ORM mapper
+    # listeners that normally clean the index blobs, and the note_part
+    # rows (whose ids the provenance carries) die in the row CASCADE --
+    # collecting them afterwards would be too late. Without this, a
+    # purged note/task leaves orphaned, still-retrievable blobs.
+    # Whole-entity pairs are included ON PURPOSE: a permanent delete is a
+    # SOVEREIGN human act, so it mirrors ``gdpr_erase`` -- a derived memory
+    # whose only provenance was a purged row dies with it. The autonomous
+    # retention sweep deliberately does NOT do this (see
+    # ``entity_revisions.hard_delete_soft_deleted``).
+    sources: list[tuple[str, str]] = [("task", str(tid)) for tid in task_ids]
+    sources.extend(("note", str(nid)) for nid in note_ids)
+    if note_ids:
+        part_ids = (
+            (await session.execute(select(NotePart.id).where(NotePart.note_id.in_(note_ids))))
+            .scalars()
+            .all()
+        )
+        sources.extend(("note_part", str(pid)) for pid in part_ids)
+    blobs_deleted = await erase_blobs_for_sources(session, sources=sources)
+
+    if task_ids:
+        await session.execute(delete(Task).where(Task.id.in_(task_ids)))
+    if note_ids:
+        await session.execute(delete(Note).where(Note.id.in_(note_ids)))
+    return blobs_deleted

@@ -29,6 +29,7 @@ import { NoteDetailRoute } from './routes/NoteDetailRoute'
 import { GardenRoute } from './routes/GardenRoute'
 import { GardenHealthRoute } from './routes/GardenHealthRoute'
 import { GardenAuditRoute } from './routes/GardenAuditRoute'
+import { GardenProposalRoute } from './routes/GardenProposalRoute'
 import { GardenReviewRoute } from './routes/GardenReviewRoute'
 import { InvoicesRoute } from './routes/InvoicesRoute'
 import { NotificationsRoute } from './routes/NotificationsRoute'
@@ -94,6 +95,7 @@ function App() {
             <Route path="/garden/health" element={<GardenHealthRoute />} />
             <Route path="/garden/audit" element={<GardenAuditRoute />} />
             <Route path="/garden/review" element={<GardenReviewRoute />} />
+            <Route path="/garden/review/:noteId" element={<GardenProposalRoute />} />
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />
             <Route path="/tags" element={<TagManagerRoute />} />

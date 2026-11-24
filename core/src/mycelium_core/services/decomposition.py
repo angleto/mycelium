@@ -42,6 +42,7 @@ from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.llm_resolver import resolve_llm
+from mycelium_core.services.note_effective import DECLINED
 from mycelium_core.services.rbac import require_role
 
 # Hard cap on caller-supplied external distillation text. The external path
@@ -183,8 +184,11 @@ async def distill_note(
                 NoteNoteLink.parent_note_id == note_id,
                 NoteNoteLink.kind == "hypha_of",
                 Note.humus_kind == "distillation",
-                # A rejected distillation sits in the bin. It answers nothing:
-                # rejecting one is asking for a better one.
+                # A declined distillation answers nothing: declining one is
+                # asking for a better one (ADR-0043 amendment 2026-11-12). It
+                # stays in the review history, and the new one is generated
+                # beside it. One removed for good is gone.
+                Note.review_state.is_distinct_from(DECLINED),
                 Note.deleted_at.is_(None),
             )
             .limit(1)

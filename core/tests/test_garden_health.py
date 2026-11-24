@@ -292,7 +292,7 @@ async def test_density_delta_positive_when_links_added_after_old_notes() -> None
 async def test_density_delta_does_not_rise_when_a_linked_node_is_binned() -> None:
     """The reported failure (task 02f8f7c7): the denominator lost the
     binned note while the numerator kept its link, so throwing something
-    away -- what ``reject_node`` does to a rejected proposal -- reported a
+    away -- what ``decline_node`` does to a rejected proposal -- reported a
     THICKENING mycelium. Numerator and denominator now read the same
     perimeter, so the edge leaves with its endpoint."""
     org, user = await _org_user()

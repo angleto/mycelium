@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
@@ -15,14 +15,20 @@ import type { components } from '../shared'
 //  - Archi da curare    : link_add (a strong tag/co-activity pair with no
 //    manual link) | link_prune (a `related` link whose basis has decayed)
 //    | link_direct (one-way search traversal -> promote to hypha_of).
-//  - In attesa di revisione : autonomously-produced humus atoms awaiting a
-//    human approve/reject (ADR-0043).
+//  - In attesa di revisione : generated notes awaiting a person's decision
+//    (ADR-0043). Each opens the reading view (/garden/review/:id, ADR-0075),
+//    where the whole text sits beside its sources and the decision is
+//    taken: deciding from a 280-character preview is what that view ended.
+//  - Rifiutate : generated notes a person declined (ADR-0075). Kept, out of
+//    memory and out of reach of the trash; reopened from here or from the
+//    reading view, where they can also be approved or removed for good.
 //  - Fatti letti dalle note  : knowledge-graph facts a model extracted on
 //    its own, awaiting the same decision (ADR-0071). The first page only;
 //    the inbox is newest first and the rest arrives as these are decided.
 //
 // Actions are wired only where a REST endpoint exists today: single-note
-// distill (POST /notes/{id}/distill) and review approve/reject. Pattern,
+// distill (POST /notes/{id}/distill), reopening a declined note here, and the
+// decisions on the reading view. Pattern,
 // season and edge curation have no REST endpoint yet — those run via the
 // MCP/agent path — so they render read-only with deep-links to the notes,
 // never a dead button.
@@ -41,6 +47,10 @@ const NODE_GLYPH: Record<string, string> = {
 
 export function GardenReviewRoute() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  // The reading view sends the person back here after removing a declined
+  // note for good, naming it, so the removal is visible where it is missed.
+  const removed = (useLocation().state as { removed?: string } | null)?.removed
   const [nodes, setNodes] = useState<CandidateNode[]>([])
   const [edges, setEdges] = useState<CandidateEdge[]>([])
   const [pending, setPending] = useState<ReviewItem[]>([])
@@ -95,52 +105,28 @@ export function GardenReviewRoute() {
     async (noteId: string) => {
       setBusy(`distill:${noteId}`)
       setErr('')
-      const { error } = await api.POST('/notes/{note_id}/distill', {
+      const { data, error } = await api.POST('/notes/{note_id}/distill', {
         params: { header: workspaceHeader(), path: { note_id: noteId } },
       })
       setBusy(null)
-      if (error) {
+      if (error || !data) {
         setErr(errMessage(error))
         return
       }
-      await reload()
+      // The distillation is what the person asked to see: open it.
+      navigate(`/garden/review/${data.distilled_note_id}`)
     },
-    [reload],
+    [navigate],
   )
 
-  const onReview = useCallback(
-    async (noteId: string, action: 'approve' | 'reject', expectedVersion: number) => {
-      setBusy(`${action}:${noteId}`)
-      setErr('')
-      const path = action === 'approve' ? '/garden/review/approve' : '/garden/review/reject'
-      const { error } = await api.POST(path, {
-        params: { header: workspaceHeader() },
-        // expected_version = the version this card rendered: the server
-        // rejects with stale_version if the note changed after we read it
-        // (TOCTOU guard, task 2e36e732).
-        body: { note_id: noteId, reason: null, expected_version: expectedVersion },
-      })
-      setBusy(null)
-      if (error) {
-        setErr(errMessage(error))
-        await reload() // refresh the card so the reviewer sees the CURRENT content
-        return
-      }
-      await reload()
-    },
-    [reload],
-  )
-
-  // Undoing a rejection is the ordinary note restore: rejecting soft-deletes
-  // the note and leaves it 'proposed', so putting it back is exactly what
-  // clearing deleted_at means, and the note lands in the inbox again.
-  const onUndoReject = useCallback(
+  // Taking a decline back: the note is pending again and back in the inbox.
+  const onReopen = useCallback(
     async (noteId: string, expectedVersion: number) => {
-      setBusy(`undo:${noteId}`)
+      setBusy(`reopen:${noteId}`)
       setErr('')
-      const { error } = await api.POST('/notes/{note_id}/restore', {
-        params: { header: workspaceHeader(), path: { note_id: noteId } },
-        body: { expected_version: expectedVersion },
+      const { error } = await api.POST('/garden/review/reopen', {
+        params: { header: workspaceHeader() },
+        body: { note_id: noteId, expected_version: expectedVersion },
       })
       setBusy(null)
       // Reload FIRST, then report: reload() clears the error banner as its
@@ -180,6 +166,11 @@ export function GardenReviewRoute() {
       </header>
       <p className="ghreview__intro">{t('gardenReview.intro')}</p>
 
+      {removed !== undefined && (
+        <p className="hint" role="status">
+          {t('gardenReview.removed', { title: removed || t('gardenProposal.untitled') })}
+        </p>
+      )}
       {err && <p className="error">{err}</p>}
       {loading ? (
         <p className="hint">{t('common.loading')}</p>
@@ -308,7 +299,7 @@ export function GardenReviewRoute() {
                     </span>
                     <span className="ghreview__body">
                       <span className="ghreview__title">
-                        <Link to={`/notes/${r.note_id}`}>
+                        <Link to={`/garden/review/${r.note_id}`}>
                           {r.title || r.note_id.slice(0, 8)}
                         </Link>
                       </span>
@@ -320,24 +311,9 @@ export function GardenReviewRoute() {
                         {r.origin_model_id}
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className="btn--ghost btn--sm"
-                      disabled={busy === `approve:${r.note_id}`}
-                      title={t('gardenReview.approve')}
-                      onClick={() => void onReview(r.note_id, 'approve', r.version)}
-                    >
-                      ✓ {t('gardenReview.approve')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn--ghost btn--sm"
-                      disabled={busy === `reject:${r.note_id}`}
-                      title={t('gardenReview.reject')}
-                      onClick={() => void onReview(r.note_id, 'reject', r.version)}
-                    >
-                      × {t('gardenReview.reject')}
-                    </button>
+                    <Link to={`/garden/review/${r.note_id}`} className="btn btn--sm">
+                      {t('gardenReview.readAndDecide')}
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -416,11 +392,17 @@ export function GardenReviewRoute() {
               <ul className="ghreview__list">
                 {rejected.map((r) => (
                   <li key={r.note_id} className="ghreview__item">
+                    {/* The glyph says what the row is (a generated note), as
+                        in the inbox; a bin here read as "this is lost". */}
                     <span className="ghreview__glyph" aria-hidden="true">
-                      🗑️
+                      🍄
                     </span>
                     <span className="ghreview__body">
-                      <span className="ghreview__title">{r.title || r.note_id.slice(0, 8)}</span>
+                      <span className="ghreview__title">
+                        <Link to={`/garden/review/${r.note_id}`}>
+                          {r.title || r.note_id.slice(0, 8)}
+                        </Link>
+                      </span>
                       <span className="ghreview__reason">{r.preview}</span>
                     </span>
                     {r.humus_kind && <span className="chip">{r.humus_kind}</span>}
@@ -437,14 +419,17 @@ export function GardenReviewRoute() {
                         minute: '2-digit',
                       })}
                     </span>
+                    <Link to={`/garden/review/${r.note_id}`} className="btn--ghost btn--sm">
+                      {t('gardenReview.read')}
+                    </Link>
                     <button
                       type="button"
                       className="btn--ghost btn--sm"
-                      disabled={busy === `undo:${r.note_id}`}
-                      title={t('gardenReview.undoReject')}
-                      onClick={() => void onUndoReject(r.note_id, r.version)}
+                      disabled={busy === `reopen:${r.note_id}`}
+                      title={t('gardenReview.reopenHint')}
+                      onClick={() => void onReopen(r.note_id, r.version)}
                     >
-                      ↩ {t('gardenReview.undoReject')}
+                      {t('gardenReview.reopen')}
                     </button>
                   </li>
                 ))}

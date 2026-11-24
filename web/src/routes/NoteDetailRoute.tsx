@@ -21,6 +21,7 @@ import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
 import { NoteLinksPanel } from '../components/NoteLinksPanel'
 import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
+import { GeneratedFromNotePanel } from '../components/GeneratedFromNotePanel'
 import { LinkProposalsPanel } from '../components/LinkProposalsPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
@@ -741,6 +742,7 @@ export function NoteDetailRoute({
       </header>
 
       {note.promoted_at && <p className="banner">{t('notes.promotedHint')}</p>}
+      <GeneratedFromNotePanel noteId={id} />
 
       {/* Title spans full width above the two-pane grid (issue-tracker
           layout). onBlur flushes so a quick exit never loses it. */}

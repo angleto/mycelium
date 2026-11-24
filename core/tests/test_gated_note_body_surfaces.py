@@ -51,6 +51,7 @@ from mycelium_core.services import note_parts as parts_svc
 from mycelium_core.services import notes as nt
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.auth import signup
+from mycelium_core.services.note_effective import GATED_STATES
 
 
 def _email() -> str:
@@ -74,9 +75,25 @@ async def _note(s: object, org: uuid.UUID, user: uuid.UUID, text: str) -> Note:
     )
 
 
+#: The gated state ``_propose`` puts a note in. Every test of this module
+#: runs once per state in ``GATED_STATES`` (the fixture below): a door
+#: closed to a pending proposal must be closed to a declined one too
+#: (ADR-0075), and this is where each door is named.
+_GATED = {"state": "proposed"}
+
+
+@pytest.fixture(autouse=True, params=GATED_STATES)
+def _gated_state(request: pytest.FixtureRequest) -> Iterator[None]:
+    _GATED["state"] = request.param
+    try:
+        yield
+    finally:
+        _GATED["state"] = "proposed"
+
+
 async def _propose(s: object, note_id: uuid.UUID) -> None:
     note = (await s.execute(select(Note).where(Note.id == note_id))).scalar_one()  # type: ignore[attr-defined]
-    note.review_state = "proposed"
+    note.review_state = _GATED["state"]
     await s.flush()  # type: ignore[attr-defined]
 
 
@@ -606,7 +623,7 @@ async def test_deleting_what_is_already_in_the_bin_changes_nothing() -> None:
         )
 
         # Idempotent, not unguarded: a caller working from a stale read
-        # still learns it is stale (mirror of garden_review.reject_node).
+        # still learns it is stale (mirror of garden_review.decline_node).
         with pytest.raises(ConflictError):
             await nt.soft_delete_note(
                 s, org_id=org, actor_id=user, note_id=note.id, expected_version=v1 - 1
@@ -636,19 +653,27 @@ async def test_a_live_proposal_is_not_restorable() -> None:
         assert fresh.version == 1  # untouched: no version bump, no revision
 
 
-async def test_a_rejected_proposal_can_be_un_rejected() -> None:
-    """``reject_node`` rejects by soft-deleting and promises the note is
-    "reversible via the normal restore path". It was not: the restore
-    refused a note still marked ``proposed``. Restoring one puts it back
-    in the review inbox, which is what un-rejecting means."""
+async def test_a_declined_proposal_is_reopened_not_restored() -> None:
+    """A declined proposal (ADR-0075) is not in the bin, so the ordinary
+    restore is not its undo and answers 404 like every ordinary door; the
+    undo is ``reopen_node``, which puts it back in the review inbox, still
+    ``proposed``, never silently approved."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         note = await _note(s, org, user, "proposed body TANGO")
         await _propose(s, note.id)
-        await garden_review.reject_node(s, org_id=org, actor_id=user, note_id=note.id)
+        await garden_review.decline_node(s, org_id=org, actor_id=user, note_id=note.id)
 
     async with tenant_session(str(org), str(user)) as s:
-        await nt.restore_note(
+        with pytest.raises(NotFoundError):
+            await nt.restore_note(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=note.id,
+                expected_version=await _version(s, note.id),
+            )
+        await garden_review.reopen_node(
             s,
             org_id=org,
             actor_id=user,

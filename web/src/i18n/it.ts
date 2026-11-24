@@ -248,20 +248,79 @@ export const it: Catalog = {
     },
     pending: {
       title: 'In attesa di revisione',
-      hint: 'Atomi prodotti in autonomia, trattenuti finché non li approvi (ADR-0043).',
+      hint: 'Sintesi generate dal giardino. Non sono nella tua memoria finché non le approvi: aprile per leggerle accanto alle note da cui vengono, e decidere.',
       model: 'modello produttore',
     },
     rejected: {
       title: 'Rifiutate',
       at: 'rifiutata il',
-      hint: "Proposte che hai rifiutato: non compaiono in nessun'altra lista, nemmeno nel cestino. Annulla per rimetterle in attesa di revisione.",
+      hint: 'Sintesi che hai rifiutato. Restano qui, fuori dalla tua memoria, finché non le riapri, le approvi o le elimini definitivamente. Svuotare il cestino non le tocca.',
     },
-    undoReject: 'Annulla rifiuto',
+    readAndDecide: 'Leggi e decidi',
+    read: 'Leggi',
+    reopen: 'Riapri',
+    reopenHint: 'Rimettila in attesa di revisione: torna tra quelle da decidere.',
+    removed: '«{{title}}» è stata eliminata definitivamente.',
     facts: {
       title: 'Fatti letti dalle tue note',
       hint: 'Relazioni che un modello ha trovato nelle tue note, da solo o su richiesta. Nessuna vale finché non la approvi; un fatto rifiutato non viene riproposto, a meno che qualcuno chieda di rileggere quella nota.',
       source: 'da',
     },
+  },
+  gardenProposal: {
+    back: '← Revisione',
+    missing: 'Questa proposta non esiste più, oppure non è una proposta del giardino.',
+    untitled: 'senza titolo',
+    state: {
+      proposed: 'In attesa della tua decisione',
+      declined: 'Rifiutata',
+      approved: 'Approvata',
+    },
+    kind: {
+      distillation: 'Distillazione',
+      pattern: 'Pattern',
+      season: 'Stagione',
+    },
+    writtenBy: 'scritta da {{model}}',
+    createdAt: 'generata il {{when}}',
+    explain: {
+      proposed:
+        'Non è ancora nella tua memoria: non compare in ricerca, nelle liste né agli agenti finché non la approvi. Leggila accanto alle note da cui viene, poi decidi.',
+      declined:
+        'L’hai rifiutata il {{when}}. Resta qui, fuori dalla tua memoria e al riparo dal cestino, finché non la riapri, la approvi o la elimini definitivamente.',
+      approved: 'L’hai approvata il {{when}}: ora è una nota della tua memoria.',
+    },
+    actions: 'Decisione',
+    approve: 'Approva',
+    decline: 'Rifiuta',
+    reopen: 'Riapri',
+    remove: 'Elimina definitivamente…',
+    openNote: 'Apri la nota',
+    actionsHint: {
+      proposed:
+        'Approva: entra nella tua memoria. Rifiuta: resta tra le rifiutate, la puoi riaprire o approvare in qualsiasi momento.',
+      declined:
+        'Approva: entra nella tua memoria. Riapri: torna in attesa di decisione. Elimina definitivamente: sparisce, e non si può annullare.',
+      approved: 'Le note da cui viene restano intatte.',
+    },
+    sources_one: 'La nota da cui viene',
+    sources_other: 'Le {{count}} note da cui viene',
+    noSources: 'Le note da cui viene non sono più disponibili.',
+    archived: 'archiviata',
+    proposalTitle: {
+      proposed: 'Cosa propone il giardino',
+      declined: 'Cosa aveva proposto il giardino',
+      approved: 'La sintesi approvata',
+    },
+    removeTitle: 'Eliminare definitivamente?',
+    removeIntro: '«{{title}}» sparirà per sempre. Non si può annullare.',
+    removeConfirm: 'Elimina definitivamente',
+    removeDetail: 'Le note da cui viene non vengono toccate.',
+  },
+  generatedFromNote: {
+    title: 'Generato da questa nota',
+    readAndDecide: 'Leggi e decidi',
+    read: 'Leggi',
   },
   gardenSuggest: {
     title: 'Suggerimenti del giardino',

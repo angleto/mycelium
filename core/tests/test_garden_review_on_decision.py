@@ -259,7 +259,7 @@ async def test_an_agent_rejects_on_a_persons_comment(_wire: None) -> None:
 
     await _reject(w, atom, decision)
 
-    assert (await _state(w, atom.id))[:2] == ("proposed", True)
+    assert (await _state(w, atom.id))[:2] == ("declined", False)
     async with tenant_session(str(w.org), str(w.user)) as s:
         row = (
             await s.execute(
@@ -361,7 +361,7 @@ async def test_a_name_shared_with_another_node_of_the_source_is_refused(
     source = await _inert_note(w, "source")
     first = await _proposal(w, source)
     async with tenant_session(str(w.org), str(w.user)) as s:
-        await review.reject_node(s, org_id=w.org, actor_id=w.user, note_id=first.id)
+        await review.decline_node(s, org_id=w.org, actor_id=w.user, note_id=first.id)
     atom = await _proposal(w, source)
     decision = await _comment(w, source, f"approve {atom.id}")
 

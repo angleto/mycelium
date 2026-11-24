@@ -273,7 +273,7 @@ async def test_rejecting_a_distillation_clears_the_source_mark(_wire: None) -> N
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
         source, atom_id = await _legacy_marked(s, org, user)
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=atom_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=atom_id)
         assert await _flag(s, source.id) is False
         rows = await _audit(s, source.id, "garden_review:source_humus")
         assert len(rows) == 1
@@ -298,7 +298,7 @@ async def test_rejection_keeps_a_mark_another_effective_atom_justifies(_wire: No
             )
         )
         await s.flush()
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=atom_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=atom_id)
         assert await _flag(s, source.id) is True
 
 
@@ -348,7 +348,7 @@ async def test_a_rejected_distillation_does_not_block_a_new_one(_wire: None) -> 
         source = await _inert_source(s, org, user, title="second try")
         first = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
         assert first.review_state == "proposed"
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=first.distilled_note_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=first.distilled_note_id)
         second = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
         assert second.created is True
         assert second.distilled_note_id != first.distilled_note_id

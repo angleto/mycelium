@@ -74,6 +74,8 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.note_effective import (
     effective_note_clause,
     ineffective_note_ids,
+    is_review_gated,
+    review_gated,
 )
 from mycelium_core.services.rbac import require_role
 
@@ -754,16 +756,18 @@ _JOB_BATCH = 50
 
 
 def _awaiting_review() -> ColumnElement[bool]:
-    """SQL: the note is a proposal a human has NOT decided on yet -- live and
-    still ``proposed``. Rejecting soft-deletes it, which takes it out of this
-    set on purpose: a rejected node is gone, not early.
+    """SQL: the note is live and held at the review gate, pending or
+    declined (ADR-0075). Its classification waits: a pending proposal may
+    still be approved, and a declined one may be reopened and approved, so
+    neither is a vanished node to fail on. A proposal removed for good is
+    deleted, which takes it out of this set: from then on its job fails like
+    any vanished node's.
 
-    ``IS NOT DISTINCT FROM``, not ``=``: ``review_state`` is NULL for every
-    ordinary note, and a plain equality would make the whole predicate NULL,
-    so negating it would filter out exactly the rows this queue exists to
-    process. Same NULL-safety the shared perimeter predicate is built on.
+    NULL-safe through ``review_gated``: ``review_state`` is NULL for every
+    ordinary note, and a predicate that went NULL there would, negated,
+    filter out exactly the rows this queue exists to process.
     """
-    return and_(Note.review_state.is_not_distinct_from("proposed"), Note.deleted_at.is_(None))
+    return and_(review_gated(), Note.deleted_at.is_(None))
 
 
 async def _is_awaiting_review(
@@ -779,7 +783,7 @@ async def _is_awaiting_review(
             )
         )
     ).first()
-    return row is not None and row[0] == "proposed" and row[1] is None
+    return row is not None and is_review_gated(row[0]) and row[1] is None
 
 
 async def process_classification_jobs(
@@ -799,9 +803,9 @@ async def process_classification_jobs(
     24de74e5): its job stays ``pending`` and is picked up on the tick after
     approval. Deferred jobs are excluded in the QUERY rather than skipped in
     the loop, so a proposal nobody reviews cannot sit at the head of an
-    oldest-first batch and starve every job behind it. A REJECTED proposal is
-    soft-deleted, so it stops being deferred and fails like any vanished node
-    -- the queue never holds a row that can no longer become work.
+    oldest-first batch and starve every job behind it. A declined proposal
+    stays deferred, since it can be reopened; one removed for good is
+    deleted, so it stops being deferred and fails like any vanished node.
     """
     now = now or dt.datetime.now(dt.UTC)
     # LEFT JOIN: a task job has no note to look at and must pass through.

@@ -311,8 +311,9 @@ async def _density_delta_7d(
     Numerator and denominator are read over the SAME perimeter -- the
     effective corpus (ADR-0043 D1), at both ends of every link. Filtering
     the notes alone, which is what this did, made rejecting a proposal
-    RAISE the density: ``garden_review.reject_node`` soft-deletes the
-    node, so the denominator lost it while its links stayed in the
+    RAISE the density: a rejected proposal left the corpus (it was a
+    soft-delete then, it is ``declined`` since ADR-0075, ineffective
+    either way), so the denominator lost it while its links stayed in the
     numerator, and the sensor reported a thickening mycelium every time
     the forester threw something away.
 

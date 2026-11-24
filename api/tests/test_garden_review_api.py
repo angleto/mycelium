@@ -7,7 +7,8 @@ synthesis is born ``proposed``, so the fixture generates one through the
 real decomposition service on the signed-up workspace, then drives the
 endpoints over
 HTTP: the inbox lists it WITH its producing model, approve makes it
-retrievable, reject 404s it, and a non-proposed note is refused.
+retrievable, a decline keeps it out of reach of every ordinary door and of
+the trash purge, and a non-proposed note is refused.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ async def test_pending_lists_with_model_then_approve_makes_effective(_wire: None
         assert nid not in {p["note_id"] for p in after}
 
 
-async def test_reject_soft_deletes_the_proposal(_wire: None) -> None:
+async def test_reject_declines_the_proposal(_wire: None) -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h, org, user = await _signup(c)
@@ -118,45 +119,151 @@ async def test_reject_soft_deletes_the_proposal(_wire: None) -> None:
         )
         assert r.status_code == 200, r.text
         assert r.json()["rejected"] is True
-        # Gone from the inbox and from the read path (soft-deleted).
+        # Gone from the inbox and from the read path (declined, ADR-0075).
         assert nid not in {
             p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
         }
         assert (await c.get(f"/notes/{nid}", headers=h)).status_code == 404
 
 
-async def test_the_review_bin_makes_a_rejection_undoable(_wire: None) -> None:
-    """A rejected proposal shows in no other listing -- the inbox wants the
-    live ones, the trash view refuses proposals -- so the bin is what makes
-    the undo reachable, and the undo is the ordinary note restore."""
+async def test_a_proposal_is_read_whole_and_a_decline_survives_the_trash(_wire: None) -> None:
+    """The lifecycle a person walks (ADR-0075), over HTTP.
+
+    Read: the whole proposal and the whole text of its sources, which no
+    other door serves -- ``/notes/{id}`` stays 404 in every gated state.
+    Decline: the proposal leaves the inbox and lands among the declined,
+    and emptying the workspace trash does not touch it, which is the defect
+    that lost rejected proposals while they were soft-deletes. Reopen: it is
+    pending again. Approve from declined: it becomes an ordinary note. The
+    old door, restoring from the trash, answers 404 on a proposal."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h, org, user = await _signup(c)
         nid = str(await _seed_proposed(org, user))
         assert (await c.get("/garden/review/rejected", headers=h)).json() == []
 
-        await c.post("/garden/review/reject", headers=h, json={"note_id": nid, "reason": "weak"})
-        # Neither the inbox nor the trash view of /notes shows it.
+        reading = await c.get(f"/garden/review/nodes/{nid}", headers=h)
+        assert reading.status_code == 200, reading.text
+        r = reading.json()
+        assert r["review_state"] == "proposed" and r["body"]
+        # The pattern was drawn from three archived sources; all three are
+        # served whole, which is what the side-by-side reading needs.
+        assert sorted(x["title"] for x in r["sources"]) == ["src0", "src1", "src2"]
+        assert all(x["body"].startswith("compost forecast") for x in r["sources"])
+        assert (await c.get(f"/notes/{nid}", headers=h)).status_code == 404
+
+        dec = await c.post(
+            "/garden/review/reject",
+            headers=h,
+            json={"note_id": nid, "reason": "weak", "expected_version": r["version"]},
+        )
+        assert dec.status_code == 200, dec.text
+        assert dec.json()["review_state"] == "declined" and dec.json()["rejected"] is True
         assert nid not in {
             p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
         }
+        assert (await c.get(f"/notes/{nid}", headers=h)).status_code == 404
         trashed = (await c.get("/notes", headers=h, params={"include_deleted": True})).json()[
             "items"
         ]
         assert nid not in {n["id"] for n in trashed}
 
-        binned = (await c.get("/garden/review/rejected", headers=h)).json()
-        assert [b["note_id"] for b in binned] == [nid]
-        assert binned[0]["rejected_at"] and binned[0]["preview"]
-
-        undo = await c.post(
-            f"/notes/{nid}/restore", headers=h, json={"expected_version": binned[0]["version"]}
+        # Emptying the bin is an owner's act, and an owner acts as a member
+        # until the SPA steps up with this header.
+        emptied = await c.post(
+            "/workspaces/me/trash/empty", headers={**h, "X-Workspace-Role": "owner"}
         )
-        assert undo.status_code == 200, undo.text
+        assert emptied.status_code == 200, emptied.text
+        declined = (await c.get("/garden/review/rejected", headers=h)).json()
+        assert [d["note_id"] for d in declined] == [nid]
+        assert declined[0]["rejected_at"] and declined[0]["preview"]
+        again = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()
+        assert again["review_state"] == "declined" and again["body"] == r["body"]
+        assert again["decided_at"] is not None
+
+        assert (
+            await c.post(
+                f"/notes/{nid}/restore",
+                headers=h,
+                json={"expected_version": declined[0]["version"]},
+            )
+        ).status_code == 404
+
+        reopened = await c.post(
+            "/garden/review/reopen",
+            headers=h,
+            json={"note_id": nid, "expected_version": declined[0]["version"]},
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["review_state"] == "proposed"
         assert (await c.get("/garden/review/rejected", headers=h)).json() == []
         assert nid in {
             p["note_id"] for p in (await c.get("/garden/review/pending", headers=h)).json()
         }
+
+        dec2 = await c.post(
+            "/garden/review/reject",
+            headers=h,
+            json={"note_id": nid, "expected_version": reopened.json()["version"]},
+        )
+        ok = await c.post(
+            "/garden/review/approve",
+            headers=h,
+            json={"note_id": nid, "expected_version": dec2.json()["version"]},
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["review_state"] == "approved"
+        assert (await c.get(f"/notes/{nid}", headers=h)).status_code == 200
+
+
+async def test_removing_a_declined_proposal_is_the_one_irreversible_act(_wire: None) -> None:
+    """A pending proposal cannot be removed unread; a declined one can, and
+    then it is gone from every review surface."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        v = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()["version"]
+        pending_removal = await c.post(
+            "/garden/review/remove", headers=h, json={"note_id": nid, "expected_version": v}
+        )
+        assert pending_removal.status_code == 404
+
+        dec = await c.post(
+            "/garden/review/reject", headers=h, json={"note_id": nid, "expected_version": v}
+        )
+        v2 = dec.json()["version"]
+        stale = await c.post(
+            "/garden/review/remove", headers=h, json={"note_id": nid, "expected_version": v}
+        )
+        assert stale.status_code == 409
+        gone = await c.post(
+            "/garden/review/remove", headers=h, json={"note_id": nid, "expected_version": v2}
+        )
+        assert gone.status_code == 200, gone.text
+        assert gone.json() == {"note_id": nid, "removed": True}
+        assert (await c.get(f"/garden/review/nodes/{nid}", headers=h)).status_code == 404
+        assert (await c.get("/garden/review/rejected", headers=h)).json() == []
+
+
+async def test_a_source_lists_what_was_generated_from_it(_wire: None) -> None:
+    """The source note says what happened to it: the proposal generated
+    from it, and its state at each step. The source must be a note the
+    caller can open; the proposal itself is not."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        src = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()["sources"][0]
+        listed = (await c.get(f"/garden/review/by-source/{src['note_id']}", headers=h)).json()
+        assert [(x["note_id"], x["review_state"]) for x in listed] == [(nid, "proposed")]
+        v = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()["version"]
+        await c.post(
+            "/garden/review/reject", headers=h, json={"note_id": nid, "expected_version": v}
+        )
+        listed = (await c.get(f"/garden/review/by-source/{src['note_id']}", headers=h)).json()
+        assert [(x["note_id"], x["review_state"]) for x in listed] == [(nid, "declined")]
+        assert (await c.get(f"/garden/review/by-source/{nid}", headers=h)).status_code == 404
 
 
 async def test_review_of_a_plain_note_is_404(_wire: None) -> None:

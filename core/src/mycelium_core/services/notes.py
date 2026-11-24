@@ -416,19 +416,20 @@ async def get_note(
     org_id: uuid.UUID,
     note_id: uuid.UUID,
     include_deleted: bool = False,
-    include_proposed: bool = False,
+    include_gated: bool = False,
 ) -> Note:
-    # ADR-0043 D2: a 'proposed' note (autonomously generated, pending human
-    # review) is not openable through the normal read path -- it is visible
-    # only via the review inbox. ``include_proposed`` is the inbox/approve
-    # bypass (the review service loads via session.get and does not depend on
-    # this), mirroring ``include_deleted``.
+    # ADR-0043 D2, ADR-0075: a generated note held at the review gate
+    # (pending or declined) is not openable through the normal read path --
+    # the review surfaces read it, for the person deciding it.
+    # ``include_gated`` is the photographers' opt-in (revision snapshots must
+    # record any state); the review service loads via session.get and does
+    # not depend on it.
     n = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
     if n is None or not note_is_effective(
         review_state=n.review_state,
         deleted_at=n.deleted_at,
         include_deleted=include_deleted,
-        include_proposed=include_proposed,
+        include_gated=include_gated,
     ):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n
@@ -638,7 +639,7 @@ async def _log_note_revision(
         org_id=org_id,
         note_id=note_id,
         include_deleted=True,
-        include_proposed=True,
+        include_gated=True,
     )
     snapshot = await _revisions.snapshot_note(session, fresh)
     await _revisions.append(
@@ -843,7 +844,6 @@ async def _note_set(
     edit_session_id: str | None = None,
     restored_from: uuid.UUID | None = None,
     include_deleted: bool = False,
-    include_proposed: bool = False,
 ) -> int:
     # Validate existence, on the note's own perimeter. This used to admit
     # the bin for EVERY action because one of them (restore) needs to see
@@ -858,7 +858,6 @@ async def _note_set(
         org_id=org_id,
         note_id=note_id,
         include_deleted=include_deleted,
-        include_proposed=include_proposed,
     )
     await _assert_writable_by_this_credential(session, note)
     new_version = await lifecycle.transition(
@@ -1488,7 +1487,7 @@ async def soft_delete_note(
     nothing had changed.
 
     ``expected_version`` is checked BEFORE the short-circuit, mirroring
-    ``garden_review.reject_node``: a caller working from a stale read
+    ``garden_review.decline_node``: a caller working from a stale read
     learns it is stale instead of being told its delete landed.
     """
     note = await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
@@ -1518,27 +1517,12 @@ async def restore_note(
     note_id: uuid.UUID,
     expected_version: int,
 ) -> int:
-    # The only action that must see the soft-deleted row -- and the only one
-    # that may touch a proposal, but ONLY a rejected one:
-    # ``garden_review.reject_node`` rejects by soft-deleting and leaves
-    # ``review_state='proposed'``, promising the note is "reversible via the
-    # normal restore path". Without the opt-in that promise was false. Passing
-    # it unconditionally would be worse than the bug: with both legs relaxed
-    # the guard degenerates to "the row exists", and a LIVE proposal -- one
-    # still waiting in the review inbox, which no read surface will open --
-    # would take a version bump and a revision from anyone with notes:write.
-    # So the un-reject is opened by hand, on the one state that means it.
-    note = await get_note(
-        session,
-        org_id=org_id,
-        note_id=note_id,
-        include_deleted=True,
-        include_proposed=True,
-    )
-    rejected = note.review_state == "proposed" and note.deleted_at is not None
-    if note.review_state == "proposed" and not rejected:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-    new_version = await _note_set(
+    # The only action that must see the soft-deleted row. A generated note
+    # held at the review gate is never in the bin -- declining it is a state
+    # of its own since ADR-0075, taken back with ``garden_review.reopen_node``
+    # -- so the gate stays closed here: restoring is for what a person threw
+    # away, and a proposal answers 404 like on every other ordinary door.
+    return await _note_set(
         session,
         org_id=org_id,
         actor_id=actor_id,
@@ -1547,21 +1531,7 @@ async def restore_note(
         values={"deleted_at": None},
         action="restore",
         include_deleted=True,
-        include_proposed=rejected,
     )
-    if rejected:
-        # The undo has to leave a mark of its own, or the per-model
-        # reliability signal keeps counting a rejection the human took back
-        # (and, after a second look that approves, counts the node twice).
-        # Local import: ``garden_review`` owns the review vocabulary and
-        # imports this module.
-        from mycelium_core.services import garden_review as garden_review_svc
-
-        note.version = new_version
-        await garden_review_svc.record_unreject(
-            session, org_id=org_id, actor_id=actor_id, note=note
-        )
-    return new_version
 
 
 async def create_note(

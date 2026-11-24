@@ -140,7 +140,7 @@ async def test_proposed_note_hidden_from_listings_then_visible(_wire: None) -> N
         # get_note 404s by default; the inbox bypass loads it.
         with pytest.raises(NotFoundError):
             await nt.get_note(s, org_id=org, note_id=nid)
-        assert (await nt.get_note(s, org_id=org, note_id=nid, include_proposed=True)).id == nid
+        assert (await nt.get_note(s, org_id=org, note_id=nid, include_gated=True)).id == nid
         # The @-lookup picker excludes it.
         matches = await lookup.resolve_prefix(s, prefix=str(nid)[:8], kinds=("note",))
         assert nid not in {m.id for m in matches}
@@ -238,21 +238,30 @@ async def test_approve_emits_commit_event_and_audit(_wire: None) -> None:
         assert log.diff["review_state"] == {"old": "proposed", "new": "approved"}
 
 
-async def test_reject_soft_deletes_emits_event_and_reopens(_wire: None) -> None:
+async def test_decline_keeps_the_node_emits_event_and_reopens(_wire: None) -> None:
+    """Declining (ADR-0075) keeps the node, gated: out of the inbox and of
+    every ordinary read, never in the trash, listed among the declined and
+    readable through the review surface. The bus event and the audit row
+    are those a rejection always left."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
         res = await _make_proposed_pattern(s, org, user)
         nid = res.note_id
     async with tenant_session(str(org), str(user)) as s:
-        note = await review.reject_node(
+        note = await review.decline_node(
             s, org_id=org, actor_id=user, note_id=nid, reason="weak summary"
         )
-        # Soft-deleted: never pollutes; gone from the inbox and listings.
-        assert note.deleted_at is not None
+        assert note.review_state == "declined" and note.deleted_at is None
+        assert note.review_decided_at is not None
         assert nid not in {p.note_id for p in await review.list_pending(s, org_id=org)}
+        assert [r.note_id for r in await review.list_rejected(s, org_id=org)] == [nid]
         with pytest.raises(NotFoundError):
-            await nt.get_note(s, org_id=org, note_id=nid, include_proposed=True)
+            await nt.get_note(s, org_id=org, note_id=nid)
+        with pytest.raises(NotFoundError):
+            await nt.get_note(s, org_id=org, note_id=nid, include_deleted=True)
+        reading = await review.read_node(s, org_id=org, actor_id=user, note_id=nid)
+        assert reading.review_state == "declined" and reading.body
         # Bus reject event carries the model (for the D4 accept-ratio later).
         ev = (
             await s.execute(
@@ -271,7 +280,7 @@ async def test_reject_soft_deletes_emits_event_and_reopens(_wire: None) -> None:
             )
         ).scalar_one()
         assert log is not None
-    # The soft-delete reopens the humus signature: a re-run regenerates.
+    # A pattern over new sources is a new synthesis, declined one or not.
     async with tenant_session(str(org), str(user)) as s:
         again = await _make_proposed_pattern(s, org, user)
         assert again.created is True
@@ -316,7 +325,7 @@ async def test_review_of_non_proposed_note_is_404(_wire: None) -> None:
         with pytest.raises(NotFoundError):
             await review.approve_node(s, org_id=org, actor_id=user, note_id=live.id)
         with pytest.raises(NotFoundError):
-            await review.reject_node(s, org_id=org, actor_id=user, note_id=live.id)
+            await review.decline_node(s, org_id=org, actor_id=user, note_id=live.id)
         with pytest.raises(NotFoundError):
             await review.approve_node(s, org_id=org, actor_id=user, note_id=uuid.uuid4())
 
@@ -349,7 +358,7 @@ async def test_accept_ratio_by_model_counts_approve_and_reject() -> None:
         await review.approve_node(
             s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="model-x")
         )
-        await review.reject_node(
+        await review.decline_node(
             s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="model-x")
         )
         await review.approve_node(
@@ -364,19 +373,18 @@ async def test_accept_ratio_by_model_counts_approve_and_reject() -> None:
         assert await review.accept_ratio_overall(s, org_id=org) == round(2 / 3, 4)
 
 
-async def test_the_review_bin_lists_what_was_rejected_and_the_restore_undoes_it() -> None:
-    """Rejecting soft-deletes while leaving the node ``proposed``, a pair of
-    states no listing shows: the inbox wants the live ones, the trash view
-    refuses proposals. The bin is what makes the undo reachable, and the
-    undo is the ordinary restore."""
+async def test_the_declined_list_shows_what_was_declined_and_reopen_undoes_it() -> None:
+    """A declined node is listed by its state, most recently declined
+    first, and the ordinary trash is not part of it. The undo is
+    ``reopen_node``, echoing the version the list serves; the old undo, the
+    ordinary restore, answers 404 on a proposal like every ordinary door."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         note_id = await _proposed(s, org, user, model="model-z")
         assert {p.note_id for p in await review.list_pending(s, org_id=org)} == {note_id}
         assert await review.list_rejected(s, org_id=org) == []
 
-        # An ordinary trashed note is NOT a rejected proposal: the bin
-        # selects the pair of states, not just the soft-delete.
+        # An ordinary trashed note is NOT a declined proposal.
         plain = await nt.create_note(
             s, org_id=org, actor_id=user, kind=NoteKind.text, title="plain", text="ordinary"
         )
@@ -388,19 +396,23 @@ async def test_the_review_bin_lists_what_was_rejected_and_the_restore_undoes_it(
             expected_version=plain.version,
         )
         older = await _proposed(s, org, user, model="model-z")
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=older)
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=older)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=note_id)
         assert await review.list_pending(s, org_id=org) == []
         binned = await review.list_rejected(s, org_id=org)
-        # Most recently rejected first, and the plain trashed note is absent.
+        # Most recently declined first, and the plain trashed note is absent.
         assert [r.note_id for r in binned] == [note_id, older]
         assert plain.id not in {r.note_id for r in binned}
         assert binned[0].origin_model_id == "model-z"
         assert binned[0].preview  # the body is readable to decide on the undo
         assert binned[0].rejected_at >= binned[0].created_at
 
-        # The undo: the ordinary restore, echoing the pin the bin serves.
-        await nt.restore_note(
+        with pytest.raises(NotFoundError):
+            await nt.restore_note(
+                s, org_id=org, actor_id=user, note_id=note_id, expected_version=binned[0].version
+            )
+        # The undo: reopen, echoing the pin the list serves.
+        await review.reopen_node(
             s,
             org_id=org,
             actor_id=user,
@@ -413,18 +425,18 @@ async def test_the_review_bin_lists_what_was_rejected_and_the_restore_undoes_it(
 
 async def test_a_rejection_taken_back_stops_counting_against_the_model() -> None:
     """A reject the human undid is not a reject. Without the compensating
-    event the sequence reject -> restore -> approve would charge the model a
+    event the sequence decline -> reopen -> approve would charge the model a
     decision that was reversed AND credit it with the approval, a worse
     reading of reliability than either outcome alone."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         note_id = await _proposed(s, org, user, model="model-undo")
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=note_id)
         by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
         assert (by["model-undo"].approved, by["model-undo"].rejected) == (0, 1)
 
         version = (await review.list_rejected(s, org_id=org))[0].version
-        await nt.restore_note(
+        await review.reopen_node(
             s, org_id=org, actor_id=user, note_id=note_id, expected_version=version
         )
         by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
@@ -443,6 +455,76 @@ async def test_a_rejection_taken_back_stops_counting_against_the_model() -> None
         )
 
 
+async def test_approving_a_declined_node_is_one_decision_not_two() -> None:
+    """Approving straight from the declined list (ADR-0075) takes the
+    decline back first, so the model ends with one approval and no
+    rejection, as after decline -> reopen -> approve."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note_id = await _proposed(s, org, user, model="model-direct")
+        declined = await review.decline_node(s, org_id=org, actor_id=user, note_id=note_id)
+        approved = await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=note_id, expected_version=declined.version
+        )
+        assert approved.review_state == "approved" and approved.review_decided_at is not None
+        by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
+        assert (by["model-direct"].approved, by["model-direct"].rejected) == (1, 0)
+        assert await review.list_rejected(s, org_id=org) == []
+
+
+async def test_reopen_and_remove_act_only_on_a_declined_node() -> None:
+    """Reopen is a no-op on a pending node and 404 on an approved one;
+    removal is 404 on anything but a declined node, so nothing is thrown
+    away unread; both refuse a stale version."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        pending = await _proposed(s, org, user, model="m")
+        v = (await s.get(Note, pending)).version  # type: ignore[union-attr]
+        same = await review.reopen_node(
+            s, org_id=org, actor_id=user, note_id=pending, expected_version=v
+        )
+        assert same.review_state == "proposed" and same.version == v
+        with pytest.raises(NotFoundError):
+            await review.remove_declined(
+                s, org_id=org, actor_id=user, note_id=pending, expected_version=v
+            )
+        approved = await review.approve_node(s, org_id=org, actor_id=user, note_id=pending)
+        with pytest.raises(NotFoundError):
+            await review.reopen_node(
+                s, org_id=org, actor_id=user, note_id=pending, expected_version=approved.version
+            )
+
+        other = await _proposed(s, org, user, model="m")
+        d = await review.decline_node(s, org_id=org, actor_id=user, note_id=other)
+        with pytest.raises(ConflictError):
+            await review.remove_declined(
+                s, org_id=org, actor_id=user, note_id=other, expected_version=d.version - 1
+            )
+        with pytest.raises(ConflictError):
+            await review.reopen_node(
+                s, org_id=org, actor_id=user, note_id=other, expected_version=d.version - 1
+            )
+        await review.remove_declined(
+            s, org_id=org, actor_id=user, note_id=other, expected_version=d.version
+        )
+        assert await s.scalar(select(Note.id).where(Note.id == other)) is None
+        with pytest.raises(NotFoundError):
+            await review.read_node(s, org_id=org, actor_id=user, note_id=other)
+
+
+async def test_an_ordinary_note_is_not_readable_as_a_proposal() -> None:
+    """The review reading serves generated notes only: an ordinary note, or
+    an id that does not exist, is 404 there."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        plain = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="plain", text="ordinary"
+        )
+        for nid in (plain.id, uuid.uuid4()):
+            with pytest.raises(NotFoundError):
+                await review.read_node(s, org_id=org, actor_id=user, note_id=nid)
+
+
 async def test_a_second_rejection_after_an_undo_counts_again() -> None:
     """The decision keys carry the version for this: a node rejected, taken
     back and rejected again has been rejected twice as far as the model is
@@ -451,12 +533,12 @@ async def test_a_second_rejection_after_an_undo_counts_again() -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         note_id = await _proposed(s, org, user, model="model-twice")
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=note_id)
         version = (await review.list_rejected(s, org_id=org))[0].version
-        await nt.restore_note(
+        await review.reopen_node(
             s, org_id=org, actor_id=user, note_id=note_id, expected_version=version
         )
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=note_id)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=note_id)
         by = {m.model_id: m for m in await review.accept_ratio_by_model(s, org_id=org)}
         # reject(1) - unreject(1) + reject(1): the second verdict stands.
         assert (by["model-twice"].approved, by["model-twice"].rejected) == (0, 1)
@@ -471,7 +553,7 @@ async def test_undoing_an_unattributed_withdrawal_stays_unattributed() -> None:
     async with tenant_session(str(org), str(user)) as s:
         # A real rejection for the model, on its own node.
         real = await _proposed(s, org, user, model="model-mix")
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=real)
+        await review.decline_node(s, org_id=org, actor_id=user, note_id=real)
 
         # A lens of the same model, withdrawn by restore_source.
         source = await nt.create_note(
@@ -501,7 +583,7 @@ async def test_undoing_an_unattributed_withdrawal_stays_unattributed() -> None:
 
         # Undo the WITHDRAWAL: the real rejection on the other node stands.
         binned = {r.note_id: r for r in await review.list_rejected(s, org_id=org)}
-        await nt.restore_note(
+        await review.reopen_node(
             s,
             org_id=org,
             actor_id=user,
@@ -657,14 +739,14 @@ async def test_reject_with_stale_version_conflicts(_wire: None) -> None:
         note.version += 1
         await s.flush()
         with pytest.raises(ConflictError):
-            await review.reject_node(
+            await review.decline_node(
                 s, org_id=org, actor_id=user, note_id=nid, expected_version=seen
             )
-        rejected = await review.reject_node(
+        rejected = await review.decline_node(
             s, org_id=org, actor_id=user, note_id=nid, expected_version=note.version
         )
-        assert rejected.deleted_at is not None
-        assert rejected.version == seen + 2  # interposed bump + reject bump
+        assert rejected.review_state == "declined" and rejected.deleted_at is None
+        assert rejected.version == seen + 2  # interposed bump + decline bump
 
 
 async def test_list_pending_serves_the_version_pin(_wire: None) -> None:

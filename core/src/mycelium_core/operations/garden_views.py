@@ -268,9 +268,9 @@ class GardenReviewPendingItem(BaseModel):
 
 
 class GardenReviewRejectedItem(BaseModel):
-    """One proposal a human DECLINED: the review bin's row. ``rejected_at``
-    is when it was declined; ``version`` is the pin to echo back to the
-    restore that undoes the rejection."""
+    """One proposal a person DECLINED (ADR-0075): kept, readable, and
+    reversible. ``rejected_at`` is when it was declined; ``version`` is the
+    pin to echo back to a reopen, an approval or a removal."""
 
     note_id: uuid.UUID
     title: str | None = None
@@ -278,8 +278,8 @@ class GardenReviewRejectedItem(BaseModel):
     origin_model_id: str | None = None
     preview: str
     created_at: datetime.datetime
-    # Echo this back as ``expected_version`` on the restore that undoes the
-    # rejection.
+    # Echo this back as ``expected_version`` on a reopen, an approval or a
+    # removal.
     version: int
     rejected_at: datetime.datetime
 
@@ -335,10 +335,66 @@ class GardenReviewActionIn(BaseModel):
 
 class GardenReviewActionOut(BaseModel):
     note_id: uuid.UUID
-    review_state: str | None  # 'approved' after approve; null after a reject
+    review_state: str | None  # 'approved', 'declined' or 'proposed' after the action
     origin_model_id: str | None = None
-    rejected: bool  # True when the action soft-deleted the node
+    rejected: bool  # True when the node is declined after the action
     version: int  # post-action version (callers can chain guarded actions)
+
+
+class GardenReviewNodeIn(BaseModel):
+    """One generated note, by id."""
+
+    note_id: uuid.UUID
+
+
+class GardenReviewGuardedIn(BaseModel):
+    """One generated note, with the version the person read. Required, not
+    optional: reopening or removing acts on what was read."""
+
+    note_id: uuid.UUID
+    expected_version: int
+
+
+class GardenReviewSourceOut(BaseModel):
+    """A note a proposal was generated from, whole."""
+
+    note_id: uuid.UUID
+    title: str | None = None
+    body: str
+    is_archived: bool
+
+
+class GardenReviewReadingOut(BaseModel):
+    """A generated note read in full by the person deciding it (ADR-0075),
+    with its sources. ``review_state`` is 'proposed', 'declined' or
+    'approved'; ``decided_at`` is when it was last approved or declined."""
+
+    note_id: uuid.UUID
+    title: str | None = None
+    body: str
+    humus_kind: str | None = None
+    origin_model_id: str | None = None
+    review_state: str
+    created_at: datetime.datetime
+    decided_at: datetime.datetime | None = None
+    version: int
+    sources: list[GardenReviewSourceOut]
+
+
+class GardenReviewForSourceItem(BaseModel):
+    """A note generated from a given source, with where it stands."""
+
+    note_id: uuid.UUID
+    title: str | None = None
+    humus_kind: str | None = None
+    review_state: str
+    created_at: datetime.datetime
+    decided_at: datetime.datetime | None = None
+
+
+class GardenReviewRemoveOut(BaseModel):
+    note_id: uuid.UUID
+    removed: bool
 
 
 class GardenRestoreSourceOut(BaseModel):

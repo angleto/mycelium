@@ -6396,9 +6396,10 @@ export interface paths {
         };
         /**
          * Garden Review Rejected
-         * @description The review bin (ADR-0043): proposals a person declined, most recently
-         *     declined first. No other listing shows them, so this is how a rejection
-         *     is found again; undo one by restoring the note, echoing ``version``.
+         * @description The proposals a person declined (ADR-0075), most recently declined
+         *     first. They are kept, not deleted: read one with garden_review_read,
+         *     take the decline back with garden_review_reopen, approve it directly, or
+         *     remove it for good with garden_review_remove, echoing ``version``.
          */
         get: operations["garden_review_rejected_garden_review_rejected_get"];
         put?: never;
@@ -6420,12 +6421,13 @@ export interface paths {
         put?: never;
         /**
          * Garden Review Approve
-         * @description Approve a generated note (ADR-0043): it becomes effective and enters
-         *     retrieval, search and listings; for a distillation, the source becomes
-         *     humus if it is still inert. A person's act: a credential carrying a
-         *     scope list cannot call it. Audited, idempotent. Pass ``expected_version``
-         *     from the pending listing to fail with ``stale_version`` if the note
-         *     changed after you read it; ``reason`` is ignored.
+         * @description Approve a generated note, pending or declined (ADR-0043, ADR-0075): it
+         *     becomes effective and enters retrieval, search and listings; for a
+         *     distillation, the source becomes humus if it is still inert. A person's
+         *     act: a credential carrying a scope list cannot call it. Audited,
+         *     idempotent. Pass ``expected_version`` from the listing to fail with
+         *     ``stale_version`` if the note changed after you read it; ``reason`` is
+         *     ignored.
          */
         post: operations["garden_review_approve_garden_review_approve_post"];
         delete?: never;
@@ -6445,12 +6447,12 @@ export interface paths {
         put?: never;
         /**
          * Garden Review Reject
-         * @description Reject a generated note (ADR-0043): it is moved to the review bin,
-         *     restorable, so a weak summary never enters the corpus; for a
-         *     distillation, the source loses the humus mark unless another approved
-         *     distillation still justifies it. A person's act: a credential carrying a
-         *     scope list cannot call it. Audited, idempotent; ``expected_version`` as
-         *     for approve.
+         * @description Decline a generated note (ADR-0043, ADR-0075): it stays out of the
+         *     corpus and is kept, readable and reversible, among the declined ones --
+         *     nothing deletes it; for a distillation, the source loses the humus mark
+         *     unless another approved distillation still justifies it. A person's act:
+         *     a credential carrying a scope list cannot call it. Audited, idempotent;
+         *     ``expected_version`` as for approve.
          */
         post: operations["garden_review_reject_garden_review_reject_post"];
         delete?: never;
@@ -6534,8 +6536,8 @@ export interface paths {
          * Garden Review Restore Source
          * @description Restore the original under a humus atom: un-archive the atom's
          *     ``hypha_of`` sources (preserved, never changed) and retire the atom (an
-         *     approved atom is demoted, then rejected). Nothing is hard-deleted and
-         *     the provenance chain stays queryable. Idempotent.
+         *     approved atom is demoted, then declined, and stays reopenable). Nothing
+         *     is hard-deleted and the provenance chain stays queryable. Idempotent.
          */
         post: operations["garden_review_restore_source_garden_review_restore_source_post"];
         delete?: never;
@@ -6560,6 +6562,100 @@ export interface paths {
         get: operations["garden_review_accept_ratio_garden_review_accept_ratio_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/nodes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review Read
+         * @description Read a generated note in full, pending, declined or approved, with
+         *     the whole text of the notes it was generated from (ADR-0075): what the
+         *     person deciding it needs to decide. A person's read: the text of a
+         *     proposal does not leave the review perimeter for a credential carrying a
+         *     scope list, which reads the titles and previews of garden_review_pending
+         *     instead.
+         */
+        get: operations["garden_review_read_garden_review_nodes__note_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/by-source/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review For Source
+         * @description The notes generated from this note (distillations, patterns,
+         *     seasons), newest first, each with its review state: 'proposed' (waiting
+         *     for a person), 'declined' or 'approved'. Titles and states only.
+         */
+        get: operations["garden_review_for_source_garden_review_by_source__note_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Reopen
+         * @description Take a decline back: the declined note is pending again, back in
+         *     garden_review_pending, and the decline stops counting against the model
+         *     that wrote it. Nothing is decided by this: a person still approves or
+         *     declines it. ``expected_version`` from the declined listing.
+         */
+        post: operations["garden_review_reopen_garden_review_reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Remove
+         * @description Delete a declined note for good, with its text, links and search
+         *     entries. Irreversible, and only on a note a person already declined: a
+         *     pending proposal cannot be thrown away unread. A person's act: a
+         *     credential carrying a scope list cannot call it. ``expected_version``
+         *     from the declined listing.
+         */
+        post: operations["garden_review_remove_garden_review_remove_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11388,6 +11484,44 @@ export interface components {
             decision_comment_id: string;
         };
         /**
+         * GardenReviewForSourceItem
+         * @description A note generated from a given source, with where it stands.
+         */
+        GardenReviewForSourceItem: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Review State */
+            review_state: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at?: string | null;
+        };
+        /**
+         * GardenReviewGuardedIn
+         * @description One generated note, with the version the person read. Required, not
+         *     optional: reopening or removing acts on what was read.
+         */
+        GardenReviewGuardedIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
          * GardenReviewPendingItem
          * @description One AUTONOMOUSLY-generated humus note awaiting human review (ADR-0043
          *     review inbox). ``origin_model_id`` is the transparency requirement: the
@@ -11416,10 +11550,44 @@ export interface components {
             version: number;
         };
         /**
+         * GardenReviewReadingOut
+         * @description A generated note read in full by the person deciding it (ADR-0075),
+         *     with its sources. ``review_state`` is 'proposed', 'declined' or
+         *     'approved'; ``decided_at`` is when it was last approved or declined.
+         */
+        GardenReviewReadingOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Body */
+            body: string;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Review State */
+            review_state: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at?: string | null;
+            /** Version */
+            version: number;
+            /** Sources */
+            sources: components["schemas"]["GardenReviewSourceOut"][];
+        };
+        /**
          * GardenReviewRejectedItem
-         * @description One proposal a human DECLINED: the review bin's row. ``rejected_at``
-         *     is when it was declined; ``version`` is the pin to echo back to the
-         *     restore that undoes the rejection.
+         * @description One proposal a person DECLINED (ADR-0075): kept, readable, and
+         *     reversible. ``rejected_at`` is when it was declined; ``version`` is the
+         *     pin to echo back to a reopen, an approval or a removal.
          */
         GardenReviewRejectedItem: {
             /**
@@ -11447,6 +11615,33 @@ export interface components {
              * Format: date-time
              */
             rejected_at: string;
+        };
+        /** GardenReviewRemoveOut */
+        GardenReviewRemoveOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Removed */
+            removed: boolean;
+        };
+        /**
+         * GardenReviewSourceOut
+         * @description A note a proposal was generated from, whole.
+         */
+        GardenReviewSourceOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Body */
+            body: string;
+            /** Is Archived */
+            is_archived: boolean;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -31233,6 +31428,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenAcceptRatioOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_read_garden_review_nodes__note_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewReadingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_for_source_garden_review_by_source__note_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewForSourceItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_reopen_garden_review_reopen_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewGuardedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_remove_garden_review_remove_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewGuardedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewRemoveOut"];
                 };
             };
             /** @description Validation Error */

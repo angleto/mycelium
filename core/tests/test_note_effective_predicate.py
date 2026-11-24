@@ -18,9 +18,10 @@ exclusion` holds the twin for the other half of the predicate.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.note import Note, NoteKind
@@ -29,6 +30,7 @@ from mycelium_core.services import graph, graph_local, link_prediction
 from mycelium_core.services import notes as nt
 from mycelium_core.services.auth import signup
 from mycelium_core.services.note_effective import (
+    GATED_STATES,
     effective_note_clause,
     ineffective_note_ids,
     note_is_effective,
@@ -227,7 +229,7 @@ async def test_the_three_forms_agree_on_every_state() -> None:
     (review_state x deleted_at) matrix, so a future edit cannot move one
     without the others."""
     org, user = await _org()
-    states: list[str | None] = [None, "approved", "proposed"]
+    states: list[str | None] = [None, "approved", "proposed", "declined"]
     ids: dict[tuple[str | None, bool], uuid.UUID] = {}
     deleted_at = dt.datetime.now(dt.UTC)
     async with tenant_session(str(org), str(user)) as s:
@@ -242,7 +244,7 @@ async def test_the_three_forms_agree_on_every_state() -> None:
                 ids[(review_state, trashed)] = nid
 
         for include_deleted in (False, True):
-            for include_proposed in (False, True):
+            for include_gated in (False, True):
                 selected = {
                     r[0]
                     for r in (
@@ -251,7 +253,7 @@ async def test_the_three_forms_agree_on_every_state() -> None:
                                 Note.org_id == org,
                                 effective_note_clause(
                                     include_deleted=include_deleted,
-                                    include_proposed=include_proposed,
+                                    include_gated=include_gated,
                                 ),
                             )
                         )
@@ -262,13 +264,13 @@ async def test_the_three_forms_agree_on_every_state() -> None:
                         review_state=review_state,
                         deleted_at=deleted_at if trashed else None,
                         include_deleted=include_deleted,
-                        include_proposed=include_proposed,
+                        include_gated=include_gated,
                     )
                     assert (nid in selected) is expected, (
                         review_state,
                         trashed,
                         include_deleted,
-                        include_proposed,
+                        include_gated,
                     )
 
         # The id-set form is exactly the complement, whole-org and narrowed
@@ -284,9 +286,43 @@ async def test_the_three_forms_agree_on_every_state() -> None:
         assert await ineffective_note_ids(s, org_id=org, among=every) == every - effective
         assert await ineffective_note_ids(s, org_id=org, among=[]) == set()
 
-        # ``include_proposed`` is not a listing option in either form: it is
+        # ``include_gated`` is not a listing option in either form: it is
         # the review-inbox bypass of ``get_note`` and the photographers'
         # opt-out (the revision logger and ``snapshot_note``), never a way
         # for a surface to show a proposal.
-        assert note_is_effective(review_state="proposed", deleted_at=None, include_proposed=True)
-        assert not note_is_effective(review_state="proposed", deleted_at=None)
+        for gated in GATED_STATES:
+            assert note_is_effective(review_state=gated, deleted_at=None, include_gated=True)
+            assert not note_is_effective(review_state=gated, deleted_at=None)
+        # A declined proposal is gated exactly like a pending one (ADR-0075):
+        # neither an ordinary note nor an approved one is.
+        assert set(GATED_STATES) == {"proposed", "declined"}
+
+
+async def test_the_database_names_the_same_gated_states() -> None:
+    """Two places in the database restate the gated set, because SQL cannot
+    import a Python tuple: the CHECK on ``notes.review_state`` (the closed
+    set of states) and the trigger that drops a note's pins when it enters
+    the gate (migrations 0033 and 0035). Both are read back from the catalog
+    and compared with ``GATED_STATES``, so a state added to the tuple and
+    forgotten there fails here, and one removed from it too."""
+    async with admin_session() as s:
+        check = await s.scalar(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'ck_notes_review_state'"
+            )
+        )
+        trigger = await s.scalar(
+            text(
+                "SELECT pg_get_triggerdef(oid) FROM pg_trigger "
+                "WHERE tgname = 'trg_note_pins_drop_on_review'"
+            )
+        )
+    assert check is not None and trigger is not None
+    check_states = set(re.findall(r"'([a-z_]+)'", check))
+    assert check_states == {*GATED_STATES, "approved"}, check
+    # The trigger names the gated set twice (entering it, from outside it);
+    # each mention must be exactly the tuple.
+    for mention in re.findall(r"ARRAY\[([^\]]*)\]", trigger):
+        assert set(re.findall(r"'([a-z_]+)'", mention)) == set(GATED_STATES), trigger
+    assert trigger.count("ARRAY[") == 2, trigger

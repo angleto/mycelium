@@ -10,6 +10,14 @@ human approves it; the model that produced it must be visible; reject must
 never pollute; autonomy is *earned* once a model proves reliable.
 "L'architettura migliore e più solida, niente accrocchi."
 
+Superseded in part (2026-11-24) by
+[ADR-0075](0075-a-proposal-is-read-before-it-is-decided.md): a reject no
+longer soft-deletes the node. It is the stored state `declined`, gated like
+`proposed`, out of reach of the trash purge and of the retention sweep,
+readable by the person through the review surface and reopenable. The text
+below that describes a reject as a soft-delete is the decision as it was
+taken, kept as history.
+
 ## Implementation status (2026-06-21)
 
 Shipped behind `garden_review_gate_enabled` (default off, so byte-identical

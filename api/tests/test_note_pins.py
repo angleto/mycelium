@@ -542,9 +542,10 @@ async def _pin_rows(org: str, user: str, note_id: str) -> int:
 
 
 async def test_a_note_sent_back_to_review_loses_its_pins() -> None:
-    """Withdrawing an atom (``restore_source``) demotes it to 'proposed': it
-    leaves every list, so its pins are dropped in the same transaction and
-    stop holding a place under the cap. A note merely binned keeps its pin."""
+    """Withdrawing an atom (``restore_source``) sends it back to the review
+    gate (demoted, then declined, ADR-0075): it leaves every list, so its
+    pins are dropped in the same transaction and stop holding a place under
+    the cap. A note merely binned keeps its pin."""
     from mycelium_core.db import tenant_session
     from mycelium_core.models.note import Note, NoteKind
     from mycelium_core.models.note_link import NoteNoteLink
@@ -587,7 +588,7 @@ async def test_a_note_sent_back_to_review_loses_its_pins() -> None:
     async with tenant_session(str(org), me) as s:
         await review.restore_source(s, org_id=org, actor_id=user, atom_note_id=atom_id)
         state = await s.scalar(select(Note.review_state).where(Note.id == atom_id))
-        assert state == "proposed"
+        assert state == "declined"
     assert await _pin_rows(str(org), me, str(atom_id)) == 0
 
 

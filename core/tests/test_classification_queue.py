@@ -176,24 +176,37 @@ async def test_a_proposal_waits_for_its_reviewer_instead_of_failing(
         assert await gc.read_classification(s, org_id=org, node_id=note.id) is not None
 
 
-async def test_a_rejected_proposal_stops_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Deferral is not a leak: rejecting soft-deletes the node, which takes it
-    out of the waiting set and lets its job reach a terminal state like any
-    other vanished node. The queue never holds a row that can no longer
-    become work."""
+async def test_a_declined_proposal_waits_and_a_removed_one_stops_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deferral is not a leak. A declined proposal (ADR-0075) can still be
+    reopened and approved, so its job keeps waiting, outside the batch, as a
+    pending one's does. Removing it for good is what ends the wait: from then
+    on the job reaches a terminal state like any other vanished node's, so
+    the queue never holds a row that can no longer become work."""
     monkeypatch.setattr(get_settings(), "garden_autoclassify_on_creation_enabled", True)
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
-        note = await _note(s, org, user, "rejected")
+        note = await _note(s, org, user, "declined")
         note.review_state = "proposed"
         await s.flush()
-        await review.reject_node(s, org_id=org, actor_id=user, note_id=note.id)
+        declined = await review.decline_node(s, org_id=org, actor_id=user, note_id=note.id)
+        note_id, version = declined.id, declined.version
 
         res = await gc.process_classification_jobs(s, org_id=org)
-        assert res["errors"] == 1
+        assert res == {"processed": 0, "errors": 0, "deferred": 0}
         job = (
-            await s.execute(select(ClassificationJob).where(ClassificationJob.node_id == note.id))
+            await s.execute(select(ClassificationJob).where(ClassificationJob.node_id == note_id))
         ).scalar_one()
+        assert job.status == "pending"
+
+        await review.remove_declined(
+            s, org_id=org, actor_id=user, note_id=note_id, expected_version=version
+        )
+        await gc.process_classification_jobs(s, org_id=org)
+        # ``node_id`` is polymorphic and carries no FK, so the job outlives
+        # the note and fails like any vanished node's.
+        await s.refresh(job)
         assert job.status == "error"
 
 

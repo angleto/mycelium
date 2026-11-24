@@ -202,7 +202,7 @@ async def test_restore_source_roundtrip_proposed_atom() -> None:
         assert src.is_archived is False
         atom = await s.get(Note, atom_id)
         assert atom is not None  # never hard-deleted
-        assert atom.deleted_at is not None
+        assert atom.review_state == "declined" and atom.deleted_at is None
         # The provenance chain (the stack) survives the retire.
         link = (
             await s.execute(
@@ -222,10 +222,10 @@ async def test_restore_source_roundtrip_proposed_atom() -> None:
 
 
 async def test_restore_source_roundtrip_approved_atom() -> None:
-    # An APPROVED (effective) atom has no direct reject verb: restore demotes
-    # it back to 'proposed' (audited) and then rejects, landing on the exact
-    # rejected-proposal end state (withheld from retrieval + hidden + fully
-    # reversible).
+    # An APPROVED (effective) atom has no direct decline verb: restore demotes
+    # it back to 'proposed' (audited) and then declines, landing on the end
+    # state a person's decline leaves (withheld from retrieval, hidden, kept
+    # and reopenable, ADR-0075).
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         src = await _inert_note(s, org, user, "sorgente approvata")
@@ -235,8 +235,8 @@ async def test_restore_source_roundtrip_approved_atom() -> None:
         assert res.atom_retired is True
         atom = await s.get(Note, atom_id)
         assert atom is not None
-        assert atom.deleted_at is not None
-        assert atom.review_state == "proposed"  # demoted, then rejected
+        assert atom.deleted_at is None
+        assert atom.review_state == "declined"  # demoted, then declined
         await s.refresh(src)
         assert src.is_archived is False
 

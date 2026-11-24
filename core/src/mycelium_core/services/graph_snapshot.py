@@ -36,7 +36,7 @@ from mycelium_core.models.task import Task
 from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import graph as graph_svc
-from mycelium_core.services.note_effective import effective_note_clause
+from mycelium_core.services.note_effective import effective_note_clause, review_gated
 
 _log = logging.getLogger("mycelium.graph_snapshot")
 
@@ -84,7 +84,7 @@ async def graph_signature(
             select(
                 func.count().filter(effective_note_clause()),
                 func.count().filter(Note.deleted_at.is_not(None)),
-                func.count().filter(Note.review_state == "proposed"),
+                func.count().filter(review_gated()),
             )
             .select_from(Note)
             .where(Note.org_id == org_id)

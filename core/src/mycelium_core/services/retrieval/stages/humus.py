@@ -39,7 +39,7 @@ from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
-from mycelium_core.services.note_effective import effective_note_clause
+from mycelium_core.services.note_effective import effective_note_clause, review_gated
 from mycelium_core.services.retrieval.stages.fusion import RRFFusionStage
 from mycelium_core.services.retrieval.stages.lexical import LexicalFTSStage
 from mycelium_core.services.retrieval.stages.order_limit import OrderingStage
@@ -126,9 +126,10 @@ def humus_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
 
 def proposed_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
     """SQL predicate EXCLUDING blobs whose source note is an autonomously-
-    generated proposal awaiting human review (``review_state='proposed'``,
-    ADR-0043 D2). ANDed into ``memory.retrieve``'s base ``tag_clauses`` so the
-    lexical, dense AND humus stages all withhold a proposed note in one place.
+    generated proposal held at the review gate (pending or declined,
+    ``note_effective.review_gated``, ADR-0043 D2). ANDed into
+    ``memory.retrieve``'s base ``tag_clauses`` so the lexical, dense AND humus
+    stages all withhold a proposed note in one place.
     Unconditional: when no proposed note exists the subquery is empty and the
     ``NOT IN`` is a no-op, so behaviour is byte-identical.
 
@@ -142,7 +143,7 @@ def proposed_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
         .where(
             BlobSource.source_kind == "note_part",
             BlobSource.org_id == org_id,
-            Note.review_state == "proposed",
+            review_gated(),
         )
     )
 
@@ -157,7 +158,7 @@ def ineffective_source_blob_exclusion(
     retrievable" is defined for the memory surfaces:
 
     - a note that is an unreviewed autonomous proposal
-      (``review_state='proposed'``, ADR-0043 D2) or SOFT-DELETED
+      held at the review gate (pending or declined, ADR-0043 D2, ADR-0075) or SOFT-DELETED
       (``deleted_at`` set) withholds every blob carrying ``note_part``
       provenance from it -- the same join shape the proposed-only
       exclusion always used, so pointer-less legacy part blobs are
@@ -192,7 +193,7 @@ def ineffective_source_blob_exclusion(
     ``include_deleted=True`` is the unified /search opt-in ("show me the
     bin too"): it drops ONLY the soft-delete legs. The ADR-0043
     ``proposed`` withholding is not an option and always stands."""
-    ineffective_note: ColumnElement[bool] = Note.review_state == "proposed"
+    ineffective_note: ColumnElement[bool] = review_gated()
     if not include_deleted:
         ineffective_note = or_(ineffective_note, Note.deleted_at.is_not(None))
     ineffective_note_blobs = (

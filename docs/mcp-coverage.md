@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**310 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**314 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,7 +70,7 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (28)
+### garden (32)
 
 | Tool | Summary |
 |---|---|
@@ -86,12 +86,16 @@ over-fetch the org table and filter in its head.
 | `garden_learning_telemetry` | What the classifier learned from the caller (ADR-0037): the |
 | `garden_link_proposer_precision` | Per proposer: proposals accepted, rejected, expired and open, how |
 | `garden_review_accept_ratio` | How often a person approved, rather than rejected, each model's |
-| `garden_review_approve` | Approve a generated note (ADR-0043): it becomes effective and enters |
+| `garden_review_approve` | Approve a generated note, pending or declined (ADR-0043, ADR-0075): it |
 | `garden_review_approve_on_decision` | Approve a generated note that a PERSON has decided to approve, on |
+| `garden_review_for_source` | The notes generated from this note (distillations, patterns, |
 | `garden_review_pending` | The review inbox (ADR-0043): generated notes awaiting a person's |
-| `garden_review_reject` | Reject a generated note (ADR-0043): it is moved to the review bin, |
+| `garden_review_read` | Read a generated note in full, pending, declined or approved, with |
+| `garden_review_reject` | Decline a generated note (ADR-0043, ADR-0075): it stays out of the |
 | `garden_review_reject_on_decision` | Reject a generated note that a PERSON has decided to reject, on |
-| `garden_review_rejected` | The review bin (ADR-0043): proposals a person declined, most recently |
+| `garden_review_rejected` | The proposals a person declined (ADR-0075), most recently declined |
+| `garden_review_remove` | Delete a declined note for good, with its text, links and search |
+| `garden_review_reopen` | Take a decline back: the declined note is pending again, back in |
 | `graph_walk` | Traverse the note graph from ``seed`` and return the walked notes as a |
 | `list_distillation_candidates` | Is there distillation to do? Distillation is graph maintenance, so |
 | `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |

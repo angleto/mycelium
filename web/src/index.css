@@ -3707,6 +3707,110 @@ button.btn--danger:hover {
   font-size: 0.78rem;
   color: var(--muted);
 }
+/* The reading view of one generated note (ADR-0075): its state in words,
+   the decision its state allows, and the whole text beside the whole text
+   of the notes it was drawn from. */
+.gproposal__head h1 {
+  margin: var(--sp-8) 0 var(--sp-4);
+}
+.gproposal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.gproposal__explain {
+  margin: var(--sp-8) 0 0;
+  max-width: 70ch;
+}
+.gproposal__state--proposed {
+  border-color: var(--info);
+  color: var(--info);
+}
+.gproposal__state--declined {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+.gproposal__state--approved {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.gproposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin-top: var(--sp-16);
+}
+.gproposal__remove {
+  margin-left: auto;
+  color: var(--err);
+}
+.gproposal__actionshint {
+  margin: var(--sp-4) 0 0;
+  max-width: 70ch;
+}
+.gproposal__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-24);
+  margin-top: var(--sp-24);
+}
+@media (max-width: 820px) {
+  .gproposal__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.gproposal__col h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--sp-8);
+}
+.gproposal__col--proposal {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--sp-16);
+}
+.gproposal__source + .gproposal__source {
+  border-top: 1px solid var(--border);
+  margin-top: var(--sp-16);
+  padding-top: var(--sp-16);
+}
+.gproposal__source h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: 0.95rem;
+  margin: 0 0 var(--sp-6);
+}
+/* On a source note: what the garden generated from it, with its state. */
+.generated {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  padding: var(--sp-8) var(--sp-12);
+}
+.generated__title {
+  font-size: 0.85rem;
+  margin: 0 0 var(--sp-6);
+  color: var(--muted);
+}
+.generated__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-6);
+}
+.generated__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: 0.85rem;
+}
+.generated__name {
+  flex: 1;
+  min-width: 0;
+}
 /* A live card is clickable: it opens the 90-day per-metric drill-down. */
 .ghealth__card--clickable {
   cursor: pointer;

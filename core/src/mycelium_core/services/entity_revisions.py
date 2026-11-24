@@ -278,7 +278,7 @@ async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
             org_id=note.org_id,
             note_id=note.id,
             include_deleted=True,
-            include_proposed=True,
+            include_gated=True,
         )
     ]
     payload["tags"] = await _tags_for_note(session, note_id=note.id)

@@ -2,7 +2,8 @@
 counts" for the note/graph surfaces (task f8402e7f).
 
 ADR-0043 D1 already writes the definition in prose -- a note is
-**effective** iff ``review_state IS DISTINCT FROM 'proposed'`` AND
+**effective** iff it is not held at the review gate (``review_state`` is
+neither ``'proposed'`` nor, since ADR-0075, ``'declined'``) AND
 ``deleted_at IS NULL`` -- but the code kept re-deriving it per call site,
 and the copies drifted: the centrality node set, the bounded
 neighbourhood and the link-prediction candidate set each filtered only
@@ -47,15 +48,44 @@ import datetime as dt
 import uuid
 from collections.abc import Iterable
 
-from sqlalchemy import ColumnElement, and_, not_, select, true
+from sqlalchemy import ColumnElement, and_, func, not_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.util import AliasedClass
 
 from mycelium_core.models.note import Note
 
-#: The un-approved autonomous proposal state (ADR-0043 D1). NULL (human /
-#: legacy / user-initiated) and 'approved' are both effective.
+#: A generated note waiting for a person's decision (ADR-0043 D1).
 PROPOSED = "proposed"
+#: A generated note a person turned down (ADR-0075). It used to be a
+#: soft-delete, which put the proposal in reach of the trash purge and the
+#: retention sweep although no trash view showed it: declining is a
+#: decision, kept and reversible, not a deletion.
+DECLINED = "declined"
+#: Every state held at the review gate: withheld from every reading,
+#: listing and retrieval surface, readable only through the review
+#: surfaces. NULL (human / legacy / user-initiated) and 'approved' are
+#: effective. This tuple is the one place that says which states those
+#: are; the SQL and row-level forms below and every surface that has to
+#: speak about the gate directly (the blob perimeter, the classification
+#: queue, the fact extractor) read it from here.
+GATED_STATES: tuple[str, ...] = (PROPOSED, DECLINED)
+
+
+def review_gated(
+    entity: type[Note] | AliasedClass[Note] = Note,
+) -> ColumnElement[bool]:
+    """SQL: the note is held at the review gate. NULL-safe by construction:
+    ``coalesce`` turns the NULL of every ordinary note into a value outside
+    the set, so the predicate is never NULL and can be negated without the
+    three-valued-logic hazard (a bare ``IN`` on NULL is NULL, and ``NOT``
+    of it would drop exactly the ordinary notes)."""
+    return func.coalesce(entity.review_state, "").in_(GATED_STATES)
+
+
+def is_review_gated(review_state: str | None) -> bool:
+    """Row-level twin of :func:`review_gated`."""
+    return review_state in GATED_STATES
+
 
 #: Chunk size for the ``among`` narrowing of :func:`ineffective_note_ids`.
 #: An expanding ``IN`` binds one parameter per id and asyncpg caps a
@@ -68,29 +98,30 @@ _AMONG_CHUNK = 5000
 def effective_note_clause(
     *,
     include_deleted: bool = False,
-    include_proposed: bool = False,
+    include_gated: bool = False,
     entity: type[Note] | AliasedClass[Note] = Note,
 ) -> ColumnElement[bool]:
-    """SQL predicate selecting the EFFECTIVE notes (ADR-0043 D1):
-    ``review_state IS DISTINCT FROM 'proposed' AND deleted_at IS NULL``.
+    """SQL predicate selecting the EFFECTIVE notes (ADR-0043 D1, ADR-0075):
+    not :func:`review_gated` AND ``deleted_at IS NULL``.
 
-    ``IS DISTINCT FROM`` (not ``!=``) is what makes the NULL default --
-    every human-authored, legacy or user-initiated note -- pass, so the
-    clause is a no-op until a workspace actually holds a proposed note.
+    The gate leg is NULL-safe (see :func:`review_gated`), which is what
+    makes the NULL default -- every human-authored, legacy or
+    user-initiated note -- pass, so the clause is a no-op until a workspace
+    actually holds a proposal.
 
     ``include_deleted=True`` is the trash-view opt-in (``list_notes``,
     ``lookup``, the unified search, the merge idempotency branch): it
     drops ONLY the soft-delete leg.
 
-    ``include_proposed=True`` is NOT a listing option: no surface may mix
-    un-approved proposals into what it shows. It exists for the
+    ``include_gated=True`` is NOT a listing option: no surface may mix
+    proposals, pending or declined, into what it shows. It exists for the
     PHOTOGRAPHERS -- the revision logger and ``snapshot_note`` -- which
     must record whatever state a note is in, including a state no reader
     is allowed to see. A snapshot that silently dropped the parts of a
     gated note would restore as an empty note, so being permissive there
     is the safe direction, and being permissive anywhere else is not.
-    The review inbox itself does not use this: it selects
-    ``review_state = 'proposed'`` positively.
+    The review surfaces do not use this: they select the state they list
+    positively.
 
     ``entity`` is the mapped ``Note`` by default and an ``aliased(Note)``
     when a query has to speak about two notes at once -- the two ends of
@@ -102,8 +133,8 @@ def effective_note_clause(
     the whole clause without the usual three-valued-logic hazard.
     """
     legs: list[ColumnElement[bool]] = []
-    if not include_proposed:
-        legs.append(entity.review_state.is_distinct_from(PROPOSED))
+    if not include_gated:
+        legs.append(not_(review_gated(entity)))
     if not include_deleted:
         legs.append(entity.deleted_at.is_(None))
     if not legs:
@@ -120,7 +151,7 @@ async def ineffective_note_ids(
     among: Iterable[uuid.UUID] | None = None,
 ) -> set[uuid.UUID]:
     """The complement of :func:`effective_note_clause` as an id set: the
-    org's notes that are NOT effective (proposed or in the trash).
+    org's notes that are NOT effective (held at the review gate, or in the trash).
 
     For the weave builders, which stream rows keyed by note id pairs
     (``note_links``, ``note_coactivity``, ``note_edge_usage``, and the
@@ -159,13 +190,13 @@ def note_is_effective(
     review_state: str | None,
     deleted_at: dt.datetime | None,
     include_deleted: bool = False,
-    include_proposed: bool = False,
+    include_gated: bool = False,
 ) -> bool:
     """Row-level mirror of :func:`effective_note_clause`, for the code
     paths that already hold the note (or just its two state columns:
     ``task_search`` reads them as a projection, not as an ORM object).
 
-    ``include_proposed`` opens the review gate, and the callers allowed
+    ``include_gated`` opens the review gate, and the callers allowed
     to ask for it are counted on one hand: the review inbox path of
     ``notes.get_note`` (approving a proposal is how it stops being one),
     the un-reject in ``notes.restore_note``, and the photographers that
@@ -175,6 +206,6 @@ def note_is_effective(
     (review_state x deleted_at) matrix, so this can never drift from the
     clause above nor from its complement.
     """
-    if review_state == PROPOSED and not include_proposed:
+    if is_review_gated(review_state) and not include_gated:
         return False
     return deleted_at is None or include_deleted

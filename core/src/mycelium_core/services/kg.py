@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import bindparam, delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +56,7 @@ from mycelium_core.services import audit
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.identities import ensure_for_user
 from mycelium_core.services.llm_resolver import MeteredLLM, resolve_llm
+from mycelium_core.services.note_effective import GATED_STATES
 from mycelium_core.services.rbac import require_role
 
 _WS_RE = re.compile(r"\s+")
@@ -1253,7 +1254,9 @@ class PendingRead:
 
 
 # A note qualifies when a person could have written it and wants it seen:
-# live, not archived, not a proposal or a rejection, not opted out of
+# live, not archived, not held at the review gate (pending or declined, the
+# set ``note_effective.GATED_STATES`` defines, spelled into the SQL below from
+# that tuple as a bound list rather than copied by hand), not opted out of
 # automatic indexing (ADR-0056: index_scope='none' keeps a note away from
 # every automatic reader, and a model reading it is one), not still being
 # transcribed, and left alone for ``settle`` so a note being typed is not
@@ -1285,7 +1288,7 @@ _PENDING_SQL = text(
        AND NOT n.is_archived
        AND n.index_scope = 'org'
        AND n.status <> 'transcribing'
-       AND (n.review_state IS NULL OR n.review_state NOT IN ('proposed', 'rejected'))
+       AND COALESCE(n.review_state, '') NOT IN :gated
        AND sig.has_text
        AND sig.last_edit < :settled_before
        AND (x.id IS NULL
@@ -1295,7 +1298,7 @@ _PENDING_SQL = text(
      ORDER BY sig.last_edit ASC, n.id ASC
      LIMIT :scan
     """
-)
+).bindparams(bindparam("gated", expanding=True))
 
 
 async def pending_reads(
@@ -1316,6 +1319,7 @@ async def pending_reads(
             _PENDING_SQL,
             {
                 "org_id": org_id,
+                "gated": list(GATED_STATES),
                 "settled_before": settled_before,
                 "max_attempts": max_attempts,
                 "token_budget": token_budget,

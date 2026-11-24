@@ -80,6 +80,18 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
         "garden_review_restore_source",
     ),
     ("GET", "/review/accept-ratio", "garden.review.accept_ratio", "garden_review_accept_ratio"),
+    # Static segments before the parametrised ones: ``/review/nodes/...``
+    # and ``/review/by-source/...`` carry their own prefix, so no id can
+    # shadow ``/review/pending`` or ``/review/rejected``.
+    ("GET", "/review/nodes/{note_id}", "garden.review.read", "garden_review_read"),
+    (
+        "GET",
+        "/review/by-source/{note_id}",
+        "garden.review.for_source",
+        "garden_review_for_source",
+    ),
+    ("POST", "/review/reopen", "garden.review.reopen", "garden_review_reopen"),
+    ("POST", "/review/remove", "garden.review.remove", "garden_review_remove"),
     # what the classifier learned
     ("POST", "/learning/rollback", "garden.learning.rollback", "garden_learning_rollback"),
     ("GET", "/learning/telemetry", "garden.learning.telemetry", "garden_learning_telemetry"),
