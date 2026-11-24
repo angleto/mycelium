@@ -6733,6 +6733,43 @@ button.btn--danger:hover {
   color: var(--violet);
   margin-top: var(--sp-4);
 }
+/* "Work closed" (task e584ed61): every linked task is over and the note
+   waits for a person. The info hue, not the violet of the transplanted
+   chip: it is a question to answer, not a state the note is in. */
+.plant__chip--closed {
+  border-color: color-mix(in srgb, var(--info) 40%, transparent);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  color: var(--info);
+}
+.garden__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-top: var(--sp-8);
+}
+/* The board's card title opens the plant detail, like the list row: a
+   button drawn as the title, so it gives up the accent fill AND its ink. */
+.garden__card-title {
+  background: transparent;
+  color: var(--text-h);
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.garden__kanban .kanban__card--fixed { cursor: default; }
+/* Why a seed or dormant column takes no card, always visible: a refusal
+   with no reason reads as a bug. */
+.kanban__hint {
+  margin: 0;
+  padding: var(--sp-6) var(--sp-12);
+  font-size: 0.75rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
 .plant__actions {
   display: flex;
   flex-wrap: wrap;

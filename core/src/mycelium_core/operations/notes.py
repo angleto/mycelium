@@ -38,11 +38,11 @@ from mycelium_core.operations.notes_views import (
     NotesPage,
     TagBrief,
 )
+from mycelium_core.services import note_inert, text_patch
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services import note_parts as parts_svc
 from mycelium_core.services import note_pins as pins_svc
 from mycelium_core.services import notes as notes_svc
-from mycelium_core.services import text_patch
 
 NOTES = "notes"
 
@@ -170,7 +170,7 @@ def note_out(
     base = list_out(n, tags, primary_task_id, task_title, derived_task_ids, linked_task_count)
     joined = "\n\n".join(p.body or "" for p in parts) if parts else transcript
     return NoteOut(
-        **base.model_dump(exclude={"preview", "transcript"}),
+        **base.model_dump(exclude={"preview", "transcript", "work_closed"}),
         transcript=joined if include_transcript else None,
         parts=list(parts or []),
         outline=outline,
@@ -274,7 +274,9 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
     notes; ``task_id`` the notes linked to a task. ``only`` is the bin or
     the archive. Each row has a one-line ``preview``, not the body. Date
     filters take an ISO instant or a bare date, read as a day in your
-    timezone; ``order_by`` other than the default returns one page."""
+    timezone; ``order_by`` other than the default returns one page.
+    ``work_closed=true`` lists the notes whose linked tasks are all closed,
+    the ones waiting for a person to decide what they become."""
     after: tuple[dt.datetime, uuid.UUID] | None = None
     if p.cursor:
         try:
@@ -327,6 +329,7 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
         project_id=p.project_id,
         tag_id=p.tag_id,
         any_tag_ids=p.any_tag_ids,
+        work_closed=p.work_closed,
         note_ids=note_ids,
         maturities=maturities or None,
         q=p.q,
@@ -363,6 +366,7 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
     title_map = await note_links_svc.task_titles_for_ids(
         ctx.session, org_id=ctx.org_id, task_ids=list(pid_map.values())
     )
+    closed = await note_inert.work_closed_note_ids(ctx.session, org_id=ctx.org_id, note_ids=ids)
     previews = await notes_svc._previews_by_note(ctx.session, note_ids=ids)
     bodies = (
         await notes_svc._bodies_by_note(ctx.session, note_ids=ids) if p.include_transcript else {}
@@ -379,6 +383,7 @@ async def list_(ctx: OpCtx, p: NotesListIn) -> NotesPage:
             linked_task_count=count_map.get(n.id, 0),
             preview=previews.get(n.id),
         )
+        row.work_closed = n.id in closed
         if p.include_transcript:
             row.transcript = bodies.get(n.id)
         out.append(row)

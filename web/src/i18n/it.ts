@@ -1441,6 +1441,26 @@ export const it: Catalog = {
     fruits: 'Task (frutti)',
     none: 'Nessuno.',
     unlink: 'Scollega',
+    archive: 'Archivia',
+    view: {
+      switch: 'Vista del giardino',
+      list: 'Lista',
+      kanban: 'Bacheca',
+    },
+    kanban: {
+      label: 'Note per maturità',
+      timeManaged:
+        'Qui non si può lasciare nessuna nota: il prossimo giro del giardino la sposterebbe di nuovo, perché spostarla conta come lavorarci. Le note di questa colonna, tranne quelle trapiantate, possono comunque passare a in crescita o matura.',
+      moveTo: 'Segna come {{stage}}',
+      colEmpty: 'Qui non c’è niente.',
+    },
+    workClosed: {
+      chip: 'lavoro chiuso',
+      hint: 'Tutti i task collegati a questa nota sono chiusi. Decidi cosa diventa: matura, archiviata o lasciata com’è.',
+      filter: 'Da decidere',
+      filterHint: 'Solo le note i cui task collegati sono tutti chiusi',
+      empty: 'Nessuna nota in attesa di una decisione.',
+    },
   },
   linkProposals: {
     title: 'Link proposti',

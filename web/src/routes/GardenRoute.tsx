@@ -5,13 +5,18 @@
  * (growing + mature) / Cemetery (dormant + transplanted). Each tab
  * lists notes with quick gardening actions: change maturity, promote
  * to task (transplant), derive a fruit task, expand to plant view
- * with backlinks + atomic children + fruit tasks.
+ * with backlinks + atomic children + fruit tasks. The board view
+ * (GardenKanban) draws the same notes in one column per stage.
  *
- * Pure client-side filtering: a single GET /notes load drives the
- * three tabs (notes are few-per-workspace, no pagination yet).
+ * Client-side filtering: the page reads every page of GET /notes once
+ * (the map needs the whole workspace anyway) and the tabs, the board and
+ * the "to decide" filter all slice that one set. The filter reads the
+ * server's ``work_closed`` per row, so the rule itself lives once, on the
+ * server (note_inert.work_closed); ``notes.list(work_closed=true)`` is the
+ * same rule for a caller that pages.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
@@ -20,6 +25,9 @@ import { allNotes } from '../api/notes'
 import { MarkdownView } from '../components/Markdown'
 import { GardenMindmap } from '../components/GardenMindmap'
 import { CopyIdButton } from '../components/CopyIdButton'
+import { GardenKanban } from '../components/GardenKanban'
+import { columnOf, type GardenColumn } from '../lib/gardenBoard'
+import { Toggle } from '../components/Toggle'
 import { useFocus } from '../lib/focus'
 import { getSession } from '../auth/session'
 import type { components } from '../shared'
@@ -31,6 +39,7 @@ type NoteLink = components['schemas']['NoteLinkOut']
 type TaskBrief = { id: string; title: string }
 
 type Tab = 'inbox' | 'garden' | 'cemetery' | 'mindmap'
+type View = 'list' | 'kanban'
 
 const MATURITY_OPTIONS = ['seed', 'growing', 'mature', 'dormant'] as const
 
@@ -44,11 +53,17 @@ const MATURITY_GLYPH: Record<string, string> = {
   dormant: '🍂',
 }
 
+// A tab is a group of board columns, so the two views cannot file a note
+// in different places: the column decides, the tab follows.
+const TAB_OF_COLUMN: Record<GardenColumn, Tab> = {
+  seed: 'inbox',
+  growing: 'garden',
+  mature: 'garden',
+  dormant: 'cemetery',
+}
+
 function bucketOf(n: Note): Tab {
-  if (n.promoted_at) return 'cemetery'
-  if (n.maturity === 'seed') return 'inbox'
-  if (n.maturity === 'dormant') return 'cemetery'
-  return 'garden'
+  return TAB_OF_COLUMN[columnOf(n)]
 }
 
 function shortPreview(n: Note): string {
@@ -91,6 +106,20 @@ function loadActiveTab(workspaceId: string | null): Tab {
   return 'inbox'
 }
 
+// The list or the board, per workspace like the tab.
+function viewKey(workspaceId: string | null): string {
+  return `mycelium.garden.view.${workspaceId ?? '_'}`
+}
+
+function loadView(workspaceId: string | null): View {
+  try {
+    if (localStorage.getItem(viewKey(workspaceId)) === 'kanban') return 'kanban'
+  } catch {
+    // ignore
+  }
+  return 'list'
+}
+
 export function GardenRoute() {
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -99,6 +128,10 @@ export function GardenRoute() {
   const session = getSession()
   const workspaceId = session?.workspaceId ?? null
   const [tab, setTab] = useState<Tab>(() => loadActiveTab(workspaceId))
+  const [view, setView] = useState<View>(() => loadView(workspaceId))
+  // "To decide": only the notes whose linked work is all closed. Not
+  // persisted: it is a pass over a queue, not a way of looking at the garden.
+  const [toDecide, setToDecide] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
   const [openData, setOpenData] = useState<NoteWithLinks | null>(null)
   const [err, setErr] = useState('')
@@ -118,6 +151,14 @@ export function GardenRoute() {
       // quota full: tab simply won't persist this session
     }
   }, [tab, workspaceId])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewKey(workspaceId), view)
+    } catch {
+      // quota full: the view simply won't persist this session
+    }
+  }, [view, workspaceId])
 
   // Focus (sidebar): a client (all its projects) or one project.
   // Same predicate as NotesRoute so /garden and /notes always agree
@@ -208,6 +249,19 @@ export function GardenRoute() {
     [focusActive, focusIds, focusProject, focusClient],
   )
 
+  // Every alive note in scope, before the "to decide" filter: what the
+  // filter's own count is taken over.
+  const alive = useMemo(
+    () => notes.filter((n) => !n.deleted_at && !n.is_archived && inFocus(n)),
+    [notes, inFocus],
+  )
+  const closedCount = useMemo(() => alive.filter((n) => n.work_closed).length, [alive])
+
+  const shown = useMemo(
+    () => (toDecide ? alive.filter((n) => n.work_closed) : alive),
+    [alive, toDecide],
+  )
+
   const buckets = useMemo(() => {
     const out: Record<Tab, Note[]> = {
       inbox: [],
@@ -215,22 +269,57 @@ export function GardenRoute() {
       cemetery: [],
       mindmap: [],
     }
-    for (const n of notes) {
-      if (n.deleted_at || n.is_archived) continue
-      if (!inFocus(n)) continue
-      out[bucketOf(n)].push(n)
-    }
+    for (const n of shown) out[bucketOf(n)].push(n)
     // The mindmap view spans every alive note in scope (all three
     // lifecycle buckets) — its count chip reflects the total set
     // it renders, not a separate bucket.
     out.mindmap = [...out.inbox, ...out.garden, ...out.cemetery]
     return out
-  }, [notes, inFocus])
+  }, [shown])
 
   const titleOf = (n: Note) =>
     (n.title && n.title.trim()) || shortPreview(n).slice(0, 80) || n.id.slice(0, 8)
 
+  // Where the keyboard goes after a move or an archive. The card a person
+  // just acted on is drawn again under another column (or not at all), so
+  // the control they pressed is gone and the browser drops focus on the
+  // body: a keyboard or screen-reader user would start again from the top
+  // of the page. After the reload, focus goes to the first of these notes
+  // still on screen (the moved card, else its neighbours), else to the
+  // page heading. Only when focus was actually lost: a control that
+  // survived the reload (the list's maturity select) keeps it.
+  const sectionRef = useRef<HTMLElement>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const focusAfter = useRef<string[] | null>(null)
+
+  function neighboursOf(noteId: string): string[] {
+    const el = sectionRef.current?.querySelector<HTMLElement>(`[data-note-id="${noteId}"]`)
+    const near = [el?.nextElementSibling, el?.previousElementSibling]
+    return near
+      .map((x) => (x instanceof HTMLElement ? x.dataset.noteId : undefined))
+      .filter((x): x is string => !!x)
+  }
+
+  useEffect(() => {
+    const wanted = focusAfter.current
+    if (!wanted) return
+    focusAfter.current = null
+    const active = document.activeElement
+    if (active && active !== document.body && sectionRef.current?.contains(active)) return
+    for (const id of wanted) {
+      const el = sectionRef.current?.querySelector<HTMLElement>(
+        `[data-note-id="${id}"] [data-focus-target]`,
+      )
+      if (el) {
+        el.focus()
+        return
+      }
+    }
+    headingRef.current?.focus()
+  }, [notes])
+
   async function setMaturity(noteId: string, maturity: string) {
+    focusAfter.current = [noteId, ...neighboursOf(noteId)]
     setBusy(true)
     setErr('')
     const { error } = await api.POST('/notes/{note_id}/maturity', {
@@ -239,6 +328,32 @@ export function GardenRoute() {
     })
     setBusy(false)
     if (error) {
+      // Nothing moved, so nothing lost focus; a target left here would be
+      // spent by the next unrelated reload (a distillation, a promotion).
+      focusAfter.current = null
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+  }
+
+  // One of the three answers to "work closed" (mature, archive, leave it).
+  // The version is the one the list read, so an edit made meanwhile is a
+  // conflict the person sees rather than an archive of a note they did not.
+  async function onArchive(n: Note) {
+    // The archived note leaves every view, so its neighbours are the target.
+    focusAfter.current = neighboursOf(n.id)
+    setBusy(true)
+    setErr('')
+    const { error } = await api.POST('/notes/{note_id}/archive', {
+      params: { header: workspaceHeader(), path: { note_id: n.id } },
+      body: { expected_version: n.version },
+    })
+    setBusy(false)
+    if (error) {
+      // Nothing moved, so nothing lost focus; a target left here would be
+      // spent by the next unrelated reload (a distillation, a promotion).
+      focusAfter.current = null
       setErr(errMessage(error))
       return
     }
@@ -341,12 +456,35 @@ export function GardenRoute() {
   const visible = buckets[tab]
 
   return (
-    <section className="card garden">
-      <h1>{t('garden.title')}</h1>
+    <section className="card garden" ref={sectionRef}>
+      <h1 ref={headingRef} tabIndex={-1}>
+        {t('garden.title')}
+      </h1>
       <p className="hint">{t('garden.intro')}</p>
 
-      <div className="garden__tabs" role="tablist">
-        {tabs.map((x) => (
+      <div className="garden__toolbar">
+        <div className="viewtabs" role="tablist" aria-label={t('garden.view.switch')}>
+          {(['list', 'kanban'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              className={'viewtabs__tab' + (view === v ? ' viewtabs__tab--active' : '')}
+              onClick={() => setView(v)}
+            >
+              {t(`garden.view.${v}`)}
+            </button>
+          ))}
+        </div>
+        <Toggle on={toDecide} onChange={setToDecide} title={t('garden.workClosed.filterHint')}>
+          {t('garden.workClosed.filter')}{' '}
+          <span className="garden__tab-count">{closedCount}</span>
+        </Toggle>
+      </div>
+
+      <div className="garden__tabs" role={view === 'list' ? 'tablist' : undefined}>
+        {view === 'list' && tabs.map((x) => (
           <button
             key={x.id}
             type="button"
@@ -381,6 +519,21 @@ export function GardenRoute() {
 
       {loading ? (
         <p className="hint garden__empty">{t('garden.loading')}</p>
+      ) : view === 'kanban' ? (
+        toDecide && shown.length === 0 ? (
+          <p className="hint garden__empty">{t('garden.workClosed.empty')}</p>
+        ) : (
+          <GardenKanban
+            notes={shown}
+            busy={busy}
+            glyph={MATURITY_GLYPH}
+            titleOf={titleOf}
+            previewOf={shortPreview}
+            onMove={(n, to) => setMaturity(n.id, to)}
+            onOpen={(n) => void openPlant(n.id)}
+            onArchive={onArchive}
+          />
+        )
       ) : tab === 'mindmap' ? (
         <GardenMindmap
           notes={visible}
@@ -388,14 +541,17 @@ export function GardenRoute() {
           onOpenNote={(id) => void openPlant(id)}
         />
       ) : visible.length === 0 ? (
-        <p className="hint garden__empty">{t(`garden.empty.${tab}`)}</p>
+        <p className="hint garden__empty">
+          {toDecide ? t('garden.workClosed.empty') : t(`garden.empty.${tab}`)}
+        </p>
       ) : (
         <ul className="garden__list">
           {visible.map((n) => (
-            <li key={n.id} className="plant">
+            <li key={n.id} className="plant" data-note-id={n.id}>
               <button
                 type="button"
                 className="plant__open"
+                data-focus-target
                 onClick={() => void openPlant(n.id)}
                 title={t('garden.openPlant')}
               >
@@ -413,6 +569,14 @@ export function GardenRoute() {
                   {n.promoted_at && (
                     <span className="plant__chip plant__chip--promoted">
                       {t('garden.promotedChip')}
+                    </span>
+                  )}
+                  {n.work_closed && (
+                    <span
+                      className="plant__chip plant__chip--closed"
+                      title={t('garden.workClosed.hint')}
+                    >
+                      {t('garden.workClosed.chip')}
                     </span>
                   )}
                 </span>
@@ -461,6 +625,19 @@ export function GardenRoute() {
                       </span>
                     </button>
                   </>
+                )}
+                {n.work_closed && !n.promoted_at && (
+                  <button
+                    type="button"
+                    className="plant__btn plant__btn--ghost"
+                    disabled={busy}
+                    title={t('garden.workClosed.hint')}
+                    aria-label={t('garden.archive')}
+                    onClick={() => void onArchive(n)}
+                  >
+                    <span aria-hidden="true">🗃️</span>
+                    <span className="plant__btn-label">{t('garden.archive')}</span>
+                  </button>
                 )}
                 {tab === 'cemetery' && (
                   <button

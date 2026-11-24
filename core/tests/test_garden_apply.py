@@ -14,10 +14,11 @@ Covers the mutating, reversible counterpart to ``classify_node``:
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import DomainError
@@ -210,12 +211,11 @@ async def _growing_hub(s: object, org: uuid.UUID, user: uuid.UUID, in_links: int
             child_note_id=hub.id,
             kind="related",
         )
-    await note_links.set_maturity(
-        s,  # type: ignore[arg-type]
-        org_id=org,
-        actor_id=user,
-        note_id=hub.id,
-        maturity="growing",
+    # Growing the way the sweep makes a touched seed growing, not by a
+    # person's set_maturity: a person's explicit choice is one the
+    # auto-promotion must leave alone (see the override tests below).
+    await s.execute(  # type: ignore[attr-defined]
+        update(Note).where(Note.id == hub.id).values(maturity="growing")
     )
     return hub.id
 
@@ -253,3 +253,268 @@ async def test_auto_promote_is_idempotent_after_maturing() -> None:
         second = await gc.auto_promote_mature(s, org_id=org, actor_id=user)
     assert first >= 1
     assert second == 0  # already mature -> no longer growing -> nothing to do
+
+
+# ---------------------------------------------------------------------------
+# A note a person brought back from mature is not re-asserted (ADR-0032)
+# ---------------------------------------------------------------------------
+
+# A person's own session over REST: ``human_api`` with no subject is what
+# ``services.caller`` calls a person. ``tenant_session``'s default kind is the
+# server acting, so it would hold nothing.
+_PERSON = {"actor_kind": "human_api"}
+
+
+async def _set(
+    org: uuid.UUID,
+    user: uuid.UUID,
+    note_id: uuid.UUID,
+    maturity: str,
+    *,
+    as_agent: bool = False,
+) -> None:
+    """A move, in its own transaction as a request would be: a person's, or
+    an agent's (an MCP token)."""
+    who = (
+        {"actor_kind": "mcp_token", "actor_subject_id": str(uuid.uuid4())} if as_agent else _PERSON
+    )
+    async with tenant_session(str(org), str(user), **who) as s:
+        await note_links.set_maturity(
+            s, org_id=org, actor_id=user, note_id=note_id, maturity=maturity
+        )
+
+
+async def _sweep_promote(org: uuid.UUID, user: uuid.UUID) -> int:
+    """The worker's auto-promotion alone, as the worker runs it."""
+    async with tenant_session(str(org), str(user), actor_kind="system") as s:
+        return await gc.auto_promote_mature(s, org_id=org, actor_id=user)
+
+
+async def _worker_cycle(
+    org: uuid.UUID, user: uuid.UUID, now: dt.datetime | None = None
+) -> tuple[dict[str, int], int]:
+    """What the garden worker runs for a workspace: the sweep and then the
+    auto-promotion, in ONE system session (worker/garden.py)."""
+    async with tenant_session(str(org), str(user), actor_kind="system") as s:
+        moved = await note_links.tick_maturity_transitions(s, org_id=org, actor_id=user, now=now)
+        promoted = await gc.auto_promote_mature(s, org_id=org, actor_id=user)
+    return moved, promoted
+
+
+async def _maturity(org: uuid.UUID, user: uuid.UUID, note_id: uuid.UUID) -> str:
+    async with tenant_session(str(org), str(user)) as s:
+        return str((await s.execute(select(Note.maturity).where(Note.id == note_id))).scalar_one())
+
+
+async def _held(org: uuid.UUID, user: uuid.UUID, note_id: uuid.UUID) -> bool:
+    async with tenant_session(str(org), str(user)) as s:
+        return note_id in await note_links.person_held_maturity(s, org_id=org, note_ids=[note_id])
+
+
+async def _hub_at(org: uuid.UUID, user: uuid.UUID, maturity: str) -> uuid.UUID:
+    """A central, curated hub (five inbound links) sitting at ``maturity``,
+    put there with no maturity event of its own."""
+    async with tenant_session(str(org), str(user)) as s:
+        hub_id = await _growing_hub(s, org, user, in_links=5)
+        await s.execute(update(Note).where(Note.id == hub_id).values(maturity=maturity))
+    return hub_id
+
+
+async def test_auto_promote_does_not_undo_a_persons_demotion() -> None:
+    """The board's mature -> growing move: a central, curated hub the person
+    took back to growing stays growing, however often the worker runs."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing")
+    assert await _held(org, user, hub_id)
+    assert (await _worker_cycle(org, user))[1] == 0
+    assert (await _worker_cycle(org, user))[1] == 0
+    assert await _maturity(org, user, hub_id) == "growing"
+
+
+@pytest.mark.parametrize("to", ["seed", "dormant"])
+async def test_the_worker_cycle_does_not_re_assert_a_note_taken_out_of_mature(to: str) -> None:
+    """A person moves a hub out of mature into seed or dormant. Their move is
+    a touch, so the very next sweep revives it to growing (writing
+    ``auto_maturity``), and the auto-promotion runs right after in the same
+    session: the hub must stay growing, not come back as mature."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, to)
+    _, promoted = await _worker_cycle(org, user)
+    assert await _maturity(org, user, hub_id) == "growing"
+    assert promoted == 0
+    assert await _held(org, user, hub_id)
+    _, promoted = await _worker_cycle(org, user)
+    assert promoted == 0
+    assert await _maturity(org, user, hub_id) == "growing"
+
+
+async def test_a_move_from_mature_to_seed_holds_through_the_sweep() -> None:
+    """The sweep's own moves never end the hold, ageing included: 60
+    untouched days take the hub to dormant, a touch revives it, and the
+    auto-promotion still leaves it growing."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "seed")
+    await _worker_cycle(org, user)
+    assert await _maturity(org, user, hub_id) == "growing"
+    later = dt.datetime.now(dt.UTC) + dt.timedelta(days=61)
+    moved, _ = await _worker_cycle(org, user, now=later)
+    assert moved["to_dormant"] >= 1
+    assert await _maturity(org, user, hub_id) == "dormant"
+    # The person's move is still within the 7-day window: the sweep revives.
+    _, promoted = await _worker_cycle(org, user)
+    assert await _maturity(org, user, hub_id) == "growing"
+    assert promoted == 0
+    assert await _held(org, user, hub_id)
+
+
+async def test_a_later_decay_ends_the_hold() -> None:
+    """A supersedes link pointing at the held hub decays it to dormant
+    (``auto_dormant``): a new judgement about the note, which ends the hold.
+    Once the sweep revives it, the auto-promotion applies again."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing")
+    assert await _held(org, user, hub_id)
+    async with tenant_session(str(org), str(user), **_PERSON) as s:
+        newer = await _make_note(s, org, user, "the newer idea")
+        await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=newer.id,
+            child_note_id=hub_id,
+            kind="supersedes",
+        )
+    assert await _maturity(org, user, hub_id) == "dormant"
+    assert not await _held(org, user, hub_id)
+    _, promoted = await _worker_cycle(org, user)
+    assert await _maturity(org, user, hub_id) == "mature"
+    assert promoted >= 1
+
+
+async def test_a_persons_later_move_ends_the_hold() -> None:
+    """The person's own later move decides: mature -> growing holds, then
+    the person's growing -> seed (not out of mature) holds nothing."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing")
+    assert await _held(org, user, hub_id)
+    await _set(org, user, hub_id, "seed")
+    assert not await _held(org, user, hub_id)
+    _, promoted = await _worker_cycle(org, user)
+    assert promoted >= 1
+    assert await _maturity(org, user, hub_id) == "mature"
+
+
+@pytest.mark.parametrize("start", ["seed", "dormant"])
+async def test_a_persons_move_into_growing_from_elsewhere_does_not_hold(start: str) -> None:
+    """Only a move out of mature holds a note (ADR-0032): a person's seed ->
+    growing or dormant -> growing says nothing against mature, so the
+    auto-promotion promotes the hub as it would one the sweep made growing."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, start)
+    await _set(org, user, hub_id, "growing")
+    assert not await _held(org, user, hub_id)
+    assert await _sweep_promote(org, user) == 1
+    assert await _maturity(org, user, hub_id) == "mature"
+
+
+async def test_an_agents_move_out_of_mature_does_not_hold() -> None:
+    """Agents propose, a person decides: an MCP token's mature -> growing is
+    not a person's move, so the auto-promotion may promote the hub again."""
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing", as_agent=True)
+    assert not await _held(org, user, hub_id)
+    assert await _sweep_promote(org, user) == 1
+    assert await _maturity(org, user, hub_id) == "mature"
+
+
+async def test_an_agents_later_move_does_not_end_a_persons_hold() -> None:
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing")
+    await _set(org, user, hub_id, "seed", as_agent=True)
+    await _set(org, user, hub_id, "growing", as_agent=True)
+    assert await _held(org, user, hub_id)
+    assert await _sweep_promote(org, user) == 0
+
+
+async def test_the_auto_promotions_own_write_is_not_a_hold() -> None:
+    org, user = await _make_workspace()
+    hub_id = await _hub_at(org, user, "growing")
+    assert await _sweep_promote(org, user) == 1
+    assert not await _held(org, user, hub_id)
+
+
+async def _seasons(org: uuid.UUID, user: uuid.UUID, note_id: uuid.UUID) -> list[tuple[str, dict]]:
+    from mycelium_core.models.activity_log import ActivityLog
+
+    async with tenant_session(str(org), str(user)) as s:
+        rows = (
+            await s.execute(
+                select(ActivityLog.actor_kind, ActivityLog.diff)
+                .where(
+                    ActivityLog.entity == "note",
+                    ActivityLog.entity_id == note_id,
+                    ActivityLog.action == "auto_maturity",
+                )
+                .order_by(ActivityLog.ts)
+            )
+        ).all()
+    return [(k, d) for k, d in rows]
+
+
+async def test_every_sweep_move_is_on_the_notes_history() -> None:
+    """Each of the sweep's three moves leaves an ``auto_maturity`` row on the
+    note it moved, written as ``system``: seed -> growing, growing -> dormant
+    after 60 untouched days, dormant -> growing on a touch."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        nid = (await _make_note(s, org, user, "ages")).id
+    await _worker_cycle(org, user)
+    later = dt.datetime.now(dt.UTC) + dt.timedelta(days=61)
+    await _worker_cycle(org, user, now=later)
+    await _worker_cycle(org, user)
+    assert await _seasons(org, user, nid) == [
+        ("system", {"from": "seed", "to": "growing"}),
+        ("system", {"from": "growing", "to": "dormant"}),
+        ("system", {"from": "dormant", "to": "growing"}),
+    ]
+    # Not a touch: the liveness clock reads no system row, so a behavioural
+    # check of this (the clock unmoved by the sweep) passes whatever
+    # NOTE_TOUCH_ACTIONS lists; the membership is the claim that can fail.
+    from mycelium_core.services import note_touch
+
+    assert "auto_maturity" not in note_touch.NOTE_TOUCH_ACTIONS
+
+
+async def test_the_hold_states_the_workspace_itself() -> None:
+    """``person_held_maturity`` names the workspace in its activity-log query,
+    not only through row-level security: on an owner connection, which the
+    policies do not narrow, another workspace's held note is not held here."""
+    import os
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    org, user = await _make_workspace()
+    other, _ = await _make_workspace()
+    hub_id = await _hub_at(org, user, "mature")
+    await _set(org, user, hub_id, "growing")
+    owner_url = os.environ["MYCELIUM_DATABASE_URL_SYNC"].replace(
+        "postgresql+psycopg", "postgresql+asyncpg"
+    )
+    engine = create_async_engine(owner_url)
+    try:
+        async with AsyncSession(engine) as s:
+            assert await note_links.person_held_maturity(s, org_id=org, note_ids=[hub_id]) == {
+                hub_id
+            }
+            assert (
+                await note_links.person_held_maturity(s, org_id=other, note_ids=[hub_id]) == set()
+            )
+    finally:
+        await engine.dispose()

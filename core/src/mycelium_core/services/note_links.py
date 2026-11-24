@@ -48,6 +48,7 @@ from sqlalchemy.orm import aliased
 
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.identity import Identity
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note, NoteMaturity
@@ -63,6 +64,7 @@ from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit, note_inert, note_touch, tag_assignment
+from mycelium_core.services import caller as caller_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.note_effective import effective_note_clause
 from mycelium_core.services.rbac import require_role
@@ -1099,6 +1101,114 @@ async def record_task_artifact(
 # ---------------------------------------------------------------------------
 
 
+# The maturity writes that can end a person's hold on a note (see
+# ``person_held_maturity``): a person's own later ``set_maturity``, and the
+# decay of a supersedes/contradicts link (``auto_dormant``). The sweep's
+# per-note ``auto_maturity`` is deliberately not among them.
+HOLD_ENDING_ACTIONS: tuple[str, ...] = ("set_maturity", "auto_dormant")
+
+
+async def _log_season(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    prior: str,
+    to: str,
+) -> None:
+    """The sweep's move of one note, on the note's own history.
+
+    The sweep used to leave one workspace-level ``maturity_tick`` row with
+    counters, so a note's history did not say that time had moved it, and a
+    person reading it saw their own last move as the note's current state.
+
+    It does not end a person's hold (``person_held_maturity``): the sweep's
+    moves are driven by touches, and a person's ``set_maturity`` is itself a
+    touch, so the sweep revives a note the person just put in seed or
+    dormant in the very cycle that then runs the auto-promotion. Letting this
+    row end the hold made that note mature again within one cycle. It is not
+    a touch either: the worker writes it as ``system``, and the liveness
+    clock (``note_touch``) reads no system row."""
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="auto_maturity",
+        diff={"from": prior, "to": to},
+    )
+
+
+async def person_held_maturity(
+    session: AsyncSession, *, org_id: uuid.UUID, note_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """The notes a person took out of mature and that neither the person nor
+    a decay has moved since.
+
+    Per note, the latest of: a person's ``set_maturity``, or an
+    ``auto_dormant``. The note is held when that row is the person's and its
+    diff (``{"from": prior, "to": new}``, as ``set_maturity`` writes it) has
+    ``from`` = ``mature``.
+
+    Why only that move, and why only those rows (decision 2026-11-24,
+    ADR-0032, which keeps demotion conservative: a note a person brought back
+    from mature "the next promotion cycle simply does not re-assert"):
+
+    - A person's seed -> growing or dormant -> growing says nothing against
+      mature, so it holds nothing: the auto-promotion may promote that note
+      later, as it would one the sweep made growing.
+    - The sweep's ``auto_maturity`` rows do not end a hold. A person's move
+      is a touch, so the sweep revives a note just put in seed or dormant in
+      the same cycle that runs the auto-promotion, and a hold that ended
+      there would have the note mature again a minute after the person said
+      otherwise.
+    - A later decay (``auto_dormant``, a supersedes/contradicts link pointing
+      at the note) ends it: that is a new judgement about the note.
+    - Only a person holds a note. An agent's ``set_maturity`` neither holds
+      one nor ends a hold: agents propose, a person decides. Who is a person
+      is ``services.caller``'s answer, the same one every guard asks.
+
+    Rows written in one transaction share a timestamp; a person's write never
+    shares a transaction with a decay of the same note, so the order is the
+    order they happened in.
+
+    One query over the (org_id, entity, entity_id, ts) index of activity_log,
+    driven by ``note_ids``; a note has a handful of maturity rows."""
+    if not note_ids:
+        return set()
+    rows = (
+        await session.execute(
+            select(
+                ActivityLog.entity_id,
+                ActivityLog.action,
+                ActivityLog.actor_kind,
+                ActivityLog.actor_subject_id,
+                ActivityLog.diff["from"].astext,
+            )
+            .where(
+                ActivityLog.org_id == org_id,
+                ActivityLog.entity == "note",
+                ActivityLog.entity_id.in_(note_ids),
+                ActivityLog.action.in_(HOLD_ENDING_ACTIONS),
+            )
+            .order_by(ActivityLog.entity_id, ActivityLog.ts.desc())
+        )
+    ).all()
+    held: set[uuid.UUID] = set()
+    decided: set[uuid.UUID] = set()
+    for note_id, action, kind, subject, prior in rows:
+        if note_id is None or note_id in decided:
+            continue
+        by_person = caller_svc.classify(kind, subject).is_person
+        if action == "set_maturity" and not by_person:
+            continue
+        decided.add(note_id)
+        if action == "set_maturity" and prior == NoteMaturity.mature.value:
+            held.add(note_id)
+    return held
+
+
 async def tick_maturity_transitions(
     session: AsyncSession,
     *,
@@ -1158,6 +1268,7 @@ async def tick_maturity_transitions(
     for n in seed_to_growing:
         n.maturity = NoteMaturity.growing.value
         out["seed_to_growing"] += 1
+        await _log_season(session, org_id, actor_id, n.id, "seed", "growing")
 
     # growing / mature -> dormant (untouched)
     to_dormant = (
@@ -1183,8 +1294,10 @@ async def tick_maturity_transitions(
         .all()
     )
     for n in to_dormant:
+        prior = n.maturity
         n.maturity = NoteMaturity.dormant.value
         out["to_dormant"] += 1
+        await _log_season(session, org_id, actor_id, n.id, prior, "dormant")
 
     # dormant -> growing (recovered)
     dormant_to_growing = (
@@ -1209,6 +1322,7 @@ async def tick_maturity_transitions(
     for n in dormant_to_growing:
         n.maturity = NoteMaturity.growing.value
         out["dormant_to_growing"] += 1
+        await _log_season(session, org_id, actor_id, n.id, "dormant", "growing")
 
     if any(v > 0 for v in out.values()):
         await session.flush()
@@ -1232,6 +1346,7 @@ __all__ = [
     "list_note_links",
     "list_note_task_links",
     "list_workspace_note_links",
+    "person_held_maturity",
     "promote_note_to_task",
     "record_task_artifact",
     "set_maturity",

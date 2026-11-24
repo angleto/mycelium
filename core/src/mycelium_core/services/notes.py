@@ -48,7 +48,15 @@ from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
-from mycelium_core.services import audit, billing, lifecycle, note_touch, tag_assignment, text_patch
+from mycelium_core.services import (
+    audit,
+    billing,
+    lifecycle,
+    note_inert,
+    note_touch,
+    tag_assignment,
+    text_patch,
+)
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
@@ -292,6 +300,7 @@ async def list_notes(
     after: tuple[dt.datetime, uuid.UUID] | None = None,
     only: str | None = None,
     any_tag_ids: Sequence[uuid.UUID] | None = None,
+    work_closed: bool | None = None,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
@@ -343,6 +352,12 @@ async def list_notes(
         stmt = stmt.where(
             Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id.in_(list(any_tag_ids))))
         )
+    if work_closed is not None:
+        # The garden's "to decide" filter (task e584ed61), applied before
+        # paging so a page of them is a full page. ``False`` is the
+        # complement: notes with no link, or with work still open.
+        clause = note_inert.work_closed(org_id)
+        stmt = stmt.where(clause if work_closed else ~clause)
     if q is not None:
         for term in (w for w in q.split() if w.strip()):
             like = f"%{term}%"

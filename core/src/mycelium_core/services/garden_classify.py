@@ -1094,6 +1094,14 @@ async def auto_promote_mature(
         .scalars()
         .all()
     )
+    # A note a person brought back from mature is not re-asserted by the next
+    # cycle (ADR-0032). Without this, a hub note a person took from mature
+    # back to growing was mature again after the next sweep. A person's other
+    # moves into growing hold nothing (see person_held_maturity).
+    held = await note_links.person_held_maturity(
+        session, org_id=org_id, note_ids=[n.id for n in growing]
+    )
+    growing = [n for n in growing if n.id not in held]
     if not growing:
         return 0
     link_rows = (

@@ -1446,6 +1446,26 @@ export const en = {
     fruits: 'Tasks (fruits)',
     none: 'None.',
     unlink: 'Unlink',
+    archive: 'Archive',
+    view: {
+      switch: 'Garden view',
+      list: 'List',
+      kanban: 'Board',
+    },
+    kanban: {
+      label: 'Notes by maturity',
+      timeManaged:
+        'Nothing can be dropped here: the next garden sweep would move the note again, because a move counts as working on it. Notes in this column, except transplanted ones, can still go to growing or mature.',
+      moveTo: 'Mark as {{stage}}',
+      colEmpty: 'Nothing here.',
+    },
+    workClosed: {
+      chip: 'work closed',
+      hint: 'Every task linked to this note is closed. Decide what it becomes: mature, archived, or left as it is.',
+      filter: 'To decide',
+      filterHint: 'Only the notes whose linked tasks are all closed',
+      empty: 'No notes waiting for a decision.',
+    },
   },
   linkProposals: {
     title: 'Proposed links',

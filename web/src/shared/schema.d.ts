@@ -4788,6 +4788,8 @@ export interface paths {
          *     the archive. Each row has a one-line ``preview``, not the body. Date
          *     filters take an ISO instant or a bare date, read as a day in your
          *     timezone; ``order_by`` other than the default returns one page.
+         *     ``work_closed=true`` lists the notes whose linked tasks are all closed,
+         *     the ones waiting for a person to decide what they become.
          */
         get: operations["list_notes_notes_get"];
         put?: never;
@@ -13273,6 +13275,11 @@ export interface components {
             updated_at?: string | null;
             /** Review State */
             review_state?: string | null;
+            /**
+             * Work Closed
+             * @default false
+             */
+            work_closed?: boolean;
             /** Preview */
             preview?: string | null;
             /** Transcript */
@@ -27746,6 +27753,8 @@ export interface operations {
                 /** @description Default newest first. Another order returns one page, no cursor. touched_at is the last time a person or an agent worked on the note or one of its parts (else its creation); updated_at moves on any write to the note row and not on an edit made inside a part. */
                 order_by?: ("created_at" | "updated_at" | "title" | "touched_at") | null;
                 order_desc?: boolean;
+                /** @description true: only the notes whose linked tasks are all closed (done, archived or deleted), at least one: their work is over and a person decides what the note becomes. false: the others. Each row carries work_closed. */
+                work_closed?: boolean | null;
                 /** @description Only the notes the caller has pinned (pin_note), most recently pinned first, archived ones included. One page, no cursor. */
                 pinned?: boolean;
                 limit?: number;

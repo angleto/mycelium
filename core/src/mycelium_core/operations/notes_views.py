@@ -133,6 +133,12 @@ class NoteListOut(_NoteCommon):
     every body so the client can filter locally.
     """
 
+    # Task e584ed61: the note has linked tasks and every one of them is
+    # closed (terminal state, archived or in the bin); a person decides what
+    # the note becomes. Computed on read (``note_inert.work_closed``), never
+    # stored. On the list row only: the single-note responses do not compute
+    # it, and a default of false there would be a claim nobody checked.
+    work_closed: bool = False
     # First non-empty line of the body, capped server-side
     # (``services.notes._previews_by_note``). Enough for a row label or
     # a card subtitle, which is all the list surfaces ever did with the
@@ -266,6 +272,14 @@ class NotesListIn(BaseModel):
         ),
     )
     order_desc: bool = False
+    work_closed: bool | None = Field(
+        None,
+        description=(
+            "true: only the notes whose linked tasks are all closed (done, archived "
+            "or deleted), at least one: their work is over and a person decides what "
+            "the note becomes. false: the others. Each row carries work_closed."
+        ),
+    )
     pinned: bool = Field(
         False,
         description=(
