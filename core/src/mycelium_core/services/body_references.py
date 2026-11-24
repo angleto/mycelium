@@ -34,15 +34,24 @@ Resolution (decision 3)
       target does not change what was written. One match resolves, several
       are ambiguous. With none, a bare code is not a reference at all (the
       normaliser's gate), and a chip is recorded as dangling only when it
-      has at least eight hex digits, the ADR-0038 convention: the renderer
-      shows ``1234`` or ``cafe`` in backticks as plain code, so they are not
-      references a person wrote.
+      is written the way a code is written (:func:`chip_could_name_an_entity`):
+      eight hex digits, or the dashed layout of a UUID with as many groups as
+      the writer kept. The renderer shows ``1234`` or ``cafe`` in backticks as
+      plain code, and backticks also hold numbers (sizes, phone numbers, VAT
+      numbers) and git shas, none of which a person wrote as a reference.
+      The first production backfill found them among the dangling chips:
+      decimal runs of 8 to 14 digits and hex runs of 9 to 16.
+
+    Dangling occurrences are looked up again by :func:`recheck_dangling`
+    as well as on the next projection of their body, so that a change to
+    the rule above reaches bodies nobody edits.
 """
 
 from __future__ import annotations
 
 import datetime
 import hashlib
+import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -71,9 +80,22 @@ TargetKind = Literal["note", "task", "tag"]
 PART_DIRTY_KEY = "body_reference_part_dirty"
 TASK_DIRTY_KEY = "body_reference_task_dirty"
 
-#: A chip with fewer hex digits than this that resolves to nothing is plain
-#: inline code, not a dangling reference (see the module docstring).
-DANGLING_CHIP_MIN_HEX = lookup_svc.IDENTIFIER_MIN_HEX
+#: The written forms of a code that names nothing (see the module
+#: docstring): the eight-digit code, or a UUID cut after any of its groups,
+#: with the version and variant digits of the ``uuid4`` every row id is.
+_CODE_SHAPE_RE = re.compile(
+    r"^[0-9a-f]{8}(?:-[0-9a-f]{4}(?:-4[0-9a-f]{3}(?:-[89ab][0-9a-f]{3}(?:-[0-9a-f]{12})?)?)?)?$"
+)
+
+
+def chip_could_name_an_entity(token: str) -> bool:
+    """Whether a chip that resolves to nothing is still a reference: written
+    as a code is written, and not a run of decimal digits. An all-decimal
+    code is possible (one id in 43 starts with eight of them), but among the
+    chips that name nothing a number is far likelier than a code, and a
+    dangling chip is only a record, never a backlink."""
+    t = token.lower()
+    return bool(_CODE_SHAPE_RE.match(t)) and not t.replace("-", "").isdigit()
 
 
 # ---------------------------------------------------------------- marking
@@ -326,10 +348,81 @@ async def _resolve_one(session: AsyncSession, ref: Reference) -> _Resolution | N
         return _Resolution("resolved", matches[0].kind, matches[0].id)
     if len(matches) > 1:
         return _Resolution("ambiguous", None, None)
-    hex_digits = len(ref.token.replace("-", ""))
-    if ref.syntax == "chip" and hex_digits >= DANGLING_CHIP_MIN_HEX:
+    if ref.syntax == "chip" and chip_could_name_an_entity(ref.token):
         return _Resolution("dangling", None, None)
     return None
+
+
+async def recheck_dangling(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    after: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> tuple[int, uuid.UUID | None]:
+    """Look up again the dangling chips of up to ``limit`` sources, in id
+    order after ``after``. One that now resolves takes its target, one the
+    rule no longer counts as a reference is removed, the rest stay. Returns
+    how many occurrences changed and the last source seen (``None`` once
+    there are no more), so a caller can walk the workspace in short
+    transactions. Each source is locked as :func:`_project` locks it, so a
+    person's edit of the same body waits rather than interleaves."""
+    q = (
+        select(BodyReference.source_id)
+        .where(
+            BodyReference.org_id == org_id,
+            BodyReference.status == "dangling",
+            BodyReference.syntax == "chip",
+        )
+        .group_by(BodyReference.source_id)
+        .order_by(BodyReference.source_id)
+    )
+    if after is not None:
+        q = q.where(BodyReference.source_id > after)
+    if limit is not None:
+        q = q.limit(limit)
+    source_ids = list((await session.execute(q)).scalars())
+    changed = 0
+    for source_id in source_ids:
+        await session.execute(
+            select(BodyReferenceSource.id)
+            .where(BodyReferenceSource.id == source_id)
+            .with_for_update()
+        )
+        rows = (
+            await session.execute(
+                select(BodyReference)
+                .where(
+                    BodyReference.source_id == source_id,
+                    BodyReference.status == "dangling",
+                    BodyReference.syntax == "chip",
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+        for row in list(rows):
+            res = await _resolve_one(
+                session,
+                Reference(
+                    syntax="chip",
+                    token=row.token,
+                    ordinal=row.ordinal,
+                    mention_kind=None,
+                    start=0,
+                    end=0,
+                    anchor=None,
+                ),
+            )
+            if res is None:
+                await session.delete(row)
+                changed += 1
+            elif res.status != "dangling":
+                row.status = res.status
+                row.target_kind = res.target_kind
+                row.target_id = res.target_id
+                changed += 1
+    await session.flush()
+    return changed, (source_ids[-1] if source_ids else None)
 
 
 # ---------------------------------------------------------------- drift

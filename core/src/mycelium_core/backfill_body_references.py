@@ -8,7 +8,9 @@ every ambiguous and dangling occurrence with its source, so a person can
 resolve the first and look at the second.
 
 Idempotent: a second run finds nothing to project and prints the same
-counts. Occurrences found here have ``first_seen_at`` NULL. The worker's
+counts. Dangling chips are looked up again under the current rule
+(``body_references.recheck_dangling``), so a change to that rule reaches
+bodies nobody edits. Occurrences found here have ``first_seen_at`` NULL. The worker's
 hourly repair (``mycelium_worker.body_references``) reaches the same state
 on its own; this command exists to run it at once and to read the report.
 
@@ -50,6 +52,7 @@ class OrgReport:
     org_id: uuid.UUID
     projected_parts: int = 0
     projected_tasks: int = 0
+    rechecked: int = 0
     by_syntax_status: Counter[tuple[str, str]] = field(default_factory=Counter)
     unresolved: list[str] = field(default_factory=list)
 
@@ -60,6 +63,12 @@ async def backfill_org(org_id: uuid.UUID, actor_id: uuid.UUID) -> OrgReport:
         repaired = await refs_svc.repair_drift(s, org_id=org_id)
         report.projected_parts = repaired.parts
         report.projected_tasks = repaired.tasks
+        after = None
+        while True:
+            changed, after = await refs_svc.recheck_dangling(s, org_id=org_id, after=after)
+            report.rechecked += changed
+            if after is None:
+                break
     async with tenant_session(str(org_id), str(actor_id), actor_kind="system") as s:
         rows = (
             await s.execute(
@@ -89,7 +98,8 @@ def render(reports: list[OrgReport]) -> str:
     for r in reports:
         lines.append(
             f"workspace {r.org_id}: projected {r.projected_parts} part(s), "
-            f"{r.projected_tasks} task description(s)"
+            f"{r.projected_tasks} task description(s), "
+            f"{r.rechecked} dangling occurrence(s) changed"
         )
         total = sum(r.by_syntax_status.values())
         lines.append(f"  occurrences: {total}")

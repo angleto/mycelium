@@ -99,11 +99,22 @@ uses: outside fenced and inline code, links and URLs, and only when it
 resolves. Reading it in place is what the normaliser's rewrite was for,
 so the projection makes that rewrite of a person's text unnecessary.
 
-A chip that resolves to nothing is recorded as `dangling` only when it has
-at least eight hex digits, the convention of ADR-0038. The renderer shows a
-shorter code such as `cafe` or `1234` as plain code when it names nothing,
-so it is not a reference a person wrote, and a row for every such span
-would bury the dangling references that matter. A chip inside a link label
+A chip that resolves to nothing is recorded as `dangling` only when it is
+written the way a code is written: eight hex digits (the convention of
+ADR-0038), or the dashed layout of a row id cut after one of its groups,
+and not a run of decimal digits. The renderer shows a shorter code such as
+`cafe` or `1234` as plain code when it names nothing, and backticks also
+hold sizes, phone numbers, VAT numbers and git shas; none of them is a
+reference a person wrote, and a row for every such span would bury the
+dangling references that matter. The first backfill on a real workspace
+measured this: under a bare "at least eight hex digits" rule about one
+dangling chip in three was a number or a hex run of 9 to 16 digits. An
+all-decimal code can name a row (about one id in 43 starts with eight
+decimal digits), and it is still not recorded when it names nothing,
+because among chips that name nothing a number is far the likelier
+reading and a dangling occurrence is a record, never a backlink. Dangling
+occurrences are looked up again by the worker's repair sweep, so a change
+to this rule reaches bodies nobody edits. A chip inside a link label
 is still a chip, because both web recognisers decorate inline code
 wherever it sits.
 

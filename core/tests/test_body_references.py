@@ -554,7 +554,7 @@ async def test_an_unresolving_bare_code_or_short_chip_is_not_a_reference() -> No
 
 async def test_a_long_chip_that_names_nothing_is_dangling() -> None:
     w = await _ws()
-    nid = await _note(w, text="see `00000000`", title="Prose")
+    nid = await _note(w, text="see `0000beef`", title="Prose")
     async with tenant_session(str(w.org), str(w.user)) as s:
         rows = (
             (await s.execute(select(BodyReference).where(BodyReference.org_id == w.org)))
@@ -563,6 +563,85 @@ async def test_a_long_chip_that_names_nothing_is_dangling() -> None:
         )
     assert [(r.syntax, r.status, r.target_id) for r in rows] == [("chip", "dangling", None)]
     assert nid
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("0000beef", True),
+        ("91cf6aaa-1111", True),
+        ("91cf6aaa-1111-4222", True),
+        ("91cf6aaa-1111-4222-8333", True),
+        ("91cf6aaa-1111-4222-8333-444455556666", True),
+        # Numbers in backticks: a size, a phone number, a VAT number.
+        ("10485760", False),
+        ("00391234567890", False),
+        ("12345678901", False),
+        # Git shas and other hex runs no code is written as.
+        ("1ba4dcaaa", False),
+        ("8b8b5602c0ff", False),
+        ("8b8b5602c0ffee00", False),
+        ("8b8b5602c0ffee008b8b5602c0ffee00", False),
+        # A UUID, but not one a row id can be (version 3).
+        ("1668ec92-db12-3c65-86fb-e3e766d1ec30", False),
+        ("91cf6aaa-11", False),
+    ],
+)
+def test_which_unresolved_chips_are_dangling(token: str, expected: bool) -> None:
+    assert br.chip_could_name_an_entity(token) is expected
+
+
+async def _dangling_rows(w: W) -> list[tuple[str, str]]:
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        rows = (
+            (await s.execute(select(BodyReference).where(BodyReference.org_id == w.org)))
+            .scalars()
+            .all()
+        )
+    return sorted((r.token, r.status) for r in rows)
+
+
+async def test_recheck_applies_the_current_rule_to_bodies_nobody_edits() -> None:
+    """A dangling chip recorded under an earlier rule is removed when the
+    rule no longer counts it, and one whose target now exists resolves;
+    the body is not edited and stays projected."""
+    w = await _ws()
+    code = uuid.uuid4().hex[:7] + "a"
+    body = f"size `10485760`, see `{code}` and `{uuid.uuid4().hex[:7]}b`"
+    nid = await _note(w, text=body, title="Prose")
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        src = (
+            await s.execute(
+                select(BodyReferenceSource)
+                .join(NotePart, NotePart.id == BodyReferenceSource.note_part_id)
+                .where(NotePart.note_id == nid)
+            )
+        ).scalar_one()
+        # What the earlier rule (eight hex digits) recorded.
+        s.add(
+            BodyReference(
+                org_id=w.org,
+                source_id=src.id,
+                syntax="chip",
+                token="10485760",
+                ordinal=0,
+                status="dangling",
+            )
+        )
+    before = await _dangling_rows(w)
+    assert [t for t, st in before if st == "dangling"].count("10485760") == 1
+    target = uuid.UUID(code + str(uuid.uuid4())[8:])
+    await _note_with_id(w, nid, target, "Now exists")
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        changed, after = await br.recheck_dangling(s, org_id=w.org, limit=10)
+        assert (changed, after) == (2, src.id)
+        assert await br.recheck_dangling(s, org_id=w.org, after=after) == (0, None)
+    after_rows = dict(await _dangling_rows(w))
+    assert "10485760" not in after_rows
+    assert after_rows[code] == "resolved"
+    assert sorted(after_rows.values()) == ["dangling", "resolved"]
+    async with tenant_session(str(w.org), str(w.user)) as s:
+        assert await br.count_drift(s, org_id=w.org) == 0
 
 
 async def _note_with_id(w: W, like: uuid.UUID, note_id: uuid.UUID, title: str) -> None:

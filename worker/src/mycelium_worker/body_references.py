@@ -4,7 +4,8 @@ The commit-time flush keeps ``body_reference`` in step with every body whose
 write path marks it. This sweep is the instrument for the paths that do not:
 per workspace, it re-projects every note part and task description whose
 recorded digest differs from the live text (or that was never projected),
-and logs how many it found. On a workspace that predates the projection the
+and logs how many it found. It then looks up again the dangling chips
+(``body_references.recheck_dangling``). On a workspace that predates the projection the
 first ticks are the backfill.
 
 Registered UNCONDITIONALLY, like ``fuel_retention``: it calls no model and
@@ -84,6 +85,21 @@ async def run_once() -> int:
                 tasks += report.tasks
                 if report.parts + report.tasks == 0:
                     break
+            # Dangling chips under the current rule (body_references
+            # module docstring): what now resolves takes its target, what
+            # the rule no longer counts goes. Same short transactions.
+            rechecked = 0
+            after: uuid.UUID | None = None
+            while True:
+                async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                    changed, after = await refs_svc.recheck_dangling(
+                        s, org_id=org_id, after=after, limit=_TX_BODIES
+                    )
+                rechecked += changed
+                if after is None:
+                    break
+            if rechecked:
+                _log.info("reference recheck org=%s changed=%d", org_id, rechecked)
             total += parts + tasks
             if parts or tasks:
                 _log.info("reference repair org=%s parts=%d tasks=%d", org_id, parts, tasks)
