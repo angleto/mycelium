@@ -852,6 +852,29 @@ async def apply_patch_to_description(
     )
 
 
+async def _assert_parent_allowed(
+    session: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID, parent_id: uuid.UUID
+) -> None:
+    """A task's parent must be another live task of the workspace that is
+    not one of its own descendants. Measured on 2026-11-25: ``update_task``
+    accepted any value, so a task could be made its own parent, or the
+    parent of its parent, and every walk up or down the tree (the subtask
+    list, the connections panel of ADR-0077) would loop. The walk up from
+    the proposed parent is bounded by the tree's depth."""
+    if parent_id == task_id:
+        raise DomainError(MessageCode.TASK_PARENT_CYCLE)
+    await get_task(session, org_id=org_id, task_id=parent_id)
+    seen: set[uuid.UUID] = set()
+    cursor: uuid.UUID | None = parent_id
+    while cursor is not None and cursor not in seen:
+        if cursor == task_id:
+            raise DomainError(MessageCode.TASK_PARENT_CYCLE)
+        seen.add(cursor)
+        cursor = await session.scalar(
+            select(Task.parent_task_id).where(Task.id == cursor, Task.org_id == org_id)
+        )
+
+
 async def update_task(
     session: AsyncSession,
     *,
@@ -874,6 +897,10 @@ async def update_task(
     unknown = set(values) - _UPDATABLE - {"assignee_handle"}
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    if values.get("parent_task_id") is not None:
+        await _assert_parent_allowed(
+            session, org_id=org_id, task_id=task_id, parent_id=values["parent_task_id"]
+        )
     if values.get("description") is not None:
         text_patch.assert_body_within_cap(
             values["description"], max_bytes=get_settings().note_body_max_bytes

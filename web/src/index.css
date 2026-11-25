@@ -3853,6 +3853,52 @@ button.btn--danger:hover {
   display: block;
   font-weight: 400;
 }
+/* ADR-0077: one panel for every connection of a note or a task. */
+.connections__title {
+  font-size: 1rem;
+  margin: 0 0 var(--sp-8);
+}
+.connections__group + .connections__group {
+  margin-top: var(--sp-12);
+}
+.connections__grouphead {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 var(--sp-4);
+}
+.connections__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-4);
+}
+.connections__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: 0.9rem;
+}
+.connections__name {
+  flex: 1;
+  min-width: 0;
+}
+.connections__add {
+  margin-top: var(--sp-16);
+  display: grid;
+  gap: var(--sp-8);
+}
+.connections__addrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.connections__lag {
+  width: 6rem;
+}
 /* ADR-0075 decision 5: what happened to a note. */
 .notehistory summary {
   cursor: pointer;

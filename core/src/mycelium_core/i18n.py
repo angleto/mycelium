@@ -60,6 +60,11 @@ class MessageCode(enum.StrEnum):
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
     TASK_NOT_FOUND = "task.not_found"
+    # A task's parent cannot be itself or one of its own descendants.
+    TASK_PARENT_CYCLE = "task.parent_cycle"
+    # ADR-0077: no mechanism carries that relation between those items.
+    CONNECTION_INVALID = "connection.invalid"
+    CONNECTION_NOT_FOUND = "connection.not_found"
     # A short entity id (the ADR-0038 8-hex prefix) that named no row, or
     # named more than one. Raised where a prefix is expanded on the caller's
     # behalf: an ambiguous prefix is REFUSED and never resolved to the
@@ -922,6 +927,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "({reason}). Ask the person to comment on one of its source notes with a "
             "line '{verb} <note id>'."
         ),
+        MessageCode.TASK_PARENT_CYCLE: (
+            "A task cannot be a subtask of itself or of one of its own subtasks."
+        ),
+        MessageCode.CONNECTION_INVALID: (
+            "These two items cannot be connected this way. Choose one of the relations "
+            "offered for this pair."
+        ),
+        MessageCode.CONNECTION_NOT_FOUND: "This connection no longer exists.",
         MessageCode.GARDEN_DELEGATION_REFUSED: (
             "This decision is not handed over to assistants in this workspace ({reason}). "
             "The person decides it, or hands this kind of decision over in the garden "
@@ -1018,6 +1031,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.DURATION_HOURS: "{n} ore",
         MessageCode.DURATION_DAY: "{n} giorno",
         MessageCode.DURATION_DAYS: "{n} giorni",
+        MessageCode.TASK_PARENT_CYCLE: (
+            "Un task non può essere sottotask di sé stesso né di uno dei suoi sottotask."
+        ),
+        MessageCode.CONNECTION_INVALID: (
+            "Questi due elementi non si possono collegare così. Scegli una delle relazioni "
+            "proposte per questa coppia."
+        ),
+        MessageCode.CONNECTION_NOT_FOUND: "Questo collegamento non esiste più.",
     },
 }
 

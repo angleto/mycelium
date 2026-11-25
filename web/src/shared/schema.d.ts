@@ -7124,6 +7124,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Connections
+         * @description Every connection of a note or a task, from every mechanism (typed
+         *     links between notes, between a note and a task, related tasks,
+         *     subtasks, dependencies, mentions written in a body), each with its
+         *     relation and direction, and the connections this item can make
+         *     (``choices``).
+         */
+        get: operations["list_connections_connections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connections/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect Items
+         * @description Connect a note or a task to another note or task with one of the
+         *     relations connections.list offers as ``choices``. Refused with
+         *     connection.invalid otherwise.
+         */
+        post: operations["connect_items_connections_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connections/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disconnect Items
+         * @description Remove a connection by the ``handle`` connections.list gave. A
+         *     promotion and a mention cannot be removed this way.
+         */
+        post: operations["disconnect_items_connections_disconnect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/stream": {
         parameters: {
             query?: never;
@@ -10031,6 +10098,89 @@ export interface components {
             body: string;
         };
         /**
+         * ConnectIn
+         * @description Connect this item to another: ``direction`` ``out`` makes "this item
+         *     <relation> other", ``in`` makes "other <relation> this item", ``none``
+         *     for ``related``. A dependency takes ``dependency_type`` (FS, SS, FF,
+         *     SF; default FS) and ``lag_minutes``.
+         */
+        ConnectIn: {
+            this_kind: components["schemas"]["ItemKind"];
+            /**
+             * This Id
+             * Format: uuid
+             */
+            this_id: string;
+            relation: components["schemas"]["Relation"];
+            direction: components["schemas"]["Direction"];
+            that_kind: components["schemas"]["ItemKind"];
+            /**
+             * That Id
+             * Format: uuid
+             */
+            that_id: string;
+            /** Dependency Type */
+            dependency_type?: string | null;
+            /** Lag Minutes */
+            lag_minutes?: number | null;
+        };
+        /** ConnectionActionOut */
+        ConnectionActionOut: {
+            /** Done */
+            done: boolean;
+        };
+        /**
+         * ConnectionChoice
+         * @description A connection this item can make: "this item <relation> other" for
+         *     ``out``, "other <relation> this item" for ``in``, to an item of
+         *     ``other_kind``.
+         */
+        ConnectionChoice: {
+            relation: components["schemas"]["Relation"];
+            direction: components["schemas"]["Direction"];
+            other_kind: components["schemas"]["ItemKind"];
+        };
+        /**
+         * ConnectionOut
+         * @description One connection seen from the item asked about. ``direction``:
+         *     ``out`` (this item <relation> the other), ``in`` (the other <relation>
+         *     this item), ``none`` (no direction, ``related``). ``handle`` names it
+         *     for disconnect; ``removable`` is false for a promotion and for a
+         *     mention, which changes only when the text changes.
+         */
+        ConnectionOut: {
+            /** Handle */
+            handle: string;
+            relation: components["schemas"]["Relation"];
+            direction: components["schemas"]["Direction"];
+            other_kind: components["schemas"]["ItemKind"];
+            /**
+             * Other Id
+             * Format: uuid
+             */
+            other_id: string;
+            /** Other Title */
+            other_title?: string | null;
+            /** Removable */
+            removable: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Detail
+             * @default {}
+             */
+            detail?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ConnectionsOut */
+        ConnectionsOut: {
+            /** Items */
+            items: components["schemas"]["ConnectionOut"][];
+            /** Choices */
+            choices: components["schemas"]["ConnectionChoice"][];
+        };
+        /**
          * ConnectorInfoOut
          * @description Where to point an MCP client. The SPA shows ``mcp_url`` in the
          *     connector card and the operator pastes it into Claude / Cursor.
@@ -10366,10 +10516,31 @@ export interface components {
              */
             count?: number;
         };
+        /**
+         * Direction
+         * @enum {string}
+         */
+        Direction: "out" | "in" | "none";
         /** DiscardDryRunOut */
         DiscardDryRunOut: {
             /** Discarded */
             discarded: number;
+        };
+        /**
+         * DisconnectIn
+         * @description ``handle`` as connections.list gave it, and the item it was listed
+         *     for (whose write scope the disconnect needs).
+         */
+        DisconnectIn: {
+            this_kind: components["schemas"]["ItemKind"];
+            /**
+             * This Id
+             * Format: uuid
+             */
+            this_id: string;
+            /** Handle */
+            handle: string;
+            that_kind: components["schemas"]["ItemKind"];
         };
         /** DispatchDecisionIn */
         DispatchDecisionIn: {
@@ -13206,6 +13377,11 @@ export interface components {
             /** Is Default */
             is_default?: boolean | null;
         };
+        /**
+         * ItemKind
+         * @enum {string}
+         */
+        ItemKind: "note" | "task";
         /** KgEntityRef */
         KgEntityRef: {
             /**
@@ -15939,6 +16115,11 @@ export interface components {
             /** Batch Size */
             batch_size: number;
         };
+        /**
+         * Relation
+         * @enum {string}
+         */
+        Relation: "related" | "works_on" | "derives_from" | "promoted_to" | "result_of" | "supersedes" | "contradicts" | "subtask_of" | "depends_on" | "mentions";
         /** ReminderIn */
         ReminderIn: {
             /** Offset Minutes */
@@ -33128,6 +33309,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KgReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connections_connections_get: {
+        parameters: {
+            query: {
+                this_kind: components["schemas"]["ItemKind"];
+                this_id: string;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_items_connections_connect_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_items_connections_disconnect_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisconnectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionActionOut"];
                 };
             };
             /** @description Validation Error */

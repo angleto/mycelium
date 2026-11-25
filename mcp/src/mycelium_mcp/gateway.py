@@ -413,6 +413,9 @@ _PREFIX_ARGS_BY_KIND: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
     # garden_proposal_decide / _reopen (ADR-0075): a synthesis is a note; a
     # link proposal and a fact are kinds resolve_prefix cannot reach.
     "id": ("kind", {"synthesis": ("note",)}),
+    # connections (ADR-0077): each end names its kind beside its id.
+    "this_id": ("this_kind", {"note": ("note",), "task": ("task",)}),
+    "that_id": ("that_kind", {"note": ("note",), "task": ("task",)}),
     "parent_id": ("parent_kind", {"task": ("task",), "note": ("note",)}),
     # An annotation's document: a note PART under 'note_part' (not expandable,
     # so absent from the inner map) or a task under 'task_description'.
@@ -546,6 +549,10 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # existed the bound tools were counted in docs/mcp-coverage.md and
     # listed under no heading.
     ("kg", ("kg_",)),
+    # Connections between notes and tasks (ADR-0077): registry-bound, domain
+    # from the declaration; the rule orders the bucket next to navigation,
+    # which holds the per-mechanism link tools.
+    ("connections", ("connection", "connect_items")),
     # Navigation/relations must come next: link/relation/resolve tools
     # also contain "note"/"task" in their names, so they would otherwise
     # be swallowed by the notes/tasks rules below.

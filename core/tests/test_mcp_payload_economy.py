@@ -536,3 +536,24 @@ async def test_a_list_of_short_ids_expands_element_by_element() -> None:
     full = args["source_note_ids"]
     assert [len(x) for x in full] == [36, 36]  # type: ignore[attr-defined]
     assert [x[:8] for x in full] == [a["id"], b["id"]]  # type: ignore[index]
+
+
+async def test_the_short_ids_of_both_ends_of_a_connection_expand_by_their_kind() -> None:
+    """``connect_items`` takes a note or a task at either end: a short id
+    expands by the kind named beside it, a note's as a note and a task's as
+    a task."""
+    from mycelium_mcp.gateway import _expand_prefixes
+
+    org = await _org()
+    async with _as_principal(org):
+        n = await execute_tool(name="create_note", arguments={"kind": "text", "text": "n"})
+        t = await execute_tool(name="create_task", arguments={"title": "t"})
+        args: dict[str, object] = {
+            "this_kind": "note",
+            "this_id": n["id"],
+            "that_kind": "task",
+            "that_id": t["id"],
+        }
+        assert await _expand_prefixes(args) is None
+    assert str(args["this_id"]).startswith(n["id"]) and len(str(args["this_id"])) == 36
+    assert str(args["that_id"]).startswith(t["id"]) and len(str(args["that_id"])) == 36

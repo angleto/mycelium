@@ -33,6 +33,7 @@ from mycelium_api.routers import (
     buildinfo,
     calendars,
     capabilities,
+    connections,
     connector_webhooks,
     dependencies,
     device,
@@ -470,6 +471,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(garden.router)
     app.include_router(kg.router)
+    app.include_router(connections.router)
     app.include_router(attachments.router)
     app.include_router(capabilities.router)
     app.include_router(invoices.router)

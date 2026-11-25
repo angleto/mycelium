@@ -1,22 +1,19 @@
-"""The verbs the store canonicalises are the verbs the surface merges.
+"""The kinds of note link the store knows are the kinds the surface knows,
+and the direction a person reads is the one the store means.
 
-Two files hold this list: ``models.note_link``, where the service decides
-which kinds get their endpoints sorted before the row is written, and
-``web/src/shared/noteLinks.ts``, where the panels decide which kinds are
-rendered as one neighbour list rather than as two directions. They are in
-different languages and different packages, and neither can import the
-other.
+This test used to compare two hand-kept lists: the kinds the service
+canonicalises (``models.note_link``) and the kinds the web panels rendered
+as one neighbour list (``web/src/shared/noteLinks.ts``). The defect it was
+written after was an undirected ``related`` edge visible from one of its
+two notes only. Since ADR-0077 the web no longer decides direction: the
+connections service returns each connection with its direction seen from
+the item asked about, and the web shows it. So the agreement that matters
+now is:
 
-Drift here is silent, because nothing breaks: the panel keeps rendering.
-A kind the server canonicalises and the client still treats as directional
-is shown on whichever of its two notes happens to sort lower by id and on
-neither the other -- which is the defect this pair was written after, an
-undirected ``related`` edge visible from one endpoint only. The opposite
-direction splits a real direction into a single list and loses which note
-grew from which.
-
-So the agreement is asserted as equality, on both lists: the set of kinds
-and the subset that is undirected.
+- the web's ``NoteLinkKind`` type names exactly the store's kinds, since
+  the link proposals panel still offers them by name;
+- the connections adapter reads exactly the undirected kinds as having no
+  direction, and every other kind as a direction, from both ends.
 """
 
 from __future__ import annotations
@@ -28,30 +25,35 @@ from mycelium_core.models.note_link import (
     NOTE_NOTE_LINK_KINDS,
     NOTE_NOTE_LINK_UNDIRECTED_KINDS,
 )
+from mycelium_core.services.connections import Direction, note_notes
 
 _SHARED = pathlib.Path(__file__).resolve().parents[2] / "web" / "src" / "shared" / "noteLinks.ts"
 
 
-def _list_in_web(name: str) -> set[str]:
+def test_the_web_type_names_the_same_four_kinds() -> None:
     source = _SHARED.read_text(encoding="utf-8")
-    match = re.search(
-        rf"export const {name}: readonly NoteLinkKind\[\] = \[(.*?)\]",
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, f"{name} not found in {_SHARED}"
-    return set(re.findall(r"'([^']+)'", match.group(1)))
+    match = re.search(r"export type NoteLinkKind = ([^\n]*)", source)
+    assert match is not None, f"NoteLinkKind not found in {_SHARED}"
+    assert set(re.findall(r"'([^']+)'", match.group(1))) == set(NOTE_NOTE_LINK_KINDS)
 
 
-def test_the_web_knows_the_same_four_verbs() -> None:
-    assert _list_in_web("NOTE_LINK_KINDS") == set(NOTE_NOTE_LINK_KINDS)
-
-
-def test_the_web_merges_exactly_the_kinds_the_service_canonicalises() -> None:
-    assert _list_in_web("UNDIRECTED_NOTE_LINK_KINDS") == set(NOTE_NOTE_LINK_UNDIRECTED_KINDS)
+def test_every_stored_kind_has_a_relation_and_only_the_undirected_lack_direction() -> None:
+    """Every stored kind maps to a relation, and the adapter's rule for
+    direction agrees with the store's rule for canonicalisation. Read from
+    the adapter's own table, so a kind added to the store without a
+    relation, or made undirected in one place only, fails here."""
+    assert set(note_notes._RELATION) == set(NOTE_NOTE_LINK_KINDS)
+    undirected = {k for k, r in note_notes._RELATION.items() if r.value == "related"}
+    assert undirected == set(NOTE_NOTE_LINK_UNDIRECTED_KINDS)
 
 
 def test_the_undirected_kinds_are_kinds() -> None:
-    """A typo in either file would make the subset check above pass on a
-    name no verb answers to, which reads as "nothing is undirected"."""
+    """A typo in the store would make the check above pass on a name no
+    verb answers to, which reads as "nothing is undirected"."""
     assert NOTE_NOTE_LINK_UNDIRECTED_KINDS <= NOTE_NOTE_LINK_KINDS
+
+
+def test_direction_is_not_left_to_the_reader() -> None:
+    """The three values a connection can carry; ``none`` is the one the
+    undirected kinds get (asserted end to end in ``test_connections``)."""
+    assert {d.value for d in Direction} == {"out", "in", "none"}

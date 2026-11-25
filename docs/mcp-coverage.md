@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**326 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**329 tools across 17 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -131,6 +131,14 @@ over-fetch the org table and filter in its head.
 | `kg_review_approve` | Approve a proposed knowledge-graph fact (ADR-0071): it becomes |
 | `kg_review_pending` | The knowledge-graph review inbox (ADR-0071): facts a model extracted |
 | `kg_review_reject` | Reject a proposed knowledge-graph fact (ADR-0071): it never becomes |
+
+### connections (3)
+
+| Tool | Summary |
+|---|---|
+| `connect_items` | Connect a note or a task to another note or task with one of the |
+| `disconnect_items` | Remove a connection by the ``handle`` connections.list gave. A |
+| `list_connections` | Every connection of a note or a task, from every mechanism (typed |
 
 ### navigation (18)
 

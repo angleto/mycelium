@@ -18,10 +18,9 @@ import { TagPicker } from '../components/TagPicker'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { VoicePlayer } from '../components/VoicePlayer'
-import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
-import { NoteLinksPanel } from '../components/NoteLinksPanel'
 import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
 import { GeneratedFromNotePanel } from '../components/GeneratedFromNotePanel'
+import { ConnectionsPanel } from '../components/ConnectionsPanel'
 import { LinkProposalsPanel } from '../components/LinkProposalsPanel'
 import { NoteHistoryPanel } from '../components/NoteHistoryPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
@@ -137,20 +136,17 @@ export function NoteDetailRoute({
     }
   }, [detailsOpen])
 
-  // Unified "Connections" group: linked tasks / note links / garden
-  // suggestions share one tabbed surface. Active tab remembered per note.
+  // Connections (ADR-0077): every connection of the note in one panel, and
+  // the garden's suggestions in the other tab. Active tab remembered per note.
   const connKey = `mycelium.note.${id}.connTab`
-  const [connTab, setConnTab] = useState<'tasks' | 'ideas' | 'suggestions'>(
-    () => {
-      try {
-        const v = localStorage.getItem(connKey)
-        if (v === 'tasks' || v === 'ideas' || v === 'suggestions') return v
-      } catch {
-        /* private mode / quota */
-      }
-      return 'tasks'
-    },
-  )
+  const [connTab, setConnTab] = useState<'links' | 'suggestions'>(() => {
+    try {
+      if (localStorage.getItem(connKey) === 'suggestions') return 'suggestions'
+    } catch {
+      /* private mode / quota */
+    }
+    return 'links'
+  })
   useEffect(() => {
     try {
       localStorage.setItem(connKey, connTab)
@@ -890,20 +886,11 @@ export function NoteDetailRoute({
           <button
             type="button"
             role="tab"
-            aria-selected={connTab === 'tasks'}
-            className={`tabs__tab${connTab === 'tasks' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('tasks')}
+            aria-selected={connTab === 'links'}
+            className={`tabs__tab${connTab === 'links' ? ' is-active' : ''}`}
+            onClick={() => setConnTab('links')}
           >
-            {t('notes.tabTasks')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={connTab === 'ideas'}
-            className={`tabs__tab${connTab === 'ideas' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('ideas')}
-          >
-            {t('notes.tabIdeas')}
+            {t('itemConnections.title')}
           </button>
           <button
             type="button"
@@ -915,15 +902,12 @@ export function NoteDetailRoute({
             {t('notes.tabSuggestions')}
           </button>
         </div>
-        <div role="tabpanel" hidden={connTab !== 'tasks'}>
-          <LinkedTasksPanel noteId={id} />
-        </div>
-        <div role="tabpanel" hidden={connTab !== 'ideas'}>
-          <NoteLinksPanel noteId={id} />
-          <WrittenBacklinksPanel targetKind="note" targetId={id} />
-          <LinkProposalsPanel noteId={id} />
+        <div role="tabpanel" hidden={connTab !== 'links'}>
+          <ConnectionsPanel kind="note" id={id} />
+          <WrittenBacklinksPanel targetKind="note" targetId={id} onlyAmbiguous />
         </div>
         <div role="tabpanel" hidden={connTab !== 'suggestions'}>
+          <LinkProposalsPanel noteId={id} />
           <GardenSuggestionsPanel
             nodeId={id}
             nodeKind="note"

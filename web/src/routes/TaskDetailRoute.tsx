@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errCode, errMessage, errParam, workspaceHeader } from '../api/client'
-import { notesPage } from '../api/notes'
 import { fmtDateTime } from '../lib/tz'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RefreshHint } from '../components/RefreshHint'
@@ -21,7 +20,7 @@ import { AgentRunPanel } from '../components/AgentRunPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { CoordinationPanel } from '../components/CoordinationPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
-import { LinkedNotesPanel } from '../components/LinkedNotesPanel'
+import { ConnectionsPanel } from '../components/ConnectionsPanel'
 import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { TaskTimer } from '../components/TaskTimer'
@@ -43,9 +42,7 @@ type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']
-type Dep = components['schemas']['DependencyOut']
 type Lease = components['schemas']['LeaseOut']
-type Rel = components['schemas']['TaskRelationOut']
 
 // Stable signature of an annotation set: id + version + status +
 // soft-delete flag, sorted so member order never matters. Powers the
@@ -189,23 +186,12 @@ export function TaskDetailRoute({
   const [remCustom, setRemCustom] = useState(false)
   // Channels for the next reminder; empty = the user's default (all enabled).
   const [remChannels, setRemChannels] = useState<string[]>([])
-  const [deps, setDeps] = useState<Dep[]>([])
-  const [depOther, setDepOther] = useState('')
-  const [depQuery, setDepQuery] = useState('')
-  const [depOpen, setDepOpen] = useState(false)
-  const [depRel, setDepRel] = useState<'depends' | 'blocks'>('depends')
-  const [rels, setRels] = useState<Rel[]>([])
-  const [relQuery, setRelQuery] = useState('')
-  const [relOpen, setRelOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   // Tag errors render inside the picker, not in the page-level banner
   // at the bottom of the body column: a rejected client/project change
   // (DomainError -> 400) has to be visible next to the control that
   // caused it, on the other side of the layout grid.
   const [tagErr, setTagErr] = useState<string | null>(null)
-  const [workNotes, setWorkNotes] = useState<
-    { id: string; title: string | null }[]
-  >([])
   // Two tabs in the task body: markdown description and checklist
   // (no modality, both always available; the user picks what to use).
   // The last picked tab is remembered per task in localStorage so that
@@ -229,29 +215,6 @@ export function TaskDetailRoute({
       /* ignore */
     }
   }, [tabKey, activeTab])
-  // Unified "Connections" group: subtasks / dependencies / related /
-  // notes share one tabbed surface. Active tab remembered per task
-  // (mycelium.* localStorage namespace).
-  const connKey = `mycelium.task.${id}.connTab`
-  const [connTab, setConnTab] = useState<
-    'subtasks' | 'deps' | 'related' | 'notes'
-  >(() => {
-    try {
-      const v = localStorage.getItem(connKey)
-      if (v === 'subtasks' || v === 'deps' || v === 'related' || v === 'notes')
-        return v
-    } catch {
-      /* private mode / quota */
-    }
-    return 'subtasks'
-  })
-  useEffect(() => {
-    try {
-      localStorage.setItem(connKey, connTab)
-    } catch {
-      /* ignore */
-    }
-  }, [connKey, connTab])
   // Responsive: below the layout breakpoint the properties rail can't
   // sit beside the content, so it becomes a collapsible panel (closed
   // by default) above the body. Desktop renders it as a sticky rail.
@@ -335,20 +298,6 @@ export function TaskDetailRoute({
     apply(data)
   }, [id, apply])
 
-  const reloadDeps = useCallback(async () => {
-    const { data } = await api.GET('/dependencies', {
-      params: { header: workspaceHeader() },
-    })
-    if (data) setDeps(data)
-  }, [])
-
-  const reloadRels = useCallback(async () => {
-    const { data } = await api.GET('/task-relations', {
-      params: { header: workspaceHeader(), query: { task_id: id } },
-    })
-    if (data) setRels(data)
-  }, [id])
-
   useEffect(() => {
     let active = true
     // Hydrate the task surface immediately from the navigation seed
@@ -387,7 +336,7 @@ export function TaskDetailRoute({
         : api.GET('/tasks/{task_id}', {
             params: { header: h, path: { task_id: id } },
           })
-      const [tk, st, tg, pj, all, dp, ws, rm, nt, rl, ls] = await Promise.all([
+      const [tk, st, tg, pj, all, ws, rm, ls] = await Promise.all([
         tkPromise,
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -399,15 +348,10 @@ export function TaskDetailRoute({
           params: { header: h, query: { include_archived: true } },
         }),
         api.GET('/tasks', { params: { header: h } }),
-        api.GET('/dependencies', { params: { header: h } }),
         api.GET('/workspaces/me', { params: { header: h } }),
         api.GET('/tasks/{task_id}/reminders', {
           params: { header: h, path: { task_id: id } },
         }),
-        // The task's own notes, asked for by task: the list's first page
-        // holds the newest notes of the workspace, not this task's.
-        notesPage({ task_id: id, limit: 200 }),
-        api.GET('/task-relations', { params: { header: h, query: { task_id: id } } }),
         // Possession (ADR-0063). Fetched with the rest rather than on a
         // failed transition, because the point is to say who holds the
         // task BEFORE somebody tries to move it: a person who learns it
@@ -426,15 +370,8 @@ export function TaskDetailRoute({
       if (tg.data) setTags(tg.data)
       if (pj.data) setProjects(pj.data)
       if (all.data) setAllTasks(all.data)
-      if (dp.data) setDeps(dp.data)
-      if (rl.data) setRels(rl.data)
       if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
       if (rm.data) setReminders(rm.data)
-      setWorkNotes(
-        nt.items
-          .filter((n) => n.task_id === id)
-          .map((n) => ({ id: n.id, title: n.title })),
-      )
     })().catch((e: unknown) => {
       if (active) setErr(errMessage(e))
     })
@@ -1024,103 +961,8 @@ export function TaskDetailRoute({
     leave(`/notes/${data.id}`)
   }
 
-  async function onAddDep() {
-    if (!depOther) return
-    setErr(null)
-    // depends-on: the other task must finish first (it is the
-    // predecessor). blocks: this task is the predecessor. FS edges feed
-    // the deterministic scheduler; cycles are rejected server-side.
-    const body =
-      depRel === 'depends'
-        ? { predecessor_id: depOther, successor_id: id, type: 'FS' as const }
-        : { predecessor_id: id, successor_id: depOther, type: 'FS' as const }
-    const { error } = await api.POST('/dependencies', {
-      params: { header: workspaceHeader() },
-      body: { ...body, lag_working_minutes: 0 },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setDepOther('')
-    setDepQuery('')
-    setDepOpen(false)
-    await reloadDeps()
-  }
-
-  async function onRemoveDep(depId: string) {
-    setErr(null)
-    const { error } = await api.DELETE('/dependencies/{dependency_id}', {
-      params: { header: workspaceHeader(), path: { dependency_id: depId } },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    await reloadDeps()
-  }
-
-  async function onAddRelated(otherId: string) {
-    if (!otherId || otherId === id) return
-    setErr(null)
-    const { error } = await api.POST('/task-relations', {
-      params: { header: workspaceHeader() },
-      body: { task_id: id, other_id: otherId },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setRelQuery('')
-    setRelOpen(false)
-    await reloadRels()
-  }
-
-  async function onRemoveRelated(relId: string) {
-    setErr(null)
-    const { error } = await api.DELETE('/task-relations/{relation_id}', {
-      params: { header: workspaceHeader(), path: { relation_id: relId } },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    await reloadRels()
-  }
-
   const titleOf = (tid: string) =>
     allTasks.find((x) => x.id === tid)?.title ?? tid.slice(0, 8)
-  const subtasks = allTasks
-    .filter((x) => x.parent_task_id === id && !x.deleted_at)
-    .sort((a, b) => a.title.localeCompare(b.title))
-  const dependsOn = deps.filter((d) => d.successor_id === id)
-  const blocks = deps.filter((d) => d.predecessor_id === id)
-  const depQ = depQuery.trim().toLowerCase()
-  const depMatches = allTasks
-    .filter(
-      (x) =>
-        x.id !== id &&
-        (depQ === '' ||
-          x.title.toLowerCase().includes(depQ) ||
-          x.id.startsWith(depQ)),
-    )
-    .slice(0, 10)
-  // Symmetric relations: pick the *other* endpoint regardless of which
-  // side of the canonical pair this task lives on.
-  const relatedIds = new Set(
-    rels.map((r) => (r.task_a_id === id ? r.task_b_id : r.task_a_id)),
-  )
-  const relQ = relQuery.trim().toLowerCase()
-  const relMatches = allTasks
-    .filter(
-      (x) =>
-        x.id !== id &&
-        !relatedIds.has(x.id) &&
-        (relQ === '' ||
-          x.title.toLowerCase().includes(relQ) ||
-          x.id.startsWith(relQ)),
-    )
-    .slice(0, 10)
 
   // Autosave covers every field. A "save now" button is intentionally
   // gone — the debounced effect above flushes title/description ~1s
@@ -1676,260 +1518,18 @@ export function TaskDetailRoute({
       </div>
 
       <section className="taskdetail__connections">
-        <h2 className="taskdetail__connh">{t('tasks.connections')}</h2>
-        <div
-          className="tabs"
-          role="tablist"
-          aria-label={t('tasks.connections')}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={connTab === 'subtasks'}
-            className={`tabs__tab${connTab === 'subtasks' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('subtasks')}
-          >
-            {t('tasks.subtasks')}
+        {/* Every connection of the task, from every mechanism, in one panel
+            (ADR-0077): subtasks, dependencies, related tasks, notes, and
+            mentions written in a body. */}
+        <ConnectionsPanel kind="task" id={id} />
+        <WrittenBacklinksPanel targetKind="task" targetId={id} onlyAmbiguous />
+        <div className="row">
+          <button type="button" className="btn--sm" onClick={() => void openWorkNote()}>
+            {t('tasks.workNote')}
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={connTab === 'deps'}
-            className={`tabs__tab${connTab === 'deps' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('deps')}
-          >
-            {t('tasks.deps')}
+          <button type="button" className="btn--sm" onClick={() => void newWorkNote()}>
+            {t('tasks.newWorkNote')}
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={connTab === 'related'}
-            className={`tabs__tab${connTab === 'related' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('related')}
-          >
-            {t('tasks.related')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={connTab === 'notes'}
-            className={`tabs__tab${connTab === 'notes' ? ' is-active' : ''}`}
-            onClick={() => setConnTab('notes')}
-          >
-            {t('tasks.connNotes')}
-          </button>
-        </div>
-        <div role="tabpanel" hidden={connTab !== 'deps'}>
-      {dependsOn.length === 0 && blocks.length === 0 ? (
-        <p className="hint">{t('tasks.depNone')}</p>
-      ) : (
-        <ul className="list">
-          {dependsOn.map((d) => (
-            <li key={d.id}>
-              <strong>{t('tasks.dependsOn')}:</strong>{' '}
-              <Link to={`/tasks/${d.predecessor_id}`}>
-                {titleOf(d.predecessor_id)}
-              </Link>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void onRemoveDep(d.id)}
-              >
-                {t('tasks.remove')}
-              </button>
-            </li>
-          ))}
-          {blocks.map((d) => (
-            <li key={d.id}>
-              <strong>{t('tasks.blocksL')}:</strong>{' '}
-              <Link to={`/tasks/${d.successor_id}`}>
-                {titleOf(d.successor_id)}
-              </Link>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void onRemoveDep(d.id)}
-              >
-                {t('tasks.remove')}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="row">
-        <label>
-          {t('tasks.relation')}
-          <select
-            value={depRel}
-            onChange={(e) => setDepRel(e.target.value as 'depends' | 'blocks')}
-          >
-            <option value="depends">{t('tasks.dependsOn')}</option>
-            <option value="blocks">{t('tasks.blocksL')}</option>
-          </select>
-        </label>
-        <label className="deppick">
-          {t('tasks.otherTask')}
-          <input
-            type="text"
-            value={depQuery}
-            placeholder={t('tasks.depSearch')}
-            onChange={(e) => {
-              setDepQuery(e.target.value)
-              setDepOther('')
-              setDepOpen(true)
-            }}
-            onFocus={() => setDepOpen(true)}
-            onBlur={() => window.setTimeout(() => setDepOpen(false), 150)}
-          />
-          {depOpen && depMatches.length > 0 && (
-            <div className="deppick__list">
-              {depMatches.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  className={
-                    'deppick__row' +
-                    (x.id === depOther ? ' deppick__row--sel' : '')
-                  }
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setDepOther(x.id)
-                    setDepQuery(x.title)
-                    setDepOpen(false)
-                  }}
-                >
-                  {x.title}
-                </button>
-              ))}
-            </div>
-          )}
-        </label>
-        <button type="button" onClick={() => void onAddDep()}>
-          {t('tasks.addDep')}
-        </button>
-      </div>
-          <p className="hint">{t('tasks.relatedTo')}</p>
-        </div>
-        <div role="tabpanel" hidden={connTab !== 'subtasks'}>
-          {task.parent_task_id == null && subtasks.length === 0 && (
-            <p className="hint">{t('tasks.subtasksNone')}</p>
-          )}
-          {(task.parent_task_id || subtasks.length > 0) && (
-            <>
-          {task.parent_task_id && (
-            <p className="hint">
-              {t('tasks.parentLabel')}{' '}
-              <Link to={`/tasks/${task.parent_task_id}`}>
-                {titleOf(task.parent_task_id)}
-              </Link>
-            </p>
-          )}
-          {subtasks.length === 0 ? (
-            <p className="hint">{t('tasks.subtasksNone')}</p>
-          ) : (
-            <ul className="subtasks">
-              {subtasks.map((s) => (
-                <li key={s.id}>
-                  <Link to={`/tasks/${s.id}`}>{s.title}</Link>
-                  {s.is_archived && (
-                    <span className="hint"> ({t('tasks.archivedSuffix')})</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-            </>
-          )}
-        </div>
-        <div role="tabpanel" hidden={connTab !== 'related'}>
-          {rels.length === 0 ? (
-        <p className="hint">{t('tasks.relatedNone')}</p>
-      ) : (
-        <div className="chips">
-          {rels.map((r) => {
-            const otherId = r.task_a_id === id ? r.task_b_id : r.task_a_id
-            return (
-              <span key={r.id} className="chip">
-                <Link to={`/tasks/${otherId}`}>{titleOf(otherId)}</Link>
-                <button
-                  type="button"
-                  className="btn--ghost btn--sm"
-                  title={t('tasks.relatedRemove')}
-                  onClick={() => void onRemoveRelated(r.id)}
-                >
-                  ✕
-                </button>
-              </span>
-            )
-          })}
-        </div>
-      )}
-      <div className="row">
-        <label className="deppick">
-          {t('tasks.relatedAdd')}
-          <input
-            type="text"
-            value={relQuery}
-            placeholder={t('tasks.relatedSearch')}
-            onChange={(e) => {
-              setRelQuery(e.target.value)
-              setRelOpen(true)
-            }}
-            onFocus={() => setRelOpen(true)}
-            onBlur={() => window.setTimeout(() => setRelOpen(false), 150)}
-          />
-          {relOpen && relMatches.length > 0 && (
-            <div className="deppick__list">
-              {relMatches.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  className="deppick__row"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    void onAddRelated(x.id)
-                  }}
-                >
-                  {x.title}
-                </button>
-              ))}
-            </div>
-          )}
-        </label>
-      </div>
-        </div>
-        <div role="tabpanel" hidden={connTab !== 'notes'}>
-          <LinkedNotesPanel taskId={id} />
-          <WrittenBacklinksPanel targetKind="task" targetId={id} />
-          <div className="row">
-            <button
-              type="button"
-              className="btn--sm"
-              onClick={() => void openWorkNote()}
-            >
-              {t('tasks.workNote')}
-            </button>
-            <button
-              type="button"
-              className="btn--sm"
-              onClick={() => void newWorkNote()}
-            >
-              {t('tasks.newWorkNote')}
-            </button>
-          </div>
-          {workNotes.length === 0 ? (
-            <p className="hint">{t('tasks.noWorkNotes')}</p>
-          ) : (
-            <ul className="list">
-              {workNotes.map((n) => (
-                <li key={n.id}>
-                  <Link to={`/notes/${n.id}`}>
-                    {n.title || t('notes.untitled')}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </section>
 

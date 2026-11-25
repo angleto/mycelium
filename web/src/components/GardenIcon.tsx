@@ -15,7 +15,7 @@
 //     contradicts (broken twig)
 //   - note<->task link kinds: references (pointing arc) and
 //     derives_from (root spread); leaf / branch double as task-link
-//     glyphs (see LinkedTasksPanel)
+//     glyphs (the note-task link kinds)
 //   - maturity: seed (buried seed), sprout (two cotyledons),
 //     branch (forked stem), leaf (full leaf), compost (decomposing
 //     leaf)
@@ -28,7 +28,7 @@ export type GardenIconName =
   | 'related'
   | 'supersedes'
   | 'contradicts'
-  // note<->task link kinds (LinkedTasksPanel)
+  // note<->task link kinds
   | 'references'
   | 'derives_from'
   // Maturity
@@ -58,7 +58,7 @@ const PATH: Record<GardenIconName, string> = {
   contradicts:
     'M4 6c4 2 6 4 7 6M20 18c-4-2-6-4-7-6M11 12l-2 1M13 12l2-1M9 13l-3 1M15 11l3-1',
 
-  // --- note<->task link kinds (LinkedTasksPanel) --------------------
+  // --- note<->task link kinds -----------------------------------------
   // Pointing arc: classic right-arrow trimmed to a citation gesture.
   references: 'M4 12h13M11 6l6 6-6 6',
   // Roots spreading: source-of (derives_from = origin in the soil).

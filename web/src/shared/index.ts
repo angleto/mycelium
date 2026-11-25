@@ -72,12 +72,4 @@ export {
 export type { Lease, Possession } from './leases'
 export { possessionOf, possessionsByTask, possessionsForBoard } from './leases'
 
-export type { NoteLinkKind, NoteEdge, NoteLinkGroup } from './noteLinks'
-export {
-  NOTE_LINK_KINDS,
-  UNDIRECTED_NOTE_LINK_KINDS,
-  groupNoteLinks,
-  isUndirectedNoteLinkKind,
-  linkedNeighbourIds,
-  otherEndpoint,
-} from './noteLinks'
+export type { NoteLinkKind } from './noteLinks'

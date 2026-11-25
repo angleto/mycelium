@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { allNotes } from '../api/notes'
+import { ConnectionsPanel } from '../components/ConnectionsPanel'
 import { MarkdownView } from '../components/Markdown'
 import { GardenMindmap } from '../components/GardenMindmap'
 import { CopyIdButton } from '../components/CopyIdButton'
@@ -31,12 +32,9 @@ import { Toggle } from '../components/Toggle'
 import { useFocus } from '../lib/focus'
 import { getSession } from '../auth/session'
 import type { components } from '../shared'
-import { groupNoteLinks, otherEndpoint } from '../shared'
 
 type Note = components['schemas']['NoteListOut']
 type NoteWithLinks = components['schemas']['NoteWithLinksOut']
-type NoteLink = components['schemas']['NoteLinkOut']
-type TaskBrief = { id: string; title: string }
 
 type Tab = 'inbox' | 'garden' | 'cemetery' | 'mindmap'
 type View = 'list' | 'kanban'
@@ -124,7 +122,6 @@ export function GardenRoute() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const [notes, setNotes] = useState<Note[]>([])
-  const [allTasks, setAllTasks] = useState<TaskBrief[]>([])
   const session = getSession()
   const workspaceId = session?.workspaceId ?? null
   const [tab, setTab] = useState<Tab>(() => loadActiveTab(workspaceId))
@@ -185,18 +182,13 @@ export function GardenRoute() {
     let active = true
     void (async () => {
       try {
-        const [n, tk] = await Promise.all([
-          allNotes().then(
-            (rows) => ({ rows, error: null as unknown }),
-            (error: unknown) => ({ rows: null, error }),
-          ),
-          api.GET('/tasks', { params: { header: workspaceHeader() } }),
-        ])
+        const n = await allNotes().then(
+          (rows) => ({ rows, error: null as unknown }),
+          (error: unknown) => ({ rows: null, error }),
+        )
         if (!active) return
         if (n.rows === null) setErr(errMessage(n.error))
         else setNotes(n.rows)
-        if (tk.data)
-          setAllTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
       } finally {
         if (active) setLoading(false)
       }
@@ -734,25 +726,7 @@ export function GardenRoute() {
               {openData === null ? (
                 <p className="hint">{t('garden.loading')}</p>
               ) : (
-                <PlantDetail
-                  data={openData}
-                  allNotes={notes}
-                  allTasks={allTasks}
-                  onUnlink={async (link) => {
-                    await api.DELETE('/notes/{note_id}/links', {
-                      params: {
-                        header: workspaceHeader(),
-                        path: { note_id: openId },
-                        query: {
-                          parent_note_id: link.parent_note_id,
-                          child_note_id: link.child_note_id,
-                          kind: link.kind,
-                        },
-                      },
-                    })
-                    await openPlant(openId)
-                  }}
-                />
+                <PlantDetail data={openData} />
               )}
             </div>
           </div>
@@ -762,66 +736,9 @@ export function GardenRoute() {
   )
 }
 
-function PlantDetail({
-  data,
-  allNotes,
-  allTasks,
-  onUnlink,
-}: {
-  data: NoteWithLinks
-  allNotes: Note[]
-  allTasks: TaskBrief[]
-  onUnlink: (link: NoteLink) => Promise<void>
-}) {
+function PlantDetail({ data }: { data: NoteWithLinks }) {
   const { t } = useTranslation()
-  const titleById = (id: string) =>
-    allNotes.find((x) => x.id === id)?.title?.trim() || id.slice(0, 8)
-  const taskTitleById = (id: string) =>
-    allTasks.find((x) => x.id === id)?.title?.trim() || id.slice(0, 8)
   const n = data.note
-  // The schema marks default-valued arrays as optional (post fix to
-  // gen:api --default-non-nullable false), so guard them with empty
-  // fallbacks once at the top of the render.
-  const taskLinks = data.task_links ?? []
-  // The stored (parent, child) order is a direction only for the
-  // directional kinds; for the undirected ones it is a canonicalisation
-  // by id, so those edges get their own section instead of being filed
-  // under a direction that would be this note's id sorting low or high.
-  const groups = groupNoteLinks(data.outgoing ?? [], data.incoming ?? [])
-  const asParent = groups.flatMap((g) => (g.directional ? g.asParent : []))
-  const asChild = groups.flatMap((g) => (g.directional ? g.asChild : []))
-  const undirected = groups.flatMap((g) => (g.directional ? [] : g.neighbours))
-  const linkRow = (l: NoteLink) => {
-    const other = otherEndpoint(l, n.id)
-    return (
-      <li key={l.id}>
-        <span
-          className="chip chip--linkkind"
-          title={t(`garden.mindmap.linkKindHint.${l.kind}`)}
-        >
-          {t(`garden.mindmap.linkKind.${l.kind}`)}
-        </span>{' '}
-        <Link to={`/notes/${other}`}>{titleById(other)}</Link>{' '}
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          onClick={() => void onUnlink(l)}
-        >
-          {t('garden.unlink')}
-        </button>
-      </li>
-    )
-  }
-  const linkSection = (heading: string, links: NoteLink[]) => (
-    <section className="plant-detail__section">
-      <h3>{heading}</h3>
-      {links.length === 0 ? (
-        <p className="hint">{t('garden.none')}</p>
-      ) : (
-        <ul className="plant-detail__links">{links.map(linkRow)}</ul>
-      )}
-    </section>
-  )
   return (
     <div className="plant-detail">
       <div className="plant-detail__chips">
@@ -838,26 +755,9 @@ function PlantDetail({
           <MarkdownView text={n.transcript} parent={{ kind: 'note', id: n.id }} />
         </div>
       )}
-      {linkSection(t('garden.outgoing'), asParent)}
-      {linkSection(t('garden.incoming'), asChild)}
-      {linkSection(t('garden.undirected'), undirected)}
-      <section className="plant-detail__section">
-        <h3>{t('garden.fruits')}</h3>
-        {taskLinks.length === 0 ? (
-          <p className="hint">{t('garden.none')}</p>
-        ) : (
-          <ul className="plant-detail__links">
-            {taskLinks.map((l) => (
-              <li key={l.id}>
-                <span className="chip chip--linkkind">{l.kind}</span>{' '}
-                <Link to={`/tasks/${l.task_id}`}>
-                  {taskTitleById(l.task_id)}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {/* The same panel as on the note page (ADR-0077): every connection,
+          its direction in words, Connect and Disconnect. */}
+      <ConnectionsPanel kind="note" id={n.id} />
     </div>
   )
 }

@@ -72,6 +72,10 @@ TOOLS: dict[str, Any] = {
     ),
     # A person's pins (migration 0033); ``list_notes(pinned=true)`` reads
     # them back.
+    # one way to connect two things, notes or tasks (ADR-0077)
+    "list_connections": bind_tool(mcp, op_ctx, "connections.list", name="list_connections"),
+    "connect_items": bind_tool(mcp, op_ctx, "connections.connect", name="connect_items"),
+    "disconnect_items": bind_tool(mcp, op_ctx, "connections.disconnect", name="disconnect_items"),
     "pin_note": bind_tool(mcp, op_ctx, "notes.pin", name="pin_note"),
     "unpin_note": bind_tool(mcp, op_ctx, "notes.unpin", name="unpin_note"),
     # The outline is what this tool is for; the bodies are one flag away.

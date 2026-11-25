@@ -16,9 +16,14 @@ type TargetKind = 'note' | 'task' | 'tag'
 export function WrittenBacklinksPanel({
   targetKind,
   targetId,
+  onlyAmbiguous = false,
 }: {
   targetKind: TargetKind
   targetId: string
+  /** Show only the mentions whose code names more than one item, to be
+   *  resolved here. The resolved ones are rows of the Connections panel
+   *  (ADR-0077); with nothing to resolve the panel renders nothing. */
+  onlyAmbiguous?: boolean
 }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<Backlink[]>([])
@@ -71,18 +76,25 @@ export function WrittenBacklinksPanel({
     return row.part_id ? `${base}#part-${row.part_id}` : base
   }
 
+  const shown = onlyAmbiguous ? rows.filter((r) => r.status === 'ambiguous') : rows
+  if (onlyAmbiguous && shown.length === 0 && !err) return null
+
   return (
     <div className="linkedpanel">
       <div className="linkedpanel__head">
-        <h3 className="linkedpanel__h">{t('writtenBacklinks.title')}</h3>
-        <span className="muted">{t('writtenBacklinks.headHint')}</span>
+        <h3 className="linkedpanel__h">
+          {t(onlyAmbiguous ? 'writtenBacklinks.ambiguousTitle' : 'writtenBacklinks.title')}
+        </h3>
+        <span className="muted">
+          {t(onlyAmbiguous ? 'writtenBacklinks.ambiguousHeadHint' : 'writtenBacklinks.headHint')}
+        </span>
       </div>
       {err && <p className="error">{err}</p>}
-      {rows.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="hint linkedpanel__empty">{t('writtenBacklinks.empty')}</p>
       ) : (
         <ul className="linkedpanel__list">
-          {rows.map((row) => (
+          {shown.map((row) => (
             <li key={row.reference_id} className="linkedpanel__item writtenref">
               <div className="writtenref__body">
                 <Link className="linkedpanel__title" to={sourceLink(row)}>
