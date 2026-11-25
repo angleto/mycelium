@@ -89,13 +89,16 @@ from mycelium_core.operations.garden_views import (
     GardenReviewGuardedIn,
     GardenReviewNodeIn,
     GardenReviewPendingItem,
+    GardenReviewReadIn,
     GardenReviewReadingOut,
     GardenReviewRejectedItem,
     GardenReviewRemoveOut,
     GardenReviewReviseIn,
     GardenReviewReviseOut,
     GardenReviewRevisionRef,
+    GardenReviewSourceIn,
     GardenReviewSourceOut,
+    GardenReviewSourceSliceOut,
     GardenTagSuggestionOut,
     GardenTelemetryIn,
     GardenWalkIn,
@@ -654,6 +657,13 @@ async def candidates(ctx: OpCtx, p: GardenCandidatesIn) -> GardenCandidatesOut:
 # Review of generated text (ADR-0043)
 # --------------------------------------------------------------------------
 
+#: The sources' share of one agent reading, in characters, taken together.
+#: Measured on production 2026-11-24: one 93,218-character source made the
+#: whole reading 96,184 characters, which Claude Code would not take as one
+#: result. 24,000 leaves the proposal (at most 20,000 by the external cap),
+#: the checks and the envelope inside a result a client accepts.
+_SOURCE_BUDGET = 24_000
+
 
 @operation(
     "garden.review.pending",
@@ -867,10 +877,10 @@ async def review_restore_source(ctx: OpCtx, p: GardenRestoreSourceIn) -> GardenR
     domain=GARDEN,
     kind=Kind.READ,
     access="notes:read",
-    params=GardenReviewNodeIn,
+    params=GardenReviewReadIn,
     result=GardenReviewReadingOut,
 )
-async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingOut:
+async def review_read(ctx: OpCtx, p: GardenReviewReadIn) -> GardenReviewReadingOut:
     """Read a generated note in full, pending, declined or approved, with
     the whole text of the notes it was generated from, the checks attached
     to it and, for a revision, the original it replaces (ADR-0075,
@@ -880,9 +890,17 @@ async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingO
     A proposal is NOT part of the memory: ``review_state`` says so. Do not
     ground an answer on a 'proposed' or 'declined' text, and do not quote it
     as something the person wrote; only the person's approval makes it a
-    note."""
+    note.
+
+    The sources share a budget of about 24,000 characters; a source cut to
+    fit says ``body_truncated`` and its ``body_chars``. Read the rest with
+    garden_review_read_source before checking a claim against it."""
     r = await review_svc.read_node(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, note_id=p.note_id
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        source_budget=None if p.full_text else _SOURCE_BUDGET,
     )
     return GardenReviewReadingOut(
         note_id=r.note_id,
@@ -896,7 +914,12 @@ async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingO
         version=r.version,
         sources=[
             GardenReviewSourceOut(
-                note_id=x.note_id, title=x.title, body=x.body, is_archived=x.is_archived
+                note_id=x.note_id,
+                title=x.title,
+                body=x.body,
+                is_archived=x.is_archived,
+                body_chars=x.body_chars,
+                body_truncated=x.body_truncated,
             )
             for x in r.sources
         ],
@@ -934,6 +957,36 @@ async def review_read(ctx: OpCtx, p: GardenReviewNodeIn) -> GardenReviewReadingO
             )
             for x in r.revised_by
         ],
+    )
+
+
+@operation(
+    "garden.review.read_source",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenReviewSourceIn,
+    result=GardenReviewSourceSliceOut,
+)
+async def review_read_source(ctx: OpCtx, p: GardenReviewSourceIn) -> GardenReviewSourceSliceOut:
+    """Read one source of a proposal in windows of up to 20,000 characters,
+    from ``offset``: the rest of a source garden_review_read cut. Call again
+    with ``next_offset`` until it is null."""
+    sl = await review_svc.read_source(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        note_id=p.note_id,
+        source_id=p.source_id,
+        offset=p.offset,
+        limit=p.limit,
+    )
+    return GardenReviewSourceSliceOut(
+        source_id=sl.source_id,
+        offset=sl.offset,
+        text=sl.text,
+        total_chars=sl.total_chars,
+        next_offset=sl.next_offset,
     )
 
 

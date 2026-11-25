@@ -451,3 +451,97 @@ async def test_an_assistant_checks_and_revises_and_the_person_decides(_wire: Non
         assert [(m["model_id"], m["approved"], m["rejected"]) for m in ratio] == [
             ("external:claude-test", 1, 0)
         ], ratio
+
+
+async def test_an_agent_reads_a_long_source_within_budget_and_pages_the_rest(
+    _wire: None,
+) -> None:
+    """On production one 93,218-character source made a reading 96,184
+    characters, which a client would not take as one result. An agent's
+    reading now carries the source's opening, says it was cut and how long
+    the whole is, and the rest is read by windows; the person's reading
+    (``full_text``) is whole. A note that is not one of the proposal's
+    sources is not readable through this door."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        long_body = "".join(f"riga {i:05d} del diario di gara.\n" for i in range(3000))
+        async with tenant_session(org, user) as s:
+            src = await nt.create_note(
+                s,
+                org_id=uuid.UUID(org),
+                actor_id=uuid.UUID(user),
+                kind=NoteKind.text,
+                title="diario lungo",
+                text=long_body,
+            )
+            other = await nt.create_note(
+                s,
+                org_id=uuid.UUID(org),
+                actor_id=uuid.UUID(user),
+                kind=NoteKind.text,
+                title="altro",
+                text="unrelated",
+            )
+            res = await decomp.distill_note(
+                s,
+                org_id=uuid.UUID(org),
+                actor_id=uuid.UUID(user),
+                note_id=src.id,
+                distilled_text="Una sintesi breve.",
+                origin_model_id="small",
+            )
+            src_id, other_id, nid = str(src.id), str(other.id), str(res.distilled_note_id)
+        total = len(long_body)
+        assert total > 90_000
+
+        a = await _assistant(c, h)
+        agent = await c.get(f"/garden/review/nodes/{nid}", headers=a)
+        assert agent.status_code == 200, agent.text
+        assert len(agent.text) < 30_000, len(agent.text)
+        source = agent.json()["sources"][0]
+        assert source["body_truncated"] is True and source["body_chars"] == total
+        assert long_body.startswith(source["body"])
+
+        person = (
+            await c.get(f"/garden/review/nodes/{nid}", headers=h, params={"full_text": True})
+        ).json()["sources"][0]
+        assert person["body_truncated"] is False and len(person["body"]) == total
+
+        pieces, offset = [], 0
+        while offset is not None:
+            window = await c.get(
+                f"/garden/review/nodes/{nid}/sources/{src_id}",
+                headers=a,
+                params={"offset": offset},
+            )
+            assert window.status_code == 200, window.text
+            pieces.append(window.json()["text"])
+            offset = window.json()["next_offset"]
+        assert "".join(pieces) == person["body"]
+        assert len(pieces) == -(-total // 20_000)
+
+        stranger = await c.get(f"/garden/review/nodes/{nid}/sources/{other_id}", headers=a)
+        assert stranger.status_code == 404
+
+
+async def test_a_pasted_proposal_code_is_found_and_opens_its_reading(_wire: None) -> None:
+    """A person pasting the code of a proposal must find it: before, the
+    lookup applied the review gate and answered nothing, so the codes the
+    review pages showed led nowhere. Resolution finds it and routes it to
+    the reading view; a list of things to link to still does not offer it."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        prefix = nid.replace("-", "")[:8]
+
+        picker = (await c.get(f"/lookup/{prefix}", headers=h)).json()
+        assert picker["matches"] == []
+
+        found = (
+            await c.get(f"/lookup/{prefix}", headers=h, params={"include_gated": True})
+        ).json()["matches"]
+        assert [(m["id"], m["review_state"], m["route_url"]) for m in found] == [
+            (nid, "proposed", f"/garden/review/{nid}")
+        ]

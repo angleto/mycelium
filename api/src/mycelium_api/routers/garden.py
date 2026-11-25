@@ -86,6 +86,12 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
     ("GET", "/review/nodes/{note_id}", "garden.review.read", "garden_review_read"),
     (
         "GET",
+        "/review/nodes/{note_id}/sources/{source_id}",
+        "garden.review.read_source",
+        "garden_review_read_source",
+    ),
+    (
+        "GET",
         "/review/by-source/{note_id}",
         "garden.review.for_source",
         "garden_review_for_source",

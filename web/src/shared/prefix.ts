@@ -37,6 +37,9 @@ export interface LookupMatch {
   is_archived: boolean
   is_deleted: boolean
   route_url: string
+  /** 'proposed' or 'declined' for a garden proposal (``route_url`` is then
+   *  its review reading view), 'approved', or null. */
+  review_state?: string | null
 }
 
 export interface LookupOut {
@@ -49,13 +52,19 @@ export interface LookupOpts {
   /** Resolve entities on the archive shelf too. They come back with
    *  ``is_archived: true``, so the caller can (and should) show it. */
   includeArchived?: boolean
+  /** Resolve garden proposals too, pending or declined (ADR-0075). They
+   *  come back with their ``review_state`` and a ``route_url`` on the
+   *  review reading view, the one place they are read. A code a person
+   *  pastes must find what it names; a list of things to link to must not
+   *  offer what is not in the memory. */
+  includeGated?: boolean
 }
 
 /** The perimeter for "what entity is this id?": the archive shelf must
  *  not hide an entity from its own identifier. Spread it
  *  (``{...RESOLVE_ID, kinds: [...]}``) so every resolution call site
  *  says which question it is asking instead of leaning on a default. */
-export const RESOLVE_ID: LookupOpts = { includeArchived: true }
+export const RESOLVE_ID: LookupOpts = { includeArchived: true, includeGated: true }
 
 // A bare hex run, or a hyphenated one up to a full UUID. Anchored at
 // both ends on a hex digit so a trailing hyphen from a half-typed UUID
@@ -79,7 +88,7 @@ export function isFullUuid(raw: string): boolean {
 export function lookupCacheKey(prefix: string, opts: LookupOpts = {}): string {
   const kinds = opts.kinds
   const k = kinds && kinds.length ? [...kinds].sort().join(',') : 'task,note'
-  return `${prefix.trim().toLowerCase()}|${k}|${opts.includeArchived ? 'a' : ''}`
+  return `${prefix.trim().toLowerCase()}|${k}|${opts.includeArchived ? 'a' : ''}${opts.includeGated ? 'g' : ''}`
 }
 
 /** The request path, relative to the API root. Built here so the two
@@ -89,6 +98,7 @@ export function lookupPath(prefix: string, opts: LookupOpts = {}): string {
   const qs = new URLSearchParams()
   if (opts.kinds && opts.kinds.length) qs.set('kinds', [...opts.kinds].join(','))
   if (opts.includeArchived) qs.set('include_archived', 'true')
+  if (opts.includeGated) qs.set('include_gated', 'true')
   const q = qs.toString()
   return `/lookup/${encodeURIComponent(prefix.trim().toLowerCase())}${q ? `?${q}` : ''}`
 }

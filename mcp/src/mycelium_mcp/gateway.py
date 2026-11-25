@@ -366,6 +366,8 @@ _PREFIX_ARGS: dict[str, tuple[str, ...]] = {
     "other_id": ("task",),
     "note_id": ("note",),
     "parent_note_id": ("note",),
+    # garden_review_read_source: a source of a proposal is a note (ADR-0076).
+    "source_id": ("note",),
     "child_note_id": ("note",),
     "dst_note_id": ("note",),
     "src_note_id": ("note",),

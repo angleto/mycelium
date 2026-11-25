@@ -841,13 +841,17 @@ async def remove_declined(
 
 @dataclass(frozen=True)
 class ProposalSource:
-    """One note a proposal was generated from, as the person reviewing it
-    reads it: whole, beside the proposal."""
+    """One note a proposal was generated from, beside the proposal. ``body``
+    is whole unless the reader asked for a budget (``source_budget``), and
+    ``body_chars`` always says how long the whole is, so a cut is never
+    silent: the rest is read with :func:`read_source`."""
 
     note_id: uuid.UUID
     title: str | None
     body: str
     is_archived: bool
+    body_chars: int
+    body_truncated: bool
 
 
 @dataclass(frozen=True)
@@ -900,8 +904,19 @@ class ProposalReading:
     revised_by: list[RevisionRef]
 
 
+#: Each source keeps at least this much under a budget, so a pattern over
+#: many sources still shows each one's opening rather than one source whole
+#: and the rest empty.
+_MIN_SOURCE_SHARE = 2_000
+
+
 async def read_node(
-    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, note_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    source_budget: int | None = None,
 ) -> ProposalReading:
     """The whole of a generated note and of its sources, for the person
     deciding it (ADR-0075 decision 2) and for an agent asked to check or
@@ -935,15 +950,30 @@ async def read_node(
         .scalars()
         .all()
     )
-    sources = [
-        ProposalSource(
-            note_id=src.id,
-            title=src.title,
-            body=(await notes_svc.get_body(session, note_id=src.id)) or "",
-            is_archived=src.is_archived,
+    # ``source_budget`` bounds the sources' text taken together, shared out
+    # evenly: an MCP result stays in the caller's context for the rest of
+    # the session, and one long source made a single read 96,184 characters
+    # on production (2026-11-24), past what a client accepts in one result.
+    # None is the web's whole reading.
+    share = (
+        None
+        if source_budget is None or not parents
+        else max(_MIN_SOURCE_SHARE, source_budget // len(parents))
+    )
+    sources = []
+    for src in parents:
+        whole = (await notes_svc.get_body(session, note_id=src.id)) or ""
+        cut = share is not None and len(whole) > share
+        sources.append(
+            ProposalSource(
+                note_id=src.id,
+                title=src.title,
+                body=whole[:share] if cut else whole,
+                is_archived=src.is_archived,
+                body_chars=len(whole),
+                body_truncated=cut,
+            )
         )
-        for src in parents
-    ]
     state = note.review_state
     if state is None:  # excluded by _load_proposed; narrows the type
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
@@ -1234,6 +1264,61 @@ async def revise_node(
 
 
 @dataclass(frozen=True)
+class SourceSlice:
+    """A window on one source's text: ``text`` starts at ``offset``;
+    ``next_offset`` is where the next window starts, None at the end."""
+
+    source_id: uuid.UUID
+    offset: int
+    text: str
+    total_chars: int
+    next_offset: int | None
+
+
+async def read_source(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    source_id: uuid.UUID,
+    offset: int = 0,
+    limit: int = 20_000,
+) -> SourceSlice:
+    """Read one source of a proposal by windows, for a reader that cannot
+    take it whole in one result: the rest of a source :func:`read_node` cut.
+    The source must be a live ``hypha_of`` parent of the proposal that the
+    caller could open; anything else is 404, so this is no door onto an
+    arbitrary note."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    is_parent = await session.scalar(
+        select(
+            exists().where(
+                NoteNoteLink.org_id == org_id,
+                NoteNoteLink.parent_note_id == source_id,
+                NoteNoteLink.child_note_id == note.id,
+                NoteNoteLink.kind == "hypha_of",
+            )
+        )
+    )
+    if not is_parent:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    await notes_svc.get_note(session, org_id=org_id, note_id=source_id)
+    if offset < 0 or limit < 1:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    whole = (await notes_svc.get_body(session, note_id=source_id)) or ""
+    end = min(len(whole), offset + limit)
+    return SourceSlice(
+        source_id=source_id,
+        offset=offset,
+        text=whole[offset:end],
+        total_chars=len(whole),
+        next_offset=end if end < len(whole) else None,
+    )
+
+
+@dataclass(frozen=True)
 class SourceProposal:
     """A note generated from a given source, with where it stands."""
 
@@ -1499,6 +1584,7 @@ __all__ = [
     "RejectedNode",
     "RevisionRef",
     "SourceProposal",
+    "SourceSlice",
     "accept_ratio_by_model",
     "accept_ratio_overall",
     "approve_node",
@@ -1508,6 +1594,7 @@ __all__ = [
     "list_pending",
     "list_rejected",
     "read_node",
+    "read_source",
     "reject_node_on_decision",
     "remove_declined",
     "reopen_node",

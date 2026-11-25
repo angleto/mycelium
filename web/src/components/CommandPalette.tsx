@@ -271,9 +271,14 @@ export function CommandPalette() {
             // The id branch resolves the archive shelf too (RESOLVE_ID):
             // pasting a code must find the entity whether or not it is
             // shelved, and the subtitle is where that is said.
+            // A garden proposal says so: it opens on the review reading
+            // view, where it is read and decided, not as a note.
             sub:
-              (m.kind === 'task' ? (m.state_name ?? 'task') : 'note') +
-              (m.is_archived ? ` · ${t('common.archived')}` : ''),
+              (m.kind === 'task'
+                ? (m.state_name ?? 'task')
+                : m.review_state === 'proposed' || m.review_state === 'declined'
+                  ? t(`gardenProposal.state.${m.review_state}`)
+                  : 'note') + (m.is_archived ? ` · ${t('common.archived')}` : ''),
           })
         }
       }

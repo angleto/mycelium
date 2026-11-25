@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CopyIdButton } from '../components/CopyIdButton'
 import { MarkdownView } from '../components/Markdown'
 import type { components } from '../shared'
 
@@ -73,8 +74,14 @@ export function GardenProposalRoute() {
   const [confirmRemove, setConfirmRemove] = useState(false)
 
   const load = useCallback(async () => {
+    // The person reads the sources whole: the budget that keeps an agent's
+    // result small is for MCP, not for this page.
     const { data, error, response } = await api.GET('/garden/review/nodes/{note_id}', {
-      params: { header: workspaceHeader(), path: { note_id: noteId } },
+      params: {
+        header: workspaceHeader(),
+        path: { note_id: noteId },
+        query: { full_text: true },
+      },
     })
     if (error) {
       if (response.status === 404) setMissing(true)
@@ -187,6 +194,13 @@ export function GardenProposalRoute() {
             <span>{t('gardenProposal.writtenBy', { model: reading.origin_model_id })}</span>
           )}
           <span>{t('gardenProposal.createdAt', { when: when(reading.created_at) })}</span>
+          {/* The code to hand to an assistant ("check 833743fb"): the full
+              id is what the button copies. */}
+          <CopyIdButton
+            id={reading.note_id}
+            label={t('gardenProposal.copyId')}
+            copiedLabel={t('gardenProposal.idCopied')}
+          />
         </p>
         <p className="gproposal__explain">
           {t(`gardenProposal.explain.${state}`, { when: when(reading.decided_at) })}

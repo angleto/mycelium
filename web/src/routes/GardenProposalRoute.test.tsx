@@ -35,6 +35,8 @@ let version = 3
 let exists = true
 // ADR-0076: what an agent attached, served as the API serves it.
 let extra: Record<string, unknown> = {}
+// What the page asked for: the person reads the sources whole.
+const fullText: (string | null)[] = []
 const writes: { path: string; body: Record<string, unknown> }[] = []
 
 function json(body: unknown, status = 200): Promise<Response> {
@@ -63,6 +65,8 @@ function reading() {
         title: 'Viaggio a Lisbona',
         body: 'SOURCE: the whole original note the summary was drawn from.',
         is_archived: true,
+        body_chars: 59,
+        body_truncated: false,
       },
     ],
     checks: [],
@@ -77,6 +81,7 @@ function answer(): void {
     const req = input as Request
     const path = new URL(req.url, 'http://t').pathname.replace(/^\/api/, '')
     if (req.method === 'GET' && path === `/garden/review/nodes/${NODE}`) {
+      fullText.push(new URL(req.url, 'http://t').searchParams.get('full_text'))
       return exists ? json(reading()) : json({ code: 'note.not_found', detail: 'x' }, 404)
     }
     if (req.method === 'POST' && path.startsWith('/garden/review/')) {
@@ -122,9 +127,13 @@ async function mount(): Promise<void> {
   await settle()
 }
 
-// By role and accessible name, as a person (or a screen reader) finds them.
+// By role and accessible name, as a person (or a screen reader) finds them:
+// the decision controls are the buttons of the group named "Decision".
 function buttons(): HTMLElement[] {
-  return [...host.querySelectorAll<HTMLElement>('button, [role="button"]')]
+  const group = [...host.querySelectorAll<HTMLElement>('[role="group"]')].find(
+    (g) => g.getAttribute('aria-label') === i18n.t('gardenProposal.actions'),
+  )
+  return group ? [...group.querySelectorAll<HTMLElement>('button, [role="button"]')] : []
 }
 function button(name: string): HTMLElement {
   const el = buttons().find((b) => b.textContent?.trim() === name)
@@ -172,6 +181,8 @@ describe('GardenProposalRoute', () => {
     expect(text).toContain(i18n.t('gardenProposal.archived'))
     expect(host.querySelector(`a[href="/notes/${SRC}"]`)).not.toBeNull()
     expect(names()).toEqual([i18n.t('gardenProposal.approve'), i18n.t('gardenProposal.decline')])
+    expect(fullText.every((v) => v === 'true')).toBe(true)
+    expect(fullText.length).toBeGreaterThan(0)
   })
 
   it('declines, stays readable, then reopens, echoing the version each time', async () => {
@@ -306,6 +317,15 @@ describe('GardenProposalRoute', () => {
     await mount()
     expect(host.textContent).toContain(i18n.t('gardenProposal.revisedBy'))
     expect(host.querySelector(`a[href="/garden/review/${REV}"]`)).not.toBeNull()
+  })
+
+  it('shows the code to hand to an assistant, and copies the full id', async () => {
+    await mount()
+    const copy = host.querySelector<HTMLElement>(
+      `button[aria-label="${i18n.t('gardenProposal.copyId')}"]`,
+    )
+    expect(copy?.textContent).toContain(NODE.slice(0, 8))
+    expect(copy?.getAttribute('title')).toBe(NODE)
   })
 
   it('says a note is not a proposal instead of showing an empty page', async () => {

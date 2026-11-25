@@ -318,6 +318,8 @@ export const it: Catalog = {
     removeDetail: 'Le note da cui viene non vengono toccate.',
     revises: 'Questa è una revisione di una proposta scritta da {{model}}, che ora è tra le rifiutate.',
     openOriginal: 'Apri l’originale',
+    copyId: 'Copia il codice della proposta',
+    idCopied: 'Codice copiato',
     showOriginal: 'Mostra la versione originale',
     revisedBy: 'Questa proposta è stata sostituita da una revisione:',
     openRevision: 'apri la revisione di {{model}}',

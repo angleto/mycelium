@@ -319,6 +319,8 @@ export const en = {
     removeDetail: 'The notes it comes from are not touched.',
     revises: 'This is a revision of a proposal written by {{model}}, which is now among the declined.',
     openOriginal: 'Open the original',
+    copyId: 'Copy the proposal code',
+    idCopied: 'Code copied',
     showOriginal: 'Show the original version',
     revisedBy: 'This proposal was replaced by a revision:',
     openRevision: 'open the revision by {{model}}',

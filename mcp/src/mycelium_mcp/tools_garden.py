@@ -57,6 +57,7 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("note_restore_source", "garden.review.restore_source", None),
     ("garden_review_accept_ratio", "garden.review.accept_ratio", _under("models")),
     ("garden_review_read", "garden.review.read", None),
+    ("garden_review_read_source", "garden.review.read_source", None),
     ("garden_review_for_source", "garden.review.for_source", _under("proposals")),
     ("garden_review_reopen", "garden.review.reopen", None),
     ("garden_review_check", "garden.review.check", None),

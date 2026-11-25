@@ -105,6 +105,23 @@ count as simple is the person's choice, made in the setting, not in code.
 | 4 | `synthesized_text` and `origin_model_id` on `extract_cluster_pattern` and `synthesize_season`; the cap and the provenance rule are `decomposition.external_text` and `external_model_id`, shared by every text an agent writes | `core/tests/test_garden_review.py` |
 | 5 | the reading view shows the checks (verdict and findings in words, the model, stale when on an earlier version), the original under a revision, and the revision of a replaced note | `web/src/routes/GardenProposalRoute.test.tsx`, observed failing with both panels removed |
 
+### After phase A, on production (2026-11-25)
+
+- The MCP gateway expands the short ids it hands out through the prefix
+  resolver, which applied the review gate; an assistant could list a
+  proposal and not address it. Name resolution now includes gated notes
+  (2.4.20); the tools still decide what they may do with one.
+- One source of 93,218 characters made a reading 96,184 characters, more
+  than a client takes as one result. An agent's reading shares a budget of
+  24,000 characters among the sources, says which were cut and how long they
+  are, and `garden.review.read_source` reads the rest in windows; the
+  person's reading asks for the whole (`full_text`).
+- A person pasting a proposal's code found nothing, because the lookup
+  applied the gate too, and the review pages showed no code to copy. The
+  lookup resolves a proposal when asked to resolve a code (`include_gated`,
+  never for a list of things to link to) and routes it to the reading view;
+  the reading view and the review list show the code with a copy button.
+
 ## Consequences
 
 - The strong model a person already uses through MCP becomes the corrector

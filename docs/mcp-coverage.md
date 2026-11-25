@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**316 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**317 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,7 +70,7 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (34)
+### garden (35)
 
 | Tool | Summary |
 |---|---|
@@ -92,6 +92,7 @@ over-fetch the org table and filter in its head.
 | `garden_review_for_source` | The notes generated from this note (distillations, patterns, |
 | `garden_review_pending` | The review inbox (ADR-0043): generated notes awaiting a person's |
 | `garden_review_read` | Read a generated note in full, pending, declined or approved, with |
+| `garden_review_read_source` | Read one source of a proposal in windows of up to 20,000 characters, |
 | `garden_review_reject` | Decline a generated note (ADR-0043, ADR-0075): it stays out of the |
 | `garden_review_reject_on_decision` | Reject a generated note that a PERSON has decided to reject, on |
 | `garden_review_rejected` | The proposals a person declined (ADR-0075), most recently declined |

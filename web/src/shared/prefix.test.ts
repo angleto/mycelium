@@ -67,8 +67,13 @@ describe('lookupPath', () => {
 
   it('spells the perimeter and the kinds the way the endpoint reads them', () => {
     expect(lookupPath('abc12345', { ...RESOLVE_ID, kinds: ['task', 'note'] })).toBe(
-      '/lookup/abc12345?kinds=task%2Cnote&include_archived=true',
+      '/lookup/abc12345?kinds=task%2Cnote&include_archived=true&include_gated=true',
     )
+  })
+
+  it('asks for garden proposals only when resolving a code, never for a list', () => {
+    expect(lookupPath('abc12345', { kinds: ['note'] })).toBe('/lookup/abc12345?kinds=note')
+    expect(lookupCacheKey('abc12345', RESOLVE_ID)).not.toBe(lookupCacheKey('abc12345'))
   })
 
   it('encodes the prefix: it is user input reaching a URL', () => {

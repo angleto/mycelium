@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { CopyIdButton } from '../components/CopyIdButton'
 import type { components } from '../shared'
 
 // Distillation-candidate surfacing (task 4995a32f). "Suggest, don't
@@ -311,6 +312,11 @@ export function GardenReviewRoute() {
                         {r.origin_model_id}
                       </span>
                     )}
+                    <CopyIdButton
+                      id={r.note_id}
+                      label={t('gardenProposal.copyId')}
+                      copiedLabel={t('gardenProposal.idCopied')}
+                    />
                     <Link to={`/garden/review/${r.note_id}`} className="btn btn--sm">
                       {t('gardenReview.readAndDecide')}
                     </Link>
@@ -419,6 +425,11 @@ export function GardenReviewRoute() {
                         minute: '2-digit',
                       })}
                     </span>
+                    <CopyIdButton
+                      id={r.note_id}
+                      label={t('gardenProposal.copyId')}
+                      copiedLabel={t('gardenProposal.idCopied')}
+                    />
                     <Link to={`/garden/review/${r.note_id}`} className="btn--ghost btn--sm">
                       {t('gardenReview.read')}
                     </Link>

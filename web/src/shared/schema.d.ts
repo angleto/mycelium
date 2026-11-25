@@ -4761,7 +4761,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lookup Prefix */
+        /**
+         * Lookup Prefix
+         * @description Resolve an id prefix. ``include_gated`` is for name resolution only
+         *     (a pasted code, a short URL, the command palette): it finds a garden
+         *     proposal still awaiting a decision, or declined, and routes it to the
+         *     review reading view (ADR-0075), where it is read and decided. A list of
+         *     things to link to (the mention picker) never asks for it.
+         */
         get: operations["lookup_prefix_lookup__prefix__get"];
         put?: never;
         post?: never;
@@ -6587,8 +6594,34 @@ export interface paths {
          *     ground an answer on a 'proposed' or 'declined' text, and do not quote it
          *     as something the person wrote; only the person's approval makes it a
          *     note.
+         *
+         *     The sources share a budget of about 24,000 characters; a source cut to
+         *     fit says ``body_truncated`` and its ``body_chars``. Read the rest with
+         *     garden_review_read_source before checking a claim against it.
          */
         get: operations["garden_review_read_garden_review_nodes__note_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/nodes/{note_id}/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review Read Source
+         * @description Read one source of a proposal in windows of up to 20,000 characters,
+         *     from ``offset``: the rest of a source garden_review_read cut. Call again
+         *     with ``next_offset`` until it is null.
+         */
+        get: operations["garden_review_read_source_garden_review_nodes__note_id__sources__source_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -11835,7 +11868,9 @@ export interface components {
         };
         /**
          * GardenReviewSourceOut
-         * @description A note a proposal was generated from, whole.
+         * @description A note a proposal was generated from. ``body_truncated`` says the body
+         *     is the opening only, ``body_chars`` how long the whole is; read the rest
+         *     with garden_review_read_source.
          */
         GardenReviewSourceOut: {
             /**
@@ -11849,6 +11884,29 @@ export interface components {
             body: string;
             /** Is Archived */
             is_archived: boolean;
+            /** Body Chars */
+            body_chars: number;
+            /**
+             * Body Truncated
+             * @default false
+             */
+            body_truncated?: boolean;
+        };
+        /** GardenReviewSourceSliceOut */
+        GardenReviewSourceSliceOut: {
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Offset */
+            offset: number;
+            /** Text */
+            text: string;
+            /** Total Chars */
+            total_chars: number;
+            /** Next Offset */
+            next_offset?: number | null;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -13100,6 +13158,8 @@ export interface components {
             is_deleted: boolean;
             /** Route Url */
             route_url: string;
+            /** Review State */
+            review_state?: string | null;
         };
         /** LookupOut */
         LookupOut: {
@@ -28089,6 +28149,7 @@ export interface operations {
                 kinds?: string | null;
                 include_archived?: boolean;
                 include_deleted?: boolean;
+                include_gated?: boolean;
                 limit?: number;
             };
             header: {
@@ -31650,7 +31711,9 @@ export interface operations {
     };
     garden_review_read_garden_review_nodes__note_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                full_text?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
@@ -31671,6 +31734,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenReviewReadingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_read_source_garden_review_nodes__note_id__sources__source_id__get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                /** @description The proposal. */
+                note_id: string;
+                /** @description One of its sources. */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewSourceSliceOut"];
                 };
             };
             /** @description Validation Error */

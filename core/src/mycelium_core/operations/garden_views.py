@@ -358,12 +358,40 @@ class GardenReviewGuardedIn(BaseModel):
 
 
 class GardenReviewSourceOut(BaseModel):
-    """A note a proposal was generated from, whole."""
+    """A note a proposal was generated from. ``body_truncated`` says the body
+    is the opening only, ``body_chars`` how long the whole is; read the rest
+    with garden_review_read_source."""
 
     note_id: uuid.UUID
     title: str | None = None
     body: str
     is_archived: bool
+    body_chars: int
+    body_truncated: bool = False
+
+
+class GardenReviewReadIn(BaseModel):
+    """``full_text`` serves the sources whole, for a person reading in the
+    app. Leave it false from an agent: the sources then share a budget, and
+    each says whether it was cut."""
+
+    note_id: uuid.UUID
+    full_text: bool = False
+
+
+class GardenReviewSourceIn(BaseModel):
+    note_id: uuid.UUID = Field(description="The proposal.")
+    source_id: uuid.UUID = Field(description="One of its sources.")
+    offset: int = Field(0, ge=0)
+    limit: int = Field(20000, ge=1, le=20000)
+
+
+class GardenReviewSourceSliceOut(BaseModel):
+    source_id: uuid.UUID
+    offset: int
+    text: str
+    total_chars: int
+    next_offset: int | None = None
 
 
 class GardenReviewFindingIn(BaseModel):

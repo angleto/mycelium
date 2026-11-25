@@ -98,6 +98,10 @@ class LookupMatch:
     is_terminal: bool | None
     is_archived: bool
     is_deleted: bool
+    #: A note's review state when it was generated: 'proposed' or 'declined'
+    #: (held at the review gate, read on the review surface, never on the
+    #: ordinary one), 'approved', or None for every note a person wrote.
+    review_state: str | None = None
 
 
 def normalise_prefix(raw: str) -> str:
@@ -205,9 +209,9 @@ async def resolve_prefix(
         # Distinct local name from the task branch: the two selects have
         # different row shapes and reusing ``q`` makes mypy infer the
         # broader (and wrong) union, breaking strict mode.
-        qn = select(Note.id, Note.title, Note.is_archived, Note.deleted_at).where(
-            text("notes.id::text LIKE :pat").bindparams(pat=pat)
-        )
+        qn = select(
+            Note.id, Note.title, Note.is_archived, Note.deleted_at, Note.review_state
+        ).where(text("notes.id::text LIKE :pat").bindparams(pat=pat))
         # The effective-note predicate: a trashed note only with the opt-in,
         # a 'proposed' one (autonomously generated, pending review) never --
         # the @-mention picker must not offer a node nobody can open.
@@ -228,7 +232,7 @@ async def resolve_prefix(
             qn = qn.where(Note.is_archived.is_(False))
         qn = qn.order_by(Note.updated_at.desc()).limit(limit - len(out))
         note_rows = (await session.execute(qn)).all()
-        for nid, title, archived, deleted_at in note_rows:
+        for nid, title, archived, deleted_at, review_state in note_rows:
             out.append(
                 LookupMatch(
                     kind="note",
@@ -238,6 +242,7 @@ async def resolve_prefix(
                     is_terminal=None,
                     is_archived=bool(archived),
                     is_deleted=deleted_at is not None,
+                    review_state=review_state,
                 )
             )
 
