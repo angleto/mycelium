@@ -1,6 +1,6 @@
 # ADR-0077: One way to connect two things, notes or tasks, and the graph follows the work
 
-Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phase A implemented; phase B open (rewritten on 2026-11-25: its first version assumed the retrieval walk included tasks, and it does not).
+Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phase A implemented (released in 2.4.25; the 2.4.24 tag failed its build and has no images); phase B open (rewritten on 2026-11-25: its first version assumed the retrieval walk included tasks, and it does not).
 Relates to: ADR-0029 (typed note links), ADR-0040 (the four note-to-note
 kinds), ADR-0042 (tasks in the unified graph), ADR-0073 (written references),
 ADR-0075 (one kind of proposal), ADR-0004 (task dependencies).
@@ -128,7 +128,7 @@ uses for retrieval is a separate question, open below.
 
 | decision | where | checked by |
 |---|---|---|
-| 1, one panel | `web/src/components/ConnectionsPanel.tsx` on the note page, the task page and the garden's note view; the note page keeps a second tab for the garden's suggestions; the tabs and panels it replaces (`NoteLinksPanel`, `LinkedTasksPanel`, `LinkedNotesPanel`, the task page's subtasks, dependencies and related tabs, the garden modal's link lists) are removed; ambiguous mentions keep their chooser, shown only when there is one to resolve | `ConnectionsPanel.test.tsx`, observed failing with the direction dropped from the grouping |
+| 1, one panel | `web/src/components/ConnectionsPanel.tsx` on the note page, the task page and the garden's note view; the note page keeps a second tab for the garden's suggestions; the tabs and panels it replaces (`NoteLinksPanel`, `LinkedTasksPanel`, `LinkedNotesPanel`, the task page's subtasks, dependencies and related tabs, the garden modal's link lists) are removed; ambiguous mentions keep their chooser, shown only when there is one to resolve | `ConnectionsPanel.test.tsx`, observed failing with the direction dropped from the grouping; `web/e2e/connections.spec.ts` (connect two notes from one page, read the direction from both, disconnect), observed failing with the two directions' names swapped |
 | 2, vocabulary | `connections.Relation`, codes in English; every sentence and group name comes from the i18n catalogue (`itemConnections`, en and it); the interface strings that showed record numbers no longer do | `check:i18n` |
 | 3, one contract | `services/connections/`: an adapter per mechanism (`note_notes`, `note_tasks`, `task_related`, `task_parent`, `task_dependencies`, `mentions`) found by presence, each declaring the (relation, from, to) it creates, so the valid connections have one source; `connections.list`, `.connect`, `.disconnect` on REST (`/connections`) and MCP (`list_connections`, `connect_items`, `disconnect_items`); each kind of item needs its own scope, and a connection to a kind the caller cannot read is left out | `core/tests/test_connections.py`, `api/tests/test_connections_api.py` |
 

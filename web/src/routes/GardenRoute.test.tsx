@@ -91,6 +91,10 @@ function answer(): void {
     if (req.method === 'GET' && path === '/tasks') return json([])
     if (path === '/garden/candidates') return json({ nodes: [], edges: [] })
     if (path === '/garden/review/pending') return json([])
+    // The note view mounts the connections panel (ADR-0077), which reads
+    // the item's connections and the workflow states for its task picker.
+    if (req.method === 'GET' && path === '/connections') return json({ items: [], choices: [] })
+    if (req.method === 'GET' && path === '/workflows') return json([])
     const links = /^\/notes\/([^/]+)\/links$/.exec(path)
     if (req.method === 'GET' && links) {
       const r = rows.find((x) => x.id === links[1])!

@@ -357,9 +357,7 @@ test('task work note: open from task + billable timer in the note', async ({
 
   // New work note (Proposal A: a note is the work log of the task) →
   // opens the linked note with the billable timer. The work-note actions
-  // live under the task's "Notes" connection tab (role=tab), so activate it
-  // first — it is not the default-selected tab.
-  await page.getByRole('tab', { name: /^(notes|note)$/i }).click()
+  // sit under the task's connections panel (ADR-0077), always visible.
   await page
     .getByRole('button', { name: /new work note|nuova nota di lavoro/i })
     .click()
