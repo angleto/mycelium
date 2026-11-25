@@ -4,6 +4,7 @@ import { AttachmentSettings } from '../components/AttachmentSettings'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { GmailConnect } from '../components/GmailConnect'
 import { IssuerProfiles } from '../components/IssuerProfiles'
+import { GardenDelegationSettings } from '../components/GardenDelegationSettings'
 import { RetrievalSettings } from '../components/RetrievalSettings'
 import { WorkspaceIdentityCard } from '../components/WorkspaceIdentityCard'
 import { WorkspaceListCard } from '../components/WorkspaceListCard'
@@ -50,6 +51,7 @@ export function SettingsWorkspaceRoute() {
         <IssuerProfiles />
         <EstimatePresets />
         <RetrievalSettings />
+        <GardenDelegationSettings />
         <AttachmentSettings />
       </section>
     </>

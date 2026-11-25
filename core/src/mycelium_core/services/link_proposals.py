@@ -296,10 +296,13 @@ async def _close_pair(
     b: uuid.UUID,
     status: str,
     kind: str | None,
+    delegated: bool = False,
 ) -> None:
     """A person's decision on a pair answers every open proposal of that
     pair, whoever proposed it: each proposer is credited (or debited) for
-    the same judgement."""
+    the same judgement. ``delegated`` marks a decision an assistant took
+    under the workspace delegation (ADR-0076 phase B): it closes the pair
+    the same way and counts for no proposer."""
     await session.execute(
         update(LinkProposal)
         .where(
@@ -310,7 +313,13 @@ async def _close_pair(
                 and_(LinkProposal.source_note_id == b, LinkProposal.target_note_id == a),
             ),
         )
-        .values(status=status, decided_at=func.now(), decided_by=actor_id, accepted_kind=kind)
+        .values(
+            status=status,
+            decided_at=func.now(),
+            decided_by=actor_id,
+            accepted_kind=kind,
+            delegated=delegated,
+        )
     )
 
 
@@ -322,6 +331,7 @@ async def accept(
     proposal_id: uuid.UUID,
     kind: str,
     swap: bool = False,
+    delegated: bool = False,
 ) -> NoteNoteLink:
     """A person accepts: a typed link of ``kind`` is created between the two
     notes (source as parent, or target as parent with ``swap``), carrying
@@ -349,13 +359,19 @@ async def accept(
         b=p.target_note_id,
         status="accepted",
         kind=kind,
+        delegated=delegated,
     )
     await session.flush()
     return link
 
 
 async def reject(
-    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, proposal_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    delegated: bool = False,
 ) -> None:
     """A person rejects: the pair is remembered and no proposer proposes it
     again."""
@@ -381,6 +397,7 @@ async def reject(
         b=p.target_note_id,
         status="rejected",
         kind=None,
+        delegated=delegated,
     )
     await session.flush()
 
@@ -422,7 +439,8 @@ async def precision(session: AsyncSession, *, org_id: uuid.UUID) -> list[Propose
     rows = (
         await session.execute(
             select(LinkProposal.proposer, LinkProposal.status, func.count())
-            .where(LinkProposal.org_id == org_id)
+            # A person's judgements only (ADR-0076 phase B).
+            .where(LinkProposal.org_id == org_id, LinkProposal.delegated.is_(False))
             .group_by(LinkProposal.proposer, LinkProposal.status)
         )
     ).all()

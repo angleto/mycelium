@@ -6575,6 +6575,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/delegation/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Delegation Policy
+         * @description Which decisions the person handed over to assistants in this
+         *     workspace. Read it before garden_delegated_decide: anything not listed
+         *     is the person's to decide, and you leave it to them (with a check or a
+         *     revision, if that helps).
+         */
+        get: operations["garden_delegation_policy_garden_delegation_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/delegation/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Delegation Decide
+         * @description Take a decision the person handed over to assistants (ADR-0076):
+         *     decline a synthesis, approve a synthesis whose current version has a
+         *     check with the verdict 'supported', accept or reject a link proposal,
+         *     approve a fact. Only for kinds listed by garden_delegation_policy;
+         *     otherwise refused with garden.delegation_refused and a reason. Every
+         *     decision is recorded with you as the decider, listed to the person, and
+         *     reversible by them. Be conservative: when in doubt, leave it to the
+         *     person.
+         */
+        post: operations["garden_delegation_decide_garden_delegation_decide_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/delegation/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Delegation Decisions
+         * @description What assistants decided on the person's behalf, most recent first,
+         *     with whether the person reversed it.
+         */
+        get: operations["garden_delegation_decisions_garden_delegation_decisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/delegation/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Delegation Revert
+         * @description Take back a decision an assistant took: the thing is pending again,
+         *     as before. A person's act.
+         */
+        post: operations["garden_delegation_revert_garden_delegation_revert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/delegation/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Delegation Stats
+         * @description Per kind of decision: how many assistants took, how many the person
+         *     reversed. The measure of whether a kind is safe to hand over.
+         */
+        get: operations["garden_delegation_stats_garden_delegation_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/review/nodes/{note_id}": {
         parameters: {
             query?: never;
@@ -6608,7 +6721,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/garden/review/nodes/{note_id}/sources/{source_id}": {
+    "/garden/review/nodes/{note_id}/sources/{source_note_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -6621,7 +6734,7 @@ export interface paths {
          *     from ``offset``: the rest of a source garden_review_read cut. Call again
          *     with ``next_offset`` until it is null.
          */
-        get: operations["garden_review_read_source_garden_review_nodes__note_id__sources__source_id__get"];
+        get: operations["garden_review_read_source_garden_review_nodes__note_id__sources__source_note_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9916,6 +10029,11 @@ export interface components {
              */
             day: string;
         };
+        /**
+         * DecisionKind
+         * @enum {string}
+         */
+        DecisionKind: "synthesis_decline" | "synthesis_approve_checked" | "link_proposal_accept" | "link_proposal_reject" | "fact_approve";
         /** DependencyCreateIn */
         DependencyCreateIn: {
             /**
@@ -10944,6 +11062,87 @@ export interface components {
             count: number;
         };
         /**
+         * GardenDelegatedDecideIn
+         * @description Decide on the person's behalf, within what they handed over.
+         *     ``target_kind``: ``synthesis`` (a generated note, ``target_id`` its note
+         *     id, ``expected_version`` required), ``link_proposal`` (``link_kind``
+         *     required to approve), ``fact``. ``verdict``: ``approve`` or ``decline``.
+         *     ``reason`` is shown to the person beside the decision.
+         */
+        GardenDelegatedDecideIn: {
+            target_kind: components["schemas"]["TargetKind"];
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            verdict: components["schemas"]["Verdict"];
+            /** Expected Version */
+            expected_version?: number | null;
+            /** Link Kind */
+            link_kind?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** GardenDelegatedDecisionOut */
+        GardenDelegatedDecisionOut: {
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /** Kind */
+            kind: string;
+            /** Target Kind */
+            target_kind: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Verdict */
+            verdict: string;
+            /** Assistant Identity Id */
+            assistant_identity_id?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reversed At */
+            reversed_at?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+        };
+        /** GardenDelegatedRevertIn */
+        GardenDelegatedRevertIn: {
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+        };
+        /**
+         * GardenDelegationPolicyOut
+         * @description The kinds of decision the person handed over to assistants here
+         *     (ADR-0076 phase B). Empty means none: every decision is the person's.
+         */
+        GardenDelegationPolicyOut: {
+            /** Granted */
+            granted: components["schemas"]["DecisionKind"][];
+        };
+        /** GardenDelegationStatsOut */
+        GardenDelegationStatsOut: {
+            /** Kind */
+            kind: string;
+            /** Decided */
+            decided: number;
+            /** Reversed */
+            reversed: number;
+        };
+        /**
          * GardenEventOut
          * @description One ``event_outbox`` row on the workspace event stream (ADR-0036
          *     audit panel): the verbatim coordinated read/propose/commit/reject/
@@ -11895,10 +12094,10 @@ export interface components {
         /** GardenReviewSourceSliceOut */
         GardenReviewSourceSliceOut: {
             /**
-             * Source Id
+             * Source Note Id
              * Format: uuid
              */
-            source_id: string;
+            source_note_id: string;
             /** Offset */
             offset: number;
             /** Text */
@@ -16226,6 +16425,11 @@ export interface components {
              */
             target_ids?: string[];
         };
+        /**
+         * TargetKind
+         * @enum {string}
+         */
+        TargetKind: "synthesis" | "link_proposal" | "fact";
         /** TaskChecklistClearDoneOut */
         TaskChecklistClearDoneOut: {
             /** Removed */
@@ -17126,6 +17330,11 @@ export interface components {
             /** Public Key */
             public_key: string;
         };
+        /**
+         * Verdict
+         * @enum {string}
+         */
+        Verdict: "approve" | "decline";
         /** VerifyEmailIn */
         VerifyEmailIn: {
             /** Token */
@@ -17616,6 +17825,8 @@ export interface components {
              * @default 0
              */
             autonomous_daily_credit_cap?: number;
+            /** Garden Delegation */
+            garden_delegation?: string[];
             /**
              * Attachment Max Bytes
              * @default 0
@@ -17644,6 +17855,8 @@ export interface components {
             autonomous_daily_credit_cap?: number | null;
             /** Attachment Max Bytes */
             attachment_max_bytes?: number | null;
+            /** Garden Delegation */
+            garden_delegation?: string[] | null;
         };
         /**
          * WorkspaceSummaryOut
@@ -31709,6 +31922,186 @@ export interface operations {
             };
         };
     };
+    garden_delegation_policy_garden_delegation_policy_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenDelegationPolicyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_delegation_decide_garden_delegation_decide_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenDelegatedDecideIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenDelegatedDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_delegation_decisions_garden_delegation_decisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenDelegatedDecisionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_delegation_revert_garden_delegation_revert_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenDelegatedRevertIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenDelegatedDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_delegation_stats_garden_delegation_stats_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenDelegationStatsOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     garden_review_read_garden_review_nodes__note_id__get: {
         parameters: {
             query?: {
@@ -31747,7 +32140,7 @@ export interface operations {
             };
         };
     };
-    garden_review_read_source_garden_review_nodes__note_id__sources__source_id__get: {
+    garden_review_read_source_garden_review_nodes__note_id__sources__source_note_id__get: {
         parameters: {
             query?: {
                 offset?: number;
@@ -31763,7 +32156,7 @@ export interface operations {
                 /** @description The proposal. */
                 note_id: string;
                 /** @description One of its sources. */
-                source_id: string;
+                source_note_id: string;
             };
             cookie?: never;
         };

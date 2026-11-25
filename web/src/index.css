@@ -3848,6 +3848,40 @@ button.btn--danger:hover {
   border-left: 2px solid var(--border);
   color: var(--muted);
 }
+/* ADR-0075 decision 4: the reason of a garden suggestion, on its row. */
+.linkedpanel__why {
+  display: block;
+  font-weight: 400;
+}
+/* ADR-0076 phase B: the decisions a person hands over to agents. */
+.gdeleg {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-8);
+}
+.gdeleg__kind {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: flex-start;
+}
+.gdeleg__text {
+  display: grid;
+  gap: var(--sp-2);
+}
+.gdeleg__name {
+  font-weight: 600;
+}
+.gproposal__agent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.gproposal__agent p {
+  margin: 0;
+}
 /* On a source note: what the garden generated from it, with its state. */
 .generated {
   border: 1px solid var(--border);

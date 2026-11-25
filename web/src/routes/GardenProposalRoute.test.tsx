@@ -35,6 +35,8 @@ let version = 3
 let exists = true
 // ADR-0076: what an agent attached, served as the API serves it.
 let extra: Record<string, unknown> = {}
+// ADR-0076 phase B: decisions agents took, as the API lists them.
+let agentDecisions: Record<string, unknown>[] = []
 // What the page asked for: the person reads the sources whole.
 const fullText: (string | null)[] = []
 const writes: { path: string; body: Record<string, unknown> }[] = []
@@ -83,6 +85,17 @@ function answer(): void {
     if (req.method === 'GET' && path === `/garden/review/nodes/${NODE}`) {
       fullText.push(new URL(req.url, 'http://t').searchParams.get('full_text'))
       return exists ? json(reading()) : json({ code: 'note.not_found', detail: 'x' }, 404)
+    }
+    if (req.method === 'GET' && path === '/garden/delegation/decisions') return json(agentDecisions)
+    if (req.method === 'POST' && path === '/garden/delegation/revert') {
+      const body = (await req.json()) as Record<string, unknown>
+      writes.push({ path, body })
+      agentDecisions = agentDecisions.map((d) =>
+        d.decision_id === body.decision_id ? { ...d, reversed_at: '2026-11-25T10:00:00Z' } : d,
+      )
+      state = 'proposed'
+      version += 1
+      return json(agentDecisions[0])
     }
     if (req.method === 'POST' && path.startsWith('/garden/review/')) {
       const body = (await req.json()) as Record<string, unknown>
@@ -157,6 +170,7 @@ beforeEach(async () => {
   version = 3
   exists = true
   extra = {}
+  agentDecisions = []
   writes.length = 0
   answer()
   host = document.createElement('div')
@@ -326,6 +340,37 @@ describe('GardenProposalRoute', () => {
     )
     expect(copy?.textContent).toContain(NODE.slice(0, 8))
     expect(copy?.getAttribute('title')).toBe(NODE)
+  })
+
+  it('says an agent decided, and undoes it on request', async () => {
+    state = 'declined'
+    agentDecisions = [
+      {
+        decision_id: '00000000-0000-4000-8000-0000000000e1',
+        kind: 'synthesis_decline',
+        target_kind: 'synthesis',
+        target_id: NODE,
+        verdict: 'decline',
+        assistant_identity_id: '00000000-0000-4000-8000-0000000000e2',
+        reason: 'invents a date',
+        created_at: '2026-11-25T09:00:00Z',
+        reversed_at: null,
+        target_title: 't',
+      },
+    ]
+    await mount()
+    const banner = host.querySelector('.gproposal__agent')
+    expect(banner?.textContent).toContain('invents a date')
+    const undo = [...(banner?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent === i18n.t('gardenReview.agent.revert'),
+    )
+    await click(undo!)
+    expect(writes[0]).toEqual({
+      path: '/garden/delegation/revert',
+      body: { decision_id: '00000000-0000-4000-8000-0000000000e1' },
+    })
+    expect(host.querySelector('.gproposal__agent')).toBeNull()
+    expect(host.textContent).toContain(i18n.t('gardenProposal.state.proposed'))
   })
 
   it('says a note is not a proposal instead of showing an empty page', async () => {

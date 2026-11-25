@@ -259,6 +259,12 @@ export const it: Catalog = {
     readAndDecide: 'Leggi e decidi',
     read: 'Leggi',
     reopen: 'Riapri',
+    agent: {
+      title: 'Decise da un agente',
+      hint: 'Decisioni che hai affidato agli agenti nelle impostazioni del workspace. Ognuna si può annullare: torna in attesa della tua decisione.',
+      revert: 'Annulla la decisione',
+      reversed: 'Annullata',
+    },
     reopenHint: 'Rimettila in attesa di revisione: torna tra quelle da decidere.',
     removed: '«{{title}}» è stata eliminata definitivamente.',
     facts: {
@@ -319,6 +325,7 @@ export const it: Catalog = {
     revises: 'Questa è una revisione di una proposta scritta da {{model}}, che ora è tra le rifiutate.',
     openOriginal: 'Apri l’originale',
     copyId: 'Copia il codice della proposta',
+    agentDecided: 'Decisa da un agente ({{what}}).',
     idCopied: 'Codice copiato',
     showOriginal: 'Mostra la versione originale',
     revisedBy: 'Questa proposta è stata sostituita da una revisione:',
@@ -341,6 +348,35 @@ export const it: Catalog = {
       },
     },
   },
+  gardenDelegation: {
+    title: 'Garden: decisioni affidate agli agenti',
+    intro: 'Di norma l’ultima parola su cosa entra nella tua memoria è tua. Qui scegli i casi semplici in cui un agente (via MCP) può decidere da solo. Ogni decisione di un agente compare nella revisione e si può annullare.',
+    never: 'Rifiutare un fatto del grafo non si può affidare: un fatto rifiutato non si può più riaprire.',
+    saved: 'Salvato.',
+    stats: 'finora: {{decided}} decise da un agente, {{reversed}} annullate da te',
+    kind: {
+      synthesis_decline: {
+        name: 'Rifiutare una sintesi',
+        what: 'Una distillazione, un pattern o una season che l’agente giudica sbagliata finisce tra le rifiutate.',
+      },
+      synthesis_approve_checked: {
+        name: 'Approvare una sintesi verificata',
+        what: 'Solo se la versione attuale ha una verifica in cui ogni affermazione trova riscontro nelle note.',
+      },
+      link_proposal_accept: {
+        name: 'Accettare un link proposto',
+        what: 'L’agente sceglie anche il tipo di link.',
+      },
+      link_proposal_reject: {
+        name: 'Rifiutare un link proposto',
+        what: 'La coppia non viene più proposta, finché non annulli.',
+      },
+      fact_approve: {
+        name: 'Approvare un fatto del grafo',
+        what: 'Un fatto che un modello ha letto nelle tue note entra nel grafo.',
+      },
+    },
+  },
   generatedFromNote: {
     title: 'Generato da questa nota',
     readAndDecide: 'Leggi e decidi',
@@ -348,7 +384,7 @@ export const it: Catalog = {
   },
   gardenSuggest: {
     title: 'Suggerimenti del giardino',
-    headHint: 'Proposte dal grafo — accetta per applicare, scarta per rifiutare (ADR-0032).',
+    headHint: 'Proposte del giardino su questa nota. Ogni pulsante dice cosa fa; Scarta non cambia niente e non la ripropone.',
     loading: 'Lettura del giardino…',
     empty: 'Nessun suggerimento al momento.',
     tags: 'Tag',
@@ -357,6 +393,9 @@ export const it: Catalog = {
     accept: 'Accetta',
     dismiss: 'Scarta',
     promoteMature: 'Promuovi a maturo',
+    addTag: 'Aggiungi il tag',
+    addLink: 'Collega',
+    maturityWhat: 'Passare questa nota a matura',
     autoHint: 'Alta confidenza — il giardino la maturerà da solo.',
     confidence: 'confidenza {{pct}}%',
     clusterInfo: 'Comunità #{{id}} · modularità {{mod}}',

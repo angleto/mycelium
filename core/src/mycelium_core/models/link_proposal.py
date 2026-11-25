@@ -23,7 +23,17 @@ import datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -81,6 +91,12 @@ class LinkProposal(UUIDPKMixin, OrgScopedMixin, Base):
     )
     decided_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     accepted_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # ADR-0076 phase B (migration 0037): closed by an assistant's decision
+    # under the workspace delegation, not by a person. The proposer precision
+    # counts a person's judgements only.
+    delegated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
 
 
 class LinkRejection(UUIDPKMixin, OrgScopedMixin, Base):

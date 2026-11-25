@@ -79,6 +79,14 @@ _PREVIEW_CHARS = 280
 _SOURCE_HUMUS_POLICY = "humus_on_review_v1"
 
 
+def _delegated(identity_id: uuid.UUID | None) -> dict[str, str]:
+    """The mark a decision taken by an assistant under the workspace
+    delegation (ADR-0076 phase B) leaves on its audit row and bus event. The
+    accept ratio skips marked events: it measures how a PERSON judged each
+    model, and an agent's verdict is not that."""
+    return {"delegated_by_identity_id": str(identity_id)} if identity_id else {}
+
+
 async def _distillation_sources(
     session: AsyncSession, *, org_id: uuid.UUID, atom: Note
 ) -> list[Note]:
@@ -459,6 +467,7 @@ async def approve_node(
     note_id: uuid.UUID,
     expected_version: int | None = None,
     decision: Decision | None = None,
+    delegated_by_identity_id: uuid.UUID | None = None,
 ) -> Note:
     """Approve a ``proposed`` or ``declined`` node: ``review_state`` ->
     ``'approved'`` so it becomes effective (eligible for every
@@ -505,6 +514,7 @@ async def approve_node(
         diff={
             "review_state": {"old": previous, "new": _APPROVED},
             **(decision.record() if decision else {}),
+            **_delegated(delegated_by_identity_id),
         },
     )
     actor_kind = await event_bus.session_actor_kind(session)
@@ -521,6 +531,7 @@ async def approve_node(
             "origin_model_id": note.origin_model_id,
             "humus_kind": note.humus_kind,
             **(decision.record() if decision else {}),
+            **_delegated(delegated_by_identity_id),
         },
         applied_state="committed",
         # Versioned: a node decided again after an un-reject is a NEW
@@ -542,6 +553,7 @@ async def decline_node(
     expected_version: int | None = None,
     attribute_to_model: bool = True,
     decision: Decision | None = None,
+    delegated_by_identity_id: uuid.UUID | None = None,
 ) -> Note:
     """Decline a ``proposed`` node: ``review_state`` -> ``'declined'``
     (ADR-0075). It stays held at the review gate, so it never pollutes the
@@ -589,6 +601,7 @@ async def decline_node(
             "review_state": {"old": _PROPOSED, "new": _DECLINED},
             **({"reason": reason} if reason else {}),
             **(decision.record() if decision else {}),
+            **_delegated(delegated_by_identity_id),
         },
     )
     actor_kind = await event_bus.session_actor_kind(session)
@@ -606,6 +619,7 @@ async def decline_node(
             "humus_kind": note.humus_kind,
             "reason": reason,
             **(decision.record() if decision else {}),
+            **_delegated(delegated_by_identity_id),
         },
         applied_state="rejected",
         # Versioned, same reason as approve: after an un-reject, rejecting
@@ -720,7 +734,11 @@ async def record_unreject(
     """
     row = (
         await session.execute(
-            select(EventOutbox.id, EventOutbox.payload["origin_model_id"].astext)
+            select(
+                EventOutbox.id,
+                EventOutbox.payload["origin_model_id"].astext,
+                EventOutbox.payload["delegated_by_identity_id"].astext,
+            )
             .where(
                 EventOutbox.org_id == org_id,
                 EventOutbox.node_id == note.id,
@@ -733,7 +751,9 @@ async def record_unreject(
             .limit(1)
         )
     ).first()
-    parent, attributed_model = (row[0], row[1]) if row is not None else (None, None)
+    parent, attributed_model, delegated_by = (
+        (row[0], row[1], row[2]) if row is not None else (None, None, None)
+    )
     actor_kind = await event_bus.session_actor_kind(session)
     await event_bus.emit_event(
         session,
@@ -753,6 +773,10 @@ async def record_unreject(
             "review": _UNREJECT,
             "origin_model_id": attributed_model,
             "humus_kind": note.humus_kind,
+            # An undo of an agent's decline is an agent-side event too, so
+            # the ratio, which skips the decline, skips its undo as well and
+            # never subtracts it from a person's verdict on the same model.
+            **({"delegated_by_identity_id": delegated_by} if delegated_by else {}),
         },
         idempotency_key=f"garden_review:unreject:{note.id}:{note.version}",
     )
@@ -796,6 +820,39 @@ async def reopen_node(
         diff={"review_state": {"old": _DECLINED, "new": _PROPOSED}},
     )
     await record_unreject(session, org_id=org_id, actor_id=actor_id, note=note)
+    return note
+
+
+async def withdraw_approval(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+) -> Note:
+    """Take an approval back: ``approved`` -> ``proposed``, out of the memory
+    and back in the inbox, and a distillation's source loses the humus mark
+    unless another effective distillation still justifies it. The reversal of
+    an approval an assistant gave under the workspace delegation (ADR-0076
+    phase B); a person withdraws their own with ``restore_source``."""
+    await require_role(session, org_id, actor_id, Role.member)
+    note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if note.review_state != _APPROVED:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    note.review_state = _PROPOSED
+    note.review_decided_at = None
+    note.version += 1
+    await session.flush()
+    await _clear_sources_on_decline(session, org_id=org_id, actor_id=actor_id, atom=note)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="garden_review:withdraw_approval",
+        diff={"review_state": {"old": _APPROVED, "new": _PROPOSED}},
+    )
     return note
 
 
@@ -1418,6 +1475,8 @@ async def accept_ratio_by_model(
                 EventOutbox.org_id == org_id,
                 review.in_(("approve", "reject", _UNREJECT)),
                 model.isnot(None),
+                # A person's verdicts only (ADR-0076 phase B).
+                EventOutbox.payload["delegated_by_identity_id"].astext.is_(None),
             )
             .group_by(model)
         )
@@ -1600,4 +1659,5 @@ __all__ = [
     "reopen_node",
     "revise_node",
     "submit_check",
+    "withdraw_approval",
 ]

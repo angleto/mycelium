@@ -23,6 +23,7 @@ import type { components } from '../shared'
 
 type Reading = components['schemas']['GardenReviewReadingOut']
 type Check = components['schemas']['GardenReviewCheckOut']
+type AgentDecision = components['schemas']['GardenDelegatedDecisionOut']
 
 // ADR-0076: an agent may have checked this proposal against its sources, or
 // written a better version of it. Neither decides anything; both are shown
@@ -72,6 +73,9 @@ export function GardenProposalRoute() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<Busy>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  // ADR-0076 phase B: the standing decision an assistant took on this note,
+  // if any, shown with the way to take it back.
+  const [agentDecision, setAgentDecision] = useState<AgentDecision | null>(null)
 
   const load = useCallback(async () => {
     // The person reads the sources whole: the budget that keeps an agent's
@@ -89,6 +93,12 @@ export function GardenProposalRoute() {
       return
     }
     setReading(data)
+    const deleg = await api.GET('/garden/delegation/decisions', {
+      params: { header: workspaceHeader(), query: { limit: 200 } },
+    })
+    setAgentDecision(
+      (deleg.data ?? []).find((d) => d.target_id === noteId && !d.reversed_at) ?? null,
+    )
   }, [noteId])
 
   useEffect(() => {
@@ -157,6 +167,18 @@ export function GardenProposalRoute() {
     [reading, load, navigate],
   )
 
+  async function revertAgent(decisionId: string) {
+    setBusy('reopen')
+    setErr('')
+    const { error } = await api.POST('/garden/delegation/revert', {
+      params: { header: workspaceHeader() },
+      body: { decision_id: decisionId },
+    })
+    setBusy(null)
+    await load()
+    if (error) setErr(errMessage(error))
+  }
+
   if (loading) {
     return (
       <section className="card card--wide gproposal">
@@ -208,6 +230,25 @@ export function GardenProposalRoute() {
       </header>
 
       {err && <p className="error">{err}</p>}
+
+      {agentDecision && (
+        <div className="banner gproposal__agent" role="note">
+          <p>
+            {t('gardenProposal.agentDecided', {
+              what: t(`gardenDelegation.kind.${agentDecision.kind}.name`),
+            })}
+            {agentDecision.reason ? ` ${agentDecision.reason}` : ''}
+          </p>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={busy !== null}
+            onClick={() => void revertAgent(agentDecision.decision_id)}
+          >
+            {t('gardenReview.agent.revert')}
+          </button>
+        </div>
+      )}
 
       {reading.revised_by && reading.revised_by.length > 0 && (
         <p className="banner">

@@ -1,7 +1,7 @@
 # ADR-0076: An agent checks and revises what a model proposed, and a person keeps the last word unless they hand it over
 
 Status: Accepted (2026-11-24). Phase A implemented with this record; phase B
-open.
+implemented on 2026-11-25 (migration 0037).
 Relates to: ADR-0043 (human-gated review state, amended 2026-11-12, which
 foresaw "an approval delegated to an adversarial verification" as a later
 step), ADR-0068 (one operation registry for REST and MCP), ADR-0071 (facts
@@ -121,6 +121,17 @@ count as simple is the person's choice, made in the setting, not in code.
   lookup resolves a proposal when asked to resolve a code (`include_gated`,
   never for a list of things to link to) and routes it to the reading view;
   the reading view and the review list show the code with a copy button.
+
+### Phase B as built (2026-11-25)
+
+| part | where | checked by |
+|---|---|---|
+| the setting | `garden_delegation` in the workspace settings, written by the owner through `PATCH /workspaces/me/settings` (closed to assistant credentials); `garden_delegation.DecisionKind` is the closed set: decline a synthesis, approve a synthesis whose current version has a `supported` check, accept or reject a link proposal, approve a fact. Declining a fact is not in it: a declined fact is frozen and could not be taken back | `core/tests/test_garden_delegation.py`; the API test shows the assistant refused when it tries to write the setting |
+| deciding | `garden.delegation.decide` (`notes:write`, assistant credentials only): refused with `garden.delegation_refused` and a reason (`not_an_assistant`, `not_delegable`, `not_granted`, `no_supporting_check`) | both tests |
+| the record | `delegated_decision` (migration 0037): kind, target, verdict, assistant, reason, what it created, and the reversal | both tests |
+| reversing | `garden.delegation.revert` (person only): a declined synthesis reopens, an approved one is withdrawn, an accepted link is removed and its pair's proposals reopen, a rejected pair is forgotten, an approved fact is proposed again | `core/tests/test_garden_delegation.py` |
+| the measures | the accept ratio skips events marked `delegated_by_identity_id`, and the undo of an agent's decline is marked too; the proposer precision skips `link_proposal.delegated`; `garden.delegation.stats` counts, per kind, decisions and reversals | the core test was observed failing with the ratio filter removed |
+| the surfaces | the settings card lists the kinds with their counts; the review page lists the agents' decisions with Undo; the reading view says when an agent decided and offers Undo | `web/src/components/GardenDelegationSettings.test.tsx`, `web/src/routes/GardenProposalRoute.test.tsx` |
 
 ## Consequences
 

@@ -57,6 +57,7 @@ from mycelium_core.models.classification_personal_prior_snapshot import (
     ClassificationPersonalPriorSnapshot,
 )
 from mycelium_core.models.client_profile import ClientProfile
+from mycelium_core.models.delegated_decision import DelegatedDecision
 from mycelium_core.models.dependency import DependencyType, TaskDependency
 from mycelium_core.models.device_authorization import DeviceAuthorization
 from mycelium_core.models.dispatch_request import (
@@ -237,6 +238,7 @@ __all__ = [
     "CostBasis",
     "CreditLedger",
     "DefaultRateCard",
+    "DelegatedDecision",
     "DependencyType",
     "DeviceAuthorization",
     "DispatchRequest",

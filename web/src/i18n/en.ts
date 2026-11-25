@@ -260,6 +260,12 @@ export const en = {
     readAndDecide: 'Read and decide',
     read: 'Read',
     reopen: 'Reopen',
+    agent: {
+      title: 'Decided by an agent',
+      hint: 'Decisions you handed over to agents in the workspace settings. Each can be undone: it goes back to awaiting your decision.',
+      revert: 'Undo the decision',
+      reversed: 'Undone',
+    },
     reopenHint: 'Put it back among the ones awaiting your decision.',
     removed: '“{{title}}” was deleted for good.',
     facts: {
@@ -320,6 +326,7 @@ export const en = {
     revises: 'This is a revision of a proposal written by {{model}}, which is now among the declined.',
     openOriginal: 'Open the original',
     copyId: 'Copy the proposal code',
+    agentDecided: 'Decided by an agent ({{what}}).',
     idCopied: 'Code copied',
     showOriginal: 'Show the original version',
     revisedBy: 'This proposal was replaced by a revision:',
@@ -342,6 +349,35 @@ export const en = {
       },
     },
   },
+  gardenDelegation: {
+    title: 'Garden: decisions handed over to agents',
+    intro: 'As a rule the last word on what enters your memory is yours. Here you choose the simple cases where an agent (through MCP) may decide on its own. Every decision an agent takes is listed in the review and can be undone.',
+    never: 'Declining a fact of the graph cannot be handed over: a declined fact cannot be reopened.',
+    saved: 'Saved.',
+    stats: 'so far: {{decided}} decided by an agent, {{reversed}} undone by you',
+    kind: {
+      synthesis_decline: {
+        name: 'Decline a synthesis',
+        what: 'A distillation, pattern or season the agent judges wrong goes among the declined.',
+      },
+      synthesis_approve_checked: {
+        name: 'Approve a checked synthesis',
+        what: 'Only if its current version has a check in which every claim is supported by the notes.',
+      },
+      link_proposal_accept: {
+        name: 'Accept a proposed link',
+        what: 'The agent also chooses the kind of link.',
+      },
+      link_proposal_reject: {
+        name: 'Reject a proposed link',
+        what: 'The pair is not proposed again, until you undo it.',
+      },
+      fact_approve: {
+        name: 'Approve a fact of the graph',
+        what: 'A fact a model read in your notes enters the graph.',
+      },
+    },
+  },
   generatedFromNote: {
     title: 'Generated from this note',
     readAndDecide: 'Read and decide',
@@ -349,7 +385,7 @@ export const en = {
   },
   gardenSuggest: {
     title: 'Garden suggestions',
-    headHint: 'Proposals from the graph — accept to apply, dismiss to decline (ADR-0032).',
+    headHint: 'The garden\'s proposals about this note. Each button says what it does; Dismiss changes nothing and does not propose it again.',
     loading: 'Reading the garden…',
     empty: 'No suggestions right now.',
     tags: 'Tags',
@@ -358,6 +394,9 @@ export const en = {
     accept: 'Accept',
     dismiss: 'Dismiss',
     promoteMature: 'Promote to mature',
+    addTag: 'Add the tag',
+    addLink: 'Link',
+    maturityWhat: 'Move this note to mature',
     autoHint: 'High confidence — the garden will mature this on its own.',
     confidence: '{{pct}}% confidence',
     clusterInfo: 'Community #{{id}} · modularity {{mod}}',

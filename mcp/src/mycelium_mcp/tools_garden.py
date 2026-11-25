@@ -62,6 +62,11 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("garden_review_reopen", "garden.review.reopen", None),
     ("garden_review_check", "garden.review.check", None),
     ("garden_review_revise", "garden.review.revise", None),
+    ("garden_delegation_policy", "garden.delegation.policy", None),
+    ("garden_delegated_decide", "garden.delegation.decide", None),
+    ("garden_delegated_decisions", "garden.delegation.decisions", _under("decisions")),
+    ("garden_delegated_revert", "garden.delegation.revert", None),
+    ("garden_delegation_stats", "garden.delegation.stats", _under("kinds")),
     ("garden_review_remove", "garden.review.remove", None),
     # what the classifier learned
     ("garden_learning_telemetry", "garden.learning.telemetry", None),

@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**317 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**322 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,7 +70,7 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (35)
+### garden (40)
 
 | Tool | Summary |
 |---|---|
@@ -79,6 +79,11 @@ over-fetch the org table and filter in its head.
 | `garden_apply` | Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037). |
 | `garden_classify` | The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and |
 | `garden_clusters` | Leiden communities over the weighted note graph: the community index |
+| `garden_delegated_decide` | Take a decision the person handed over to assistants (ADR-0076): |
+| `garden_delegated_decisions` | What assistants decided on the person's behalf, most recent first, |
+| `garden_delegated_revert` | Take back a decision an assistant took: the thing is pending again, |
+| `garden_delegation_policy` | Which decisions the person handed over to assistants in this |
+| `garden_delegation_stats` | Per kind of decision: how many assistants took, how many the person |
 | `garden_health` | The garden's structural sensors (ADR-0035): the current readings and |
 | `garden_health_events` | What changed (ADR-0035): the discrete events that plausibly explain a |
 | `garden_health_timeseries` | Daily sensor snapshots over the last ``days``, newest first. Reads the |

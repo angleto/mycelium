@@ -284,6 +284,9 @@ class WorkspaceSettings(BaseModel):
     # garden sweep + embedding backfill without touching user actions.
     autonomous_jobs_enabled: bool = True
     autonomous_daily_credit_cap: float = 0.0
+    # ADR-0076 phase B: the garden decisions handed over to assistants.
+    # Empty by default: every decision is the person's.
+    garden_delegation: list[str] = Field(default_factory=list)
     # Per-workspace buffered-attachment size cap (bytes), admin-tunable.
     # The /me handler fills these with the EFFECTIVE value (the override
     # or, absent one, the config default -- always clamped to the
@@ -361,6 +364,10 @@ class WorkspaceSettingsIn(BaseModel):
     # written when present. ge=1 is the floor; the endpoint clamps to the
     # runtime config ceiling (the SPA also bounds its input to it).
     attachment_max_bytes: int | None = Field(default=None, ge=1)
+    # ADR-0076 phase B: the kinds of garden decision handed over to
+    # assistants. Optional so another save does not restate it; only
+    # written when present. An empty list hands nothing over.
+    garden_delegation: list[str] | None = None
 
     @field_validator("estimate_presets")
     @classmethod

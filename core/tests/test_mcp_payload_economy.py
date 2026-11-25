@@ -409,6 +409,9 @@ def _uuid_parsed_arguments() -> dict[str, set[str]]:
 #: ``resolve_prefix`` turn eight hex digits back into this?", and today it
 #: resolves tasks and notes and nothing else.
 _NOT_AN_ENTITY_ID = {
+    # A decision an assistant took (ADR-0076 phase B): its own kind, which
+    # resolve_prefix cannot reach.
+    "decision_id",
     "account_id",
     "annotation_id",
     "assignee_id",

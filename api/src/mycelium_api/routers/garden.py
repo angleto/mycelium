@@ -80,13 +80,24 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
         "garden_review_restore_source",
     ),
     ("GET", "/review/accept-ratio", "garden.review.accept_ratio", "garden_review_accept_ratio"),
+    # decisions handed over to assistants (ADR-0076 phase B)
+    ("GET", "/delegation/policy", "garden.delegation.policy", "garden_delegation_policy"),
+    ("POST", "/delegation/decide", "garden.delegation.decide", "garden_delegation_decide"),
+    (
+        "GET",
+        "/delegation/decisions",
+        "garden.delegation.decisions",
+        "garden_delegation_decisions",
+    ),
+    ("POST", "/delegation/revert", "garden.delegation.revert", "garden_delegation_revert"),
+    ("GET", "/delegation/stats", "garden.delegation.stats", "garden_delegation_stats"),
     # Static segments before the parametrised ones: ``/review/nodes/...``
     # and ``/review/by-source/...`` carry their own prefix, so no id can
     # shadow ``/review/pending`` or ``/review/rejected``.
     ("GET", "/review/nodes/{note_id}", "garden.review.read", "garden_review_read"),
     (
         "GET",
-        "/review/nodes/{note_id}/sources/{source_id}",
+        "/review/nodes/{note_id}/sources/{source_note_id}",
         "garden.review.read_source",
         "garden_review_read_source",
     ),

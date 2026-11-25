@@ -39,6 +39,7 @@ type CandidateEdge = components['schemas']['GardenCandidateEdge']
 type ReviewItem = components['schemas']['GardenReviewPendingItem']
 type RejectedItem = components['schemas']['GardenReviewRejectedItem']
 type ProposedFact = components['schemas']['KgProposedFact']
+type AgentDecision = components['schemas']['GardenDelegatedDecisionOut']
 
 const NODE_GLYPH: Record<string, string> = {
   distill: '⚗️',
@@ -57,13 +58,16 @@ export function GardenReviewRoute() {
   const [pending, setPending] = useState<ReviewItem[]>([])
   const [rejected, setRejected] = useState<RejectedItem[]>([])
   const [facts, setFacts] = useState<ProposedFact[]>([])
+  // ADR-0076 phase B: what assistants decided on the person's behalf, each
+  // reversible here.
+  const [agentDecisions, setAgentDecisions] = useState<AgentDecision[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     setErr('')
-    const [cand, rev, bin, kg] = await Promise.all([
+    const [cand, rev, bin, kg, deleg] = await Promise.all([
       api.GET('/garden/candidates', {
         params: { header: workspaceHeader(), query: { kind: 'all', limit: 50 } },
       }),
@@ -74,6 +78,9 @@ export function GardenReviewRoute() {
         params: { header: workspaceHeader(), query: { limit: 50 } },
       }),
       api.GET('/kg/review/pending', {
+        params: { header: workspaceHeader(), query: { limit: 50 } },
+      }),
+      api.GET('/garden/delegation/decisions', {
         params: { header: workspaceHeader(), query: { limit: 50 } },
       }),
     ])
@@ -89,6 +96,8 @@ export function GardenReviewRoute() {
     else setRejected(bin.data ?? [])
     if (kg.error) setErr((e) => e || errMessage(kg.error))
     else setFacts(kg.data?.items ?? [])
+    if (deleg.error) setErr((e) => e || errMessage(deleg.error))
+    else setAgentDecisions(deleg.data ?? [])
   }, [])
 
   useEffect(() => {
@@ -138,6 +147,22 @@ export function GardenReviewRoute() {
     [reload],
   )
 
+  // Taking back what an assistant decided: the thing is pending again.
+  const onRevertAgent = useCallback(
+    async (decisionId: string) => {
+      setBusy(`revert:${decisionId}`)
+      setErr('')
+      const { error } = await api.POST('/garden/delegation/revert', {
+        params: { header: workspaceHeader() },
+        body: { decision_id: decisionId },
+      })
+      setBusy(null)
+      await reload()
+      if (error) setErr(errMessage(error))
+    },
+    [reload],
+  )
+
   const onFactReview = useCallback(
     async (edgeId: string, action: 'approve' | 'reject', expectedVersion: number) => {
       setBusy(`fact-${action}:${edgeId}`)
@@ -155,7 +180,13 @@ export function GardenReviewRoute() {
     [reload],
   )
 
-  const total = nodes.length + edges.length + pending.length + rejected.length + facts.length
+  const total =
+    nodes.length +
+    edges.length +
+    pending.length +
+    rejected.length +
+    facts.length +
+    agentDecisions.length
 
   return (
     <div className="ghreview">
@@ -442,6 +473,60 @@ export function GardenReviewRoute() {
                     >
                       {t('gardenReview.reopen')}
                     </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* ---- Decise da un agente (ADR-0076 phase B) ----------------- */}
+          <section className="ghreview__section">
+            <header className="ghreview__sectionhead">
+              <h2>{t('gardenReview.agent.title')}</h2>
+              <span className="muted">({agentDecisions.length})</span>
+            </header>
+            <p className="hint">{t('gardenReview.agent.hint')}</p>
+            {agentDecisions.length === 0 ? (
+              <p className="hint">{t('gardenReview.none')}</p>
+            ) : (
+              <ul className="ghreview__list">
+                {agentDecisions.map((d) => (
+                  <li key={d.decision_id} className="ghreview__item">
+                    <span className="ghreview__body">
+                      <span className="ghreview__title">
+                        {d.target_kind === 'synthesis' ? (
+                          <Link to={`/garden/review/${d.target_id}`}>
+                            {d.target_title || d.target_id.slice(0, 8)}
+                          </Link>
+                        ) : (
+                          d.target_title || d.target_id.slice(0, 8)
+                        )}
+                      </span>
+                      <span className="ghreview__reason">
+                        {t(`gardenDelegation.kind.${d.kind}.name`)}
+                        {d.reason ? ` · ${d.reason}` : ''}
+                      </span>
+                    </span>
+                    <span className="muted">
+                      {new Date(d.created_at).toLocaleString(i18n.language, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    {d.reversed_at ? (
+                      <span className="chip">{t('gardenReview.agent.reversed')}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn--ghost btn--sm"
+                        disabled={busy === `revert:${d.decision_id}`}
+                        onClick={() => void onRevertAgent(d.decision_id)}
+                      >
+                        {t('gardenReview.agent.revert')}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

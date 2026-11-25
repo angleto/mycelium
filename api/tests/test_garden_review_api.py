@@ -545,3 +545,91 @@ async def test_a_pasted_proposal_code_is_found_and_opens_its_reading(_wire: None
         assert [(m["id"], m["review_state"], m["route_url"]) for m in found] == [
             (nid, "proposed", f"/garden/review/{nid}")
         ]
+
+
+async def test_the_person_hands_a_kind_over_and_the_agent_cannot_widen_it(_wire: None) -> None:
+    """ADR-0076 phase B over HTTP. Nothing is handed over by default; the
+    owner hands one kind over in the workspace settings; the assistant
+    cannot write that setting itself; it declines within the grant and is
+    refused outside it; the person sees the decision and reverses it."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+        a = await _assistant(c, h)
+        assert (await c.get("/garden/delegation/policy", headers=a)).json() == {"granted": []}
+
+        v = (await c.get(f"/garden/review/nodes/{nid}", headers=a)).json()["version"]
+        refused = await c.post(
+            "/garden/delegation/decide",
+            headers=a,
+            json={
+                "target_kind": "synthesis",
+                "target_id": nid,
+                "verdict": "decline",
+                "expected_version": v,
+            },
+        )
+        assert refused.status_code in (400, 409, 422), refused.text
+        assert refused.json()["code"] == "garden.delegation_refused"
+
+        owner = {**h, "X-Workspace-Role": "owner"}
+        ws = (await c.get("/workspaces/me", headers=owner)).json()
+        body = {
+            "expected_version": ws["version"],
+            "estimate_presets": ws["settings"]["estimate_presets"],
+            "garden_delegation": ["synthesis_decline"],
+        }
+        widen = await c.patch("/workspaces/me/settings", headers=a, json=body)
+        assert widen.status_code in (401, 403), widen.text
+        ok = await c.patch("/workspaces/me/settings", headers=owner, json=body)
+        assert ok.status_code == 200, ok.text
+        assert (await c.get("/garden/delegation/policy", headers=a)).json() == {
+            "granted": ["synthesis_decline"]
+        }
+
+        dec = await c.post(
+            "/garden/delegation/decide",
+            headers=a,
+            json={
+                "target_kind": "synthesis",
+                "target_id": nid,
+                "verdict": "decline",
+                "expected_version": v,
+                "reason": "a claim is not in the sources",
+            },
+        )
+        assert dec.status_code == 200, dec.text
+        assert dec.json()["assistant_identity_id"] is not None
+        approve = await c.post(
+            "/garden/delegation/decide",
+            headers=a,
+            json={
+                "target_kind": "synthesis",
+                "target_id": nid,
+                "verdict": "approve",
+                "expected_version": v + 1,
+            },
+        )
+        assert approve.json()["code"] == "garden.delegation_refused", approve.text
+
+        listed = (await c.get("/garden/delegation/decisions", headers=h)).json()
+        assert [(d["target_id"], d["verdict"], d["reversed_at"]) for d in listed] == [
+            (nid, "decline", None)
+        ]
+        agent_revert = await c.post(
+            "/garden/delegation/revert",
+            headers=a,
+            json={"decision_id": dec.json()["decision_id"]},
+        )
+        assert agent_revert.status_code == 403, agent_revert.text
+        back = await c.post(
+            "/garden/delegation/revert",
+            headers=h,
+            json={"decision_id": dec.json()["decision_id"]},
+        )
+        assert back.status_code == 200 and back.json()["reversed_at"], back.text
+        state = (await c.get(f"/garden/review/nodes/{nid}", headers=h)).json()["review_state"]
+        assert state == "proposed"
+        stats = (await c.get("/garden/delegation/stats", headers=h)).json()
+        assert stats == [{"kind": "synthesis_decline", "decided": 1, "reversed": 1}]

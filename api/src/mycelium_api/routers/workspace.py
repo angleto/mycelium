@@ -37,7 +37,13 @@ from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import attachments as attachments_svc
-from mycelium_core.services import autonomous_budget, dispatch_loop, memberships, trash
+from mycelium_core.services import (
+    autonomous_budget,
+    dispatch_loop,
+    garden_delegation,
+    memberships,
+    trash,
+)
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services.auth import (
     create_org_for_user,
@@ -232,6 +238,12 @@ async def patch_my_workspace_settings(
     if body.attachment_max_bytes is not None:
         ceiling = get_settings().attachment_max_bytes_ceiling
         merged[attachments_svc.MAX_BYTES_KEY] = min(body.attachment_max_bytes, ceiling)
+    # The garden decisions handed over to assistants (ADR-0076 phase B).
+    # Only written when present; an unknown kind is refused, not dropped.
+    # This route is a person's (owner, and closed to scoped credentials), so
+    # an assistant cannot widen what it may decide.
+    if body.garden_delegation is not None:
+        merged[garden_delegation.SETTINGS_KEY] = garden_delegation.normalize(body.garden_delegation)
     new_version = await optimistic_update(
         ctx.session,
         Organization,

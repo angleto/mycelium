@@ -24,6 +24,10 @@ function linkIcon(kind: string): GardenIconName {
     : 'related'
 }
 
+// ADR-0075 decision 4: every control says what it does in words (it was a
+// bare ✓ and ×, read as "break something"), and the reason for a suggestion
+// is on the row, not only in a hover title.
+//
 // ADR-0032 / ADR-0042 proposal engine, consumer side. Read-only suggestions
 // {tags, links, maturity, cluster} surfaced as accept/dismiss chips on the
 // open NOTE or TASK; hover shows the rationale + confidence. Accept/dismiss
@@ -216,25 +220,24 @@ export function GardenSuggestionsPanel({
                 >
                   <span className="linkedpanel__title">
                     {tagsById[s.tag_id] ?? t('gardenSuggest.unknownTag')}
+                    <span className="hint linkedpanel__why">{s.rationale}</span>
                   </span>
                   <span className="muted">{pct(s.confidence)}%</span>
                   <button
                     type="button"
                     className="btn--ghost btn--sm"
                     disabled={busy === k}
-                    title={t('gardenSuggest.accept')}
                     onClick={() => void apply('tag', { tag_id: s.tag_id }, 'accept', k)}
                   >
-                    ✓
+                    {t('gardenSuggest.addTag')}
                   </button>
                   <button
                     type="button"
                     className="btn--ghost btn--sm"
                     disabled={busy === k}
-                    title={t('gardenSuggest.dismiss')}
                     onClick={() => void apply('tag', { tag_id: s.tag_id }, 'reject', k)}
                   >
-                    ×
+                    {t('gardenSuggest.dismiss')}
                   </button>
                 </li>
               )
@@ -264,6 +267,7 @@ export function GardenSuggestionsPanel({
                   <GardenIcon name={linkIcon(s.link_kind)} size={14} />
                   <span className="linkedpanel__title">
                     {targetsById[s.target_id] ?? t('gardenSuggest.unknownTarget')}
+                    <span className="hint linkedpanel__why">{s.rationale}</span>
                   </span>
                   <span
                     className="muted"
@@ -276,7 +280,6 @@ export function GardenSuggestionsPanel({
                     type="button"
                     className="btn--ghost btn--sm"
                     disabled={busy === k}
-                    title={t('gardenSuggest.accept')}
                     onClick={() =>
                       void apply(
                         'link',
@@ -286,13 +289,12 @@ export function GardenSuggestionsPanel({
                       )
                     }
                   >
-                    ✓
+                    {t('gardenSuggest.addLink')}
                   </button>
                   <button
                     type="button"
                     className="btn--ghost btn--sm"
                     disabled={busy === k}
-                    title={t('gardenSuggest.dismiss')}
                     onClick={() =>
                       void apply(
                         'link',
@@ -302,7 +304,7 @@ export function GardenSuggestionsPanel({
                       )
                     }
                   >
-                    ×
+                    {t('gardenSuggest.dismiss')}
                   </button>
                 </li>
               )
@@ -324,7 +326,8 @@ export function GardenSuggestionsPanel({
             title={`${data.maturity.rationale} · ${t('gardenSuggest.confidence', { pct: pct(data.maturity.confidence) })}`}
           >
             <span className="linkedpanel__title">
-              {t('gardenSuggest.promoteMature')}
+              {t('gardenSuggest.maturityWhat')}
+              <span className="hint linkedpanel__why">{data.maturity.rationale}</span>
             </span>
             <span className="muted">{pct(data.maturity.confidence)}%</span>
             {data.maturity.auto_apply && (
@@ -334,7 +337,6 @@ export function GardenSuggestionsPanel({
               type="button"
               className="btn--ghost btn--sm"
               disabled={busy === 'maturity'}
-              title={t('gardenSuggest.accept')}
               onClick={() =>
                 void apply(
                   'maturity',
@@ -344,13 +346,12 @@ export function GardenSuggestionsPanel({
                 )
               }
             >
-              ✓
+              {t('gardenSuggest.promoteMature')}
             </button>
             <button
               type="button"
               className="btn--ghost btn--sm"
               disabled={busy === 'maturity'}
-              title={t('gardenSuggest.dismiss')}
               onClick={() =>
                 void apply(
                   'maturity',
@@ -360,7 +361,7 @@ export function GardenSuggestionsPanel({
                 )
               }
             >
-              ×
+              {t('gardenSuggest.dismiss')}
             </button>
           </div>
         </section>

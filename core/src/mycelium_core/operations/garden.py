@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 
@@ -39,6 +40,11 @@ from mycelium_core.operations.garden_views import (
     GardenClustersOut,
     GardenClusterSuggestionOut,
     GardenDaysIn,
+    GardenDelegatedDecideIn,
+    GardenDelegatedDecisionOut,
+    GardenDelegatedRevertIn,
+    GardenDelegationPolicyOut,
+    GardenDelegationStatsOut,
     GardenEventOut,
     GardenEventsIn,
     GardenFeatureDeltaOut,
@@ -112,6 +118,7 @@ from mycelium_core.services import body_references as references_svc
 from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import event_bus, focus_context, graph_local
 from mycelium_core.services import garden_classify as classify_svc
+from mycelium_core.services import garden_delegation as delegation_svc
 from mycelium_core.services import garden_health as health_svc
 from mycelium_core.services import garden_learning as learning_svc
 from mycelium_core.services import garden_review as review_svc
@@ -977,12 +984,12 @@ async def review_read_source(ctx: OpCtx, p: GardenReviewSourceIn) -> GardenRevie
         org_id=ctx.org_id,
         actor_id=ctx.actor_id,
         note_id=p.note_id,
-        source_id=p.source_id,
+        source_id=p.source_note_id,
         offset=p.offset,
         limit=p.limit,
     )
     return GardenReviewSourceSliceOut(
-        source_id=sl.source_id,
+        source_note_id=sl.source_id,
         offset=sl.offset,
         text=sl.text,
         total_chars=sl.total_chars,
@@ -1148,6 +1155,142 @@ async def review_remove(ctx: OpCtx, p: GardenReviewGuardedIn) -> GardenReviewRem
         expected_version=p.expected_version,
     )
     return GardenReviewRemoveOut(note_id=nid, removed=True)
+
+
+# --------------------------------------------------------------------------
+# Decisions handed over to assistants (ADR-0076, phase B)
+# --------------------------------------------------------------------------
+
+
+async def _decision_out(ctx: OpCtx, row: Any) -> GardenDelegatedDecisionOut:
+    from mycelium_core.models.kg import KgEdge
+    from mycelium_core.models.link_proposal import LinkProposal
+    from mycelium_core.models.note import Note
+
+    title: str | None = None
+    if row.target_kind == "synthesis":
+        n = await ctx.session.get(Note, row.target_id)
+        title = n.title if n is not None else None
+    elif row.target_kind == "link_proposal":
+        p = await ctx.session.get(LinkProposal, row.target_id)
+        if p is not None:
+            a = await ctx.session.get(Note, p.source_note_id)
+            b = await ctx.session.get(Note, p.target_note_id)
+            title = f"{a.title if a else '?'} ↔ {b.title if b else '?'}"
+    else:
+        e = await ctx.session.get(KgEdge, row.target_id)
+        title = e.predicate if e is not None else None
+    return GardenDelegatedDecisionOut(
+        decision_id=row.id,
+        kind=row.kind,
+        target_kind=row.target_kind,
+        target_id=row.target_id,
+        verdict=row.verdict,
+        assistant_identity_id=row.assistant_identity_id,
+        reason=row.reason,
+        created_at=row.created_at,
+        reversed_at=row.reversed_at,
+        target_title=title,
+    )
+
+
+@operation(
+    "garden.delegation.policy",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenNoArgs,
+    result=GardenDelegationPolicyOut,
+)
+async def delegation_policy(ctx: OpCtx, _p: GardenNoArgs) -> GardenDelegationPolicyOut:
+    """Which decisions the person handed over to assistants in this
+    workspace. Read it before garden_delegated_decide: anything not listed
+    is the person's to decide, and you leave it to them (with a check or a
+    revision, if that helps)."""
+    return GardenDelegationPolicyOut(
+        granted=sorted(await delegation_svc.granted(ctx.session, org_id=ctx.org_id))
+    )
+
+
+@operation(
+    "garden.delegation.decide",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access="notes:write",
+    params=GardenDelegatedDecideIn,
+    result=GardenDelegatedDecisionOut,
+)
+async def delegation_decide(ctx: OpCtx, p: GardenDelegatedDecideIn) -> GardenDelegatedDecisionOut:
+    """Take a decision the person handed over to assistants (ADR-0076):
+    decline a synthesis, approve a synthesis whose current version has a
+    check with the verdict 'supported', accept or reject a link proposal,
+    approve a fact. Only for kinds listed by garden_delegation_policy;
+    otherwise refused with garden.delegation_refused and a reason. Every
+    decision is recorded with you as the decider, listed to the person, and
+    reversible by them. Be conservative: when in doubt, leave it to the
+    person."""
+    row = await delegation_svc.decide(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.actor_id,
+        assistant_identity_id=await executor_identity(ctx),
+        target_kind=p.target_kind,
+        target_id=p.target_id,
+        verdict=p.verdict,
+        expected_version=p.expected_version,
+        link_kind=p.link_kind,
+        reason=p.reason,
+    )
+    return await _decision_out(ctx, row)
+
+
+@operation(
+    "garden.delegation.decisions",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenListIn,
+    result=list[GardenDelegatedDecisionOut],
+)
+async def delegation_decisions(ctx: OpCtx, p: GardenListIn) -> list[GardenDelegatedDecisionOut]:
+    """What assistants decided on the person's behalf, most recent first,
+    with whether the person reversed it."""
+    rows = await delegation_svc.list_decisions(ctx.session, org_id=ctx.org_id, limit=p.limit)
+    return [await _decision_out(ctx, r) for r in rows]
+
+
+@operation(
+    "garden.delegation.revert",
+    domain=GARDEN,
+    kind=Kind.WRITE,
+    access=HUMAN_ONLY,
+    params=GardenDelegatedRevertIn,
+    result=GardenDelegatedDecisionOut,
+)
+async def delegation_revert(ctx: OpCtx, p: GardenDelegatedRevertIn) -> GardenDelegatedDecisionOut:
+    """Take back a decision an assistant took: the thing is pending again,
+    as before. A person's act."""
+    row = await delegation_svc.revert(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, decision_id=p.decision_id
+    )
+    return await _decision_out(ctx, row)
+
+
+@operation(
+    "garden.delegation.stats",
+    domain=GARDEN,
+    kind=Kind.READ,
+    access="notes:read",
+    params=GardenNoArgs,
+    result=list[GardenDelegationStatsOut],
+)
+async def delegation_stats(ctx: OpCtx, _p: GardenNoArgs) -> list[GardenDelegationStatsOut]:
+    """Per kind of decision: how many assistants took, how many the person
+    reversed. The measure of whether a kind is safe to hand over."""
+    return [
+        GardenDelegationStatsOut(kind=x.kind, decided=x.decided, reversed=x.reversed)
+        for x in await delegation_svc.stats(ctx.session, org_id=ctx.org_id)
+    ]
 
 
 @operation(

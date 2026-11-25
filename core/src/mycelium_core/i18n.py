@@ -295,6 +295,10 @@ class MessageCode(enum.StrEnum):
     GARDEN_SUGGESTION_TYPE_INVALID = "garden.suggestion_type_invalid"
     GARDEN_ACTION_INVALID = "garden.action_invalid"
     GARDEN_REVIEW_DECISION_INVALID = "garden.review_decision_invalid"
+    # ADR-0076 phase B: an assistant asked to decide what the person has not
+    # handed over; {reason} names which condition failed.
+    GARDEN_DELEGATION_REFUSED = "garden.delegation_refused"
+    GARDEN_DELEGATED_DECISION_NOT_FOUND = "garden.delegated_decision_not_found"
     OPERATION_INVALID_ARGUMENT = "operation.invalid_argument"
     EVENT_QUOTA_EXCEEDED = "event.quota_exceeded"
     EVENT_NODE_NOT_INERT = "event.node_not_inert"
@@ -917,6 +921,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The cited comment is not a person's decision to {verb} this generated note "
             "({reason}). Ask the person to comment on one of its source notes with a "
             "line '{verb} <note id>'."
+        ),
+        MessageCode.GARDEN_DELEGATION_REFUSED: (
+            "This decision is not handed over to assistants in this workspace ({reason}). "
+            "The person decides it, or hands this kind of decision over in the garden "
+            "settings."
+        ),
+        MessageCode.GARDEN_DELEGATED_DECISION_NOT_FOUND: (
+            "No decision taken by an assistant has this id."
         ),
         MessageCode.OPERATION_INVALID_ARGUMENT: ("Invalid arguments for {operation}: {detail}"),
         MessageCode.EVENT_QUOTA_EXCEEDED: (

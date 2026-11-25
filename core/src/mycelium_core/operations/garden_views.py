@@ -16,6 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from mycelium_core.models.proposal_check import CheckVerdict, ClaimStatus
+from mycelium_core.services.garden_delegation import DecisionKind, TargetKind, Verdict
 
 # --- Garden graph (note↔note weighted + PageRank centrality) -------
 # Tasks 4467acb4 (note_edge_strength v1) + 8c0a8f08 (PageRank Phase 1).
@@ -381,13 +382,16 @@ class GardenReviewReadIn(BaseModel):
 
 class GardenReviewSourceIn(BaseModel):
     note_id: uuid.UUID = Field(description="The proposal.")
-    source_id: uuid.UUID = Field(description="One of its sources.")
+    # ``source_note_id``, not ``source_id``: the MCP gateway shortens and
+    # expands ids by key name, and ``source_id`` names a memory blob's source
+    # (a part, a task) elsewhere on that surface.
+    source_note_id: uuid.UUID = Field(description="One of its sources.")
     offset: int = Field(0, ge=0)
     limit: int = Field(20000, ge=1, le=20000)
 
 
 class GardenReviewSourceSliceOut(BaseModel):
-    source_id: uuid.UUID
+    source_note_id: uuid.UUID
     offset: int
     text: str
     total_chars: int
@@ -492,6 +496,51 @@ class GardenReviewForSourceItem(BaseModel):
 class GardenReviewRemoveOut(BaseModel):
     note_id: uuid.UUID
     removed: bool
+
+
+class GardenDelegationPolicyOut(BaseModel):
+    """The kinds of decision the person handed over to assistants here
+    (ADR-0076 phase B). Empty means none: every decision is the person's."""
+
+    granted: list[DecisionKind]
+
+
+class GardenDelegatedDecideIn(BaseModel):
+    """Decide on the person's behalf, within what they handed over.
+    ``target_kind``: ``synthesis`` (a generated note, ``target_id`` its note
+    id, ``expected_version`` required), ``link_proposal`` (``link_kind``
+    required to approve), ``fact``. ``verdict``: ``approve`` or ``decline``.
+    ``reason`` is shown to the person beside the decision."""
+
+    target_kind: TargetKind
+    target_id: uuid.UUID
+    verdict: Verdict
+    expected_version: int | None = None
+    link_kind: str | None = Field(None, max_length=20)
+    reason: str | None = Field(None, max_length=2000)
+
+
+class GardenDelegatedDecisionOut(BaseModel):
+    decision_id: uuid.UUID
+    kind: str
+    target_kind: str
+    target_id: uuid.UUID
+    verdict: str
+    assistant_identity_id: uuid.UUID | None = None
+    reason: str | None = None
+    created_at: datetime.datetime
+    reversed_at: datetime.datetime | None = None
+    target_title: str | None = None
+
+
+class GardenDelegatedRevertIn(BaseModel):
+    decision_id: uuid.UUID
+
+
+class GardenDelegationStatsOut(BaseModel):
+    kind: str
+    decided: int
+    reversed: int
 
 
 class GardenRestoreSourceOut(BaseModel):
