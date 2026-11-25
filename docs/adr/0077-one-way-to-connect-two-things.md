@@ -1,6 +1,6 @@
 # ADR-0077: One way to connect two things, notes or tasks, and the graph follows the work
 
-Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phase A implemented (released in 2.4.25; the 2.4.24 tag failed its build and has no images); phase B open (rewritten on 2026-11-25: its first version assumed the retrieval walk included tasks, and it does not).
+Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phases A (2.4.25; the 2.4.24 tag failed its build and has no images) and B (2.4.26) implemented. Phase B was rewritten on 2026-11-25 before it was built: its first version assumed the retrieval walk included tasks, and it does not.
 Relates to: ADR-0029 (typed note links), ADR-0040 (the four note-to-note
 kinds), ADR-0042 (tasks in the unified graph), ADR-0073 (written references),
 ADR-0075 (one kind of proposal), ADR-0004 (task dependencies).
@@ -139,6 +139,25 @@ check). The MCP gateway expands short ids by argument name, and `item_id`
 and `other_id` already meant a checklist item and a task there, so the
 operations take `this_*` and `that_*`, expanded by the kind named beside
 each.
+
+### Phase B as built (2026-11-25)
+
+`graph.work_structure_pairs` reads the structure of the work once, as
+undirected pairs: (subtask, parent), and dependencies with a pair joined by
+several types counted once. Both surfaces that build the unified weave read
+it: the edge weights (parent 0.70, dependency 0.55; feeding PageRank,
+betweenness and the clusters) and the personalised walk, which keeps its own
+neighbour list and, before this, would have missed edges added to the
+weights only. The snapshot signature folds in each set as a count and an
+order-independent sum of a hash of its pairs, so a re-parent with every
+count unchanged invalidates the stored analytics. The related-task
+suggestions no longer propose the source's parent, subtasks or
+dependencies, which are already connected; the walk still passes through
+them to the tasks beyond. With the unified weave off nothing changes.
+
+Checked by `core/tests/test_work_structure_graph.py`: observed failing with
+the exclusion removed, with the signature reduced to counts, and, before the
+walk read the shared pairs, on the task beyond a dependency.
 
 ## Alternatives rejected
 

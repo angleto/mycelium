@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
 from mycelium_core.models.note_edge_usage import NoteEdgeUsage
@@ -92,6 +93,16 @@ _NOTE_TASK_KIND_WEIGHT: dict[str, float] = {
 # ``related`` base so a task relation reads at the same strength as a note
 # relation in the unified weave.
 _TASK_RELATION_WEIGHT: float = _KIND_WEIGHT["related"]
+
+# The structure of the work in the unified weave (ADR-0077 decision 4). A
+# subtask and its parent are the closest tie in a piece of work, as close as
+# a note and the task it was promoted to (0.70); a task and the one it waits
+# for are tied by the plan, stronger than a loose association and weaker
+# than being part of the same thing (0.55, the strength of a note that is a
+# task's result). A pair joined by several dependency types counts once:
+# the types say when, not how close. Only read when ``include_tasks`` is on.
+_TASK_PARENT_WEIGHT: float = 0.70
+_TASK_DEPENDENCY_WEIGHT: float = 0.55
 
 # Co-activity source scale (ADR-0031 ``w_coact``). The session count from
 # ``note_coactivity`` is squashed via ``1 - 1 / (1 + scale * count)`` --
@@ -187,6 +198,41 @@ async def written_reference_pairs(
         if dst is not None and src != dst:
             out.add(_pair_key(src, dst))
     return out
+
+
+async def work_structure_pairs(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> tuple[set[tuple[uuid.UUID, uuid.UUID]], set[tuple[uuid.UUID, uuid.UUID]]]:
+    """The structure of the work as undirected pairs, canonical by
+    :func:`_pair_key` (ADR-0077 decision 4): (subtask, parent) pairs and
+    dependency pairs, a pair joined by several dependency types once. One
+    reader for every surface that walks or weighs the unified weave, so the
+    weights and the walk cannot disagree on which edges exist. Liveness of
+    the ends is left to the caller, which already holds its node set."""
+    parents = {
+        _pair_key(child, parent)
+        for child, parent in (
+            await session.execute(
+                select(Task.id, Task.parent_task_id).where(
+                    Task.org_id == org_id,
+                    Task.deleted_at.is_(None),
+                    Task.parent_task_id.is_not(None),
+                )
+            )
+        ).all()
+        if parent is not None and child != parent
+    }
+    deps = {
+        _pair_key(pred, succ)
+        for pred, succ in (
+            await session.execute(
+                select(TaskDependency.predecessor_id, TaskDependency.successor_id).where(
+                    TaskDependency.org_id == org_id
+                )
+            )
+        ).all()
+    }
+    return parents, deps
 
 
 def _usage_weight(decay_score: float) -> float:
@@ -389,9 +435,11 @@ async def compute_note_edge_weights(
     When ``include_tasks`` (ADR-0042 D1) the weave spans notes + tasks: the
     tag corpus folds in ``task_tags`` (so note↔task and task↔task co-tag
     edges surface), ``TaskRelation`` adds undirected task↔task ``related``
-    edges, and ``NoteTaskLink`` adds note↔task edges with a per-kind
-    weight. Task co-activity (the working-session source) is a separate
-    additive follow-up; absent, the soft-OR leaves it neutral. With
+    edges, ``NoteTaskLink`` adds note↔task edges with a per-kind
+    weight, and the structure of the work adds task↔task edges for a
+    subtask and its parent and for a dependency (ADR-0077). Task
+    co-activity (the working-session source) is a separate additive
+    follow-up; absent, the soft-OR leaves it neutral. With
     ``include_tasks`` off the result is byte-identical to the notes-only
     weave (the caller — a unified surface — passes the fleet flag in).
     """
@@ -549,6 +597,15 @@ async def compute_note_edge_weights(
         for task_a_id, task_b_id in rel_rows:
             if task_a_id in live_task_ids and task_b_id in live_task_ids:
                 by_pair[_pair_key(task_a_id, task_b_id)].append(_TASK_RELATION_WEIGHT)
+        # The structure of the work (ADR-0077 decision 4). Both ends must be
+        # live, as for relations.
+        parent_pairs, dep_pairs = await work_structure_pairs(session, org_id=org_id)
+        for pair in parent_pairs:
+            if pair[0] in live_task_ids and pair[1] in live_task_ids:
+                by_pair[pair].append(_TASK_PARENT_WEIGHT)
+        for pair in dep_pairs:
+            if pair[0] in live_task_ids and pair[1] in live_task_ids:
+                by_pair[pair].append(_TASK_DEPENDENCY_WEIGHT)
         ntl_rows = (
             await session.execute(
                 select(
@@ -760,7 +817,8 @@ async def compute_personalized_pagerank(
         out_neighbours[ci].append(pi)
     if inc:
         # The task-side structural filaments the pollinator can wander
-        # (ADR-0042 D1): task↔task relations and note↔task typed links.
+        # (ADR-0042 D1): task↔task relations, note↔task typed links, and
+        # the structure of the work (ADR-0077): parent and dependency.
         # Unweighted like the note links above (PPR adjacency is a plain
         # neighbour list; edge strength is PageRank's axis, not the walk's).
         rel_rows = (
@@ -777,7 +835,8 @@ async def compute_personalized_pagerank(
                 )
             )
         ).all()
-        for a_id, b_id in [*rel_rows, *ntl_rows]:
+        parent_pairs, dep_pairs = await work_structure_pairs(session, org_id=org_id)
+        for a_id, b_id in [*rel_rows, *ntl_rows, *parent_pairs, *dep_pairs]:
             ai = idx.get(a_id)
             bi = idx.get(b_id)
             if ai is None or bi is None or ai == bi:

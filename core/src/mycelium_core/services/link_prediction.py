@@ -35,9 +35,10 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_tag import NoteTag
@@ -193,7 +194,8 @@ async def suggest_links_for_task(
       induced mass. Only *task* candidates are scored, so the note bridges
       contribute structure without becoming link targets.
     - **Degree damping** by existing ``related`` degree, and the already-
-      related pairs (either direction) excluded.
+      related pairs (either direction) excluded, with the tasks already
+      tied to the source as parent, subtask or dependency (ADR-0077).
 
     The only task↔task kind is ``related``, so the caller stamps that.
     Empty when the workspace has < 2 tasks or the source has no signal.
@@ -215,6 +217,36 @@ async def suggest_links_for_task(
         )
     ).all()
     excluded: set[uuid.UUID] = {task_id}
+    # A task already tied to the source by the structure of the work (its
+    # parent, its subtasks, what it waits for, what waits for it) is
+    # connected: proposing it as "related" would ask the person to say twice
+    # what they already said once (ADR-0077). Those ties still carry PPR
+    # mass below, so they reach the tasks beyond them.
+    parent_of_source = (
+        await session.execute(select(Task.parent_task_id).where(Task.id == task_id))
+    ).scalar_one_or_none()
+    if parent_of_source is not None:
+        excluded.add(parent_of_source)
+    excluded.update(
+        r[0]
+        for r in (
+            await session.execute(
+                select(Task.id).where(Task.org_id == org_id, Task.parent_task_id == task_id)
+            )
+        ).all()
+    )
+    for pred, succ in (
+        await session.execute(
+            select(TaskDependency.predecessor_id, TaskDependency.successor_id).where(
+                TaskDependency.org_id == org_id,
+                or_(
+                    TaskDependency.predecessor_id == task_id,
+                    TaskDependency.successor_id == task_id,
+                ),
+            )
+        )
+    ).all():
+        excluded.add(succ if pred == task_id else pred)
     degree: dict[uuid.UUID, int] = defaultdict(int)
     for a, b in rel_rows:
         if a == task_id:

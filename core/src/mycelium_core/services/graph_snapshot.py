@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import BigInteger, ColumnElement, String, cast, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import QueryableAttribute
 
 from mycelium_core.config import get_settings
+from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
@@ -158,7 +161,44 @@ async def graph_signature(
             select(func.count()).select_from(TaskTag).where(TaskTag.org_id == org_id)
         )
     ).scalar_one()
-    return f"{sig}:T{tasks_n}/R{rels}/NT{ntl}/TT{task_tags}"
+
+    # The structure of the work (ADR-0077 decision 4). A count alone misses
+    # a re-parent and a dependency swapped for another, which change edges
+    # and keep every count, so each set is folded as an order-independent
+    # sum of a hash of its pairs: any change of pair moves it, a refresh of
+    # the same pairs does not.
+    def _pair_hash(a: QueryableAttribute[Any], b: QueryableAttribute[Any]) -> ColumnElement[Any]:
+        return func.coalesce(
+            func.sum(
+                cast(
+                    func.hashtext(cast(a, String) + literal(":") + cast(b, String)),
+                    BigInteger,
+                )
+            ),
+            0,
+        )
+
+    parents_n, parents_h = (
+        await session.execute(
+            select(func.count(), _pair_hash(Task.id, Task.parent_task_id)).where(
+                Task.org_id == org_id,
+                Task.deleted_at.is_(None),
+                Task.parent_task_id.is_not(None),
+            )
+        )
+    ).one()
+    deps_n, deps_h = (
+        await session.execute(
+            select(
+                func.count(),
+                _pair_hash(TaskDependency.predecessor_id, TaskDependency.successor_id),
+            ).where(TaskDependency.org_id == org_id)
+        )
+    ).one()
+    return (
+        f"{sig}:T{tasks_n}/R{rels}/NT{ntl}/TT{task_tags}"
+        f"/P{parents_n}.{parents_h}/D{deps_n}.{deps_h}"
+    )
 
 
 async def get_graph_snapshot(
