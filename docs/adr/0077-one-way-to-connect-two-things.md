@@ -1,6 +1,6 @@
-# ADR-0077: One way to connect two things, notes or tasks, and the memory follows the work
+# ADR-0077: One way to connect two things, notes or tasks, and the graph follows the work
 
-Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phase A implemented; phase B open.
+Status: Accepted (2026-11-25, Angelo approved phases A and B as proposed). Phase A implemented; phase B open (rewritten on 2026-11-25: its first version assumed the retrieval walk included tasks, and it does not).
 Relates to: ADR-0029 (typed note links), ADR-0040 (the four note-to-note
 kinds), ADR-0042 (tasks in the unified graph), ADR-0073 (written references),
 ADR-0075 (one kind of proposal), ADR-0004 (task dependencies).
@@ -8,9 +8,10 @@ ADR-0075 (one kind of proposal), ADR-0004 (task dependencies).
 This record decides how a person connects a note or a task to another note or
 task: one notion of connection, the same panel and the same words on both
 pages, one service contract over the existing tables, and the structure of the
-work (subtasks, dependencies) as part of the graph the memory walks. It
-records what was measured on 2.4.23, the decision, the phases and the
-alternatives rejected.
+work (subtasks, dependencies) as part of the unified graph of notes and tasks.
+It records what was measured on 2.4.23, the decision, the phases, the
+alternatives rejected, and one question left open: whether tasks should enter
+the walk the memory uses for retrieval.
 
 ## Context
 
@@ -46,10 +47,14 @@ What a person meets:
   this note derives from the other or the other from this one is not said.
 - **The same connection in two lists.** A note mentioned in a body is listed
   under written references, apart from the typed links to the same note.
-- **The memory does not see the work.** A subtask and its parent, or a task
-  and the one it waits for, are the closest ties in a piece of work, and they
-  are absent from the weave the memory walks: a search reaching a task does
-  not reach its parent or its predecessor.
+- **The graph does not see the structure of the work.** A subtask and its
+  parent, or a task and the one it waits for, are the closest ties in a piece
+  of work, and they are absent from the unified weave of notes and tasks
+  (ADR-0042) that the graph view, the centrality of tasks and the
+  suggestions of related tasks are computed on. (The weave the memory walks
+  for retrieval and for an agent's reading set is notes only; tasks do not
+  enter it at all, structure or not. Measured on 2026-11-25 in
+  `graph_local` and `focus_context`.)
 
 ## Decision
 
@@ -104,19 +109,20 @@ sets, the promotion that cannot be undone by unlinking. The registry
 operations `connections.list(item)`, `connections.link` and
 `connections.unlink` serve the panel and MCP alike.
 
-### 4. The structure of the work joins the weave
+### 4. The structure of the work joins the unified weave
 
-Subtasks and dependencies become edges of the graph the memory walks, with a
-weight of their own (proposed: parent 0.70, dependency 0.55), behind a flag
-and enabled only once the retrieval evaluation shows the walk is better with
-them, as written references were (ADR-0073 decision 8).
+Subtasks and dependencies become edges of the unified weave of notes and
+tasks, with a weight of their own (proposed: parent 0.70, dependency 0.55),
+so the graph view, task centrality and the related-task suggestions see the
+structure of the work. Whether tasks should also enter the walk the memory
+uses for retrieval is a separate question, open below.
 
 ## Phases
 
 | phase | delivers |
 |---|---|
 | A | decisions 1, 2 and 3: the panel on both pages, the vocabulary, the contract; the old tabs and panels removed |
-| B | decision 4, behind its flag, with the evaluation that decides it |
+| B | decision 4 |
 
 ### Phase A as built (2026-11-25)
 
@@ -146,6 +152,14 @@ each.
 - **Turn written mentions into typed links**: a mention is what the person
   wrote, not a claim about the kind of relation (ADR-0073); it is shown beside
   the links, not converted into one.
+
+## Open
+
+Whether tasks, and with them the structure of the work, should enter the
+walk the memory uses for retrieval and for an agent's reading set. Today
+that walk is notes only (`graph_local`, `focus_context`); widening it
+changes what a search returns, and would be decided by a retrieval
+evaluation that includes tasks, which does not exist yet.
 
 ## What this does not cover
 
