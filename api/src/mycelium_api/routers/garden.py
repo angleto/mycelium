@@ -80,6 +80,13 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
         "garden_review_restore_source",
     ),
     ("GET", "/review/accept-ratio", "garden.review.accept_ratio", "garden_review_accept_ratio"),
+    # every kind of proposal in one listing (ADR-0075)
+    ("GET", "/proposals", "garden.proposals.list", "garden_proposals"),
+    ("POST", "/proposals/decide", "garden.proposals.decide", "garden_proposal_decide"),
+    ("POST", "/proposals/reopen", "garden.proposals.reopen", "garden_proposal_reopen"),
+    ("GET", "/notes/{note_id}/history", "garden.note_history", "garden_note_history"),
+    ("POST", "/synthesize/pattern", "garden.synthesize.pattern", "garden_synthesize_pattern"),
+    ("POST", "/synthesize/season", "garden.synthesize.season", "garden_synthesize_season"),
     # decisions handed over to assistants (ADR-0076 phase B)
     ("GET", "/delegation/policy", "garden.delegation.policy", "garden_delegation_policy"),
     ("POST", "/delegation/decide", "garden.delegation.decide", "garden_delegation_decide"),

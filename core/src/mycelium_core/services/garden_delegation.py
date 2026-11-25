@@ -21,24 +21,21 @@ import enum
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.delegated_decision import DelegatedDecision
 from mycelium_core.models.kg import KgEdge
-from mycelium_core.models.link_proposal import LinkProposal, LinkRejection
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
-from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.organization import Organization
 from mycelium_core.models.proposal_check import CheckVerdict, ProposalCheck
 from mycelium_core.services import audit
 from mycelium_core.services import garden_review as review_svc
 from mycelium_core.services import kg as kg_svc
 from mycelium_core.services import link_proposals as proposals_svc
-from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services.rbac import require_role
 
 #: Key of the workspace setting, a list of ``DecisionKind`` values.
@@ -233,36 +230,6 @@ async def decide(
     return row
 
 
-async def _reopen_pair(
-    session: AsyncSession, *, org_id: uuid.UUID, proposal_id: uuid.UUID, status: str
-) -> LinkProposal:
-    """Put back the proposals of a pair an assistant's decision closed."""
-    p = await session.get(LinkProposal, proposal_id)
-    if p is None or p.org_id != org_id:
-        raise NotFoundError(MessageCode.PROPOSAL_NOT_FOUND)
-    a, b = p.source_note_id, p.target_note_id
-    await session.execute(
-        update(LinkProposal)
-        .where(
-            LinkProposal.org_id == org_id,
-            LinkProposal.status == status,
-            LinkProposal.delegated.is_(True),
-            or_(
-                and_(LinkProposal.source_note_id == a, LinkProposal.target_note_id == b),
-                and_(LinkProposal.source_note_id == b, LinkProposal.target_note_id == a),
-            ),
-        )
-        .values(
-            status="proposed",
-            decided_at=None,
-            decided_by=None,
-            accepted_kind=None,
-            delegated=False,
-        )
-    )
-    return p
-
-
 async def revert(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, decision_id: uuid.UUID
 ) -> DelegatedDecision:
@@ -305,38 +272,24 @@ async def revert(
                 expected_version=note.version,
             )
     elif target_kind is TargetKind.link_proposal:
-        if verdict is Verdict.approve:
-            link = await session.get(NoteNoteLink, row.result_id) if row.result_id else None
-            if link is not None:
-                await note_links_svc.unlink_notes(
-                    session,
-                    org_id=org_id,
-                    actor_id=actor_id,
-                    parent_note_id=link.parent_note_id,
-                    child_note_id=link.child_note_id,
-                    kind=link.kind,
-                )
-            await _reopen_pair(session, org_id=org_id, proposal_id=row.target_id, status="accepted")
-        else:
-            p = await _reopen_pair(
-                session, org_id=org_id, proposal_id=row.target_id, status="rejected"
-            )
-            lo, hi = sorted((p.source_note_id, p.target_note_id), key=str)
-            await session.execute(
-                delete(LinkRejection).where(
-                    LinkRejection.org_id == org_id,
-                    LinkRejection.note_a_id == lo,
-                    LinkRejection.note_b_id == hi,
-                )
-            )
+        # The same reopening a person's own decision gets (ADR-0075), kept
+        # to what the assistant closed.
+        await proposals_svc.reopen_decision(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            proposal_id=row.target_id,
+            delegated_only=True,
+        )
     else:
         edge = await session.get(KgEdge, row.target_id)
         if edge is None or edge.org_id != org_id:
             raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
         if edge.review_state != "approved" or edge.invalidated_at is not None:
             raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
-        edge.review_state = "proposed"
-        edge.version += 1
+        await kg_svc.withdraw_fact_approval(
+            session, org_id=org_id, actor_id=actor_id, edge_id=edge.id
+        )
     row.reversed_at = dt.datetime.now(dt.UTC)
     row.reversed_by = actor_id
     await session.flush()

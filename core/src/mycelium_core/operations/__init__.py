@@ -79,6 +79,7 @@ OPERATION_MODULES: tuple[str, ...] = (
     "mycelium_core.operations.garden",
     "mycelium_core.operations.kg",
     "mycelium_core.operations.notes",
+    "mycelium_core.operations.proposals",
     "mycelium_core.operations.tasks",
 )
 

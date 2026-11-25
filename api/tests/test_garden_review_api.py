@@ -633,3 +633,132 @@ async def test_the_person_hands_a_kind_over_and_the_agent_cannot_widen_it(_wire:
         assert state == "proposed"
         stats = (await c.get("/garden/delegation/stats", headers=h)).json()
         assert stats == [{"kind": "synthesis_decline", "decided": 1, "reversed": 1}]
+
+
+async def test_every_kind_of_proposal_in_one_list_with_the_same_verbs(_wire: None) -> None:
+    """ADR-0075 decision 1 over HTTP: a synthesis, a link proposal and a
+    fact, listed together as pending, decided with the same verb, listed as
+    decided, and reopened back to pending. A declined fact says it cannot be
+    reopened, and reopening it is refused."""
+    from mycelium_core.services import kg
+    from mycelium_core.services import link_proposals as lp
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        sid = str(await _seed_proposed(org, user))
+        async with tenant_session(org, user) as s:
+            a = await nt.create_note(
+                s, org_id=uuid.UUID(org), actor_id=uuid.UUID(user), kind=NoteKind.text, text="a"
+            )
+            b = await nt.create_note(
+                s, org_id=uuid.UUID(org), actor_id=uuid.UUID(user), kind=NoteKind.text, text="b"
+            )
+            prop = await lp.submit(
+                s, org_id=uuid.UUID(org), proposer="test", source_note_id=a.id, target_note_id=b.id
+            )
+            x = await kg.ensure_entity(s, org_id=uuid.UUID(org), name="X", entity_type="person")
+            y = await kg.ensure_entity(
+                s, org_id=uuid.UUID(org), name="Y", entity_type="organization"
+            )
+            edge = await kg.add_fact(
+                s,
+                org_id=uuid.UUID(org),
+                subject_id=x.id,
+                predicate="member_of",
+                object_id=y.id,
+                review_state="proposed",
+            )
+            lid, fid = str(prop.proposal_id), str(edge.id)
+
+        pending = (await c.get("/garden/proposals", headers=h)).json()["items"]
+        by = {(p["kind"], p["id"]): p for p in pending}
+        assert set(by) == {("synthesis", sid), ("link", lid), ("fact", fid)}
+        assert by[("link", lid)]["link_kinds"][0] == "related"
+        assert by[("fact", fid)]["fact_predicate"] == "member_of"
+
+        for kind, pid, extra in (
+            ("synthesis", sid, {"expected_version": by[("synthesis", sid)]["version"]}),
+            ("link", lid, {"link_kind": "related"}),
+            ("fact", fid, {"expected_version": by[("fact", fid)]["version"]}),
+        ):
+            r = await c.post(
+                "/garden/proposals/decide",
+                headers=h,
+                json={"kind": kind, "id": pid, "verdict": "accept", **extra},
+            )
+            assert r.status_code == 200, (kind, r.text)
+        assert (await c.get("/garden/proposals", headers=h)).json()["items"] == []
+        decided = (
+            await c.get("/garden/proposals", headers=h, params={"listing": "decided"})
+        ).json()["items"]
+        assert {(p["kind"], p["state"], p["reopenable"]) for p in decided} == {
+            ("synthesis", "accepted", True),
+            ("link", "accepted", True),
+            ("fact", "accepted", True),
+        }
+        links = (await c.get(f"/notes/{a.id}/links", headers=h)).json()
+        assert any(str(b.id) in str(x) for x in links["outgoing"] + links["incoming"])
+
+        for kind, pid in (("synthesis", sid), ("link", lid), ("fact", fid)):
+            r = await c.post("/garden/proposals/reopen", headers=h, json={"kind": kind, "id": pid})
+            assert r.status_code == 200, (kind, r.text)
+        again = (await c.get("/garden/proposals", headers=h)).json()["items"]
+        assert {(p["kind"], p["id"]) for p in again} == {
+            ("synthesis", sid),
+            ("link", lid),
+            ("fact", fid),
+        }
+        links = (await c.get(f"/notes/{a.id}/links", headers=h)).json()
+        assert not any(str(b.id) in str(x) for x in links["outgoing"] + links["incoming"])
+
+        fv = next(p for p in again if p["kind"] == "fact")["version"]
+        await c.post(
+            "/garden/proposals/decide",
+            headers=h,
+            json={"kind": "fact", "id": fid, "verdict": "decline", "expected_version": fv},
+        )
+        gone = next(
+            p
+            for p in (
+                await c.get("/garden/proposals", headers=h, params={"listing": "decided"})
+            ).json()["items"]
+            if p["id"] == fid
+        )
+        assert (gone["state"], gone["reopenable"]) == ("declined", False)
+        refused = await c.post(
+            "/garden/proposals/reopen", headers=h, json={"kind": "fact", "id": fid}
+        )
+        assert refused.status_code == 404
+
+        a2 = await _assistant(c, h)
+        assert (
+            await c.post(
+                "/garden/proposals/decide",
+                headers=a2,
+                json={"kind": "link", "id": lid, "verdict": "decline"},
+            )
+        ).status_code == 403
+
+
+async def test_a_note_tells_what_happened_to_it(_wire: None) -> None:
+    """ADR-0075 decision 5: a person's maturity move and the archive show in
+    the note's history, newest first, with who did them; a body edit shows
+    as an edit and does not put the text in the history."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, _org, _user = await _signup(c)
+        n = (await c.post("/notes", headers=h, json={"kind": "text", "text": "secret body"})).json()
+        r = await c.post(
+            f"/notes/{n['id']}/maturity",
+            headers=h,
+            json={"maturity": "growing", "expected_version": n["version"]},
+        )
+        assert r.status_code == 200, r.text
+        hist = (await c.get(f"/garden/notes/{n['id']}/history", headers=h)).json()["items"]
+        actions = [e["action"] for e in hist]
+        assert "set_maturity" in actions, actions
+        move = next(e for e in hist if e["action"] == "set_maturity")
+        assert move["changes"]["maturity"]["new"] == "growing"
+        assert move["actor_kind"].startswith("human_"), move["actor_kind"]
+        assert "secret body" not in str(hist)

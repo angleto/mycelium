@@ -6575,6 +6575,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Proposals
+         * @description Everything the garden proposes, of every kind, in one list: what
+         *     waits for a decision (``listing='pending'``, newest first) or what was
+         *     decided (``'decided'``, newest decision first). Narrow with ``kinds``.
+         *     Pass ``next_cursor`` back as ``cursor`` for the next page.
+         */
+        get: operations["garden_proposals_garden_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/proposals/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Proposal Decide
+         * @description Accept or decline one proposal, of any kind. A person's act: an
+         *     assistant decides only what the person handed over
+         *     (garden_delegated_decide).
+         */
+        post: operations["garden_proposal_decide_garden_proposals_decide_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/proposals/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Proposal Reopen
+         * @description Take a decision back: the proposal is pending again, as before (an
+         *     accepted link is removed, an approved note or fact leaves the memory, a
+         *     declined one comes back). A declined fact cannot be reopened.
+         */
+        post: operations["garden_proposal_reopen_garden_proposals_reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/notes/{note_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Note History
+         * @description What happened to a note, newest first: maturity moves by a person or
+         *     by the garden, the humus mark, archiving, review decisions about what was
+         *     generated from it. Pass ``next_cursor`` back as ``cursor``.
+         */
+        get: operations["garden_note_history_garden_notes__note_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/synthesize/pattern": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Synthesize Pattern
+         * @description Synthesise a ``pattern`` over a set of ARCHIVED notes: the
+         *     through-lines across them, as a new note linked back to each source. Born
+         *     pending: the person approves it (garden_review_pending), and the sources
+         *     are never changed. Idempotent on the source set (``created`` false on a
+         *     re-run).
+         */
+        post: operations["garden_synthesize_pattern_garden_synthesize_pattern_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/synthesize/season": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Synthesize Season
+         * @description Synthesise a ``season`` for one quarter, "what I cultivated this
+         *     season", over the notes archived in it. Born pending, never a change to
+         *     the sources. Idempotent per (year, quarter).
+         */
+        post: operations["garden_synthesize_season_garden_synthesize_season_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/delegation/policy": {
         parameters: {
             query?: never;
@@ -10979,6 +11114,10 @@ export interface components {
             score: number;
             /** Preview */
             preview: string;
+            /** Year */
+            year?: number | null;
+            /** Quarter */
+            quarter?: number | null;
         };
         /**
          * GardenCandidatesOut
@@ -11076,7 +11215,7 @@ export interface components {
              * Format: uuid
              */
             target_id: string;
-            verdict: components["schemas"]["Verdict"];
+            verdict: components["schemas"]["mycelium_core__services__garden_delegation__Verdict"];
             /** Expected Version */
             expected_version?: number | null;
             /** Link Kind */
@@ -13312,6 +13451,11 @@ export interface components {
             /** Balance After */
             balance_after: string;
         };
+        /**
+         * Listing
+         * @enum {string}
+         */
+        Listing: "pending" | "decided";
         /** LoginIn */
         LoginIn: {
             /** Email */
@@ -13790,6 +13934,45 @@ export interface components {
             audio_ref: string | null;
             /** Memory Blobs Deleted */
             memory_blobs_deleted: number;
+        };
+        /**
+         * NoteHistoryEventOut
+         * @description One thing that happened to the note. ``action`` is the code of the
+         *     activity log (``set_maturity``, ``auto_maturity``, ``auto_dormant``,
+         *     ``garden_review:source_humus``, ``archive``, ...); ``actor_kind`` says
+         *     whether a person, an agent or the system did it; ``changes`` holds the
+         *     before and after of the fields the garden moves.
+         */
+        NoteHistoryEventOut: {
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Action */
+            action: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Changes */
+            changes: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /** About Note Id */
+            about_note_id?: string | null;
+        };
+        /** NoteHistoryPage */
+        NoteHistoryPage: {
+            /** Items */
+            items: components["schemas"]["NoteHistoryEventOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** NoteIdOut */
         NoteIdOut: {
@@ -14683,6 +14866,33 @@ export interface components {
             duration_minutes: number;
         };
         /**
+         * PatternIn
+         * @description ``source_note_ids``: two or more archived notes. ``synthesized_text``
+         *     and ``origin_model_id``: write the pattern with your own model instead
+         *     of the workspace's (ADR-0076); its grounding is then yours to
+         *     guarantee.
+         */
+        PatternIn: {
+            /** Source Note Ids */
+            source_note_ids: string[];
+            /** Synthesized Text */
+            synthesized_text?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+        };
+        /** PatternOut */
+        PatternOut: {
+            /**
+             * Pattern Note Id
+             * Format: uuid
+             */
+            pattern_note_id: string;
+            /** Model Id */
+            model_id: string;
+            /** Created */
+            created: boolean;
+        };
+        /**
          * PaymentConnectorCreateOut
          * @description The only shape that ever carries plaintext credentials.
          *
@@ -15195,6 +15405,119 @@ export interface components {
             year: number;
             /** Number */
             number: number | null;
+        };
+        /** ProposalActionOut */
+        ProposalActionOut: {
+            kind: components["schemas"]["ProposalKind"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Done */
+            done: boolean;
+        };
+        /**
+         * ProposalDecideIn
+         * @description ``expected_version`` is required for a synthesis (the text read) and
+         *     a fact; ``link_kind`` to accept a link.
+         */
+        ProposalDecideIn: {
+            kind: components["schemas"]["ProposalKind"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            verdict: components["schemas"]["mycelium_core__services__proposals__Verdict"];
+            /** Expected Version */
+            expected_version?: number | null;
+            /** Link Kind */
+            link_kind?: string | null;
+        };
+        /**
+         * ProposalKind
+         * @enum {string}
+         */
+        ProposalKind: "synthesis" | "link" | "fact";
+        /** ProposalNoteRef */
+        ProposalNoteRef: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * ProposalOut
+         * @description One garden proposal. ``kind``: ``synthesis`` (a generated note: read
+         *     it whole with garden_review_read), ``link`` (a link between the two
+         *     ``subjects``; accepting needs one of ``link_kinds``), ``fact`` (a fact
+         *     read from the note in ``subjects``). ``state``: ``pending``,
+         *     ``declined`` or ``accepted``. ``reopenable``: whether a decision can be
+         *     taken back.
+         */
+        ProposalOut: {
+            kind: components["schemas"]["ProposalKind"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version?: number | null;
+            /** State */
+            state: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at?: string | null;
+            /** Subjects */
+            subjects: components["schemas"]["ProposalNoteRef"][];
+            /** Proposer */
+            proposer?: string | null;
+            /** Reopenable */
+            reopenable: boolean;
+            /** Title */
+            title?: string | null;
+            /** Preview */
+            preview?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Fact Subject */
+            fact_subject?: string | null;
+            /** Fact Predicate */
+            fact_predicate?: string | null;
+            /** Fact Object */
+            fact_object?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Link Kinds
+             * @default []
+             */
+            link_kinds?: string[];
+        };
+        /** ProposalPage */
+        ProposalPage: {
+            /** Items */
+            items: components["schemas"]["ProposalOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** ProposalRefIn */
+        ProposalRefIn: {
+            kind: components["schemas"]["ProposalKind"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
         };
         /** PublicBatchIn */
         PublicBatchIn: {
@@ -16125,6 +16448,29 @@ export interface components {
             assignee_handles?: string[] | null;
             /** Task State Id */
             task_state_id?: string | null;
+        };
+        /** SeasonIn */
+        SeasonIn: {
+            /** Year */
+            year: number;
+            /** Quarter */
+            quarter: number;
+            /** Synthesized Text */
+            synthesized_text?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+        };
+        /** SeasonOut */
+        SeasonOut: {
+            /**
+             * Season Note Id
+             * Format: uuid
+             */
+            season_note_id: string;
+            /** Model Id */
+            model_id: string;
+            /** Created */
+            created: boolean;
         };
         /** SelfIdentityOut */
         SelfIdentityOut: {
@@ -17330,11 +17676,6 @@ export interface components {
             /** Public Key */
             public_key: string;
         };
-        /**
-         * Verdict
-         * @enum {string}
-         */
-        Verdict: "approve" | "decline";
         /** VerifyEmailIn */
         VerifyEmailIn: {
             /** Token */
@@ -17876,6 +18217,16 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * Verdict
+         * @enum {string}
+         */
+        mycelium_core__services__garden_delegation__Verdict: "approve" | "decline";
+        /**
+         * Verdict
+         * @enum {string}
+         */
+        mycelium_core__services__proposals__Verdict: "accept" | "decline";
     };
     responses: never;
     parameters: never;
@@ -31909,6 +32260,236 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenAcceptRatioOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_proposals_garden_proposals_get: {
+        parameters: {
+            query?: {
+                listing?: components["schemas"]["Listing"];
+                kinds?: components["schemas"]["ProposalKind"][] | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_proposal_decide_garden_proposals_decide_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposalDecideIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_proposal_reopen_garden_proposals_reopen_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposalRefIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_note_history_garden_notes__note_id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteHistoryPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_synthesize_pattern_garden_synthesize_pattern_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatternIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatternOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_synthesize_season_garden_synthesize_season_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeasonIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonOut"];
                 };
             };
             /** @description Validation Error */

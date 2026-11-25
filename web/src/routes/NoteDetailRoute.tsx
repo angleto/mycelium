@@ -23,6 +23,7 @@ import { NoteLinksPanel } from '../components/NoteLinksPanel'
 import { WrittenBacklinksPanel } from '../components/WrittenBacklinksPanel'
 import { GeneratedFromNotePanel } from '../components/GeneratedFromNotePanel'
 import { LinkProposalsPanel } from '../components/LinkProposalsPanel'
+import { NoteHistoryPanel } from '../components/NoteHistoryPanel'
 import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
@@ -743,6 +744,7 @@ export function NoteDetailRoute({
 
       {note.promoted_at && <p className="banner">{t('notes.promotedHint')}</p>}
       <GeneratedFromNotePanel noteId={id} />
+      <NoteHistoryPanel key={id} noteId={id} />
 
       {/* Title spans full width above the two-pane grid (issue-tracker
           layout). onBlur flushes so a quick exit never loses it. */}

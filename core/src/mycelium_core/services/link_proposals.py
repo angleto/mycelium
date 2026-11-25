@@ -30,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -398,6 +398,84 @@ async def reject(
         status="rejected",
         kind=None,
         delegated=delegated,
+    )
+    await session.flush()
+
+
+async def reopen_decision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    delegated_only: bool = False,
+) -> None:
+    """Take back the decision on a proposal's pair, whoever took it (ADR-0075
+    decision 4): every proposal of the pair closed by it is open again, an
+    accepted pair loses the link the acceptance created, and a rejected pair
+    is no longer remembered as rejected, so it can be proposed again.
+    ``delegated_only`` limits it to what an assistant decided, for the
+    reversal of a delegated decision (ADR-0076). An open proposal is a
+    no-op; an expired one is not a decision and is absent. Role-gating is
+    the caller's, as for :func:`accept` and :func:`reject`."""
+    p = await session.get(LinkProposal, proposal_id)
+    if p is None or p.org_id != org_id or p.status == "expired":
+        raise NotFoundError(MessageCode.PROPOSAL_NOT_FOUND)
+    if p.status == "proposed":
+        return
+    a, b = p.source_note_id, p.target_note_id
+    pair = or_(
+        and_(LinkProposal.source_note_id == a, LinkProposal.target_note_id == b),
+        and_(LinkProposal.source_note_id == b, LinkProposal.target_note_id == a),
+    )
+    closed = [
+        LinkProposal.org_id == org_id,
+        LinkProposal.status == p.status,
+        pair,
+    ]
+    if delegated_only:
+        closed.append(LinkProposal.delegated.is_(True))
+    ids = list((await session.execute(select(LinkProposal.id).where(*closed))).scalars().all())
+    if p.status == "accepted":
+        links = (
+            (
+                await session.execute(
+                    select(NoteNoteLink).where(
+                        NoteNoteLink.org_id == org_id, NoteNoteLink.origin_proposal_id.in_(ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for link in links:
+            await note_links_svc.unlink_notes(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                parent_note_id=link.parent_note_id,
+                child_note_id=link.child_note_id,
+                kind=link.kind,
+            )
+    else:
+        lo, hi = _canonical(a, b)
+        await session.execute(
+            delete(LinkRejection).where(
+                LinkRejection.org_id == org_id,
+                LinkRejection.note_a_id == lo,
+                LinkRejection.note_b_id == hi,
+            )
+        )
+    await session.execute(
+        update(LinkProposal)
+        .where(LinkProposal.id.in_(ids))
+        .values(
+            status="proposed",
+            decided_at=None,
+            decided_by=None,
+            accepted_kind=None,
+            delegated=False,
+        )
     )
     await session.flush()
 

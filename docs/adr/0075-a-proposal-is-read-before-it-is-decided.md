@@ -1,7 +1,8 @@
 # ADR-0075: A proposal is read before it is decided, and a decision never loses anything
 
 Status: Accepted (2026-11-24, Angelo approved the direction and phase 1).
-Phase 1 implemented (migration 0035); phases 2 and 3 open. Decision 2 was
+Phase 1 implemented (migration 0035); phases 2 and 3 implemented on
+2026-11-25. Decision 2 was
 widened by [ADR-0076](0076-an-agent-checks-and-revises-a-person-keeps-the-last-word.md):
 an assistant may read a proposal whole too, to check or revise it.
 Relates to: ADR-0032 (classify suggestions), ADR-0040 (link model), ADR-0043
@@ -161,6 +162,19 @@ verb.
 
 Not in phase 1: the timeline of decision 5, the controls and glyphs of
 decision 4 outside the review pages, and the other proposal mechanisms.
+
+### Phases 2 and 3 as built (2026-11-25)
+
+| decision | where | checked by |
+|---|---|---|
+| 1, one contract | `services/proposals/`: a `Proposal` row and the verbs `accept`, `decline`, `reopen`; one adapter module per mechanism (`synthesis`, `links`, `facts`), found by its presence in the package; `garden.proposals.list` (keyset-paged across kinds), `garden.proposals.decide` and `garden.proposals.reopen` (person only) on REST and MCP | `api/tests/test_garden_review_api.py` walks a synthesis, a link and a fact through pending, accepted, decided and reopened |
+| 4, words and undo | the proposals page decides in words on the row and offers Undo after a decision; the note's suggestions name their actions and show their reasons; reopening an accepted link removes the link and reopens its pair, a rejected pair is forgotten (`link_proposals.reopen_decision`), an approved fact is proposed again (`kg.withdraw_fact_approval`); the agent delegation reverses through the same two helpers | `web/src/routes/GardenReviewRoute.test.tsx` (observed failing with the link kind and the Undo removed), `web/src/components/GardenSuggestionsPanel.test.tsx` |
+| 5, one place and the note's story | the review page is four tabs (to decide, decided, decided by an agent, suggested work) instead of one long page of six sections; `garden.note_history` reads a note's activity in words (maturity moves by a person or by the garden, the humus mark, archiving), without the text of an edit | `NoteHistoryPanel.test.tsx`, the API history test |
+| 6, no candidate without an action | patterns and seasons are registry operations (`garden.synthesize.pattern`, `.season`) the web calls, keeping the MCP names `extract_cluster_pattern` and `synthesize_season`; a suggested link becomes a link proposal; pruning and directing a link have no action on the web yet and are counted in a line, not drawn as controls | the page test; the gap is the open item below |
+
+Open: pruning and directing a link on the web (decision 6). The MCP gateway
+now expands a list of short ids element by element (`source_note_ids`), so
+a pattern can be asked for with the ids the surface hands out.
 
 ## Consequences
 

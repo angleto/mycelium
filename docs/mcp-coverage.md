@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**322 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**326 tools across 16 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -70,12 +70,13 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
-### garden (40)
+### garden (46)
 
 | Tool | Summary |
 |---|---|
 | `accept_link_proposal` | Accept a proposed link with the kind the person chooses. A typed link |
 | `choose_reference_target` | Say which entity an ambiguous written code means (ADR-0073): its id |
+| `extract_cluster_pattern` | Synthesise a ``pattern`` over a set of ARCHIVED notes: the |
 | `garden_apply` | Apply or decline one garden_classify suggestion (ADR-0032, ADR-0037). |
 | `garden_classify` | The proposal engine (ADR-0032, ADR-0042): tags, links, maturity and |
 | `garden_clusters` | Leiden communities over the weighted note graph: the community index |
@@ -90,6 +91,9 @@ over-fetch the org table and filter in its head.
 | `garden_learning_rollback` | Rewind the caller's learned priors to their state at ``to`` (ADR-0037): |
 | `garden_learning_telemetry` | What the classifier learned from the caller (ADR-0037): the |
 | `garden_link_proposer_precision` | Per proposer: proposals accepted, rejected, expired and open, how |
+| `garden_proposal_decide` | Accept or decline one proposal, of any kind. A person's act: an |
+| `garden_proposal_reopen` | Take a decision back: the proposal is pending again, as before (an |
+| `garden_proposals` | Everything the garden proposes, of every kind, in one list: what |
 | `garden_review_accept_ratio` | How often a person approved, rather than rejected, each model's |
 | `garden_review_approve` | Approve a generated note, pending or declined (ADR-0043, ADR-0075): it |
 | `garden_review_approve_on_decision` | Approve a generated note that a PERSON has decided to approve, on |
@@ -109,11 +113,13 @@ over-fetch the org table and filter in its head.
 | `list_events` | The workspace coordination event stream (ADR-0036): the read, propose, |
 | `list_link_proposals` | Open link proposals, best first, with who proposed each and why. The |
 | `list_written_backlinks` | Where people WROTE a reference to a note, task or tag: a mention, a |
+| `note_history` | What happened to a note, newest first: maturity moves by a person or |
 | `note_restore_source` | Restore the original under a humus atom: un-archive the atom's |
 | `propose_note_link` | Propose a note-to-note link nobody wrote. It is born proposed and |
 | `record_link_proposals_shown` | Record that these proposals were shown to the calling person, in this |
 | `reject_link_proposal` | Reject a proposed link. The pair is remembered and no proposer |
 | `suggest_note_links` | The top ``k`` notes to link from ``note_id``: Adamic-Adar over shared |
+| `synthesize_season` | Synthesise a ``season`` for one quarter, "what I cultivated this |
 
 ### kg (6)
 
@@ -424,7 +430,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_instructions` | Stream a huge file (GB, DICOM, MRI) as attachment; needs s3 and a personal access token. |
 | `work_digest` | What happened on the tasks of a client or project in a window: the |
 
-### misc (29)
+### misc (27)
 
 | Tool | Summary |
 |---|---|
@@ -438,7 +444,6 @@ over-fetch the org table and filter in its head.
 | `edit_annotation` | Edit an annotation's body (author or admin only). ``expected_version`` |
 | `edit_annotation_body_instructions` | Replace an annotation's body from a local file; needs a PAT, else set_text_block_capability. |
 | `errands` | Place/context matcher: tasks for an errand run at a location and/or |
-| `extract_cluster_pattern` | Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note |
 | `help` | Answer questions about Mycelium ITSELF -- its features, configuration and |
 | `ingest_sdi_receipt` | Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI. |
 | `list_annotations` | List the annotations (comments + suggestions) on a markdown document, |
@@ -452,7 +457,6 @@ over-fetch the org table and filter in its head.
 | `set_issuer_profile` | Create-or-update the default issuer profile, the invoice |
 | `set_notification_pref` | Set a user's per-channel notification preference. |
 | `spawn_due_recurrences` | Materialize due recurrences as independent task rows. |
-| `synthesize_season` | Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note |
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
 | `worker_close` | End a working session and GIVE BACK every task it still holds. |
 | `worker_open` | Open a working session and get the id that identifies YOU. |

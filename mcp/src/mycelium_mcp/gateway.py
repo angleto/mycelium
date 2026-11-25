@@ -132,20 +132,31 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
         isinstance(stdio_token, str) and stdio_token and isinstance(stdio_org, str)
     ):
         return None  # unauthenticated: no identity to resolve against
-    pending: list[tuple[str, str, tuple[str, ...]]] = []
-    for key, value in args.items():
-        if not isinstance(value, str) or len(value) >= _FULL_UUID_LEN:
-            continue
-        if not _PREFIX_RE.match(value):
-            continue
-        kinds = _PREFIX_ARGS.get(key)
-        if kinds is None and key in _PREFIX_ARGS_BY_KIND:
-            discriminator, by_value = _PREFIX_ARGS_BY_KIND[key]
-            sibling = args.get(discriminator)
-            if isinstance(sibling, str):
-                kinds = by_value.get(sibling.strip().lower())
-        if kinds is not None:
-            pending.append((key, value, kinds))
+    # (key, index in a list argument or None, value, kinds). A list of ids
+    # (``source_note_ids``) expands element by element: a short id handed
+    # out by this surface must come back in a list as it does alone.
+    pending: list[tuple[str, int | None, str, tuple[str, ...]]] = []
+    for key, raw in args.items():
+        values = (
+            [(None, raw)]
+            if isinstance(raw, str)
+            else list(enumerate(raw))
+            if isinstance(raw, list)
+            else []
+        )
+        for index, value in values:
+            if not isinstance(value, str) or len(value) >= _FULL_UUID_LEN:
+                continue
+            if not _PREFIX_RE.match(value):
+                continue
+            kinds = _PREFIX_ARGS.get(key)
+            if kinds is None and key in _PREFIX_ARGS_BY_KIND:
+                discriminator, by_value = _PREFIX_ARGS_BY_KIND[key]
+                sibling = args.get(discriminator)
+                if isinstance(sibling, str):
+                    kinds = by_value.get(sibling.strip().lower())
+            if kinds is not None:
+                pending.append((key, index, value, kinds))
     if not pending:
         return None
     from mycelium_core.services import lookup as lookup_svc
@@ -166,7 +177,7 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
             session, _org, _user = await stack.enter_async_context(
                 _tenant(str(stdio_token), str(stdio_org))
             )
-        for key, value, kinds in pending:
+        for key, index, value, kinds in pending:
             try:
                 # Archived AND deleted are both in scope here, which is wider
                 # than what a picker would ask for. Expanding a prefix is name
@@ -220,7 +231,10 @@ async def _expand_prefixes(args: dict[str, Any]) -> dict[str, Any] | None:
                         ],
                     }
                 }
-            args[key] = str(matches[0].id)
+            if index is None:
+                args[key] = str(matches[0].id)
+            else:
+                args[key][index] = str(matches[0].id)
     return None
 
 
@@ -366,6 +380,8 @@ _PREFIX_ARGS: dict[str, tuple[str, ...]] = {
     "other_id": ("task",),
     "note_id": ("note",),
     "parent_note_id": ("note",),
+    # extract_cluster_pattern: a list of notes, expanded element by element.
+    "source_note_ids": ("note",),
     "child_note_id": ("note",),
     "dst_note_id": ("note",),
     "src_note_id": ("note",),
@@ -394,6 +410,9 @@ _PREFIX_ARGS: dict[str, tuple[str, ...]] = {
 #: its parent is another annotation) is left alone for the same reason.
 _PREFIX_ARGS_BY_KIND: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
     "resource_id": ("kind", {"task_description": ("task",)}),
+    # garden_proposal_decide / _reopen (ADR-0075): a synthesis is a note; a
+    # link proposal and a fact are kinds resolve_prefix cannot reach.
+    "id": ("kind", {"synthesis": ("note",)}),
     "parent_id": ("parent_kind", {"task": ("task",), "note": ("note",)}),
     # An annotation's document: a note PART under 'note_part' (not expandable,
     # so absent from the inner map) or a task under 'task_description'.

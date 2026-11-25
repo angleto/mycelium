@@ -764,6 +764,36 @@ async def approve_fact(
     return edge
 
 
+async def withdraw_fact_approval(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    edge_id: uuid.UUID,
+) -> KgEdge:
+    """Take an approval back: an approved fact goes back to ``proposed``,
+    out of every read and back in the review inbox (ADR-0075 decision 4).
+    A rejected fact cannot come back this way: rejecting invalidated it, and
+    the database freezes an invalidated row."""
+    await require_role(session, org_id, actor_id, Role.member)
+    edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
+    if edge.review_state != _APPROVED or edge.invalidated_at is not None:
+        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    edge.review_state = _PROPOSED
+    edge.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="kg_edge",
+        entity_id=edge_id,
+        action="kg_withdraw_approval",
+        diff={"review_state": {"old": _APPROVED, "new": _PROPOSED}},
+    )
+    return edge
+
+
 async def reject_fact(
     session: AsyncSession,
     *,

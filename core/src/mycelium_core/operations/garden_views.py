@@ -299,6 +299,8 @@ class GardenCandidateNode(BaseModel):
     reason: str
     score: float
     preview: str
+    year: int | None = None
+    quarter: int | None = None
 
 
 class GardenCandidateEdge(BaseModel):

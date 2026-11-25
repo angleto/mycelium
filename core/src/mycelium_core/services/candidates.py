@@ -89,6 +89,9 @@ class _NodeCandidate:
     reason: str
     score: float
     preview: str
+    # A season names its quarter, which is what synthesising it takes.
+    year: int | None = None
+    quarter: int | None = None
 
 
 @dataclass(frozen=True)
@@ -320,6 +323,8 @@ async def list_distillation_candidates(
                     ),
                     score=float(len(ids)),
                     preview=f"{len(ids)} note archiviate nel trimestre {year}Q{quarter}",
+                    year=year,
+                    quarter=quarter,
                 )
             )
         # newest quarter first

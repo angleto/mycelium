@@ -517,3 +517,22 @@ def test_the_classification_lists_nothing_that_left_the_surface() -> None:
         stale = set(table) - found
         assert not stale, f"{name} names something no tool takes or returns: {sorted(stale)}"
     assert not (_NOT_AN_ENTITY_ID - found), sorted(_NOT_AN_ENTITY_ID - found)
+
+
+async def test_a_list_of_short_ids_expands_element_by_element() -> None:
+    """``extract_cluster_pattern`` takes a list of notes. The ids this surface
+    hands out are short, so a list of them must expand like a single one
+    does, or the tool would refuse ids the caller was just given."""
+    from mycelium_mcp.gateway import _expand_prefixes
+
+    org = await _org()
+    _token, _org_id, _uid = org
+    async with _as_principal(org):
+        a = await execute_tool(name="create_note", arguments={"kind": "text", "text": "a"})
+        b = await execute_tool(name="create_note", arguments={"kind": "text", "text": "b"})
+        args: dict[str, object] = {"source_note_ids": [a["id"], b["id"]]}
+        assert all(len(x) == 8 for x in args["source_note_ids"])  # type: ignore[attr-defined]
+        assert await _expand_prefixes(args) is None
+    full = args["source_note_ids"]
+    assert [len(x) for x in full] == [36, 36]  # type: ignore[attr-defined]
+    assert [x[:8] for x in full] == [a["id"], b["id"]]  # type: ignore[index]

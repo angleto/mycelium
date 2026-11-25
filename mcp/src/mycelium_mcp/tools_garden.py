@@ -62,6 +62,14 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
     ("garden_review_reopen", "garden.review.reopen", None),
     ("garden_review_check", "garden.review.check", None),
     ("garden_review_revise", "garden.review.revise", None),
+    # one listing and the same verbs for every kind of proposal (ADR-0075)
+    ("garden_proposals", "garden.proposals.list", None),
+    ("garden_proposal_decide", "garden.proposals.decide", None),
+    ("garden_proposal_reopen", "garden.proposals.reopen", None),
+    ("note_history", "garden.note_history", None),
+    # the names the hand-written tools had, now registry operations
+    ("extract_cluster_pattern", "garden.synthesize.pattern", None),
+    ("synthesize_season", "garden.synthesize.season", None),
     ("garden_delegation_policy", "garden.delegation.policy", None),
     ("garden_delegated_decide", "garden.delegation.decide", None),
     ("garden_delegated_decisions", "garden.delegation.decisions", _under("decisions")),
