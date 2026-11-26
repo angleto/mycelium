@@ -621,6 +621,7 @@ def _worker_out(w: AgentWorker) -> WorkerOut:
         opened_at=w.opened_at,
         last_seen_at=w.last_seen_at,
         closed_at=w.closed_at,
+        session_id=w.session_id,
     )
 
 
@@ -643,6 +644,7 @@ async def open_worker(
         actor_id=ctx.user_id,
         label=body.label,
         operation_id=body.operation_id,
+        join_key=body.join_key,
     )
     return _worker_out(worker)
 

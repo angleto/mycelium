@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**329 tools across 17 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**330 tools across 18 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -193,6 +193,15 @@ over-fetch the org table and filter in its head.
 | `remove_holiday` | Remove a holiday (ISO date) from a calendar. |
 | `set_task_schedule` | Write-back scheduler pins/constraints; survives recompute (FR-4). |
 | `set_user_calendar` | Assign a calendar + daily capacity (hours) to a user. |
+
+### sessions (4)
+
+| Tool | Summary |
+|---|---|
+| `sessions_list` | The sessions open in this workspace, who needs the person first: each |
+| `worker_close` | End a working session and GIVE BACK every task it still holds. |
+| `worker_open` | Open a working session and get the id that identifies YOU. |
+| `workers_list` | The working sessions that are open. ``mine_only`` narrows to the |
 
 ### orchestration (16)
 
@@ -438,7 +447,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_instructions` | Stream a huge file (GB, DICOM, MRI) as attachment; needs s3 and a personal access token. |
 | `work_digest` | What happened on the tasks of a client or project in a window: the |
 
-### misc (27)
+### misc (24)
 
 | Tool | Summary |
 |---|---|
@@ -466,9 +475,6 @@ over-fetch the org table and filter in its head.
 | `set_notification_pref` | Set a user's per-channel notification preference. |
 | `spawn_due_recurrences` | Materialize due recurrences as independent task rows. |
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
-| `worker_close` | End a working session and GIVE BACK every task it still holds. |
-| `worker_open` | Open a working session and get the id that identifies YOU. |
-| `workers_list` | The working sessions that are open. ``mine_only`` narrows to the |
 <!-- END GENERATED -->
 
 ## Scope model

@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.errors import ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
+from mycelium_core.models.agent_session import AgentSession, hash_join_key
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.identity import Identity
@@ -154,8 +155,20 @@ async def open_worker(
     label: str | None = None,
     operation_id: str | None = None,
     token_id: uuid.UUID | None = None,
+    join_key: str | None = None,
 ) -> AgentWorker:
     """Mint a worker for the calling session and return it.
+
+    ``join_key`` is the key an agent host's session was opened with
+    (docs/adr/0078); presented, the worker joins that session, which is how
+    the page shows what a session holds. The key proves the caller was
+    given it, and only that session was; it must also come from the person
+    who opened the session, so a key that leaked to another member joins
+    nothing. A key that is unknown, or whose session closed, is refused and
+    no worker is opened: the agent's context is stale, and it should learn
+    that rather than be handed a worker that belongs nowhere. Membership is
+    never authority: the worker is bound to its own credential exactly as
+    without a key.
 
     Member-level, and deliberately no higher. Opening a worker grants
     nothing: the row carries no permission, is never read as authority,
@@ -183,6 +196,20 @@ async def open_worker(
     identity_id = await caller_identity(
         session, org_id=org_id, actor_id=actor_id, token_id=token_id
     )
+    session_id: uuid.UUID | None = None
+    if join_key is not None and join_key.strip():
+        session_id = (
+            await session.execute(
+                select(AgentSession.id).where(
+                    AgentSession.org_id == org_id,
+                    AgentSession.join_key_hash == hash_join_key(join_key),
+                    AgentSession.opened_by_user_id == actor_id,
+                    AgentSession.closed_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if session_id is None:
+            raise NotFoundError(MessageCode.SESSION_JOIN_KEY_UNKNOWN)
     if operation_id and token_id is not None:
         existing = (
             await session.execute(
@@ -193,6 +220,12 @@ async def open_worker(
             )
         ).scalar_one_or_none()
         if existing is not None:
+            # A retry that now carries the key its first attempt lacked
+            # joins; one that carries none leaves the membership as it was.
+            if session_id is not None and existing.session_id != session_id:
+                existing.session_id = session_id
+                existing.version += 1
+                await session.flush()
             return existing
     worker = AgentWorker(
         org_id=org_id,
@@ -201,6 +234,7 @@ async def open_worker(
         opened_by_token_id=token_id,
         label=(label[:128] if label else None),
         operation_id=(operation_id[:128] if operation_id else None),
+        session_id=session_id,
         opened_at=_now(),
         last_seen_at=_now(),
     )
@@ -213,7 +247,7 @@ async def open_worker(
         entity="agent_worker",
         entity_id=worker.id,
         action="open",
-        diff={"label": worker.label or ""},
+        diff={"label": worker.label or "", "session": str(session_id or "")},
     )
     return worker
 

@@ -247,6 +247,12 @@ class MessageCode(enum.StrEnum):
     WORKFLOW_PERSON_ONLY = "workflow.person_only"
     WORKER_NOT_FOUND = "worker.not_found"
     WORKER_NEEDS_CREDENTIAL = "worker.needs_credential"
+    SESSION_NOT_FOUND = "session.not_found"
+    SESSION_NEEDS_CREDENTIAL = "session.needs_credential"
+    SESSION_HOST_REF_REQUIRED = "session.host_ref_required"
+    SESSION_MACHINE_REQUIRED = "session.machine_required"
+    SESSION_BLOCKED_ON_MISMATCH = "session.blocked_on_mismatch"
+    SESSION_JOIN_KEY_UNKNOWN = "session.join_key_unknown"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -799,6 +805,32 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "No open worker with this id in this workspace. A worker is closed by worker_close, "
             "or by the server once it has gone unseen for hours holding nothing. Open a new one "
             "with worker_open and pass the id it returns"
+        ),
+        MessageCode.SESSION_NOT_FOUND: (
+            "No open session with this id opened by this credential. A session is closed when "
+            "its host says it ended, when its machine no longer lists it, or after a long "
+            "silence; open it again with the host's id and it comes back"
+        ),
+        MessageCode.SESSION_NEEDS_CREDENTIAL: (
+            "A session is opened by an agent host's hooks, with a credential of their own (the "
+            "CLI's token). This caller has none to bind it to"
+        ),
+        MessageCode.SESSION_HOST_REF_REQUIRED: (
+            "host_ref is required: the host's own id for the session, so a resume finds the "
+            "session it was"
+        ),
+        MessageCode.SESSION_MACHINE_REQUIRED: (
+            "machine is required: a reconcile closes only the sessions of the machine that "
+            "listed what it has alive"
+        ),
+        MessageCode.SESSION_BLOCKED_ON_MISMATCH: (
+            "blocked_on goes with attention 'blocked' and with nothing else: say what the "
+            "session is blocked on, or do not say it is blocked"
+        ),
+        MessageCode.SESSION_JOIN_KEY_UNKNOWN: (
+            "This join key names no open session of yours. Its session was closed or opened "
+            "again with a new key, so the key in your context is stale. Open the worker "
+            "without join_key, and say so to the person: the session will not show what you hold"
         ),
         MessageCode.WORKER_NEEDS_CREDENTIAL: (
             "A worker is bound to the credential that opens it, and this session has none "

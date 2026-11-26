@@ -81,6 +81,14 @@ class AgentWorker(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Bas
 
     label: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # The session this worker works in, when it joined one with the key the
+    # session was opened with (docs/adr/0078). Membership only: it changes
+    # nothing about what the worker may do, and a worker opened outside any
+    # session has none.
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Retry key. A session whose reply was lost re-sends the same one and
     # gets the same worker back, instead of ending up with two and no way
     # to tell which holds its leases.

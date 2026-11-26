@@ -216,6 +216,14 @@ class Settings(BaseSettings):
     # once and opens a new worker, having held nothing to lose.
     agent_worker_idle_close_seconds: int = 6 * 3600
 
+    # A session nothing has been heard from (docs/adr/0078) and with no open
+    # worker. Long on purpose: a session waiting for its person sends
+    # nothing, and the machine's own reconcile is what closes the dead ones
+    # the next time anything runs there. This bound is for the machine that
+    # never comes back, and three days covers a long weekend away from a
+    # session left waiting.
+    agent_session_idle_close_seconds: int = 3 * 24 * 3600
+
     # Two-phase transmit (ADR-0046). The dispatch wall time is bounded
     # explicitly (httpx's 30 s timeout is PER PHASE -- connect/write/read --
     # so it does not bound the total); the lease must comfortably exceed

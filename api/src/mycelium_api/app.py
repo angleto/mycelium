@@ -61,6 +61,7 @@ from mycelium_api.routers import (
     received_invoices,
     schedule,
     search,
+    sessions,
     tags,
     task_relations,
     tasks,
@@ -472,6 +473,7 @@ def create_app() -> FastAPI:
     app.include_router(garden.router)
     app.include_router(kg.router)
     app.include_router(connections.router)
+    app.include_router(sessions.router)
     app.include_router(attachments.router)
     app.include_router(capabilities.router)
     app.include_router(invoices.router)

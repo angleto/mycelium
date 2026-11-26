@@ -41,6 +41,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
+from mycelium_core.services import agent_sessions as sessions_svc
 from mycelium_core.services import agent_workers as workers_svc
 from mycelium_core.services import task_leases
 
@@ -98,6 +99,20 @@ async def run_once(batch_size: int | None = None) -> int:
                     s,
                     idle_for=dt.timedelta(seconds=settings.agent_worker_idle_close_seconds),
                     limit=limit,
+                )
+            # And the sessions, after their workers: a session is closed only
+            # once no worker of it is open, so the order lets one pass do both.
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                closed_sessions = await sessions_svc.close_idle(
+                    s,
+                    idle_for=dt.timedelta(seconds=settings.agent_session_idle_close_seconds),
+                    limit=limit,
+                )
+            if closed_sessions:
+                _log.info(
+                    "task-lease sweep org=%s closed_idle_sessions=%d",
+                    org_id,
+                    len(closed_sessions),
                 )
             if closed:
                 _log.info(

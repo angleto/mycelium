@@ -1482,6 +1482,9 @@ class HandoffOut(BaseModel):
 class WorkerOpenIn(BaseModel):
     label: str | None = Field(default=None, max_length=128)
     operation_id: str | None = Field(default=None, max_length=128)
+    # The key an agent host's session was opened with (docs/adr/0078): the
+    # worker joins that session. Membership only, never authority.
+    join_key: str | None = Field(default=None, max_length=128)
 
 
 class WorkerOut(BaseModel):
@@ -1490,6 +1493,7 @@ class WorkerOut(BaseModel):
     opened_at: datetime.datetime
     last_seen_at: datetime.datetime | None
     closed_at: datetime.datetime | None
+    session_id: uuid.UUID | None = None
 
 
 class WorkerClosedOut(BaseModel):

@@ -3699,6 +3699,7 @@ def _worker(w: AgentWorker) -> dict[str, Any]:
             "opened_at": w.opened_at.isoformat(),
             "last_seen_at": w.last_seen_at.isoformat() if w.last_seen_at else None,
             "closed_at": w.closed_at.isoformat() if w.closed_at else None,
+            "session_id": str(w.session_id) if w.session_id else None,
         }
     )
 
@@ -3709,6 +3710,7 @@ async def worker_open(
     org_id: str,
     label: str | None = None,
     operation_id: str | None = None,
+    join_key: str | None = None,
 ) -> dict[str, Any]:
     """Open a working session and get the id that identifies YOU.
 
@@ -3729,6 +3731,13 @@ async def worker_open(
     two workers. Pass ``operation_id`` and a retry after a lost reply
     returns the same worker instead of a second one.
 
+    ``join_key``: if your context was given one at session start (an agent
+    host opened a session for you and said so), pass it. Your worker then
+    joins that session, and the person's sessions page shows what you hold
+    next to whether you are waiting for them. It grants nothing. A key that
+    is refused as unknown is stale: open the worker without it and tell the
+    person.
+
     Resuming after losing your context? Call ``workers_list`` to find
     what you opened, then ``task_leases_list(worker_id=...)`` for what it
     still holds."""
@@ -3741,6 +3750,7 @@ async def worker_open(
             label=label,
             operation_id=operation_id,
             token_id=(principal[2] if principal is not None else None),
+            join_key=join_key,
         )
         return _worker(worker)
 
@@ -10047,7 +10057,13 @@ async def restore_note_revision(
 
 # The garden tools are generated from the operation registry (ADR-0068).
 # Imported last: the bindings need this module's registry and tenant opener.
-from mycelium_mcp import tools_garden, tools_kg, tools_notes, tools_tasks  # noqa: E402,F401
+from mycelium_mcp import (  # noqa: E402,F401
+    tools_garden,
+    tools_kg,
+    tools_notes,
+    tools_sessions,
+    tools_tasks,
+)
 
 # Python callers (tests, eval scenarios) import tools from this module; the
 # generated ones stay importable under the names they always had. Resolved

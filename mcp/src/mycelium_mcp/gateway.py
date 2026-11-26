@@ -565,6 +565,10 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # still matches via "schedule", and keeping it here used to steal
     # memory_recompute_tiers into the calendar domain.
     ("calendar", ("event", "calendar", "holiday", "schedule")),
+    # The workers and sessions agents work in (docs/adr/0078). The session
+    # read is registry-bound and declares its domain; the worker tools are
+    # hand-written and land here by name instead of in misc.
+    ("sessions", ("worker",)),
     ("orchestration", ("executor", "agent_run", "handoff", "offer", "claim", "dispatch", "tick")),
     ("workflow", ("workflow", "state", "transition")),
     ("memory", ("memory",)),
@@ -799,7 +803,8 @@ async def search_tools(
     ``describe_tools`` for the schemas of the ones you want, then
     ``execute_tool`` to run them. ``domain`` optionally biases ranking
     toward one of: tasks, notes, search, navigation, time, calendar,
-    memory, orchestration, workflow, taxonomy, billing, email, misc. It is
+    memory, orchestration, sessions, workflow, taxonomy, billing, email,
+    misc. It is
     a SOFT down-rank, not a hard filter: off-domain tools are demoted, not
     removed, so the requested domain dominates the top results while a
     genuinely strong off-domain match can still surface below them. The
