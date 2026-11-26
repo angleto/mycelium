@@ -484,12 +484,15 @@ async def tick(
 
     # (2) Reschedule first: the recompute reflects the previous cycle's
     # completed/failed tasks and the P4 handoff-driven new ready set.
+    # A tick with nothing changed keeps the stored plan rather than
+    # rewriting it (``scheduler._reuse_summary`` says why and for how long).
     summary = await scheduler_svc.recompute(
         session,
         org_id=org_id,
         actor_id=actor_id,
         as_of=as_of,
         policy=policy,
+        reuse_unchanged=True,
     )
 
     admitted = await _admitted_agent_rows(session)
@@ -514,15 +517,30 @@ async def tick(
             # (A task with an active request has not run yet -- a run
             # terminalizes its request to ``dispatched`` -- so this
             # branch never collides with the dispatch-once rule.)
-            existing.executor_id = sch.assigned_executor_id
-            existing.projected_credit_cost = sch.projected_cost
+            #
+            # The version moves only when a field does. It used to move on
+            # every reuse, so a request waiting for approval was rewritten
+            # on every tick: measured on production 2026-11-26, 104 pending
+            # requests with versions up to 130 004 and about 10.27 M in
+            # total, none of which said anything had changed. A reader
+            # presenting the version it read (approve/deny) was refused for
+            # a write nobody made.
+            changed = False
+            if existing.executor_id != sch.assigned_executor_id:
+                existing.executor_id = sch.assigned_executor_id
+                changed = True
+            if existing.projected_credit_cost != sch.projected_cost:
+                existing.projected_credit_cost = sch.projected_cost
+                changed = True
             if auto and existing.status is DispatchStatus.pending:
                 existing.status = DispatchStatus.approved
                 existing.decided_at = now
                 existing.decided_by = actor_id
                 approved += 1
-            existing.version += 1
-            await session.flush()
+                changed = True
+            if changed:
+                existing.version += 1
+                await session.flush()
             continue
         if task.id in ran_tasks:
             # Dispatch-once: this task already had an agent run (in

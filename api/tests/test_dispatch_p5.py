@@ -49,11 +49,14 @@ from tests_helpers import seed_ai_assistant_identity
 
 from mycelium_api.main import app
 from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import DomainError, ForbiddenError
+from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
 from mycelium_core.models.ai_assistant import AssistantRuntime
+from mycelium_core.models.dependency import DependencyType
 from mycelium_core.models.dispatch_request import (
     AutonomousDispatch,
     DispatchRequest,
@@ -62,10 +65,15 @@ from mycelium_core.models.dispatch_request import (
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
+from mycelium_core.models.schedule import Schedule
+from mycelium_core.models.task import Task
 from mycelium_core.security import decode_token
 from mycelium_core.services import billing
+from mycelium_core.services import calendar as cal_svc
+from mycelium_core.services import dependencies as dep_svc
 from mycelium_core.services import dispatch_loop as loop
 from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import scheduler as sch_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.auth import signup
 
@@ -985,3 +993,153 @@ async def test_a_blocked_run_at_zero_steps_still_retires_the_task(
                 .where(DispatchRequest.task_id == task.id)
             )
         ).scalar_one() == 0
+
+
+# --- (j) a tick with nothing changed writes nothing -------------------
+#
+# Measured on production 2026-11-26 before this: every 60 s tick deleted
+# and rewrote one schedule row per task (1605 a minute) plus an audit
+# record, and bumped the version of every waiting request (104 pending,
+# versions up to 130 004). The version bump also made an approval refuse
+# whenever a tick had run between reading the request and approving it.
+#
+# Observed failing, 2026-11-26: against the code before the change,
+# ``..._nothing_changed_writes_nothing`` (version 3 == 1) and
+# ``..._past_its_age_bound``; with only the unconditional version bump put
+# back, ``..._nothing_changed_writes_nothing`` (3 == 1); with the tasks,
+# the dependencies, the executors or the holidays taken out of the plan's
+# fingerprint one at a time, the matching ``..._when_an_input_changes``
+# case. The dependency case passed under its perturbation until the
+# predecessor was created before the first tick: creating it inside the
+# perturbation changed the task set, which hid the missing input. The
+# assignee, identity, participant, user-calendar and terminal-state parts
+# of the fingerprint have no perturbation test.
+
+
+async def _schedule_audit_count(s: AsyncSession) -> int:
+    return (
+        await s.execute(
+            select(func.count()).select_from(ActivityLog).where(ActivityLog.entity == "schedule")
+        )
+    ).scalar_one()
+
+
+async def _computed_at(s: AsyncSession) -> set[dt.datetime]:
+    return set((await s.execute(select(Schedule.computed_at))).scalars().all())
+
+
+async def test_a_tick_with_nothing_changed_writes_nothing(_fake_embedder: None) -> None:
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="IDLE")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        await _capable_agent(s, org=org, user=user)
+        task = await _llm_task(s, org=org, user=user, title="Waits for a person")
+        await loop.tick(s, org_id=org, actor_id=user, as_of=_AS_OF)
+        req = (
+            await s.execute(select(DispatchRequest).where(DispatchRequest.task_id == task.id))
+        ).scalar_one()
+        version_read = req.version
+        stamps = await _computed_at(s)
+        audits = await _schedule_audit_count(s)
+
+        later = _AS_OF + dt.timedelta(minutes=5)
+        await loop.tick(s, org_id=org, actor_id=user, as_of=later)
+        await loop.tick(s, org_id=org, actor_id=user, as_of=later + dt.timedelta(minutes=1))
+
+        await s.refresh(req)
+        assert req.version == version_read
+        assert await _computed_at(s) == stamps
+        assert await _schedule_audit_count(s) == audits
+
+        # A person asking for a plan always gets a fresh one.
+        await sch_svc.recompute(s, org_id=org, actor_id=user, as_of=later)
+        assert await _computed_at(s) == {later}
+
+        # The approval a person read before the ticks still goes through.
+        _use_llm(_FINISH)
+        try:
+            await _grant_and_rate(s, org=org, user=user)
+            approved = await loop.approve_request(
+                s, org_id=org, actor_id=user, request_id=req.id, expected_version=version_read
+            )
+        finally:
+            _clear_llm()
+        assert approved.status is not DispatchStatus.pending
+
+
+async def _perturb(kind: str, s: AsyncSession, *, org: uuid.UUID, user: uuid.UUID, task) -> None:
+    if kind == "task":
+        await tasks_svc.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=task.id,
+            expected_version=task.version,
+            values={"estimate_effort_h": Decimal(3)},
+        )
+    elif kind == "dependency":
+        # The predecessor exists before the first tick, so that the
+        # dependency is the only thing that changes.
+        other = (await s.execute(select(Task).where(Task.title == "Before it"))).scalar_one()
+        await dep_svc.add_dependency(
+            s,
+            org_id=org,
+            actor_id=user,
+            predecessor_id=other.id,
+            successor_id=task.id,
+            type=DependencyType.FS,
+        )
+    elif kind == "executor":
+        agent = (await s.execute(select(Executor).where(Executor.name == "Worker"))).scalar_one()
+        await exec_svc.update_executor(
+            s,
+            org_id=org,
+            actor_id=user,
+            executor_id=agent.id,
+            expected_version=agent.version,
+            values={"max_parallel": 2},
+        )
+    elif kind == "holiday":
+        default_cal = await cal_svc.get_default_calendar(s, org)
+        await cal_svc.add_holiday(
+            s, org_id=org, actor_id=user, calendar_id=default_cal.id, day=dt.date(2026, 1, 13)
+        )
+    else:  # pragma: no cover - parametrization guard
+        raise AssertionError(kind)
+
+
+@pytest.mark.parametrize("kind", ["task", "dependency", "executor", "holiday"])
+async def test_a_tick_recomputes_when_an_input_changes(_fake_embedder: None, kind: str) -> None:
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="MOVE")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        await _capable_agent(s, org=org, user=user)
+        task = await _llm_task(s, org=org, user=user, title="Planned")
+        await _llm_task(s, org=org, user=user, title="Before it")
+        await loop.tick(s, org_id=org, actor_id=user, as_of=_AS_OF)
+        await s.refresh(task)
+        await _perturb(kind, s, org=org, user=user, task=task)
+        later = _AS_OF + dt.timedelta(minutes=1)
+        await loop.tick(s, org_id=org, actor_id=user, as_of=later)
+        assert await _computed_at(s) == {later}
+
+
+async def test_a_tick_recomputes_an_unchanged_plan_past_its_age_bound(
+    _fake_embedder: None,
+) -> None:
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="AGE")
+    org, user = a.org_id, a.user_id
+    bound = dt.timedelta(seconds=get_settings().schedule_reuse_max_age_seconds)
+    async with tenant_session(str(org), str(user)) as s:
+        await _capable_agent(s, org=org, user=user)
+        await _llm_task(s, org=org, user=user, title="Ages")
+        await loop.tick(s, org_id=org, actor_id=user, as_of=_AS_OF)
+        inside = _AS_OF + bound - dt.timedelta(seconds=1)
+        await loop.tick(s, org_id=org, actor_id=user, as_of=inside)
+        assert await _computed_at(s) == {_AS_OF}
+        past = _AS_OF + bound + dt.timedelta(seconds=1)
+        await loop.tick(s, org_id=org, actor_id=user, as_of=past)
+        assert await _computed_at(s) == {past}

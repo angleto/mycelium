@@ -530,6 +530,15 @@ class Settings(BaseSettings):
     # MYCELIUM_DISPATCH_LOOP_INTERVAL_SECONDS like the other worker knobs.
     dispatch_loop_interval_seconds: int = 60
 
+    # How old a stored plan may be and still stand in for a fresh one when
+    # the dispatch tick finds every input unchanged (scheduler
+    # ``_reuse_summary``). The clock is the one input the plan's digest
+    # leaves out, so this is the most a reused plan's dates can lag. An
+    # hour: the tick then rewrites an unchanged workspace's plan once an
+    # hour instead of every minute, and the dates a person reads from it
+    # are at most an hour behind; asking for a recompute is always fresh.
+    schedule_reuse_max_age_seconds: int = 3600
+
     # Garden auto-maturity (docs/adr/0032): the worker auto-promotes
     # growing notes to ``mature`` when they clear the high-confidence tier
     # (central AND curated). Reversible (label-only, audited + a feedback

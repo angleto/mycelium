@@ -32,16 +32,19 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import Row, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.ai_assistant import AiAssistant
+from mycelium_core.models.calendar import CalendarHoliday, UserCalendar, WorkingCalendar
 from mycelium_core.models.dependency import DependencyType, TaskDependency
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.identity import Identity
@@ -115,6 +118,53 @@ class RecomputeSummary:
     projected_credit_cost: Decimal
     policy: SchedulePolicy
     unassignable_count: int = 0
+
+
+def _reuse_summary(
+    prev: dict[uuid.UUID, Schedule],
+    *,
+    ids: list[uuid.UUID],
+    fp: str,
+    now: dt.datetime,
+    policy: SchedulePolicy,
+) -> RecomputeSummary | None:
+    """The stored plan's summary when it can stand for a fresh one, else None.
+
+    It can when the stored rows are exactly the tasks in scope, every row
+    was written from the inputs ``fp`` digests, and the oldest row is
+    younger than ``schedule_reuse_max_age_seconds``.
+
+    Why reuse at all: the dispatch tick asks for a plan every
+    ``dispatch_loop_interval_seconds`` in every workspace, and before this
+    every ask deleted and rewrote one row per task plus an audit record:
+    1605 rows a minute in the production workspace, as read through MCP on
+    2026-11-26, whether or not anything had changed.
+
+    Why an age bound: the clock is the one input the digest leaves out.
+    Dates are anchored at the moment of computation, so a reused plan's
+    dates fall behind by its age. What the tick reads from the plan, the
+    admitted agent tasks and their order, does not move with a uniform
+    shift of the clock; the dates do, and they are what a person reads.
+    The bound caps that lag, and a person asking for a recompute never
+    gets a reused plan.
+    """
+    if not prev or set(prev) != set(ids):
+        return None
+    rows = list(prev.values())
+    if any(r.input_fingerprint != fp for r in rows):
+        return None
+    max_age = dt.timedelta(seconds=get_settings().schedule_reuse_max_age_seconds)
+    if min(r.computed_at for r in rows) < now - max_age:
+        return None
+    ends = [r.scheduled_end for r in rows if not r.unassignable and r.scheduled_end is not None]
+    makespan_end = max(ends, default=now)
+    return RecomputeSummary(
+        count=len(rows),
+        makespan_minutes=max(0, int((makespan_end - now).total_seconds() // 60)),
+        projected_credit_cost=sum((r.projected_cost for r in rows), Decimal(0)),
+        policy=policy,
+        unassignable_count=sum(1 for r in rows if r.unassignable),
+    )
 
 
 def _logical_slack_min(n: _Node) -> int:
@@ -254,6 +304,86 @@ class Scheduler:
             self._cal[assignee] = (wc, float(cap) * 60.0)
         return self._cal[assignee]
 
+    async def _input_fingerprint(
+        self,
+        *,
+        policy: SchedulePolicy,
+        tasks: list[Task],
+        deps: list[TaskDependency],
+        terminal_state_ids: set[uuid.UUID],
+        assignee_rows: Sequence[Row[tuple[uuid.UUID, uuid.UUID]]],
+        identity_rows: Sequence[Row[Any]],
+        exec_rows: list[Executor],
+        participant_rows: Sequence[Row[Any]],
+    ) -> str:
+        """A digest of everything the plan is computed from, except the clock.
+
+        Every table ``recompute`` reads goes in, in a deterministic order:
+        the tasks, their dependencies, which states are terminal, the
+        assignees and the identities they resolve to, the appointment
+        participants, the executors, and the working calendars with their
+        holidays and per-user overrides. Versioned rows enter as
+        ``id:version:updated_at``. ``updated_at`` is there because the ORM
+        moves it on every UPDATE it issues (``onupdate`` on
+        ``TimestampMixin``) while the version is moved by each service by
+        hand, so an ORM write path that forgets the version is still seen.
+        A raw SQL UPDATE that sets neither is not; the age bound is the
+        most such a write can go unseen.
+
+        The clock is left out on purpose: a plan's dates are relative to
+        the moment it was computed, so a digest that included it would
+        never repeat and nothing could be reused. The age bound in
+        ``_reuse_summary`` is what keeps the dates from drifting.
+
+        The previous rows are an input too (a manual pin is read from the
+        stored schedule), but they are the plan this digest is compared
+        against, so they cannot change without the digest changing first.
+        """
+        cal_rows = (
+            await self._s.execute(select(WorkingCalendar).order_by(WorkingCalendar.id))
+        ).scalars()
+        holiday_rows = (
+            await self._s.execute(
+                select(CalendarHoliday.calendar_id, CalendarHoliday.day).order_by(
+                    CalendarHoliday.calendar_id, CalendarHoliday.day
+                )
+            )
+        ).all()
+        user_cal_rows = (
+            await self._s.execute(select(UserCalendar).order_by(UserCalendar.user_id))
+        ).scalars()
+
+        def _v(row: Any) -> str:
+            return f"{row.id}:{row.version}:{row.updated_at.isoformat()}"
+
+        parts: list[str] = [f"policy:{policy.value}"]
+        parts += [f"t:{_v(t)}" for t in sorted(tasks, key=lambda x: str(x.id))]
+        parts += [
+            f"d:{_v(d)}:{d.predecessor_id}:{d.successor_id}:{d.type.value}:{d.lag_working_minutes}"
+            for d in sorted(deps, key=lambda x: str(x.id))
+        ]
+        parts += [f"term:{sid}" for sid in sorted(terminal_state_ids, key=str)]
+        parts += [
+            f"a:{tid}:{uid}"
+            for tid, uid in sorted(assignee_rows, key=lambda r: (str(r[0]), str(r[1])))
+        ]
+        parts += [
+            "i:" + ":".join(str(v) for v in row)
+            for row in sorted(identity_rows, key=lambda r: str(r[0]))
+        ]
+        parts += [
+            "p:" + ":".join(str(v) for v in row)
+            for row in sorted(participant_rows, key=lambda r: tuple(str(v) for v in r))
+        ]
+        parts += [f"e:{_v(e)}" for e in sorted(exec_rows, key=lambda x: str(x.id))]
+        parts += [f"c:{_v(c)}" for c in cal_rows]
+        parts += [f"h:{cid}:{day.isoformat()}" for cid, day in holiday_rows]
+        parts += [
+            f"uc:{u.user_id}:{u.calendar_id}:{u.version}:{u.updated_at.isoformat()}"
+            for u in user_cal_rows
+        ]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
     async def recompute(
         self,
         *,
@@ -261,7 +391,17 @@ class Scheduler:
         project_tag_id: uuid.UUID | None = None,
         as_of: dt.datetime | None = None,
         policy: SchedulePolicy = SchedulePolicy.balanced,
+        reuse_unchanged: bool = False,
     ) -> RecomputeSummary:
+        """Compute and store the plan for the workspace (or one project).
+
+        ``reuse_unchanged`` is for the periodic dispatch tick: when every
+        input the plan reads is what the stored plan was computed from, and
+        that plan is younger than ``schedule_reuse_max_age_seconds``, the
+        stored rows are kept and summarised instead of being deleted and
+        written again. See ``_input_fingerprint`` for what counts as an
+        input. A person asking for a recompute gets a fresh one.
+        """
         await require_role(self._s, self._org, actor_id, Role.member)
         now = (as_of or dt.datetime.now(tz=dt.UTC)).astimezone(dt.UTC)
 
@@ -364,6 +504,43 @@ class Scheduler:
             if row.task_id in id_set
         }
 
+        # Loaded here rather than where they are used so that the
+        # fingerprint and the computation read the same rows.
+        exec_rows = list(
+            (
+                await self._s.execute(
+                    select(Executor).order_by(Executor.kind, Executor.name, Executor.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        participant_rows = (
+            await self._s.execute(
+                select(
+                    Identity.user_id,
+                    TaskParticipant.start_at,
+                    TaskParticipant.duration_minutes,
+                )
+                .join(Identity, Identity.id == TaskParticipant.identity_id)
+                .where(Identity.user_id.is_not(None))
+            )
+        ).all()
+        fp = await self._input_fingerprint(
+            policy=policy,
+            tasks=tasks,
+            deps=deps,
+            terminal_state_ids=terminal_state_ids,
+            assignee_rows=assignee_rows,
+            identity_rows=identity_rows,
+            exec_rows=exec_rows,
+            participant_rows=participant_rows,
+        )
+        if reuse_unchanged:
+            reused = _reuse_summary(prev, ids=ids, fp=fp, now=now, policy=policy)
+            if reused is not None:
+                return reused
+
         nodes: dict[uuid.UUID, _Node] = {}
         for t in tasks:
             # Three fallbacks for the human executor id (used by the
@@ -463,16 +640,8 @@ class Scheduler:
         # resolved by user via build_work_calendar) and resolve the SET
         # of enabled llm_agent executors (P2: capability-matched
         # admission control across multiple agents, replacing P1's single
-        # default pool). Deterministic order: (kind, name, id).
-        exec_rows = list(
-            (
-                await self._s.execute(
-                    select(Executor).order_by(Executor.kind, Executor.name, Executor.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        # default pool). Deterministic order: (kind, name, id). The rows
+        # were loaded with the other inputs, above the fingerprint.
         human_exec: dict[uuid.UUID, Executor] = {}
         for e in exec_rows:
             if e.kind is ExecutorKind.human and e.user_id is not None:
@@ -537,18 +706,8 @@ class Scheduler:
         # through ``identities`` -- AI assistants have no users.id and
         # are not put on the human serialization timeline). This way
         # the scheduler sees N-way appointments: every participant has
-        # the slot in their busy list, not just the assignee.
-        participant_rows = (
-            await self._s.execute(
-                select(
-                    Identity.user_id,
-                    TaskParticipant.start_at,
-                    TaskParticipant.duration_minutes,
-                )
-                .join(Identity, Identity.id == TaskParticipant.identity_id)
-                .where(Identity.user_id.is_not(None))
-            )
-        ).all()
+        # the slot in their busy list, not just the assignee. The rows
+        # were loaded with the other inputs, above the fingerprint.
         for uid, p_start, p_dur in participant_rows:
             p_end = p_start + dt.timedelta(minutes=p_dur)
             appt_busy_by_user.setdefault(uid, []).append((p_start, p_end))
@@ -787,20 +946,6 @@ class Scheduler:
         }
 
         await self._s.execute(delete(Schedule).where(Schedule.task_id.in_(ids)))
-        # Fingerprint folds the policy AND the executor set
-        # (id:version, deterministically ordered): a registry change
-        # (a new agent, an edited budget/capability, an enable toggle)
-        # reschedules even when no task changed.
-        exec_fp = "|".join(
-            f"{e.id}:{e.version}" for e in sorted(exec_rows, key=lambda x: str(x.id))
-        )
-        fp = hashlib.sha256(
-            (
-                f"{policy.value}|"
-                + "|".join(f"{t.id}:{t.version}" for t in sorted(tasks, key=lambda x: str(x.id)))
-                + f"|exec:{exec_fp}"
-            ).encode()
-        ).hexdigest()
         total_cost = Decimal(0)
         for nid, n in nodes.items():
             ss, se = sched[nid]
@@ -879,12 +1024,14 @@ async def recompute(
     project_tag_id: uuid.UUID | None = None,
     as_of: dt.datetime | None = None,
     policy: SchedulePolicy = SchedulePolicy.balanced,
+    reuse_unchanged: bool = False,
 ) -> RecomputeSummary:
     return await Scheduler(session, org_id).recompute(
         actor_id=actor_id,
         project_tag_id=project_tag_id,
         as_of=as_of,
         policy=policy,
+        reuse_unchanged=reuse_unchanged,
     )
 
 
