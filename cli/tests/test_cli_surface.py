@@ -105,3 +105,36 @@ def test_a_suggestion_is_decided_from_the_web_app(verb: str) -> None:
     )
     assert result.returncode != 0
     assert "No such command" in result.stdout + result.stderr
+
+
+def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
+    return subprocess.run(  # noqa: S603 - static argv, current interpreter, no shell
+        [sys.executable, "-m", "mycelium_cli", *argv],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "path", [[], ["task"], ["task", "edit"], ["auth", "mfa", "setup"], ["today"]]
+)
+def test_help_command_prints_what_dash_h_prints(path: list[str]) -> None:
+    # `mycelium help X` is the spelling people type first; it must not be a
+    # second rendering of the help that can drift from `X -h`.
+    via_command = _run(["help", *path])
+    via_flag = _run([*path, "-h"])
+    assert via_command.returncode == 0, via_command.stderr
+    assert via_command.stdout == via_flag.stdout
+
+
+@pytest.mark.parametrize("path", [["nope"], ["task", "nope"], ["today", "extra"]])
+def test_help_command_on_an_unknown_path_is_an_error_not_a_traceback(path: list[str]) -> None:
+    # Seen failing on all three paths against the __main__ that called app()
+    # directly: `python -m mycelium_cli` printed the CLIError as a traceback.
+    result = _run(["help", *path])
+    assert result.returncode == 1
+    assert "no such command" in result.stderr
+    assert "Traceback" not in result.stdout + result.stderr

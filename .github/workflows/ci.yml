@@ -106,6 +106,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-packages
+      # cli/tests/test_shell_completion.py autoloads the zsh completion script
+      # in a real zsh and fails, rather than skips, when zsh is missing.
+      - name: Install zsh
+        run: sudo apt-get install -y --no-install-recommends zsh
       - name: Bootstrap runtime role (mycelium_app)
         run: |
           PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \

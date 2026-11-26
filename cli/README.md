@@ -16,6 +16,9 @@ uv sync --all-packages && uv run mycelium --help
 
 Optional runtime: `sox` (or `ffmpeg`) for `mycelium note voice`.
 
+Every command has help under `-h`, and `mycelium help <command>` prints the
+same thing (`mycelium help task edit`).
+
 ## First login
 
 ```sh
@@ -123,9 +126,32 @@ need a richer view.
 
 ## Shell completion
 
+The Homebrew formula installs completion for bash, zsh and fish into
+`$(brew --prefix)/share/zsh/site-functions` and its siblings. The system zsh
+on macOS does not search that directory: put
+`fpath=($(brew --prefix)/share/zsh/site-functions $fpath)` above `compinit`
+in `~/.zshrc` if `mycelium <TAB>` offers nothing.
+
+Installed any other way (`uv tool install` on Linux, for example), print the
+script with `mycelium completion <shell>` and put it where your shell loads
+it from:
+
 ```sh
-mycelium --install-completion          # zsh / bash / fish / pwsh
+# zsh: a directory in $fpath, added before compinit runs in ~/.zshrc
+mkdir -p ~/.zfunc && mycelium completion zsh > ~/.zfunc/_mycelium
+#   ~/.zshrc:  fpath=(~/.zfunc $fpath)   # above: autoload -Uz compinit && compinit
+
+# bash (bash-completion)
+mycelium completion bash > ~/.local/share/bash-completion/completions/mycelium
+
+# fish
+mycelium completion fish > ~/.config/fish/completions/mycelium.fish
 ```
+
+The script only calls back into `mycelium`, so it does not need regenerating
+when the CLI is upgraded. Use it rather than `mycelium --show-completion` or
+`--install-completion`: on zsh those write a script that completes nothing on
+the first TAB of each shell.
 
 Static completion comes from Typer. **Dynamic** completion on `task_id`
 / `note_id` arguments calls the API at each `<TAB>` and caches the

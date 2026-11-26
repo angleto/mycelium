@@ -146,6 +146,10 @@ class MyceliumCli < Formula
     cd "cli" do
       venv.pip_install_and_link buildpath/"cli"
     end
+    # `mycelium completion <shell>`, not Typer's --show-completion: on zsh the
+    # latter writes a script that completes nothing when autoloaded from
+    # site-functions, which is where this puts it.
+    generate_completions_from_executable(bin/"mycelium", "completion", shells: [:bash, :zsh, :fish])
   end
 
   def caveats
@@ -167,5 +171,6 @@ class MyceliumCli < Formula
     # exercises argument parsing + error rendering.
     output = shell_output("#{bin}/mycelium auth status 2>&1", 1)
     assert_match "not logged in", output
+    assert_match "loadautofunc", (zsh_completion/"_mycelium").read
   end
 end

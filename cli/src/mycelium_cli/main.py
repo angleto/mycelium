@@ -18,12 +18,14 @@ from mycelium_cli.cmds import annotations as annotations_cmd
 from mycelium_cli.cmds import attachments as attachments_cmd
 from mycelium_cli.cmds import auth as auth_cmd
 from mycelium_cli.cmds import clients as clients_cmd
+from mycelium_cli.cmds import help_cmd
 from mycelium_cli.cmds import invoices as invoices_cmd
 from mycelium_cli.cmds import notes as notes_cmd
 from mycelium_cli.cmds import notifications as notif_cmd
 from mycelium_cli.cmds import open_url as open_cmd
 from mycelium_cli.cmds import schedule as schedule_cmd
 from mycelium_cli.cmds import search as search_cmd
+from mycelium_cli.cmds import shell_completion as completion_cmd
 from mycelium_cli.cmds import tags as tags_cmd
 from mycelium_cli.cmds import tasks as tasks_cmd
 from mycelium_cli.cmds import timer as timer_cmd
@@ -37,6 +39,11 @@ from mycelium_cli.ui import fail, set_json_mode
 
 app = typer.Typer(
     name="mycelium",
+    # Must stay on even though `mycelium completion` is the documented way to
+    # get a script: this flag is also what registers the classes that answer
+    # at each TAB, and with it off every shell gets "Shell zsh not supported".
+    # The zsh script its --show-completion prints is the defective one; why,
+    # and when that goes away: cmds/shell_completion.py.
     add_completion=True,
     no_args_is_help=True,
     help="Keyboard-first CLI for Mycelium (tasks, notes, time, calendar).",
@@ -104,6 +111,8 @@ app.command(name="what-now", help="Advisor: feasible tasks for a window/location
     what_now_cmd.what_now
 )
 app.command(name="open", help="Open the SPA on a resource (browser fallback).")(open_cmd.open_url)
+app.command(name="completion", help="Print the shell completion script.")(completion_cmd.completion)
+app.command(name="help", help="Show the help of a command (same as -h).")(help_cmd.help_command)
 
 
 def _entrypoint() -> int:
