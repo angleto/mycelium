@@ -7192,6 +7192,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sessions
+         * @description The sessions open in this workspace, who needs the person first: each
+         *     with its project, machine, whether it waits for them and since when, and
+         *     the tasks it holds. Workers that joined no session are listed too, as
+         *     sessions of an unknown host.
+         */
+        get: operations["list_sessions_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Session
+         * @description Open the session an agent host calls ``host_ref``, or find the one
+         *     this credential opened under it (reopening it if it was closed), and
+         *     return it with its join key: the one presented, if it matches, else a
+         *     new one. Its attention starts as your_turn.
+         */
+        post: operations["open_session_sessions_open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Session
+         * @description Record whether a session needs its person now. Only the credential
+         *     that opened the session may report on it. Repeating the state it is
+         *     already in keeps the time it entered it.
+         */
+        post: operations["report_session_sessions_report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile Sessions
+         * @description Say which sessions are alive on a machine: the open sessions this
+         *     credential opened there are confirmed if listed and closed as gone if
+         *     not. A session heard from in the last two minutes is never closed.
+         */
+        post: operations["reconcile_sessions_sessions_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close Session
+         * @description The host says the session ended. Its workers, and what they hold,
+         *     are left to their own close and deadlines.
+         */
+        post: operations["close_session_sessions_close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/stream": {
         parameters: {
             query?: never;
@@ -9658,6 +9769,16 @@ export interface components {
             markdown_ref: string;
         };
         /**
+         * Attention
+         * @description What the session last said about whether it needs its person.
+         *
+         *     ``blocked``: a prompt is open in it (a permission, a question) and it
+         *     cannot go on without an answer. ``your_turn``: it finished what it was
+         *     asked and waits for the next instruction. ``working``: neither.
+         * @enum {string}
+         */
+        Attention: "working" | "blocked" | "your_turn";
+        /**
          * AutonomousDispatch
          * @description The per-workspace autonomous-dispatch policy (docs/adr/0025 P5,
          *     §Governance). Stored in ``organizations.settings.autonomous_dispatch``;
@@ -9672,6 +9793,11 @@ export interface components {
             /** Balance */
             balance: string;
         };
+        /**
+         * BlockedOn
+         * @enum {string}
+         */
+        BlockedOn: "permission" | "question";
         /** Body_upload_avatar_endpoint_auth_me_avatar_post */
         Body_upload_avatar_endpoint_auth_me_avatar_post: {
             /** File */
@@ -12598,6 +12724,21 @@ export interface components {
          * @enum {string}
          */
         HandoffStatus: "pending" | "delivered" | "consumed" | "cancelled";
+        /** HeldTaskOut */
+        HeldTaskOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /** HolidayIn */
         HolidayIn: {
             /**
@@ -16721,6 +16862,207 @@ export interface components {
             /** Sent Id */
             sent_id: string;
         };
+        /**
+         * SessionAgent
+         * @description Which host runs the session. ``unknown`` is never stored: it is how a
+         *     worker opened outside any session is shown, so the page stays complete.
+         * @enum {string}
+         */
+        SessionAgent: "claude_code";
+        /** SessionCloseIn */
+        SessionCloseIn: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+        };
+        /**
+         * SessionCloseReason
+         * @enum {string}
+         */
+        SessionCloseReason: "ended" | "gone" | "idle";
+        /** SessionCounts */
+        SessionCounts: {
+            /** Needs You */
+            needs_you: number;
+            /** Working */
+            working: number;
+            /** Quiet */
+            quiet: number;
+        };
+        /** SessionOpenIn */
+        SessionOpenIn: {
+            /** @description Which host runs the session. */
+            agent: components["schemas"]["SessionAgent"];
+            /**
+             * Host Ref
+             * @description The host's own id for the session (Claude Code's session_id). Opening again with the same one, from the same credential, returns the same session.
+             */
+            host_ref: string;
+            /**
+             * Project
+             * @description A name for what the session works on: the repository's directory name. Never a path.
+             */
+            project?: string | null;
+            /**
+             * Machine
+             * @description A name for the machine it runs on.
+             */
+            machine?: string | null;
+            /**
+             * Title
+             * @description The host's name for the session, if any.
+             */
+            title?: string | null;
+            /**
+             * Join Key
+             * @description The key a previous opening returned, if the host kept it. Kept when it matches, so the agent's context stays valid; otherwise a new one is issued.
+             */
+            join_key?: string | null;
+        };
+        /** SessionOpenedOut */
+        SessionOpenedOut: {
+            session: components["schemas"]["SessionOut"];
+            /**
+             * Join Key
+             * @description Shown once. Give it to the agent inside the session, which passes it to worker_open so its worker joins this session.
+             */
+            join_key: string;
+        };
+        /** SessionOut */
+        SessionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            agent: components["schemas"]["SessionAgent"];
+            /** Project */
+            project: string | null;
+            /** Machine */
+            machine: string | null;
+            /** Title */
+            title: string | null;
+            attention: components["schemas"]["Attention"];
+            blocked_on: components["schemas"]["BlockedOn"] | null;
+            /**
+             * Attention Since
+             * Format: date-time
+             */
+            attention_since: string;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
+            /** Closed At */
+            closed_at: string | null;
+            closed_reason: components["schemas"]["SessionCloseReason"] | null;
+        };
+        /** SessionReconcileIn */
+        SessionReconcileIn: {
+            agent: components["schemas"]["SessionAgent"];
+            /** Machine */
+            machine: string;
+            /**
+             * Alive
+             * @description The host ids of every session the host lists as alive on this machine.
+             */
+            alive: string[];
+        };
+        /** SessionReconcileOut */
+        SessionReconcileOut: {
+            /** Confirmed */
+            confirmed: string[];
+            /** Closed */
+            closed: string[];
+        };
+        /** SessionReportIn */
+        SessionReportIn: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** @description working; blocked (a prompt is open and it cannot go on); your_turn (it finished and waits for the next instruction). */
+            attention: components["schemas"]["Attention"];
+            /** @description With blocked, and only with it: permission or question. */
+            blocked_on?: components["schemas"]["BlockedOn"] | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** SessionRowOut */
+        SessionRowOut: {
+            /**
+             * Session Id
+             * @description None for a worker that joined no session: a host that does not report.
+             */
+            session_id: string | null;
+            /** Worker Ids */
+            worker_ids: string[];
+            /**
+             * Agent
+             * @enum {string}
+             */
+            agent: "claude_code" | "unknown";
+            /** Project */
+            project: string | null;
+            /** Machine */
+            machine: string | null;
+            /** Title */
+            title: string | null;
+            /**
+             * Label
+             * @description What the session's worker calls itself, if anything.
+             */
+            label: string | null;
+            attention: components["schemas"]["Attention"] | null;
+            blocked_on: components["schemas"]["BlockedOn"] | null;
+            /** Attention Since */
+            attention_since: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /**
+             * Heard At
+             * Format: date-time
+             * @description The last time the session or one of its workers was heard from.
+             */
+            heard_at: string;
+            /**
+             * Group
+             * @description needs_you (blocked or finished), working, quiet (said it was working and has not been heard from for quiet_after_seconds).
+             * @enum {string}
+             */
+            group: "needs_you" | "working" | "quiet";
+            /** Held */
+            held: components["schemas"]["HeldTaskOut"][];
+        };
+        /** SessionsPage */
+        SessionsPage: {
+            /**
+             * Sessions
+             * @description Ordered: who needs the person first.
+             */
+            sessions: components["schemas"]["SessionRowOut"][];
+            counts: components["schemas"]["SessionCounts"];
+            /** Quiet After Seconds */
+            quiet_after_seconds: number;
+            /**
+             * Now
+             * Format: date-time
+             * @description The server's clock, to measure every 'since' against.
+             */
+            now: string;
+        };
         /** SignupIn */
         SignupIn: {
             /** Email */
@@ -18079,6 +18421,8 @@ export interface components {
             label?: string | null;
             /** Operation Id */
             operation_id?: string | null;
+            /** Join Key */
+            join_key?: string | null;
         };
         /** WorkerOut */
         WorkerOut: {
@@ -18098,6 +18442,8 @@ export interface components {
             last_seen_at: string | null;
             /** Closed At */
             closed_at: string | null;
+            /** Session Id */
+            session_id?: string | null;
         };
         /** WorkflowCreateIn */
         WorkflowCreateIn: {
@@ -33423,6 +33769,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_sessions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_session_sessions_open_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionOpenIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOpenedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_session_sessions_report_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionReportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_sessions_sessions_reconcile_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionReconcileIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionReconcileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_session_sessions_close_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCloseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOut"];
                 };
             };
             /** @description Validation Error */

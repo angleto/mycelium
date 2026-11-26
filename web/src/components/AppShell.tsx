@@ -30,6 +30,7 @@ import {
   type LookupOut,
 } from '../lib/prefixLookup'
 import { CommandPalette } from './CommandPalette'
+import { SessionsAttention } from './SessionsAttention'
 import { UpdateBanner } from './UpdateBanner'
 import { useFocus } from '../lib/focus'
 import { ClientSearch } from './ClientSearch'
@@ -502,6 +503,7 @@ export function AppShell() {
       title: t('nav.groups.productivity'),
       items: [
         { to: '/tasks', label: t('tasks.nav'), icon: 'tasks' },
+        { to: '/sessions', label: t('sessions.nav'), icon: 'sessions' },
         { to: '/time', label: t('time.nav'), icon: 'time' },
         { to: '/diary', label: t('diary.nav'), icon: 'diary' },
         { to: '/schedule', label: t('scheduler.nav'), icon: 'schedule' },
@@ -620,6 +622,7 @@ export function AppShell() {
           <Logo /> {t('app.title')}
         </div>
         <div className="topbar__actions">
+          <SessionsAttention />
           {!isMobile && <RunningIndicator />}
           <PomodoroTimer />
           {!isMobile && utilities}

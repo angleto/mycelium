@@ -9,7 +9,7 @@ import { PriorityChip } from '../components/PriorityChip'
 import { IdentityBadge } from '../components/IdentityBadge'
 import { TaskKanban } from '../components/TaskKanban'
 import { LeaseBadge } from '../components/LeaseBadge'
-import { SessionsPanel } from '../components/SessionsPanel'
+import { SessionsSummary } from '../components/SessionsAttention'
 import { RecentTasks } from '../components/RecentTasks'
 import { PinnedTasks } from '../components/PinnedTasks'
 import { TaskQuickActions } from '../components/TaskQuickActions'
@@ -27,7 +27,6 @@ import type { Lease } from '../shared'
 import type { components } from '../shared'
 import { Toggle } from '../components/Toggle'
 
-type Worker = components['schemas']['WorkerOut']
 
 type View = 'kanban' | 'list'
 // One page of possessions. Bounded by the sessions running at once,
@@ -166,7 +165,6 @@ export function TasksRoute() {
   // it, which with ten sessions pulling from the same column is the
   // collision this mechanism exists to prevent, discovered too late.
   const [leases, setLeases] = useState<Lease[]>([])
-  const [workers, setWorkers] = useState<Worker[]>([])
   // Who passed each task on. Read beside the live holds and never shown
   // on top of one: a card somebody is holding cannot be picked up, so
   // its provenance decides nothing, while a free card's provenance
@@ -429,15 +427,14 @@ export function TasksRoute() {
     setProjectId(focusProjectId || '')
   }, [focusActive, focusClientId, focusProjectId, setClientId, setProjectId])
 
-  // The possession of every task on this board, plus the sessions that
-  // hold it. Refreshed on the same triggers as the task list: every
+  // The possession of every task on this board. The sessions that hold it
+  // are on their own page now (``SessionsSummary`` links to it). Refreshed on the same triggers as the task list: every
   // mutation this view makes that moves a state also ends a lease, and a
   // badge that outlives the hold it describes is worse than none.
   const loadPossession = useCallback(async () => {
     const h = workspaceHeader()
-    const [ls, wk, ho] = await Promise.all([
+    const [ls, ho] = await Promise.all([
       api.GET('/tasks/leases', { params: { header: h, query: { limit: LEASE_PAGE } } }),
-      api.GET('/tasks/workers', { params: { header: h, query: { limit: LEASE_PAGE } } }),
       api.GET('/tasks/leases/last-handoff', {
         params: { header: h, query: { limit: LEASE_PAGE } },
       }),
@@ -446,7 +443,6 @@ export function TasksRoute() {
       setLeases(ls.data)
       setLeasesCapped(ls.data.length >= LEASE_PAGE)
     }
-    if (wk.data) setWorkers(wk.data)
     if (ho.data) setHandedOff(ho.data)
   }, [])
 
@@ -454,7 +450,6 @@ export function TasksRoute() {
   // row, so the hook owns the clock and moves it at the next deadline
   // rather than on a poll.
   const possessions = usePossessions(leases, handedOff)
-  const titles = useMemo(() => new Map(tasks.map((tk) => [tk.id, tk.title])), [tasks])
 
   const loadTasks = useCallback(async () => {
     setErr(null)
@@ -1339,7 +1334,7 @@ export function TasksRoute() {
       )}
 
       {leasesCapped && <p className="hint">{t('tasks.heldTruncated')}</p>}
-      <SessionsPanel workers={workers} possessions={possessions} titles={titles} />
+      <SessionsSummary />
 
       {loading ? (
         <p className="hint" role="status" aria-live="polite">

@@ -4,6 +4,66 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Mycelium' },
+  sessions: {
+    nav: 'Sessions',
+    title: 'Sessions',
+    intro:
+      'The agent sessions running for you, on every machine. The ones waiting for you come first.',
+    loading: 'Reading the sessions…',
+    loadError: 'Could not read the sessions. The page tries again on its own.',
+    staleRead: 'Showing what was read {{when}}: the latest refresh failed.',
+    refreshNote: 'Refreshed every 15 seconds while this page is open.',
+    unnamed: 'A session',
+    noTask: 'No task taken',
+    holds: 'Tasks {{name}} is working on',
+    group: {
+      needsYou_one: 'Waiting for you · 1',
+      needsYou_other: 'Waiting for you · {{count}}',
+      needsYouEmpty: 'Nobody is waiting for you.',
+      working_one: 'Working · 1',
+      working_other: 'Working · {{count}}',
+      quiet_one: 'Gone quiet · 1',
+      quiet_other: 'Gone quiet · {{count}}',
+      quietHint:
+        'They said they were working and have not been heard from for over {{min}} min. A long command reports only when it ends; a closed terminal never does.',
+    },
+    state: {
+      permission: 'Waiting for a permission · {{d}}',
+      question: 'Waiting for an answer · {{d}}',
+      yourTurn: 'Finished, waiting for your next instruction · {{d}}',
+      working: 'Working · {{d}}',
+      quiet: 'No news for {{d}}',
+      notReporting: 'Not reporting (another client)',
+    },
+    meta: {
+      heard: 'heard {{d}} ago',
+    },
+    dur: {
+      s: '{{n}} s',
+      min: '{{n}} min',
+      h: '{{n}} h',
+      hmin: '{{h}} h {{min}} min',
+      d: '{{n}} d',
+    },
+    badge: {
+      text_one: '1 waiting for you',
+      text_other: '{{count}} waiting for you',
+      label_one: 'One session is waiting for you',
+      label_other: '{{count}} sessions are waiting for you',
+    },
+    summary: {
+      total_one: '1 session',
+      total_other: '{{count}} sessions',
+      noneWaiting: 'none waiting for you',
+    },
+    empty: {
+      lead: 'No session is reporting yet.',
+      how: 'On each machine where you run Claude Code, run this once, then start or resume a session there:',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyPrompt: 'Copy the command:',
+    },
+  },
   cmdk: {
     title: 'Go to / search',
     placeholder: 'Search by title or paste a code (e.g. 66c5d15d)…',
@@ -1382,14 +1442,10 @@ export const en = {
       'This task is held by another worker, so it cannot be moved. Reloading will not help: wait for the hold to lapse, or take it back.',
     handedOffBy: 'from {{holder}}',
     handedOffTitle: 'Passed on by {{holder}} on {{when}}. Nobody is holding it now.',
-    heldLapsed: 'Hold lapsed',
     heldLapsedTitle:
       'The hold by {{holder}} ran out at {{until}}. The task is free for anybody to take; the row is tidied up by the next sweep.',
     heldTruncated:
       'Too many holds to show at once: some cards may not be marked as taken.',
-    sessionsOpen: 'Working sessions ({{count}})',
-    sessionsSeen: 'last seen {{when}}',
-    sessionsIdle: 'holding nothing',
     heldTakeBack: 'Take it back',
     heldTakenBack: 'Taken back. The task is free.',
     tagsTitle: 'Tags',

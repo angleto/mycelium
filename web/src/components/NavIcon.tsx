@@ -3,6 +3,7 @@
 export type IconName =
   | 'home'
   | 'tasks'
+  | 'sessions'
   | 'trash'
   | 'time'
   | 'diary'
@@ -26,6 +27,7 @@ export type IconName =
 const P: Record<IconName, string> = {
   home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5',
   tasks: 'M9 6h12M9 12h12M9 18h12M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
+  sessions: 'M3 5h18v14H3zM7 10l3 2-3 2M12 15h5',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14',
   time: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
   diary: 'M6 3h11a2 2 0 0 1 2 2v16H8a2 2 0 0 1-2-2ZM6 17a2 2 0 0 1 2-2h11M10 7h5M10 10h5',

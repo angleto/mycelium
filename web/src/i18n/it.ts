@@ -3,6 +3,66 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Mycelium' },
+  sessions: {
+    nav: 'Sessioni',
+    title: 'Sessioni',
+    intro:
+      'Le sessioni degli agenti che lavorano per te, su ogni macchina. Prima quelle che aspettano te.',
+    loading: 'Sto leggendo le sessioni…',
+    loadError: 'Non sono riuscito a leggere le sessioni. La pagina riprova da sola.',
+    staleRead: 'Mostro quello che ho letto {{when}}: l’ultimo aggiornamento non è riuscito.',
+    refreshNote: 'Si aggiorna ogni 15 secondi finché la pagina è aperta.',
+    unnamed: 'Una sessione',
+    noTask: 'Nessun task preso',
+    holds: 'Task su cui lavora {{name}}',
+    group: {
+      needsYou_one: 'Aspettano te · 1',
+      needsYou_other: 'Aspettano te · {{count}}',
+      needsYouEmpty: 'Nessuno ti sta aspettando.',
+      working_one: 'Al lavoro · 1',
+      working_other: 'Al lavoro · {{count}}',
+      quiet_one: 'Silenziose · 1',
+      quiet_other: 'Silenziose · {{count}}',
+      quietHint:
+        'Hanno detto che stavano lavorando e non si sentono da più di {{min}} min. Un comando lungo si fa sentire solo quando finisce; un terminale chiuso non lo fa mai.',
+    },
+    state: {
+      permission: 'Aspetta un permesso · {{d}}',
+      question: 'Aspetta una risposta · {{d}}',
+      yourTurn: 'Ha finito, aspetta la tua prossima istruzione · {{d}}',
+      working: 'Al lavoro · {{d}}',
+      quiet: 'Nessuna notizia da {{d}}',
+      notReporting: 'Non segnala il suo stato (un altro client)',
+    },
+    meta: {
+      heard: 'sentita {{d}} fa',
+    },
+    dur: {
+      s: '{{n}} s',
+      min: '{{n}} min',
+      h: '{{n}} h',
+      hmin: '{{h}} h {{min}} min',
+      d: '{{n}} g',
+    },
+    badge: {
+      text_one: '1 aspetta te',
+      text_other: '{{count}} aspettano te',
+      label_one: 'Una sessione ti sta aspettando',
+      label_other: '{{count}} sessioni ti stanno aspettando',
+    },
+    summary: {
+      total_one: '1 sessione',
+      total_other: '{{count}} sessioni',
+      noneWaiting: 'nessuna ti aspetta',
+    },
+    empty: {
+      lead: 'Nessuna sessione si è ancora fatta sentire.',
+      how: 'Su ogni macchina dove usi Claude Code, esegui questo comando una volta, poi avvia o riprendi una sessione lì:',
+      copy: 'Copia',
+      copied: 'Copiato',
+      copyPrompt: 'Copia il comando:',
+    },
+  },
   cmdk: {
     title: 'Vai a / cerca',
     placeholder: 'Cerca per titolo o incolla un codice (es. 66c5d15d)…',
@@ -1379,14 +1439,10 @@ export const it: Catalog = {
       'Questo task e tenuto da un altro worker, quindi non si puo spostare. Ricaricare non serve: aspetta che il possesso scada, oppure riprendilo.',
     handedOffBy: 'da {{holder}}',
     handedOffTitle: 'Passata da {{holder}} il {{when}}. Adesso non la tiene nessuno.',
-    heldLapsed: 'Possesso scaduto',
     heldLapsedTitle:
       'Il possesso di {{holder}} e scaduto alle {{until}}. Il task e libero e lo puo prendere chiunque; la riga la ripulisce la prossima bonifica.',
     heldTruncated:
       'Troppi possessi da mostrare insieme: qualche scheda potrebbe non risultare presa.',
-    sessionsOpen: 'Sessioni di lavoro ({{count}})',
-    sessionsSeen: 'vista {{when}}',
-    sessionsIdle: 'non tiene niente',
     heldTakeBack: 'Riprendilo',
     heldTakenBack: 'Ripreso. Il task e libero.',
     tagsTitle: 'Tag',

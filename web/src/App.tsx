@@ -8,6 +8,7 @@ import { VerifyEmailRoute } from './routes/VerifyEmailRoute'
 import { ForgotPasswordRoute } from './routes/ForgotPasswordRoute'
 import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
 import { TasksRoute } from './routes/TasksRoute'
+import { SessionsRoute } from './routes/SessionsRoute'
 import { AdminUsersRoute } from './routes/AdminUsersRoute'
 import { AuthLayout } from './components/AuthLayout'
 import { TrashRoute } from './routes/TrashRoute'
@@ -68,6 +69,7 @@ function App() {
               }
             />
             <Route path="/t/:prefix" element={<PrefixResolver kind="task" />} />
+            <Route path="/sessions" element={<SessionsRoute />} />
             <Route path="/trash" element={<TrashRoute />} />
             <Route path="/clients" element={<ClientsProjectsRoute />} />
             <Route path="/workflows" element={<WorkflowsRoute />} />

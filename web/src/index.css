@@ -8331,46 +8331,208 @@ button.btn--danger:hover {
   border-color: var(--border);
 }
 
-/* The sessions running in this workspace, and what each holds. Shut by
-   default: on a quiet board it is one line, and it is the place to see
-   the case a per-task badge cannot show -- a session open for hours,
-   last seen long ago, still holding something. */
-.sessions {
-  margin: var(--sp-8) 0;
-}
-.sessions > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.sessions__list {
-  list-style: none;
-  margin: var(--sp-8) 0 0;
-  padding: 0;
+/* The sessions page (docs/adr/0078). A row leads with the name and the
+   state in words; the colour is a mark at the start of the row, never the
+   only carrier of the state, which is always written out. Blocked is the
+   error colour because a blocked session cannot go on at all; your turn is
+   the calm informational one, since it only waits for more. */
+.sessionspage__head {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
 }
-.sessions__row {
+.sessionspage__head .hint {
+  margin: 0;
+}
+.sessionspage__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.sessionspage__group + .sessionspage__group,
+.sessionspage__group + .sessionspage__quiet {
+  margin-top: var(--sp-12);
+}
+.sessionspage__grouptitle,
+.sessionspage__quiet > summary {
+  font-family: var(--sans);
+}
+.sessionspage__grouptitle {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sessionspage__quiet > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sessionspage__quiet[open] > summary {
+  margin-bottom: var(--sp-8);
+}
+.sessionspage__foot {
+  margin: 0;
+}
+.sessionspage__empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.sessionspage__empty p {
+  margin: 0;
+}
+.sessionspage__cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.sessionspage__cmd code {
+  font-family: var(--mono);
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-4);
+}
+.sessionlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.sessionrow {
+  --session-tone: var(--muted);
+  display: flex;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
+.sessionrow--blocked {
+  --session-tone: var(--err);
+  border-color: color-mix(in srgb, var(--err) 45%, var(--border));
+  background: color-mix(in srgb, var(--err) 5%, var(--surface));
+}
+.sessionrow--turn {
+  --session-tone: var(--info);
+}
+.sessionrow--working {
+  --session-tone: var(--ok);
+}
+.sessionrow__mark {
+  flex: none;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--session-tone);
+}
+.sessionrow--working .sessionrow__mark {
+  animation: sessionrow-pulse 2.4s ease-in-out infinite;
+}
+@keyframes sessionrow-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sessionrow--working .sessionrow__mark {
+    animation: none;
+  }
+}
+.sessionrow__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  flex: 1;
+}
+.sessionrow__line {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--sp-8);
-  font-size: 0.85rem;
+  column-gap: var(--sp-12);
+  row-gap: var(--sp-2);
 }
-.sessions__label {
+.sessionrow__name {
   font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-h);
 }
-.sessions__holds {
+.sessionrow__state {
+  color: var(--session-tone);
+  font-weight: 500;
+}
+.sessionrow--quiet .sessionrow__state {
+  color: var(--muted);
+}
+.sessionrow__tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-8);
+  flex-direction: column;
+  gap: var(--sp-2);
 }
-.sessions__task {
-  max-width: 22rem;
+.sessionrow__task {
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: bottom;
+}
+.sessionrow__notask,
+.sessionrow__meta {
+  font-size: 0.82rem;
+}
+
+/* The top-bar count: present only when somebody is waiting. */
+.sessionsbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-2) var(--sp-8);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-h);
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--info) 10%, var(--surface));
+}
+.sessionsbadge:hover {
+  border-color: var(--info);
+}
+.sessionsbadge__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-circle);
+  background: var(--info);
+}
+.sessionsbadge--blocked {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  background: color-mix(in srgb, var(--err) 10%, var(--surface));
+}
+.sessionsbadge--blocked:hover {
+  border-color: var(--err);
+}
+.sessionsbadge--blocked .sessionsbadge__dot {
+  background: var(--err);
+}
+
+/* The line the tasks board keeps, linking to the sessions page. */
+.sessionssummary {
+  margin: var(--sp-8) 0;
+  font-size: 0.85rem;
 }
 
 /* Who passed a card on, said only where it is useful: on a card nobody
