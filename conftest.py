@@ -32,6 +32,127 @@ from mycelium_core.attachment_store import set_attachment_store_override
 from mycelium_core.services.mailer import LogMailer, set_mailer
 
 _HARDEN_ACLS_SQL = pathlib.Path(__file__).parent / "deploy" / "local" / "harden_function_acls.sql"
+_MARK_TEST_DB_SQL = pathlib.Path(__file__).parent / "deploy" / "local" / "mark_test_database.sql"
+
+
+# One database per pytest-xdist worker.
+#
+# The suite assumes one process per database, and several tests rest on it:
+# a fixture purges every S3-form attachment after each test, the admin user
+# list is asserted over every user, the migration tests step the schema down
+# and back up and lift row level security from every table, and the
+# function ACL script is applied by each process at start. With several
+# workers on one database each of those broke another worker's tests
+# (measured on 2026-11-26: 2298 errors and failures at -n 8, all from these
+# four). Rather than teach each one about its neighbours, every worker gets
+# the situation they were written for: a database of its own. A serial run
+# (no xdist) is unchanged and uses the database it was given.
+#
+# The xdist controller, which configures before any worker starts, migrates
+# one template database from nothing to head and prepares it like the
+# shared one (the test-database marker; the function ACLs are applied by the
+# session fixture below, in every process, as before). Each worker clones
+# it with CREATE DATABASE ... TEMPLATE, which copies files and runs no
+# migration: eight workers migrating at once exhausted the server's lock
+# table ("out of shared memory"), and a copy is also much faster. The
+# controller drops the template at the end, each worker its own copy.
+#
+# The database the suite was pointed at must already be a test database:
+# the guard runs on it before anything is created next to it, so the suite
+# never creates databases on a server nobody declared disposable.
+def _sibling_url(url: str, suffix: str) -> str:
+    from sqlalchemy.engine import make_url
+
+    u = make_url(url)
+    return u.set(database=f"{u.database}_{suffix}"[:63]).render_as_string(hide_password=False)
+
+
+def _on_server(sync_url: str, *statements: str) -> None:
+    import sqlalchemy as sa
+
+    # CREATE / DROP DATABASE cannot run inside a transaction nor inside the
+    # database they name; the maintenance database serves for both.
+    admin = sa.create_engine(
+        sa.engine.make_url(sync_url).set(database="postgres"), isolation_level="AUTOCOMMIT"
+    )
+    try:
+        with admin.connect() as conn:
+            for statement in statements:
+                conn.exec_driver_sql(statement)
+    finally:
+        admin.dispose()
+
+
+def _db_name(url: str) -> str:
+    from sqlalchemy.engine import make_url
+
+    name = make_url(url).database
+    if not name:
+        raise pytest.UsageError(f"the test database URL names no database: {url!r}")
+    return name
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    sync_url = os.environ.get("MYCELIUM_DATABASE_URL_SYNC")
+    async_url = os.environ.get("MYCELIUM_DATABASE_URL")
+    if not sync_url or not async_url:
+        return
+    worker = getattr(config, "workerinput", {}).get("workerid")
+    template = _db_name(_sibling_url(sync_url, "template"))
+    if worker is None:
+        if not getattr(config.option, "numprocesses", None):
+            return  # a serial run: the database it was given
+        import sqlalchemy as sa
+        from _test_db_guard import assert_test_database
+        from alembic import command
+        from alembic.config import Config
+
+        assert_test_database(sync_url=sync_url, async_url=async_url)
+        _on_server(
+            sync_url,
+            f'DROP DATABASE IF EXISTS "{template}" WITH (FORCE)',
+            f'CREATE DATABASE "{template}"',
+        )
+        config.stash[_OWN_DB] = (sync_url, template)
+        template_url = _sibling_url(sync_url, "template")
+        os.environ["MYCELIUM_DATABASE_URL_SYNC"] = template_url
+        try:
+            command.upgrade(
+                Config(str(pathlib.Path(__file__).parent / "core" / "alembic.ini")), "head"
+            )
+        finally:
+            os.environ["MYCELIUM_DATABASE_URL_SYNC"] = sync_url
+        engine = sa.create_engine(template_url)
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(_MARK_TEST_DB_SQL.read_text())
+        finally:
+            engine.dispose()
+        return
+    own_sync = _sibling_url(sync_url, worker)
+    own = _db_name(own_sync)
+    _on_server(
+        sync_url,
+        f'DROP DATABASE IF EXISTS "{own}" WITH (FORCE)',
+        f'CREATE DATABASE "{own}" TEMPLATE "{template}"',
+    )
+    config.stash[_OWN_DB] = (sync_url, own)
+    os.environ["MYCELIUM_DATABASE_URL_SYNC"] = own_sync
+    os.environ["MYCELIUM_DATABASE_URL"] = _sibling_url(async_url, worker)
+    from mycelium_core.config import get_settings
+
+    get_settings.cache_clear()
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    held = config.stash.get(_OWN_DB, None)
+    if held is not None:
+        shared_sync, name = held
+        _on_server(shared_sync, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+# The database this process created, and the URL of the server to drop it on.
+_OWN_DB = pytest.StashKey[tuple[str, str]]()
 
 
 @pytest.fixture(scope="session", autouse=True)

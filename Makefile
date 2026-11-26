@@ -23,8 +23,11 @@ type:
 	uv run mypy -p mycelium_core -p mycelium_api -p mycelium_mcp -p mycelium_worker -p mycelium_sdi_inbound
 	uv run mypy core/tests api/tests worker/tests cli/tests scripts
 
+# Parallel by default (pytest-xdist): each worker gets its own database,
+# cloned from one migrated template (root conftest). `uv run pytest` alone
+# still runs serially on the database it is given.
 test:
-	uv run pytest
+	uv run pytest -n auto
 
 # --- the throwaway test database -------------------------------------------
 #

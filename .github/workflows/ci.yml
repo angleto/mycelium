@@ -125,7 +125,9 @@ jobs:
           PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
             -v ON_ERROR_STOP=1 -f deploy/local/mark_test_database.sql
       - name: Tests
-        run: uv run pytest -q
+        # One database per xdist worker, cloned from a migrated template
+        # (root conftest); the owner role here may create databases.
+        run: uv run pytest -q -n auto
 
   web:
     runs-on: ubuntu-latest

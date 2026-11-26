@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import lxml.etree as ET
 import pytest
@@ -185,16 +185,29 @@ def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, first_name: str) -> byt
     ).encode()
 
 
-async def _configure_channel_identity() -> None:
+@pytest.fixture
+async def _channel_identity() -> AsyncIterator[None]:
     """The accredited channel's fiscal code is platform configuration, not an
     env var: an EC cannot be filed under a trasmittente nobody set, so the
     tests that exercise the outbound path have to set it the way production
-    does."""
+    does.
+
+    It is one value for the whole platform, so a test that sets it gives the
+    previous one back: left set, it reached whatever test ran next in the
+    same database, and the test asserting that an unconfigured platform reads
+    empty failed as soon as the order put it after these (seen under
+    pytest-xdist, which orders tests differently)."""
     from mycelium_core.db import admin_session
     from mycelium_core.services import system_settings as sys_svc
 
     async with admin_session() as s:
+        before = await sys_svc.get_sdi_intermediary_id_codice(s)
         await sys_svc.set_sdi_intermediary_id_codice(s, "11122233344")
+    try:
+        yield
+    finally:
+        async with admin_session() as s:
+            await sys_svc.set_sdi_intermediary_id_codice(s, before)
 
 
 async def _make_org_with_received_invoice() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
@@ -328,7 +341,9 @@ async def test_send_ec_rejection_marks_rejected_verdict(_ec_signing: None) -> No
 # --- Live transport wiring (sdicoop channel) ----------------------------------
 
 
-async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -> None:
+async def test_send_ec_with_sdicoop_posts_and_stores_ack(
+    _sdicoop_active: str, _channel_identity: None
+) -> None:
     """When the channel is fully provisioned the service POSTs the signed EC
     over (mocked) mutual TLS and stores the SdI ack on the audit row."""
     import respx
@@ -336,7 +351,6 @@ async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -
 
     from mycelium_core.models.sdi_notification import ReceivedInvoiceNotification
 
-    await _configure_channel_identity()
     org, user, ri_id = await _make_org_with_received_invoice()
     endpoint = _sdicoop_active
 
@@ -383,7 +397,7 @@ async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -
 
 
 async def test_send_ec_with_sdicoop_transport_error_persists_anyway(
-    _sdicoop_active: str,
+    _sdicoop_active: str, _channel_identity: None
 ) -> None:
     """Network/HTTP failure must not roll back the persisted EC: the buyer's
     intent is durable, the transport_error is recorded so an operator can
@@ -391,7 +405,6 @@ async def test_send_ec_with_sdicoop_transport_error_persists_anyway(
     import respx
     from httpx import Response
 
-    await _configure_channel_identity()
     org, user, ri_id = await _make_org_with_received_invoice()
     endpoint = _sdicoop_active
 

@@ -29,6 +29,7 @@ dev = [
     # path instead of the tag-glade fallback.
     "python-igraph>=0.11",
     "leidenalg>=0.10",
+    "pytest-xdist>=3.6",
 ]
 
 [tool.ruff]
