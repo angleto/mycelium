@@ -25,6 +25,7 @@ from mycelium_cli.cmds import notifications as notif_cmd
 from mycelium_cli.cmds import open_url as open_cmd
 from mycelium_cli.cmds import schedule as schedule_cmd
 from mycelium_cli.cmds import search as search_cmd
+from mycelium_cli.cmds import session as session_cmd
 from mycelium_cli.cmds import shell_completion as completion_cmd
 from mycelium_cli.cmds import tags as tags_cmd
 from mycelium_cli.cmds import tasks as tasks_cmd
@@ -102,11 +103,15 @@ app.add_typer(schedule_cmd.app, name="schedule")
 app.add_typer(attachments_cmd.app, name="attachments")
 app.add_typer(workflows_cmd.app, name="workflow")
 app.add_typer(worker_cmd.app, name="worker")
+app.add_typer(session_cmd.app, name="session")
 
 # Top-level single commands
 app.command(name="today", help="Today's running timer + tasks (+ --date / --tz).")(today_cmd.today)
 app.command(name="week", help="Next 7 days of scheduled work.")(today_cmd.week)
 app.command(name="search", help="Hybrid (keyword + semantic) search.")(search_cmd.search)
+app.command(
+    name="sessions", help="Which of your agent sessions needs you, and on what each works."
+)(session_cmd.sessions)
 app.command(name="what-now", help="Advisor: feasible tasks for a window/location.")(
     what_now_cmd.what_now
 )

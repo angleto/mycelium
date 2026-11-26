@@ -110,6 +110,46 @@ mycelium auth mfa status
 Every command supports `--json` for piping into `jq`, scripts, or the
 `mycelium-nvim` plugin which shells out to the same binary.
 
+## Your agent sessions
+
+When several Claude Code sessions run at once, `mycelium sessions` says which
+one needs you, on every machine, and what each is working on
+(docs/adr/0078-a-session-is-what-a-person-steers.md):
+
+```sh
+mycelium session install-hooks --apply    # once per machine: the hooks that report
+mycelium sessions                         # who needs you first, then who is working
+mycelium sessions --pick                  # press a row's key to jump to its tmux pane
+mycelium sessions --watch 10              # keep it open in a pane, redrawn every 10 s
+```
+
+```
+   NEEDS YOU (2)
+1  symbolum      waiting for a permission · 4 min   Prove the bound    symbolum:0 symbolum
+2  kiwi          finished, your turn · 3 h          -                  kiwi:0 FA
+   WORKING (2)
+3  humus         working · 12 min                   Fix the sweep      humus:1 dev
+4  mycelium      working · 2 min                    -                  on laptop
+```
+
+`install-hooks` without `--apply` prints the settings block instead of
+merging it; with it, the hooks are added to `~/.claude/settings.json` next to
+any you already have, and the previous file is kept beside it. For a popup
+from anywhere in tmux, add to `~/.tmux.conf`:
+
+```
+bind-key S display-popup -E -w 90% -h 60% "mycelium sessions --pick"
+```
+
+What the hooks send: whether the session is working, blocked on a
+permission or a question, or finished and waiting for you, with the
+repository's name and the machine's (`MYCELIUM_MACHINE_LABEL` overrides the
+hostname). Never a path. The agent inside each session is told a key at its
+start, so the worker it opens joins the session's row and the tasks it holds
+show there; `mycelium worker open` in the session's shell joins the same way.
+A hook that cannot reach Mycelium writes to `~/.local/state/mycelium/hooks.log`
+and never slows or breaks the session.
+
 ## What's left in the browser (deliberately)
 
 - **Invoicing** (issuer profiles, line items, SDI XML/PDF). Visual and

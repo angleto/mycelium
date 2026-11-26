@@ -34,6 +34,7 @@ voice = []
 
 [project.scripts]
 mycelium = "mycelium_cli.main:main"
+mycelium-hook = "mycelium_cli.session_hook:main"
 
 [project.urls]
 Homepage = "https://github.com/angleto/mycelium"

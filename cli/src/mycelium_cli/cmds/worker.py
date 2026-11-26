@@ -31,6 +31,7 @@ from mycelium_cli.http import CLIError
 from mycelium_cli.ui import emit_json, emit_table, err, json_mode
 
 ENV_VAR = "MYCELIUM_WORKER"
+SESSION_KEY_VAR = "MYCELIUM_SESSION_KEY"
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -92,8 +93,20 @@ def open_(
     Run it as ``eval "$(mycelium worker open)"``: the export is the only
     thing written to stdout, so the shell picks up the id and nothing else.
     """
+    body: dict[str, str] = {"label": label} if label else {}
+    # Set by the agent host's SessionStart hook in the shell of the session
+    # it opened (docs/adr/0078): the worker joins that session, so the
+    # sessions page shows what this shell holds on the session's row.
+    key = (os.environ.get(SESSION_KEY_VAR) or "").strip()
     with client() as c:
-        worker = get_json(c.post("/tasks/workers", json={"label": label} if label else {}))
+        resp = c.post("/tasks/workers", json={**body, "join_key": key} if key else body)
+        if key and resp.status_code == 404 and "session.join_key_unknown" in resp.text:
+            err().print(
+                f"[yellow]the session key in ${SESSION_KEY_VAR} is stale; the worker is open "
+                "but not joined to a session[/yellow]"
+            )
+            resp = c.post("/tasks/workers", json=body)
+        worker = get_json(resp)
     if json_mode():
         emit_json(worker)
         return

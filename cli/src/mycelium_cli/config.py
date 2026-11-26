@@ -33,6 +33,19 @@ def config_path() -> Path:
     return config_dir() / "config.toml"
 
 
+def state_dir() -> Path:
+    """Where the CLI keeps what it must remember between invocations and is
+    not configuration: today, which Mycelium session each agent-host session
+    opened (docs/adr/0078). ``~/.local/state/mycelium`` on both systems, for
+    the reason the config lives in ``~/.config``; ``MYCELIUM_STATE_DIR``
+    overrides it, for tests."""
+    env_override = os.environ.get("MYCELIUM_STATE_DIR")
+    if env_override:
+        return Path(env_override).expanduser()
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "mycelium"
+
+
 @dataclass(slots=True)
 class Profile:
     base_url: str = "https://mycelium.xeno.garden/api"

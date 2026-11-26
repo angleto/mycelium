@@ -39,9 +39,13 @@ def active_profile() -> tuple[str, Profile, Credential]:
 
 
 @contextmanager
-def client(*, role: str | None = None, admin_mode: bool = False) -> Iterator[httpx.Client]:
+def client(
+    *, role: str | None = None, admin_mode: bool = False, timeout: float | None = None
+) -> Iterator[httpx.Client]:
+    """``timeout`` shortens the default for a caller that must not wait: an
+    agent host's hook runs while the person works."""
     _, prof, cred = active_profile()
-    with authed_client(prof.base_url, cred, role=role, admin_mode=admin_mode) as c:
+    with authed_client(prof.base_url, cred, role=role, admin_mode=admin_mode, timeout=timeout) as c:
         yield c
 
 

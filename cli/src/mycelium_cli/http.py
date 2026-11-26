@@ -89,6 +89,7 @@ def authed_client(
     *,
     role: str | None = None,
     admin_mode: bool = False,
+    timeout: float | None = None,
 ) -> Iterator[httpx.Client]:
     """The default client for all post-login commands."""
     client = _build_client(
@@ -97,6 +98,7 @@ def authed_client(
         workspace_id=cred.workspace_id,
         role=role,
         admin_mode=admin_mode,
+        **({"timeout": timeout} if timeout is not None else {}),
     )
     try:
         yield client
