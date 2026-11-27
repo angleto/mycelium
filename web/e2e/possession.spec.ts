@@ -161,15 +161,6 @@ test('the board says which cards are taken, and by which session', async ({ page
     await expect(row).toBeVisible({ timeout: 15_000 })
     await expect(row.locator('.leasebadge')).toContainText(label)
 
-    // And the sessions running, with what each one holds. Nothing in the
-    // app showed this before: the possession of one task was visible on
-    // that task, so "how many agents are running, and on what" had
-    // nowhere to be asked.
-    const sessions = page.locator('details.sessions')
-    await expect(sessions).toBeVisible()
-    await sessions.locator('summary').click()
-    await expect(sessions.locator('.sessions__row', { hasText: label })).toContainText(title)
-
     // A card nobody holds carries no badge. Asserted on the same page as
     // the positive case, because a badge that rendered on every row would
     // satisfy the assertions above and say nothing.
@@ -183,6 +174,23 @@ test('the board says which cards are taken, and by which session', async ({ page
     const passedRow = page.locator('li.taskrow', { hasText: passedTitle }).first()
     await expect(passedRow).toBeVisible()
     await expect(passedRow.locator('.leasebadge--handoff')).toContainText(author)
+
+    // And the sessions running, with what each one holds. Nothing in the
+    // app showed this before: the possession of one task was visible on
+    // that task, so "how many agents are running, and on what" had
+    // nowhere to be asked. The board keeps one line that counts them and
+    // leads to the sessions page, and the page has the row (docs/adr/0078,
+    // section 5). Asserted last because following the line leaves the
+    // board. The worker here was opened outside any agent session, so its
+    // row is named by its label and is never a quiet one: it was heard
+    // from just now.
+    const summary = page.locator('p.sessionssummary a')
+    await expect(summary).toBeVisible()
+    await summary.click()
+    await page.waitForURL('**/sessions')
+    const sessionRow = page.locator('li.sessionrow', { hasText: label })
+    await expect(sessionRow).toBeVisible({ timeout: 15_000 })
+    await expect(sessionRow.locator('.sessionrow__task')).toContainText(title)
   } finally {
     // Closing the session gives back everything it holds, which is the
     // fast half of recovery and also the tidy-up this spec owes: an open

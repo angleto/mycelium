@@ -402,7 +402,11 @@ def test_the_command_the_web_page_tells_a_person_to_run_exists() -> None:
     assert m is not None, "the page no longer declares INSTALL_COMMAND"
     argv = shlex.split(m.group(1))
     assert argv[0] == "mycelium"
-    r = runner.invoke(app, [*argv[1:], "--help"])
+    # Without NO_COLOR and TERM=dumb, Rich colours the help wherever it
+    # detects a colour terminal, GitHub Actions included, and writes
+    # ``--apply`` as ``-`` and ``-apply`` in separate escape sequences, so
+    # the substring check below fails on a command that exists.
+    r = runner.invoke(app, [*argv[1:], "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert r.exit_code == 0, r.output
     for flag in (a for a in argv[1:] if a.startswith("--")):
         assert flag in r.output
