@@ -394,6 +394,10 @@ _EVENTS: tuple[tuple[str, bool, int], ...] = (
     ("SessionStart", False, 10),
     ("UserPromptSubmit", True, 15),
     ("PostToolUse", True, 15),
+    # A tool call that failed fires this instead of PostToolUse: the session
+    # is still working, and the reset shadow marks the next prompt as one
+    # that follows a failure.
+    ("PostToolUseFailure", True, 15),
     ("Notification", True, 15),
     ("Stop", True, 30),
     ("StopFailure", True, 15),

@@ -5,7 +5,7 @@ whether the session needs its person.
 | hook | what is sent |
 |---|---|
 | SessionStart | the session is opened, the agent is told its join key, the relay starts |
-| UserPromptSubmit, PostToolUse | working |
+| UserPromptSubmit, PostToolUse, PostToolUseFailure | working |
 | Notification permission_prompt | blocked on a permission |
 | Notification elicitation_dialog | blocked on a question |
 | Stop, StopFailure | your turn; and the machine's live sessions, at most once a minute |
@@ -78,6 +78,23 @@ def log(message: str) -> None:
             f.write(f"{dt.datetime.now().isoformat(timespec='seconds')} {message}\n")
     except OSError:
         pass
+
+
+#: Every event ``desired`` and ``handle`` read. ``install-hooks`` must write
+#: each of them, and a test holds it to that: an event read here and never
+#: installed is a branch that never runs.
+READS: frozenset[str] = frozenset(
+    {
+        "SessionStart",
+        "SessionEnd",
+        "UserPromptSubmit",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Notification",
+        "Stop",
+        "StopFailure",
+    }
+)
 
 
 def desired(event: str, payload: dict[str, Any]) -> tuple[str, str | None] | None:
@@ -173,6 +190,10 @@ def handle(payload: dict[str, Any], *, relay: bool = False) -> int:
     if not ref:
         return 0
     _shadow(event, payload)
+    # After the shadow, which reads events of its own (PreCompact). A branch
+    # below for an event missing from READS never runs, and its test says so.
+    if event not in READS:
+        return 0
     if event == "SessionStart":
         return _start(payload, relay=relay)
     if event == "SessionEnd":

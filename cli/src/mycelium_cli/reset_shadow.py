@@ -266,12 +266,32 @@ def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
 
 
+#: Every event ``observe`` reads. ``install-hooks`` must write each of them,
+#: and a test holds it to that: until 2.4.29 PostToolUseFailure was read here
+#: and never installed, so a failed tool call never marked the next prompt.
+EVENTS: frozenset[str] = frozenset(
+    {
+        "UserPromptSubmit",
+        "PostToolUseFailure",
+        "StopFailure",
+        "PostToolUse",
+        "PreCompact",
+        "SessionStart",
+        "SessionEnd",
+    }
+)
+
+
 def observe(event: str, payload: dict[str, Any]) -> None:
     """Record what this hook event means for the shadow, if anything.
 
     The switches are read cheapest first: the environment, then the file.
     A ``ValueError`` from an unrecognised session switch reaches the hook's
     own guard, which logs it, and nothing is recorded."""
+    # First, so a branch below for an event missing from EVENTS never runs
+    # and its test says so, instead of running here and never being installed.
+    if event not in EVENTS:
+        return
     if session_switch() is False:
         return
     if not allow_path().exists():

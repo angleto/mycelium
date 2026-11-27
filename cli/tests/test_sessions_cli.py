@@ -272,6 +272,15 @@ def test_the_merge_adds_the_hook_once_and_leaves_other_hooks_alone() -> None:
     assert settings["hooks"]["PostToolUse"][0]["hooks"][0]["async"] is True
 
 
+def test_every_event_a_handler_reads_is_installed() -> None:
+    from mycelium_cli import reset_shadow, session_hook
+
+    installed = set(session_cmd.hooks_block("mycelium-hook"))
+
+    assert session_hook.READS <= installed, session_hook.READS - installed
+    assert reset_shadow.EVENTS <= installed, reset_shadow.EVENTS - installed
+
+
 def test_apply_keeps_a_copy_and_refuses_a_file_it_cannot_read(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_text('{"hooks": {}}', encoding="utf-8")
