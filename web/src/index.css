@@ -8494,6 +8494,51 @@ button.btn--danger:hover {
   font-size: 0.82rem;
 }
 
+/* Writing to a session (docs/adr/0079): one line, and the last few sent. */
+.sessioncompose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-top: var(--sp-4);
+}
+.sessioncompose__form {
+  display: flex;
+  gap: var(--sp-8);
+}
+.sessioncompose__input {
+  flex: 1;
+  min-width: 0;
+}
+.sessioncompose__mine {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: 0.82rem;
+}
+.sessionmsg {
+  display: flex;
+  gap: var(--sp-12);
+  justify-content: space-between;
+}
+.sessionmsg__body {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.sessionmsg__state {
+  flex: none;
+  color: var(--muted);
+}
+.sessionmsg--failed .sessionmsg__state,
+.sessionmsg--not_delivered .sessionmsg__state,
+.sessionmsg--uncertain .sessionmsg__state {
+  color: var(--err);
+}
+
 /* The top-bar count: present only when somebody is waiting. */
 .sessionsbadge {
   display: inline-flex;

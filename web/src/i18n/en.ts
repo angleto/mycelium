@@ -56,6 +56,24 @@ export const en = {
       total_other: '{{count}} sessions',
       noneWaiting: 'none waiting for you',
     },
+    compose: {
+      label: 'Write to {{name}}',
+      placeholder: 'An instruction for this session',
+      send: 'Send',
+      sending: 'Sending…',
+      blocked:
+        'It is waiting for a permission: the message is read once that is answered in the terminal.',
+      mine: 'Your last messages to {{name}}',
+    },
+    message: {
+      queued: 'Waiting to be delivered',
+      claimed: 'Being delivered',
+      uncertain: 'May not have arrived: check the terminal',
+      delivered: 'Delivered {{when}}',
+      failed: 'Not delivered: {{why}}',
+      failedNoReason: 'Not delivered',
+      notDelivered: 'Not delivered: the session ended first',
+    },
     empty: {
       lead: 'No session is reporting yet.',
       how: 'On each machine where you run Claude Code, run this once, then start or resume a session there:',

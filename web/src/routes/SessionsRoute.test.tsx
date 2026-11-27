@@ -208,3 +208,100 @@ describe('SessionsSummary', () => {
     expect(link.textContent).toBe('5 sessions · 2 waiting for you →')
   })
 })
+
+describe('writing to a session', () => {
+  const SID = '00000000-0000-4000-8000-0000000000c1'
+  const json = (body: unknown, status = 200) =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+    )
+  let sent: unknown[]
+  let mine: components['schemas']['SessionMessageOut'][]
+  let refuse: boolean
+
+  beforeEach(() => {
+    sent = []
+    mine = []
+    refuse = false
+    const sessions = page([
+      row('c1', { project: 'steer', attention: 'your_turn', group: 'needs_you', can_send: true }),
+      row('c2', { project: 'other', can_send: false }),
+    ])
+    fetchMock.mockImplementation((input: unknown, init?: unknown) => {
+      const req = input instanceof Request ? input : new Request(String(input), init as RequestInit)
+      const path = new URL(req.url).pathname
+      if (path.endsWith('/sessions/messages')) return json({ messages: mine })
+      if (path.endsWith('/sessions/send')) {
+        return req.json().then((b: unknown) => {
+          sent.push(b)
+          if (refuse) return json({ detail: 'its host runs no relay for it on its machine' }, 422)
+          mine = [
+            {
+              id: '00000000-0000-4000-8000-0000000000d1',
+              session_id: SID,
+              body: 'rebase onto 2.4',
+              status: 'queued',
+              status_since: NOW,
+              created_at: NOW,
+              failure: null,
+            },
+          ]
+          return json(mine[0])
+        })
+      }
+      return json(sessions)
+    })
+  })
+
+  const box = () => host.querySelector<HTMLInputElement>('input[aria-label="Write to steer"]')
+  const button = () =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Send')
+
+  async function type(value: string) {
+    await act(async () => {
+      const input = box()!
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      set.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('offers a composer only on a session that can receive', async () => {
+    await mount(<SessionsRoute />)
+    expect(box()).not.toBeNull()
+    expect(host.querySelector('input[aria-label="Write to other"]')).toBeNull()
+    expect(host.querySelectorAll('input[type="text"]')).toHaveLength(1)
+  })
+
+  it('sends what was typed, clears the line, and shows the message waiting', async () => {
+    await mount(<SessionsRoute />)
+    expect(button()!.disabled).toBe(true) // nothing to send yet
+    await type('rebase onto 2.4')
+    await act(async () => {
+      button()!.click()
+    })
+    await settle()
+    await settle()
+
+    expect(sent).toEqual([{ session_id: SID, body: 'rebase onto 2.4' }])
+    expect(box()!.value).toBe('')
+    const list = host.querySelector('ul[aria-label="Your last messages to steer"]')!
+    expect(list.textContent).toContain('rebase onto 2.4')
+    expect(list.textContent).toContain('Waiting to be delivered')
+  })
+
+  it('keeps the text and says why when the server refuses', async () => {
+    refuse = true
+    await mount(<SessionsRoute />)
+    await type('rebase onto 2.4')
+    await act(async () => {
+      button()!.click()
+    })
+    await settle()
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      'its host runs no relay for it on its machine',
+    )
+    expect(box()!.value).toBe('rebase onto 2.4')
+  })
+})

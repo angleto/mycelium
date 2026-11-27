@@ -80,3 +80,33 @@ export function sessionMeta(r: SessionRow, nowMs: number, t: TFunction): string[
   }
   return parts
 }
+
+export type SessionMessage = components['schemas']['SessionMessageOut']
+
+/** What became of a message the person sent, in words (docs/adr/0079).
+ * "Delivered" says only that it was written into the session: the session
+ * answers nothing either way, and its row moving to working is the sign
+ * that it was read. */
+export function messageState(m: SessionMessage, t: TFunction, locale: string): string {
+  switch (m.status) {
+    case 'queued':
+      return t('sessions.message.queued')
+    case 'claimed':
+      return t('sessions.message.claimed')
+    case 'uncertain':
+      return t('sessions.message.uncertain')
+    case 'delivered':
+      return t('sessions.message.delivered', {
+        when: new Date(m.status_since).toLocaleTimeString(locale, {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      })
+    case 'failed':
+      return m.failure
+        ? t('sessions.message.failed', { why: m.failure })
+        : t('sessions.message.failedNoReason')
+    case 'not_delivered':
+      return t('sessions.message.notDelivered')
+  }
+}

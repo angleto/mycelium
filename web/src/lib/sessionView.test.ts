@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import i18n from '../i18n'
-import { sessionMeta, sessionName, sessionState, sessionTone, waited, type SessionRow } from './sessionView'
+import {
+  messageState,
+  sessionMeta,
+  sessionName,
+  sessionState,
+  sessionTone,
+  waited,
+  type SessionMessage,
+  type SessionRow,
+} from './sessionView'
 
 // How a session reads to a person. Each case is one that the page it
 // replaced got wrong or could not say: a row named by a uuid, no way to tell
@@ -106,5 +115,31 @@ describe('sessionTone', () => {
     expect(sessionTone(row({ attention: 'your_turn', group: 'needs_you' }))).toBe('turn')
     expect(sessionTone(row())).toBe('working')
     expect(sessionTone(row({ group: 'quiet' }))).toBe('quiet')
+  })
+})
+
+describe('messageState', () => {
+  const msg = (over: Partial<SessionMessage>): SessionMessage => ({
+    id: '00000000-0000-4000-8000-0000000000m1',
+    session_id: '00000000-0000-4000-8000-0000000000aa',
+    body: 'rebase onto 2.4',
+    status: 'queued',
+    status_since: '2026-11-26T12:41:00Z',
+    created_at: '2026-11-26T12:40:00Z',
+    failure: null,
+    ...over,
+  })
+
+  it('says each state in words, and never "delivered" for what may not have arrived', () => {
+    const say = (over: Partial<SessionMessage>) => messageState(msg(over), t, 'en-GB')
+    expect(say({ status: 'queued' })).toBe('Waiting to be delivered')
+    expect(say({ status: 'claimed' })).toBe('Being delivered')
+    expect(say({ status: 'uncertain' })).toBe('May not have arrived: check the terminal')
+    expect(say({ status: 'delivered' })).toMatch(/^Delivered \d\d:41$/)
+    expect(say({ status: 'not_delivered' })).toBe('Not delivered: the session ended first')
+    expect(say({ status: 'failed', failure: 'connection refused' })).toBe(
+      'Not delivered: connection refused',
+    )
+    expect(say({ status: 'failed' })).toBe('Not delivered')
   })
 })

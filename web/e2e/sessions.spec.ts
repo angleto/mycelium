@@ -24,10 +24,12 @@ async function login(page: Page) {
 
 interface Host {
   report: (attention: string, blockedOn?: string) => Promise<void>
+  /** What a relay does (docs/adr/0079): take the next message, say it arrived. */
+  deliver: () => Promise<string | null>
   close: () => Promise<void>
 }
 
-async function hostSession(project: string): Promise<Host> {
+async function hostSession(project: string, acceptsMessages = false): Promise<Host> {
   // Minting a credential is an owner's act, taken explicitly (roles are sudo-style).
   const { ctx, headers } = await authedApi({ 'X-Workspace-Role': 'owner' })
   const minted = await ctx.post('/agent-tokens', {
@@ -43,7 +45,13 @@ async function hostSession(project: string): Promise<Host> {
   }
   const opened = await ctx.post('/sessions/open', {
     headers: hooks,
-    data: { agent: 'claude_code', host_ref: `e2e-${project}`, project, machine: 'e2e-box' },
+    data: {
+      agent: 'claude_code',
+      host_ref: `e2e-${project}`,
+      project,
+      machine: 'e2e-box',
+      accepts_messages: acceptsMessages,
+    },
   })
   expect(opened.ok(), await opened.text()).toBeTruthy()
   const id = ((await opened.json()) as { session: { id: string } }).session.id
@@ -54,6 +62,22 @@ async function hostSession(project: string): Promise<Host> {
         data: { session_id: id, attention, blocked_on: blockedOn ?? null },
       })
       expect(r.ok(), await r.text()).toBeTruthy()
+    },
+    deliver: async () => {
+      const claimed = await ctx.post('/sessions/messages/claim', {
+        headers: hooks,
+        data: { session_id: id },
+      })
+      expect(claimed.ok(), await claimed.text()).toBeTruthy()
+      const message = ((await claimed.json()) as { message: { id: string; text: string } | null })
+        .message
+      if (message === null) return null
+      const settled = await ctx.post('/sessions/messages/outcome', {
+        headers: hooks,
+        data: { message_id: message.id, delivered: true },
+      })
+      expect(settled.ok(), await settled.text()).toBeTruthy()
+      return message.text
     },
     close: async () => {
       await ctx.post('/sessions/close', { headers: hooks, data: { session_id: id } })
@@ -99,6 +123,53 @@ test('a session waiting for a permission is found from any page and read in word
     await expect(line).toBeVisible()
     await line.click()
     await page.waitForURL('**/sessions')
+  } finally {
+    await host.close()
+  }
+})
+
+test('a person writes to their session from the page and reads that it arrived', async ({
+  page,
+}) => {
+  const project = `e2e-steer-${Date.now()}`
+  const host = await hostSession(project, true)
+  try {
+    await host.report('your_turn')
+    await login(page)
+    await page.goto('/sessions')
+
+    const row = page.getByRole('listitem').filter({ hasText: project }).first()
+    const box = row.getByRole('textbox', { name: new RegExp(`(Write to|Scrivi a) ${project}`) })
+    await expect(box).toBeVisible({ timeout: 20_000 })
+    await box.fill('rebase onto 2.4 and stop')
+    await row.getByRole('button', { name: /^(Send|Invia)$/ }).click()
+
+    const mine = row.getByRole('list', { name: /(Your last messages to|I tuoi ultimi messaggi a)/ })
+    await expect(mine).toContainText('rebase onto 2.4 and stop')
+    await expect(mine).toContainText(/(Waiting to be delivered|In attesa di consegna)/)
+    await expect(box).toHaveValue('')
+
+    // The relay takes it: the text names who sent it, and the page, reading
+    // again on its own, says it arrived.
+    const text = await host.deliver()
+    expect(text).toContain('rebase onto 2.4 and stop')
+    expect(text).toContain('Mycelium sessions page')
+    await expect(mine).toContainText(/(Delivered|Consegnato alle) \d\d:\d\d/, { timeout: 30_000 })
+  } finally {
+    await host.close()
+  }
+})
+
+test('a session whose machine runs no relay offers nothing to write in', async ({ page }) => {
+  const project = `e2e-norelay-${Date.now()}`
+  const host = await hostSession(project)
+  try {
+    await host.report('your_turn')
+    await login(page)
+    await page.goto('/sessions')
+    const row = page.getByRole('listitem').filter({ hasText: project }).first()
+    await expect(row).toBeVisible({ timeout: 20_000 })
+    await expect(row.getByRole('textbox')).toHaveCount(0)
   } finally {
     await host.close()
   }

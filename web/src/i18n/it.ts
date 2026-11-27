@@ -55,6 +55,24 @@ export const it: Catalog = {
       total_other: '{{count}} sessioni',
       noneWaiting: 'nessuna ti aspetta',
     },
+    compose: {
+      label: 'Scrivi a {{name}}',
+      placeholder: 'Un’istruzione per questa sessione',
+      send: 'Invia',
+      sending: 'Invio…',
+      blocked:
+        'Aspetta un permesso: il messaggio viene letto quando lo concedi nel terminale.',
+      mine: 'I tuoi ultimi messaggi a {{name}}',
+    },
+    message: {
+      queued: 'In attesa di consegna',
+      claimed: 'In consegna',
+      uncertain: 'Potrebbe non essere arrivato: controlla il terminale',
+      delivered: 'Consegnato alle {{when}}',
+      failed: 'Non consegnato: {{why}}',
+      failedNoReason: 'Non consegnato',
+      notDelivered: 'Non consegnato: la sessione si è chiusa prima',
+    },
     empty: {
       lead: 'Nessuna sessione si è ancora fatta sentire.',
       how: 'Su ogni macchina dove usi Claude Code, esegui questo comando una volta, poi avvia o riprendi una sessione lì:',
