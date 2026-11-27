@@ -104,7 +104,12 @@ before the attention report, in its own `try`. What it records per event:
 - `SessionEnd`: ends the session.
 
 `install-hooks` now also adds `PreCompact`, async, because only its payload
-tells a manual compaction from an automatic one.
+tells a manual compaction from an automatic one, and `PostToolUseFailure`,
+which Claude Code fires instead of `PostToolUse` when a tool call fails. The
+second was read by both handlers and missing from the installer until 2.4.30.
+Each handler now declares the events it reads (`session_hook.READS`,
+`reset_shadow.EVENTS`), ignores any other one, and a test holds the
+installer to their union.
 
 **What is never recorded.** Prompt text, file content and paths. The project
 is named the way `agent_host.project_name` names it for the sessions page.

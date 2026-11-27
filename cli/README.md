@@ -174,11 +174,32 @@ MYCELIUM_RESET_SHADOW=off claude                   # one session not recorded
 
 The rule behind the recommendations is not yet tested on real sessions, so
 nothing is recorded until you run `on`, and each of the three switches
-(the session, everywhere, the project) can stop it alone.
+(the session, everywhere, the project) can stop it alone. `on` and `off`
+take effect at the next hook event of every session, without restarting it.
 
-Run `install-hooks --apply` again after upgrading: the shadow also reads the
-`PreCompact` event, the only one that tells a manual compaction from an
-automatic one.
+A record holds the model, the context size, the call and prompt counts,
+whether `HEAD` moved, whether a tool or the API failed, the recommendation
+with its cost margin, and the project's name. To erase what was recorded,
+delete `log.jsonl` and `log.jsonl.1` in that directory; `status` prints the
+exact path.
+
+`summary` counts prompts by three columns. `basis` is how the
+recommendation was reached: `cost_quality_null` (the model's quality terms
+were measured and are not distinguishable from zero, so cost decides) or
+`cost_quality_unmeasured` (never measured, so cost decides and the quality
+side is unknown). `recommended` is `continue` or `compact`, or `None` for a
+model the rule has no price for. `done` is what the session did before its
+next prompt: `continue`, `compact_manual`, `compact_auto`, `restart_clean`
+(a `/clear`), `delegate` (an Agent or Task call), `ended`. A session's last
+prompt is counted as waiting, not as continued. The quality bounds the rule
+used are printed under the table: a cost recommendation is not a quality one.
+
+Run `install-hooks --apply` again after upgrading: a release can read a new
+event (2.4.29 added `PreCompact`, the only one that tells a manual compaction
+from an automatic one; 2.4.30 added `PostToolUseFailure`, without which a
+failed tool call goes unseen). Claude Code normally picks up the change in
+sessions already open; a session that does not list the new hooks in
+`/hooks` needs a restart.
 
 ## What's left in the browser (deliberately)
 

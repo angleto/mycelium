@@ -476,3 +476,14 @@ def test_the_cli_allows_lists_and_denies(tmp_path: Path) -> None:
     assert runner.invoke(app, ["session", "reset-shadow", "deny", str(root)]).exit_code == 0
     assert reset_shadow.allowed_roots() == []
     assert runner.invoke(app, ["session", "reset-shadow", "deny", str(root)]).exit_code != 0
+
+
+def test_the_summary_help_names_every_basis() -> None:
+    # The help is where a person reads what a row means; a basis added to the
+    # rule and missing there is a row nobody can read.
+    from mycelium_cli.cmds import session as session_cmd
+    from mycelium_cli.reset_rule import Basis
+
+    text = " ".join((session_cmd.shadow_summary.__doc__ or "").split())
+    missing = [b.value for b in Basis if b.value not in text]
+    assert not missing, missing

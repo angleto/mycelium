@@ -503,7 +503,17 @@ def install_hooks(
     """Make your Claude Code sessions show in Mycelium: the hooks that report
     whether a session needs you, and a tmux key to jump to the one that does.
 
-    Without --apply it prints what to add and changes nothing."""
+    Without --apply it prints what to add and changes nothing. With it, the
+    hook is added to each event that does not run it yet, and every other
+    hook in the file is left as it is, so running it again is safe.
+
+    The same hooks feed the reset shadow (`mycelium session reset-shadow`),
+    which records nothing until you allow a project and turn it on.
+
+    Run it again after upgrading the CLI: a new release can read a new event.
+    Claude Code normally picks up a change to its settings file in sessions
+    already open; one that does not show the new hooks in /hooks needs a
+    restart."""
     command = _hook_command()
     path = settings_path.expanduser()
     if not apply:
@@ -547,6 +557,26 @@ shadow_app = typer.Typer(
     help=(
         "Record, without acting, what a decision rule would recommend at each prompt "
         "(continue or compact) beside what the session did. Local only, per project."
+        "\n\n"
+        "It starts off. Recording needs all three switches: the project is under a "
+        "root added with `allow`, `on` has been run, and the session was not started "
+        "with MYCELIUM_RESET_SHADOW=off. Each one alone stops it."
+        "\n\n"
+        "Each record holds numbers and labels only: the model, the context size, "
+        "the call and prompt counts, whether HEAD moved, whether a tool or the API "
+        "failed, the recommendation with its cost margin, and what the session did "
+        "next (compaction and its trigger, clear, delegation to a subagent, end). "
+        "Never prompt text, file content or a path; the project appears by name. "
+        "Nothing is sent anywhere."
+        "\n\n"
+        "The log is ~/.local/state/mycelium/reset_shadow/log.jsonl, rotated past 40 MB "
+        "with one previous file kept; `status` prints its real path. To erase what was "
+        "recorded, delete that directory's log.jsonl and log.jsonl.1."
+        "\n\n"
+        "It needs the hooks (`mycelium session install-hooks --apply`): Claude Code "
+        "normally picks them up in open sessions too, and a session that does not "
+        "list them in /hooks needs a restart. The rule and its parameters are in "
+        "docs/adr/0081."
     ),
 )
 app.add_typer(shadow_app, name="reset-shadow")
@@ -570,7 +600,10 @@ def shadow_allow(
 
 @shadow_app.command("deny")
 def shadow_deny(path: Annotated[Path, typer.Argument(help="A root added with allow.")]) -> None:
-    """Stop recording for sessions under PATH. What was recorded stays in the log."""
+    """Stop recording for sessions under PATH. What was recorded stays in the log.
+
+    PATH must be a root added with `allow`, not a directory inside one; `status`
+    lists them."""
     from mycelium_cli import reset_shadow
 
     if not reset_shadow.deny(str(path)):
@@ -580,7 +613,11 @@ def shadow_deny(path: Annotated[Path, typer.Argument(help="A root added with all
 
 @shadow_app.command("on")
 def shadow_on() -> None:
-    """Start recording, in the allowed projects only."""
+    """Start recording, in the allowed projects only.
+
+    It takes effect at the next hook event of every session that runs the
+    hooks, without restarting it. A session started with
+    MYCELIUM_RESET_SHADOW=off stays unrecorded."""
     from mycelium_cli import reset_shadow
 
     s = reset_shadow.set_enabled(True)
@@ -592,7 +629,11 @@ def shadow_on() -> None:
 
 @shadow_app.command("off")
 def shadow_off() -> None:
-    """Stop recording everywhere. The allowed projects and the log are kept."""
+    """Stop recording everywhere. The allowed projects and the log are kept.
+
+    It takes effect at the next hook event of every session. To leave out a
+    single session instead, start it with MYCELIUM_RESET_SHADOW=off; to leave
+    out a project, `deny` it."""
     from mycelium_cli import reset_shadow
 
     reset_shadow.set_enabled(False)
@@ -601,7 +642,12 @@ def shadow_off() -> None:
 
 @shadow_app.command("status")
 def shadow_status() -> None:
-    """Whether recording is on, the allowed roots, and this shell's switch."""
+    """Whether recording is on, the allowed roots, and this shell's switch.
+
+    The shell's switch is MYCELIUM_RESET_SHADOW as this shell has it, which is
+    what a session started from here would inherit; a value other than on or
+    off counts as off. Also the log's path and size. With --json, the same
+    fields as an object."""
     from mycelium_cli import reset_shadow
 
     s = reset_shadow.settings()
@@ -633,7 +679,23 @@ def shadow_status() -> None:
 
 @shadow_app.command("summary")
 def shadow_summary() -> None:
-    """What the rule recommended against what each session then did."""
+    """What the rule recommended against what each session then did.
+
+    One row per combination, counting prompts. basis says how the
+    recommendation was reached: cost_quality_null (the model's quality terms
+    were measured and are not distinguishable from zero, so cost decides),
+    cost_quality_unmeasured (they were never measured for it, so cost decides
+    and the quality side is unknown). quality_and_cost is reserved for a rule
+    that weighs measured quality terms, and none does yet. recommended is
+    continue or compact, or None for a model the rule has no price for. done is
+    what the session did before its next prompt: continue, compact_manual,
+    compact_auto, restart_clean (a /clear), delegate (an Agent or Task call),
+    ended.
+
+    A session's last prompt has no "done" yet and is counted as waiting, not
+    as continued. Below the table, the quality bounds the rule used per model:
+    a cost recommendation is not a quality one. With --json, the same as an
+    object."""
     from mycelium_cli import reset_shadow
 
     s = reset_shadow.summary(reset_shadow.read_log())
