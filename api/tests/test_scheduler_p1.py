@@ -3,9 +3,7 @@
 Covers the P1 acceptance bullets: human context-switch penalty between
 back-to-back distinct tasks; LLM K-parallel pool cap; policy changes
 the deterministic order/makespan; RecomputeOut carries
-makespan/projected credit cost; the resource-aware critical chain is a
-superset of (and differs from) the logical critical path under
-contention; determinism (same inputs+policy -> identical schedule); a
+makespan/projected credit cost; determinism (same inputs+policy -> identical schedule); a
 fresh workspace recomputes with zero manual executor config.
 
 Style mirrors api/tests/test_f3_api.py + core/tests/test_f3_scheduler.py
@@ -276,70 +274,13 @@ async def test_recompute_out_makespan_and_projected_credit_cost() -> None:
         sched = (await c.get("/schedule", headers=h)).json()
         assert {row["task_id"] for row in sched}
         for row in sched:
-            assert "on_critical_chain" in row
+            # The critical chain was removed (task 27dc7e68); what the
+            # dates rest on is on every row instead.
+            assert "on_critical_chain" not in row
+            assert {"estimate_missing", "dates_lower_bound", "due_margin_minutes"} <= set(row)
             assert Decimal(row["projected_cost"]) >= 0
         # Sum of per-task projected_cost equals the recompute total.
         assert sum(Decimal(r["projected_cost"]) for r in sched) == Decimal("12.0000")
-
-
-async def test_critical_chain_superset_under_resource_contention() -> None:
-    """(e) on_critical_chain is set on the binding leveled path and is a
-    strict superset of the logical critical path under resource
-    contention.
-
-    Setup: a long task A (6h, P1) and an independent shorter task B (2h,
-    P4) on the SAME single human, no precedence edge. Logically
-    (infinite resources) only A binds the makespan (B has slack: it
-    could float). The serial human resource forces B after A, so the
-    leveled plan ends with B -> B now binds the makespan and joins A on
-    the resource-aware critical chain while staying OFF the logical
-    critical path. chain = {A, B} strictly contains logical = {A}.
-    """
-    async with admin_session() as s:
-        a = await signup(s, email=_email(), password="pw-strong-123", org_name="CC")
-    org, user = a.org_id, a.user_id
-
-    async with tenant_session(str(org), str(user)) as s:
-        t_long = await tasks.create_task(
-            s,
-            org_id=org,
-            actor_id=user,
-            title="A",
-            importance=1,
-            urgency=1,
-            estimate_effort_h=Decimal(6),
-            assignee_ids=[user],
-        )
-        t_short = await tasks.create_task(
-            s,
-            org_id=org,
-            actor_id=user,
-            title="B",
-            importance=1,
-            urgency=4,
-            estimate_effort_h=Decimal(2),
-            assignee_ids=[user],
-        )
-        await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
-        rows = {r.task_id: r for r in await sch.list_schedule(s, org_id=org)}
-
-    r_long, r_short = rows[t_long.id], rows[t_short.id]
-    # Serialized by the single human resource (disjoint): A then B.
-    assert r_long.scheduled_end <= r_short.scheduled_start
-    # Logically only A binds; B has positive logical slack (it floats).
-    assert r_long.on_logical_critical_path is True
-    assert r_short.on_logical_critical_path is False
-    assert (r_short.slack_minutes or 0) > 0
-    # The leveled plan ends with B (pushed after A by the serial
-    # resource) -> B binds the makespan and is on the critical chain.
-    assert r_short.on_critical_chain is True
-    assert r_long.on_critical_chain is True
-    logical = {tid for tid, r in rows.items() if r.on_logical_critical_path}
-    chain = {tid for tid, r in rows.items() if r.on_critical_chain}
-    # Resource-aware chain is a STRICT superset of the logical path:
-    # contention added B (which logically had slack) to the binding path.
-    assert chain != logical
-    assert logical < chain
 
 
 async def test_determinism_same_inputs_and_policy() -> None:
@@ -383,7 +324,8 @@ async def test_determinism_same_inputs_and_policy() -> None:
                 r.ef,
                 r.scheduled_start,
                 r.scheduled_end,
-                r.on_critical_chain,
+                r.slack_minutes,
+                r.due_margin_minutes,
                 r.projected_cost,
                 r.input_fingerprint,
             )
@@ -398,7 +340,8 @@ async def test_determinism_same_inputs_and_policy() -> None:
                 r.ef,
                 r.scheduled_start,
                 r.scheduled_end,
-                r.on_critical_chain,
+                r.slack_minutes,
+                r.due_margin_minutes,
                 r.projected_cost,
                 r.input_fingerprint,
             )

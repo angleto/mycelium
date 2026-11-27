@@ -1,9 +1,21 @@
 """Deterministic resource-aware scheduler (docs/adr/0004 + 0025, FR-4).
 
-Stage 1 (unchanged): a logical CPM forward/backward pass over working
-calendars -> ES/EF/LS/LF, logical slack, ``on_logical_critical_path``.
-This assumes infinite resources and is the heuristic *input*, not the
-final answer (ADR-0025).
+Stage 1: a logical CPM forward/backward pass over working calendars ->
+ES/EF/LS/LF, slack, ``on_logical_critical_path``. This assumes infinite
+resources and is the heuristic *input*, not the final answer (ADR-0025).
+What the dates mean (task 27dc7e68, ADR-0004 amendment of 2026-11-27):
+
+- A task with subtasks in scope is a span, not work: its own estimate is
+  not scheduled, it starts with its first subtask and finishes with its
+  last. A dependency into or out of it holds for the span (see
+  ``_plan_graph``).
+- A task with no estimate has an unknown duration, not a duration of 0.
+  It is placed as a point, its row says the estimate is missing, and
+  every date downstream of it is flagged as a lower bound.
+- A due date bounds the latest finish of its task and, through the
+  backward pass, of everything before it. Slack is signed
+  (``services/slack.py``) and each row says by how much its task meets
+  or misses its own date in the leveled plan.
 
 Stage 2 (resource-constrained list scheduling, ADR-0025 P1):
 - **Humans** are serial unit-capacity resources on their working
@@ -17,9 +29,11 @@ Stage 2 (resource-constrained list scheduling, ADR-0025 P1):
   and flagged (not dropped) past ``credit_budget`` -- P1 projects only.
 
 The objective is **multi-policy** (``SchedulePolicy``), selected per
-recompute. Outputs additionally include the **resource-aware critical
-chain** (zero float in the *leveled* plan, distinct from the logical
-critical path), the projected makespan and the projected credit cost.
+recompute. Outputs additionally include the projected makespan and the
+projected credit cost. The "resource-aware critical chain" that used to
+be derived here was removed: measured on production, its 258 tasks did
+not contain the critical path it claimed to extend, and nothing outside
+the Schedule view read it.
 
 Manual/pinned and in-progress tasks survive recompute. Deterministic:
 stable ordering and an id final tie-break everywhere -- a
@@ -60,6 +74,7 @@ from mycelium_core.services import executors as executors_svc
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services.calendar import WorkCalendar, build_work_calendar
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.slack import slack_minutes
 
 # Fixed, stable set of ``Schedule.unassignable_reason`` strings (English,
 # enum-ish; documented in docs/adr/0025 P2). Never free-form prose.
@@ -76,12 +91,26 @@ _UNASSIGNABLE_BUDGET_EXHAUSTED = "budget_exhausted"
 _UNASSIGNABLE_ASSIGNEE_INACTIVE = "assignee_inactive"
 
 
+# A task with subtasks in scope enters the CPM graph as two zero-length
+# nodes, its start and its finish, with ids derived from its own. The task
+# itself is not a node: its row is read off these two and its subtasks.
+_ROLE_TASK = "task"
+_ROLE_START = "start"
+_ROLE_FINISH = "finish"
+
+
 @dataclass
 class _Node:
     task: Task
     assignee: uuid.UUID | None
     duration_min: int
     terminal: bool
+    role: str = _ROLE_TASK
+    # No estimate, so ``duration_min`` is 0 by default and not by fact.
+    estimate_missing: bool = False
+    # This node's dates depend on a duration nobody knows: its own or one
+    # upstream of it. They are the earliest the work could be, no more.
+    lower_bound: bool = False
     # docs/adr/0028: the routing kind (human vs llm_agent) is no
     # longer stored on the task; it comes from the joined
     # ``identities.kind``. We materialise it here so the rest of the
@@ -92,13 +121,9 @@ class _Node:
     ef: dt.datetime = field(default=dt.datetime.min)
     ls: dt.datetime = field(default=dt.datetime.min)
     lf: dt.datetime = field(default=dt.datetime.min)
-    # Resource-leveled placement (Stage 2). ``ss``/``se`` are the final
-    # scheduled start/end; ``llf`` is the leveled latest finish from the
-    # backward pass over the leveled graph (precedence + per-resource
-    # successor edges) used to derive ``on_critical_chain``.
+    # Resource-leveled placement (Stage 2): the final scheduled start/end.
     ss: dt.datetime = field(default=dt.datetime.min)
     se: dt.datetime = field(default=dt.datetime.min)
-    llf: dt.datetime = field(default=dt.datetime.min)
     # Admission-control dispatch result (P2). ``assigned`` is the chosen
     # llm_agent (None for human/off-timeline/unassignable rows);
     # ``unassignable_reason`` is set (from the fixed set) iff this llm
@@ -110,14 +135,21 @@ class _Node:
 @dataclass
 class RecomputeSummary:
     """What a recompute produced: row count + the comparable projections
-    (makespan, credit cost), the policy that produced them, and the
-    count of llm tasks with no admissible executor (P2 dispatch gaps)."""
+    (makespan, credit cost), the policy that produced them, the count of
+    llm tasks with no admissible executor (P2 dispatch gaps), and what
+    the dates rest on: how many tasks have no estimate (every date
+    downstream of one is a lower bound), how many miss their due date,
+    and how many dependencies were left out because they contradict the
+    parent/subtask structure."""
 
     count: int
     makespan_minutes: int
     projected_credit_cost: Decimal
     policy: SchedulePolicy
     unassignable_count: int = 0
+    unestimated_count: int = 0
+    due_missed_count: int = 0
+    dependencies_ignored: int = 0
 
 
 def _reuse_summary(
@@ -127,6 +159,7 @@ def _reuse_summary(
     fp: str,
     now: dt.datetime,
     policy: SchedulePolicy,
+    dependencies_ignored: int,
 ) -> RecomputeSummary | None:
     """The stored plan's summary when it can stand for a fresh one, else None.
 
@@ -164,11 +197,16 @@ def _reuse_summary(
         projected_credit_cost=sum((r.projected_cost for r in rows), Decimal(0)),
         policy=policy,
         unassignable_count=sum(1 for r in rows if r.unassignable),
+        unestimated_count=sum(1 for r in rows if r.estimate_missing),
+        due_missed_count=sum(
+            1 for r in rows if r.due_margin_minutes is not None and r.due_margin_minutes < 0
+        ),
+        dependencies_ignored=dependencies_ignored,
     )
 
 
-def _logical_slack_min(n: _Node) -> int:
-    return max(0, int((n.ls - n.es).total_seconds() // 60))
+def _slack(n: _Node) -> int:
+    return slack_minutes(n.lf, n.ef)
 
 
 def _policy_key(
@@ -200,8 +238,8 @@ def _policy_key(
     _DUE_MAX = dt.datetime.max.replace(tzinfo=dt.UTC)
     if policy is SchedulePolicy.fastest:
         return lambda x: (
-            _logical_slack_min(x),
-            0 if (x.ls - x.es).total_seconds() <= 0 else 1,
+            _slack(x),
+            0 if _slack(x) <= 0 else 1,
             x.task.priority,
             x.task.due_date or _DUE_MAX,
             x.task.created_at,
@@ -232,12 +270,13 @@ def _policy_key(
     )
 
 
-def _effort_minutes(task: Task) -> int:
+def _effort_minutes(task: Task) -> int | None:
+    """Remaining effort in minutes, or None when nobody estimated it."""
     hours = task.remaining_effort_h
     if hours is None:
         hours = task.estimate_effort_h
     if hours is None:
-        return 0
+        return None
     return round(float(hours) * 60)
 
 
@@ -269,7 +308,7 @@ def _manual_pin_start(task: Task, prev: dict[uuid.UUID, Schedule]) -> dt.datetim
 
 def _topo(
     ids: list[uuid.UUID],
-    deps: list[TaskDependency],
+    deps: Sequence[TaskDependency | _Edge],
 ) -> list[uuid.UUID]:
     succ: dict[uuid.UUID, set[uuid.UUID]] = {i: set() for i in ids}
     indeg: dict[uuid.UUID, int] = {i: 0 for i in ids}
@@ -290,6 +329,154 @@ def _topo(
     if len(order) != len(ids):
         raise DomainError(MessageCode.DEPENDENCY_CYCLE)
     return order
+
+
+@dataclass(frozen=True)
+class _Edge:
+    """A precedence edge of the CPM graph. The attribute names are the
+    ones ``TaskDependency`` uses, so the passes read either."""
+
+    predecessor_id: uuid.UUID
+    successor_id: uuid.UUID
+    type: DependencyType
+    lag_working_minutes: int
+
+
+@dataclass
+class _PlanGraph:
+    leaves: list[uuid.UUID]
+    # Parent -> its direct subtasks in scope, each list in id order.
+    children: dict[uuid.UUID, list[uuid.UUID]]
+    start_of: dict[uuid.UUID, uuid.UUID]
+    finish_of: dict[uuid.UUID, uuid.UUID]
+    edges: list[_Edge]
+    dependencies_ignored: int
+
+    @property
+    def node_ids(self) -> list[uuid.UUID]:
+        return [*self.leaves, *self.start_of.values(), *self.finish_of.values()]
+
+    def leaf_descendants(self, parent: uuid.UUID) -> list[uuid.UUID]:
+        out: list[uuid.UUID] = []
+        stack = [parent]
+        while stack:
+            for c in self.children[stack.pop()]:
+                (stack if c in self.children else out).append(c)
+        return out
+
+
+def _reaches(adj: dict[uuid.UUID, set[uuid.UUID]], src: uuid.UUID, dst: uuid.UUID) -> bool:
+    seen = {src}
+    stack = [src]
+    while stack:
+        cur = stack.pop()
+        if cur == dst:
+            return True
+        for nxt in adj.get(cur, ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return False
+
+
+def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
+    """The CPM graph of a scope: its leaf tasks, and each parent as a start
+    node and a finish node around its subtasks.
+
+    A parent P is in the graph as ``start(P)`` and ``finish(P)``. Every
+    direct subtask C starts no earlier than ``start(P)`` (SS 0) and
+    ``finish(P)`` is no earlier than C's finish (FF 0), so P spans its
+    subtasks and its own estimate is never scheduled: measured 2026-11-26,
+    the one critical task on production was an epic whose 624 h estimate
+    was added on top of its subtasks. A dependency touching P attaches to
+    the end of P it names: FS and SS into P hold P's start, FF and SF into
+    P hold its finish; FS and FF out of P read its finish, SS and SF read
+    its start. This is exact. The alternative of copying each dependency
+    onto every subtask is exact for FS into and out of a parent but
+    over-constrains SS out of it and FF into it (every subtask would be
+    held, where the span only needs its first or last one).
+
+    Only parents and subtasks both in scope count: in a project-scoped
+    plan a subtask whose parent carries another project is a plain task.
+
+    Some dependencies cannot hold once a parent spans its subtasks: one
+    between a task and its own ancestor, or a chain that leaves a span
+    and comes back into it. In the plain dependency graph they are not
+    cycles, so the dependency service accepts them, but here they are.
+    They are left out, in dependency-id order, and counted: one bad link
+    must not stop the plan of a whole workspace, and the count says it
+    happened. With no such dependency, which is the case the first
+    ``_topo`` attempt finds, no reachability search runs. When one does,
+    it is one search per declared dependency: on a synthetic workspace of
+    production's size (1605 tasks, 394 parents, 700 dependencies, 4 of
+    them contradictory) the whole function took 319 ms on 2026-11-27,
+    once per dispatch tick of 60 s.
+    """
+    by_id = {t.id: t for t in tasks}
+    children: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for t in sorted(tasks, key=lambda x: str(x.id)):
+        p = t.parent_task_id
+        if p is not None and p != t.id and p in by_id:
+            children.setdefault(p, []).append(t.id)
+    start_of = {p: uuid.uuid5(p, _ROLE_START) for p in children}
+    finish_of = {p: uuid.uuid5(p, _ROLE_FINISH) for p in children}
+
+    def entry(tid: uuid.UUID) -> uuid.UUID:
+        return start_of.get(tid, tid)
+
+    def exit_(tid: uuid.UUID) -> uuid.UUID:
+        return finish_of.get(tid, tid)
+
+    structural = [
+        e
+        for p, kids in children.items()
+        for c in kids
+        for e in (
+            _Edge(start_of[p], entry(c), DependencyType.SS, 0),
+            _Edge(exit_(c), finish_of[p], DependencyType.FF, 0),
+        )
+    ]
+    declared = [
+        _Edge(
+            entry(d.predecessor_id)
+            if d.type in (DependencyType.SS, DependencyType.SF)
+            else exit_(d.predecessor_id),
+            entry(d.successor_id)
+            if d.type in (DependencyType.FS, DependencyType.SS)
+            else exit_(d.successor_id),
+            d.type,
+            d.lag_working_minutes,
+        )
+        for d in sorted(deps, key=lambda x: str(x.id))
+    ]
+    leaves = sorted((t.id for t in tasks if t.id not in children), key=str)
+    graph = _PlanGraph(
+        leaves=leaves,
+        children=children,
+        start_of=start_of,
+        finish_of=finish_of,
+        edges=structural + declared,
+        dependencies_ignored=0,
+    )
+    if not children:
+        return graph
+    try:
+        _topo(graph.node_ids, graph.edges)
+        return graph
+    except DomainError:
+        pass
+    adj: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for e in structural:
+        adj.setdefault(e.predecessor_id, set()).add(e.successor_id)
+    kept: list[_Edge] = []
+    for e in declared:
+        if _reaches(adj, e.successor_id, e.predecessor_id):
+            graph.dependencies_ignored += 1
+            continue
+        adj.setdefault(e.predecessor_id, set()).add(e.successor_id)
+        kept.append(e)
+    graph.edges = structural + kept
+    return graph
 
 
 class Scheduler:
@@ -432,6 +619,7 @@ class Scheduler:
             for d in (await self._s.execute(select(TaskDependency))).scalars().all()
             if d.predecessor_id in id_set and d.successor_id in id_set
         ]
+        graph = _plan_graph(tasks, deps)
         terminal_state_ids = set(
             (
                 await self._s.execute(
@@ -537,18 +725,38 @@ class Scheduler:
             participant_rows=participant_rows,
         )
         if reuse_unchanged:
-            reused = _reuse_summary(prev, ids=ids, fp=fp, now=now, policy=policy)
+            reused = _reuse_summary(
+                prev,
+                ids=ids,
+                fp=fp,
+                now=now,
+                policy=policy,
+                dependencies_ignored=graph.dependencies_ignored,
+            )
             if reused is not None:
                 return reused
 
         nodes: dict[uuid.UUID, _Node] = {}
-        for t in tasks:
+        by_task = {t.id: t for t in tasks}
+        for tid in graph.leaves:
+            t = by_task[tid]
             # Three fallbacks for the human executor id (used by the
             # calendar resolver / serial-resource scheduler): the
             # first task_assignee row -> the identity-resolved human
             # user -> NULL (unassigned, off-calendar).
             assignee = first_assignee.get(t.id) or task_human_user.get(t.id)
-            dur = 0 if t.is_milestone else _effort_minutes(t)
+            terminal = t.state_id in terminal_state_ids
+            effort = _effort_minutes(t)
+            # Nothing is missing for a milestone (no duration by
+            # definition), a closed task (no work left) or an appointment
+            # (its own window is its duration).
+            missing = (
+                effort is None
+                and not t.is_milestone
+                and not terminal
+                and t.duration_minutes is None
+            )
+            dur = 0 if t.is_milestone or effort is None else effort
             # Kind via identity when an assignee is set, else fall
             # back to the task's ``executor_kind`` hint (docs/adr/0028).
             n_kind = task_kind.get(t.id, t.executor_kind)
@@ -556,33 +764,79 @@ class Scheduler:
                 task=t,
                 assignee=assignee,
                 duration_min=dur,
-                terminal=t.state_id in terminal_state_ids,
+                terminal=terminal,
                 kind=n_kind,
+                estimate_missing=missing,
             )
+        for parent_id, vid in [*graph.start_of.items(), *graph.finish_of.items()]:
+            t = by_task[parent_id]
+            nodes[vid] = _Node(
+                task=t,
+                assignee=first_assignee.get(parent_id) or task_human_user.get(parent_id),
+                duration_min=0,
+                terminal=False,
+                kind=task_kind.get(parent_id, t.executor_kind),
+                role=_ROLE_START if vid == graph.start_of[parent_id] else _ROLE_FINISH,
+            )
+        graph_ids = graph.node_ids
 
-        incoming: dict[uuid.UUID, list[TaskDependency]] = {i: [] for i in ids}
-        outgoing: dict[uuid.UUID, list[TaskDependency]] = {i: [] for i in ids}
-        for d in deps:
-            incoming[d.successor_id].append(d)
-            outgoing[d.predecessor_id].append(d)
+        incoming: dict[uuid.UUID, list[_Edge]] = {i: [] for i in graph_ids}
+        outgoing: dict[uuid.UUID, list[_Edge]] = {i: [] for i in graph_ids}
+        for edge in graph.edges:
+            incoming[edge.successor_id].append(edge)
+            outgoing[edge.predecessor_id].append(edge)
 
-        order = _topo(ids, deps)
+        order = _topo(graph_ids, graph.edges)
 
         # Forward pass: ES/EF.
         for nid in order:
             n = nodes[nid]
             cal, cap = await self._calendar(n.assignee)
+            n.lower_bound = n.estimate_missing or any(
+                nodes[d.predecessor_id].lower_bound for d in incoming[nid]
+            )
+            if n.role == _ROLE_FINISH:
+                # A span ends when its last subtask does (or later, if a
+                # finish dependency into the parent says so). Taken as is,
+                # not snapped: snapping a finish at 18:00 forward would end
+                # the parent at 09:00 the next morning.
+                bounds: list[dt.datetime] = []
+                for d in incoming[nid]:
+                    p = nodes[d.predecessor_id]
+                    pcal, _ = await self._calendar(p.assignee)
+                    ref = p.ef if d.type is DependencyType.FF else p.es
+                    lag = d.lag_working_minutes
+                    bounds.append(ref if lag == 0 else pcal.add(ref, lag))
+                n.es = n.ef = max(bounds, default=now)
+                continue
             if n.terminal:
                 anchor = n.task.actual_start or now
                 n.es = anchor
                 n.ef = anchor
+                # Closed: its dates are facts, whatever came before it.
+                n.lower_bound = False
                 continue
             start_lb = [now]
             finish_lb: list[dt.datetime] = []
-            if n.task.actual_start is not None:
-                start_lb.append(n.task.actual_start)
             cd = n.task.constraint_date
             ck = n.task.constraint_kind.value
+            if n.role == _ROLE_START:
+                # A parent's start constraints hold its span: MSO is read
+                # as "no subtask before", since the span starts with its
+                # first subtask and cannot be made to start on a date by
+                # itself. MFO and a manual pin are not applied to a
+                # parent: its finish and its dates are its subtasks'.
+                if cd is not None and ck in ("SNET", "MSO"):
+                    start_lb.append(cd)
+                for d in incoming[nid]:
+                    p = nodes[d.predecessor_id]
+                    pcal, _ = await self._calendar(p.assignee)
+                    ref = p.ef if d.type is DependencyType.FS else p.es
+                    start_lb.append(pcal.add(ref, d.lag_working_minutes))
+                n.es = n.ef = cal.snap_forward(max(start_lb))
+                continue
+            if n.task.actual_start is not None:
+                start_lb.append(n.task.actual_start)
             if cd is not None and ck == "SNET":
                 start_lb.append(cd)
             for d in incoming[nid]:
@@ -600,7 +854,7 @@ class Scheduler:
             es = cal.snap_forward(max(start_lb))
             if finish_lb:
                 need = max(finish_lb)
-                es = max(es, cal.add(need, -n.duration_min))
+                es = max(es, cal.subtract(need, n.duration_min))
             if cd is not None and ck == "MSO":
                 es = cd
             pin = _manual_pin_start(n.task, prev)
@@ -608,31 +862,49 @@ class Scheduler:
                 es = pin
             if cd is not None and ck == "MFO":
                 n.ef = cd
-                n.es = cal.add(cd, -n.duration_min)
+                n.es = cal.subtract(cd, n.duration_min)
             else:
                 n.es = es
                 n.ef = es if n.duration_min == 0 else cal.add_capped(es, n.duration_min, cap)
 
         project_end = max(n.ef for n in nodes.values())
 
-        # Backward pass: LF/LS, slack, logical critical path.
+        # Backward pass: LF/LS. A task's own latest finish is its due date
+        # when it has one (a leaf, or the finish of a parent's span), and
+        # the end of the plan when it has none; its successors can only
+        # bring it earlier. The end of the plan stands in for "no date",
+        # so it does not bound a task that has a date: a task due on Friday
+        # in a plan that ends on Monday has until Friday, which is also
+        # what the advisory layer says about it. A closed task has nothing
+        # left to finish, so its due date is not a bound.
         for nid in reversed(order):
             n = nodes[nid]
             cal, _ = await self._calendar(n.assignee)
-            finish_ub = [project_end]
+            due = n.task.due_date
+            if due is not None and n.role != _ROLE_START and not n.terminal:
+                finish_ub = [due]
+            else:
+                finish_ub = [project_end]
             for d in outgoing[nid]:
                 snode = nodes[d.successor_id]
                 lag = d.lag_working_minutes
                 if d.type is DependencyType.FS:
-                    finish_ub.append(cal.add(snode.ls, -lag))
-                elif d.type is DependencyType.SS:
-                    finish_ub.append(cal.add(cal.add(snode.ls, -lag), n.duration_min))
+                    finish_ub.append(cal.subtract(snode.ls, lag))
                 elif d.type is DependencyType.FF:
-                    finish_ub.append(cal.add(snode.lf, -lag))
-                else:  # SF
-                    finish_ub.append(cal.add(cal.add(snode.ls, -lag), n.duration_min))
+                    finish_ub.append(cal.subtract(snode.lf, lag))
+                else:
+                    # SS reads this start against the successor's start,
+                    # SF against its finish (SF used ``ls`` before
+                    # 2026-11-27, which is not the end SF constrains).
+                    ref = snode.ls if d.type is DependencyType.SS else snode.lf
+                    latest_start = cal.subtract(ref, lag)
+                    finish_ub.append(
+                        latest_start
+                        if n.duration_min == 0
+                        else cal.add(latest_start, n.duration_min)
+                    )
             n.lf = min(finish_ub)
-            n.ls = cal.add(n.lf, -n.duration_min)
+            n.ls = cal.subtract(n.lf, n.duration_min)
 
         # --- Stage 2: resource-constrained list scheduling (ADR-0025) ---
         # Executors were just ensured. Index humans by user (the row
@@ -684,11 +956,9 @@ class Scheduler:
         # Partition: human serial timeline vs LLM K-pool vs the
         # off-timeline rest (terminals, zero-duration milestones,
         # human tasks with no assignee) which keep their CPM ES/EF.
+        # Keyed by leaf task id. A parent is never placed: its window is
+        # the span of its subtasks' placements, read off after placing.
         sched: dict[uuid.UUID, tuple[dt.datetime, dt.datetime]] = {}
-        # Per-resource successor edges built as we place, for the
-        # leveled critical-chain backward pass (the task placed right
-        # after this one on the same human / freed pool slot).
-        res_succ: dict[uuid.UUID, set[uuid.UUID]] = {i: set() for i in ids}
         by_person: dict[uuid.UUID, list[_Node]] = {}
         llm_nodes: list[_Node] = []
         # Migration 0094 / ADR-0008 addendum: appointment-tasks
@@ -712,6 +982,8 @@ class Scheduler:
             p_end = p_start + dt.timedelta(minutes=p_dur)
             appt_busy_by_user.setdefault(uid, []).append((p_start, p_end))
         for n in nodes.values():
+            if n.role != _ROLE_TASK:
+                continue
             t = n.task
             if t.start_at is not None and t.duration_minutes is not None:
                 # Pre-placed: fixed window, never moves. Busy list is
@@ -754,15 +1026,14 @@ class Scheduler:
             plist.sort(key=key)
             cursor = now
             placed_first = False
-            prev_node_id: uuid.UUID | None = None
             for n in plist:
                 pin = _manual_pin_start(n.task, prev)
                 if pin is not None:
                     end = cal.add_capped(pin, n.duration_min, cap)
                     sched[n.task.id] = (pin, end)
                     n.ss, n.se = pin, end
-                    # A pin does not advance the switching cursor and
-                    # creates no resource-successor edge (it is fixed).
+                    # A pin does not advance the switching cursor (it is
+                    # fixed).
                     continue
                 base = max(n.es, cursor)
                 if placed_first and switch_min > 0:
@@ -782,11 +1053,8 @@ class Scheduler:
                     start = cal.snap_forward(clash[1])
                 sched[n.task.id] = (start, end)
                 n.ss, n.se = start, end
-                if prev_node_id is not None:
-                    res_succ[prev_node_id].add(n.task.id)
                 cursor = end
                 placed_first = True
-                prev_node_id = n.task.id
 
         # LLM agents (P2 admission-control dispatch, replacing P1's
         # single default pool). Each enabled agent is a K-parallel
@@ -812,6 +1080,31 @@ class Scheduler:
         # Topo order tie-broken by the policy key (then str(id) inside
         # the key): a fully deterministic dispatch sequence.
         order_pos = {nid: i for i, nid in enumerate(order)}
+
+        def _leveled(nid: uuid.UUID) -> tuple[dt.datetime, dt.datetime]:
+            """Where a predecessor sits in the leveled plan so far, for
+            gating an llm task: a placed task's window, an unplaced one's
+            CPM window, a parent's start held by what precedes the parent,
+            and a parent's finish at its last subtask's end. The llm loop
+            runs in topological order and humans are placed before it, so
+            everything this reads for a predecessor is already placed."""
+            n = nodes[nid]
+            if n.role == _ROLE_TASK:
+                if n.ss != dt.datetime.min:
+                    return n.ss, n.se
+                return n.es, n.ef
+            if n.role == _ROLE_START:
+                at = n.es
+                for d in incoming[nid]:
+                    p_start, p_end = _leveled(d.predecessor_id)
+                    at = max(at, p_end if d.type is DependencyType.FS else p_start)
+                return at, at
+            end = n.ef
+            for d in incoming[nid]:
+                p_start, p_end = _leveled(d.predecessor_id)
+                end = max(end, p_end if d.type is DependencyType.FF else p_start)
+            return end, end
+
         llm_seq = sorted(
             llm_nodes,
             key=lambda n: (order_pos[n.task.id], key(n)),
@@ -844,14 +1137,11 @@ class Scheduler:
                 earliest = pin
             else:
                 for d in incoming[nid]:
-                    p = nodes[d.predecessor_id]
-                    if p.se != dt.datetime.min and d.type in (
-                        DependencyType.FS,
-                        DependencyType.FF,
-                    ):
-                        earliest = max(earliest, p.se)
-                    elif p.ss != dt.datetime.min:
-                        earliest = max(earliest, p.ss)
+                    p_start, p_end = _leveled(d.predecessor_id)
+                    if d.type in (DependencyType.FS, DependencyType.FF):
+                        earliest = max(earliest, p_end)
+                    else:
+                        earliest = max(earliest, p_start)
             # Among eligible agents, those that ADMIT this task on budget
             # (no budget set = unlimited; budget set = cumulative + this
             # task's cost on that agent must not exceed it).
@@ -881,7 +1171,6 @@ class Scheduler:
             # Earliest freed slot on the chosen agent (deterministic:
             # smallest free time, lowest slot index on a tie).
             slot = _earliest_free_slot(free)
-            prev_in_slot = last[slot]
             start = max(earliest, free[slot])
             end = start + dt.timedelta(minutes=ln.duration_min)
             free[slot] = end
@@ -895,83 +1184,91 @@ class Scheduler:
             ln.unassignable_reason = None
             sched[nid] = (start, end)
             ln.ss, ln.se = start, end
-            if prev_in_slot is not None:
-                res_succ[prev_in_slot].add(nid)
 
-        # Resource-aware critical chain (ADR-0025). Definition: a task
-        # is on the critical chain iff it has ZERO float in the LEVELED
-        # plan -- i.e. delaying it delays the project makespan once
-        # resource contention is accounted for. Computed by a backward
-        # pass over the leveled graph = precedence successors UNION the
-        # per-resource successor (next task on the same human / the same
-        # freed pool slot). leveled_lf(n) = makespan if n has no leveled
-        # successor else min(leveled_start(succ)); n is on the chain iff
-        # leveled_lf(n) - scheduled_end(n) <= 0. This is distinct from
-        # on_logical_critical_path (infinite-resource CPM) and is a
-        # superset of it under resource contention. Fully deterministic.
-        #
-        # P2: an UNASSIGNABLE llm task is a dispatch gap, not a placed
-        # task -- it has no scheduled_start/end, does not drive the
-        # makespan, and is excluded from the leveled graph (it cannot be
-        # on the critical chain). Its logical ES/EF/LS/LF still emit.
-        for nid in ids:
+        # An unassignable llm task is a dispatch gap, not a placed task:
+        # it has no scheduled_start/end and does not drive the makespan.
+        # Its logical ES/EF/LS/LF still emit.
+        for nid in graph.leaves:
             n = nodes[nid]
             if nid not in sched:
                 sched[nid] = (n.es, n.ef)
             n.ss, n.se = sched[nid]
         makespan_end = max(
-            (n.se for nid, n in nodes.items() if nid not in unassignable_ids),
+            (nodes[nid].se for nid in graph.leaves if nid not in unassignable_ids),
             default=now,
         )
-        leveled_succ: dict[uuid.UUID, set[uuid.UUID]] = {
-            i: set(res_succ[i]) for i in ids if i not in unassignable_ids
-        }
-        for d in deps:
-            if d.predecessor_id in unassignable_ids or d.successor_id in unassignable_ids:
-                continue
-            leveled_succ[d.predecessor_id].add(d.successor_id)
-        for nid in reversed(order):
-            if nid in unassignable_ids:
-                continue
-            n = nodes[nid]
-            succs = leveled_succ[nid]
-            n.llf = makespan_end if not succs else min(nodes[s].ss for s in succs)
-        on_chain: dict[uuid.UUID, bool] = {
-            nid: (
-                False
-                if nid in unassignable_ids
-                else int((nodes[nid].llf - nodes[nid].se).total_seconds()) <= 0
-            )
-            for nid in ids
-        }
 
         await self._s.execute(delete(Schedule).where(Schedule.task_id.in_(ids)))
         total_cost = Decimal(0)
-        for nid, n in nodes.items():
-            ss, se = sched[nid]
-            is_unassignable = nid in unassignable_ids
-            # Projected cost = effort_h * the ASSIGNED agent's rate
-            # (0 for human work or an unassignable llm task -- no
-            # executor, no cost).
-            if n.kind is ExecKind.llm_agent and n.assigned is not None and not is_unassignable:
-                pcost = _effort_hours(n) * agent_rate_by_id.get(n.assigned, Decimal(0))
+        unestimated_count = 0
+        due_missed_count = 0
+
+        def _due_margin(t: Task, finish: dt.datetime | None, terminal: bool) -> int | None:
+            # By how much the leveled plan meets (+) or misses (-) the
+            # task's own due date. None with no date, no placement, or
+            # nothing left to do.
+            if t.due_date is None or finish is None or terminal:
+                return None
+            return slack_minutes(t.due_date, finish)
+
+        for t in tasks:
+            if t.id in graph.children:
+                span_start = nodes[graph.start_of[t.id]]
+                span_finish = nodes[graph.finish_of[t.id]]
+                leaves = [nodes[i] for i in graph.leaf_descendants(t.id)]
+                es = min(x.es for x in leaves)
+                ls = min(x.ls for x in leaves)
+                ef, lf = span_finish.ef, span_finish.lf
+                ss = min(sched[x.task.id][0] for x in leaves)
+                se = max(sched[x.task.id][1] for x in leaves)
+                terminal = t.state_id in terminal_state_ids
+                margin = _due_margin(t, se, terminal)
+                row = Schedule(
+                    task_id=t.id,
+                    org_id=self._org,
+                    es=es,
+                    ef=ef,
+                    ls=ls,
+                    lf=lf,
+                    slack_minutes=slack_minutes(lf, ef),
+                    on_logical_critical_path=slack_minutes(lf, ef) <= 0,
+                    # A parent's work is its subtasks', and so is its
+                    # cost: counting it here would count it twice.
+                    projected_cost=Decimal(0),
+                    scheduled_start=ss,
+                    scheduled_end=se,
+                    assigned_executor_id=None,
+                    unassignable=False,
+                    unassignable_reason=None,
+                    estimate_missing=False,
+                    dates_lower_bound=span_finish.lower_bound or span_start.lower_bound,
+                    due_margin_minutes=margin,
+                    computed_at=now,
+                    input_fingerprint=fp,
+                )
             else:
-                pcost = Decimal(0)
-            total_cost += pcost
-            self._s.add(
-                Schedule(
-                    task_id=nid,
+                n = nodes[t.id]
+                ss, se = sched[t.id]
+                is_unassignable = t.id in unassignable_ids
+                # Projected cost = effort_h * the ASSIGNED agent's rate
+                # (0 for human work or an unassignable llm task -- no
+                # executor, no cost).
+                if n.kind is ExecKind.llm_agent and n.assigned is not None and not is_unassignable:
+                    pcost = _effort_hours(n) * agent_rate_by_id.get(n.assigned, Decimal(0))
+                else:
+                    pcost = Decimal(0)
+                total_cost += pcost
+                margin = _due_margin(t, None if is_unassignable else se, n.terminal)
+                unestimated_count += n.estimate_missing
+                row = Schedule(
+                    task_id=t.id,
                     org_id=self._org,
                     es=n.es,
                     ef=n.ef,
                     ls=n.ls,
                     lf=n.lf,
-                    slack_minutes=max(
-                        0,
-                        int((n.ls - n.es).total_seconds() // 60),
-                    ),
-                    on_logical_critical_path=(int((n.ls - n.es).total_seconds()) <= 0),
-                    on_critical_chain=on_chain[nid],
+                    slack_minutes=_slack(n),
+                    on_logical_critical_path=_slack(n) <= 0,
                     projected_cost=pcost,
                     # Unassignable llm tasks have no placement: NULL
                     # scheduled_start/end (a visible dispatch gap).
@@ -980,10 +1277,14 @@ class Scheduler:
                     assigned_executor_id=n.assigned,
                     unassignable=is_unassignable,
                     unassignable_reason=n.unassignable_reason,
+                    estimate_missing=n.estimate_missing,
+                    dates_lower_bound=n.lower_bound,
+                    due_margin_minutes=margin,
                     computed_at=now,
                     input_fingerprint=fp,
                 )
-            )
+            due_missed_count += margin is not None and margin < 0
+            self._s.add(row)
         await self._s.flush()
         await audit.log(
             self._s,
@@ -1013,6 +1314,9 @@ class Scheduler:
             projected_credit_cost=total_cost,
             policy=policy,
             unassignable_count=unassignable_count,
+            unestimated_count=unestimated_count,
+            due_missed_count=due_missed_count,
+            dependencies_ignored=graph.dependencies_ignored,
         )
 
 

@@ -12,7 +12,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0001 Architecture: Python monorepo, single service layer](0001-architecture-monorepo-python-service-layer.md)
 - [0002 Multi-tenant: optimistic concurrency, mandatory RLS](0002-multi-tenant-optimistic-concurrency-rls.md)
 - [0003 Unified tag with typed satellite profiles](0003-tag-unified-typed-satellite-profiles.md)
-- [0004 Deterministic scheduler, not RCPSP](0004-deterministic-scheduler.md)
+- [0004 Deterministic scheduler, not RCPSP](0004-deterministic-scheduler.md) — amended 2026-11-27: a parent spans its subtasks, a missing estimate is unknown, a due date bounds the finish, one slack
 - [0005 Hierarchical memory on pgvector, hybrid RRF retrieval](0005-hierarchical-memory-pgvector-hybrid-rrf.md)
 - [0006 At-rest encryption at the volume level](0006-at-rest-volume-encryption.md)
 - [0007 Hard memory isolation per (org, project)](0007-memory-hard-isolation-org-project.md)
@@ -33,7 +33,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0022 Hands-free activation (headphone button): native/OS-assistant](0022-handsfree-activation-native.md)
 - [0023 Email connector abstraction and idempotent sync](0023-email-connector-abstraction.md)
 - [0024 "Workspace": user-facing name of the tenant; personal-first](0024-workspace-user-facing-tenant-name.md)
-- [0025 Resource-aware scheduling and human/LLM work orchestration](0025-work-orchestration-resource-scheduling.md)
+- [0025 Resource-aware scheduling and human/LLM work orchestration](0025-work-orchestration-resource-scheduling.md) — amended 2026-11-27: the critical chain is removed (see 0004)
 - [0026 Telegram as an in-process LLM assistant channel](0026-telegram-llm-assistant-channel.md)
 - [0027 Adjudication framework for multi-agent convergence](0027-adjudication-framework.md)
 - [0028 Identity-first addressing and explicit task ownership](0028-identity-first-addressing.md)

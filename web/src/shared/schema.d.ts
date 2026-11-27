@@ -16210,6 +16210,21 @@ export interface components {
              * @default 0
              */
             unassignable_count?: number;
+            /**
+             * Unestimated Count
+             * @default 0
+             */
+            unestimated_count?: number;
+            /**
+             * Due Missed Count
+             * @default 0
+             */
+            due_missed_count?: number;
+            /**
+             * Dependencies Ignored
+             * @default 0
+             */
+            dependencies_ignored?: number;
         };
         /**
          * RecurrenceFreq
@@ -16489,10 +16504,20 @@ export interface components {
             slack_minutes: number | null;
             /** On Logical Critical Path */
             on_logical_critical_path: boolean;
-            /** On Critical Chain */
-            on_critical_chain: boolean;
             /** Projected Cost */
             projected_cost: string;
+            /**
+             * Estimate Missing
+             * @default false
+             */
+            estimate_missing?: boolean;
+            /**
+             * Dates Lower Bound
+             * @default false
+             */
+            dates_lower_bound?: boolean;
+            /** Due Margin Minutes */
+            due_margin_minutes?: number | null;
             /** Scheduled Start */
             scheduled_start: string | null;
             /** Scheduled End */

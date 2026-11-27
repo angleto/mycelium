@@ -3119,8 +3119,10 @@ def _schedule(s: Schedule) -> dict[str, Any]:
         "lf": s.lf.isoformat() if s.lf else None,
         "slack_minutes": s.slack_minutes,
         "on_logical_critical_path": s.on_logical_critical_path,
-        "on_critical_chain": s.on_critical_chain,
         "projected_cost": str(s.projected_cost),
+        "estimate_missing": s.estimate_missing,
+        "dates_lower_bound": s.dates_lower_bound,
+        "due_margin_minutes": s.due_margin_minutes,
         "scheduled_start": (s.scheduled_start.isoformat() if s.scheduled_start else None),
         "scheduled_end": (s.scheduled_end.isoformat() if s.scheduled_end else None),
         "assigned_executor_id": (str(s.assigned_executor_id) if s.assigned_executor_id else None),
@@ -3361,9 +3363,12 @@ async def recompute_schedule(
     """Deterministically recompute the schedule for a scope under a
     resource-leveling ``policy`` (fastest|cheapest|balanced|throughput,
     default balanced). Returns the row count plus the projected makespan
-    and projected credit cost so policies are comparable, and the count
-    of llm tasks with no admissible executor (P2 dispatch gaps;
-    ADR-0025)."""
+    and projected credit cost so policies are comparable, the count of
+    llm tasks with no admissible executor (P2 dispatch gaps; ADR-0025),
+    how many tasks have no estimate (their dates and everything after
+    them are lower bounds), how many miss their due date, and how many
+    dependencies were left out for contradicting the parent/subtask
+    structure. A parent is scheduled as the span of its subtasks."""
     async with _tenant(token, org_id) as (s, org, user):
         summary = await scheduler.recompute(
             s,
@@ -3379,6 +3384,9 @@ async def recompute_schedule(
             "projected_credit_cost": str(summary.projected_credit_cost),
             "policy": summary.policy.value,
             "unassignable_count": summary.unassignable_count,
+            "unestimated_count": summary.unestimated_count,
+            "due_missed_count": summary.due_missed_count,
+            "dependencies_ignored": summary.dependencies_ignored,
         }
 
 

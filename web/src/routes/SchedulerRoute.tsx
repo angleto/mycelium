@@ -17,14 +17,19 @@ const POLICIES: Policy[] = ['balanced', 'fastest', 'cheapest', 'throughput']
 const W = 760
 const RH = 30
 
-// Slack in minutes → compact human ("0", "3h", "2d 4h").
-function humanSlack(m: number | null): string {
+// Minutes → compact human ("0", "3h", "2d 4h", "-1d 2h"). Slack is signed:
+// below zero the task cannot finish by its due date.
+function humanSlack(m: number | null | undefined): string {
   if (m == null) return '—'
-  if (m <= 0) return '0'
-  const d = Math.floor(m / 1440)
-  const h = Math.floor((m % 1440) / 60)
-  const mm = m % 60
-  return [d && `${d}d`, h && `${h}h`, !d && mm ? `${mm}m` : ''].filter(Boolean).join(' ')
+  if (m === 0) return '0'
+  const a = Math.abs(m)
+  const d = Math.floor(a / 1440)
+  const h = Math.floor((a % 1440) / 60)
+  const mm = a % 60
+  const body = [d && `${d}d`, h && `${h}h`, !d && mm ? `${mm}m` : '']
+    .filter(Boolean)
+    .join(' ')
+  return m < 0 ? `-${body}` : body
 }
 
 export function SchedulerRoute() {
@@ -187,6 +192,28 @@ export function SchedulerRoute() {
               </span>
             </>
           )}
+          {(summary.due_missed_count ?? 0) > 0 && (
+            <>
+              {' · '}
+              <span className="err">
+                {t('scheduler.dueMissed', { n: summary.due_missed_count })}
+              </span>
+            </>
+          )}
+          {(summary.unestimated_count ?? 0) > 0 && (
+            <>
+              {' · '}
+              {t('scheduler.unestimated', { n: summary.unestimated_count })}
+            </>
+          )}
+          {(summary.dependencies_ignored ?? 0) > 0 && (
+            <>
+              {' · '}
+              {t('scheduler.dependenciesIgnored', {
+                n: summary.dependencies_ignored,
+              })}
+            </>
+          )}
         </p>
       )}
 
@@ -229,7 +256,7 @@ export function SchedulerRoute() {
             <span>
               <span className="sched__sw" /> {t('scheduler.legendSlack')}
             </span>
-            <span className="muted">{t('scheduler.legendChain')}</span>
+            <span className="muted">{t('scheduler.legendParent')}</span>
             <span className="muted">
               {fmtDateTime(new Date(min).toISOString())} →{' '}
               {fmtDateTime(new Date(max).toISOString())}
@@ -285,7 +312,7 @@ export function SchedulerRoute() {
                 <th>{t('scheduler.colLf')}</th>
                 <th>{t('scheduler.slack')}</th>
                 <th>{t('scheduler.colCritical')}</th>
-                <th>{t('scheduler.colChain')}</th>
+                <th>{t('scheduler.colDue')}</th>
                 <th>{t('scheduler.colCost')}</th>
                 <th>{t('scheduler.colExecutor')}</th>
               </tr>
@@ -293,9 +320,19 @@ export function SchedulerRoute() {
             <tbody>
               {dated.map((r) => (
                 <tr key={r.task_id}>
-                  <td>{titleOf(r.task_id)}</td>
+                  <td>
+                    {titleOf(r.task_id)}
+                    {r.estimate_missing && (
+                      <>
+                        {' '}
+                        <span className="tag">{t('scheduler.estimateMissing')}</span>
+                      </>
+                    )}
+                  </td>
                   <td>{r.es ? fmtDateTime(r.es) : '—'}</td>
-                  <td>{r.ef ? fmtDateTime(r.ef) : '—'}</td>
+                  <td title={r.dates_lower_bound ? t('scheduler.lowerBound') : undefined}>
+                    {r.ef ? `${r.dates_lower_bound ? '≥ ' : ''}${fmtDateTime(r.ef)}` : '—'}
+                  </td>
                   <td>{r.ls ? fmtDateTime(r.ls) : '—'}</td>
                   <td>{r.lf ? fmtDateTime(r.lf) : '—'}</td>
                   <td>{humanSlack(r.slack_minutes)}</td>
@@ -309,12 +346,16 @@ export function SchedulerRoute() {
                     )}
                   </td>
                   <td>
-                    {r.on_critical_chain ? (
+                    {r.due_margin_minutes == null ? (
+                      <span className="muted">—</span>
+                    ) : r.due_margin_minutes < 0 ? (
                       <span className="tag tag--danger">
-                        {t('scheduler.chainYes')}
+                        {t('scheduler.dueLate', {
+                          d: humanSlack(-r.due_margin_minutes),
+                        })}
                       </span>
                     ) : (
-                      <span className="muted">—</span>
+                      t('scheduler.dueEarly', { d: humanSlack(r.due_margin_minutes) })
                     )}
                   </td>
                   <td>

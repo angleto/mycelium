@@ -37,6 +37,7 @@ from mycelium_core.services.budgets import get_budget
 from mycelium_core.services.dependencies import blocked_task_ids
 from mycelium_core.services.llm_resolver import resolve_llm
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.slack import slack_minutes
 
 _NEC_RANK: dict[Necessity, int] = {
     Necessity.must: 0,
@@ -94,10 +95,13 @@ def _deadline_signal(
     yield identical output and the ranking stays reproducible. ``due_date``
     is a timestamptz (aware); the caller guarantees ``window_start`` is
     aware too, so the subtraction never raises.
+
+    The slack is the scheduler's (``services/slack.py``), fed with the
+    finish of working on the task without a break from the window start.
     """
     if due_date is None:
         return None, _BUCKET_NONE
-    slack = round((due_date - window_start).total_seconds() / 60) - remaining_minutes
+    slack = slack_minutes(due_date, window_start + dt.timedelta(minutes=remaining_minutes))
     if due_date < window_start:
         return slack, _BUCKET_OVERDUE
     if slack < _AT_RISK_THRESHOLD_MIN:

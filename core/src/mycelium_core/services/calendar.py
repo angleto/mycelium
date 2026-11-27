@@ -155,6 +155,27 @@ class WorkCalendar:
             cur = dt.datetime.combine(day, dt.time.min, self.tz)
         raise DomainError(MessageCode.DOMAIN_ERROR)
 
+    def subtract(self, end: dt.datetime, minutes: int) -> dt.datetime:
+        """The instant ``minutes`` of working time before ``end``.
+
+        This is what a backward pass needs, and ``add(end, -minutes)`` is
+        not it: ``add`` with zero minutes snaps FORWARD to the next working
+        instant, so a zero-length task whose latest finish was the end of a
+        working window (18:00) got a latest start of 09:00 the next day,
+        after its own latest finish. Six production rows had that shape on
+        2026-11-26.
+
+        Zero minutes before ``end`` is the latest working instant at or
+        before it, the mirror of ``add``. Returning ``end`` unchanged was
+        tried and rejected: a successor that can start at 14:00 after lunch
+        then gave its predecessor a latest finish of 14:00 instead of
+        13:00, and the lunch hour showed up as an hour of slack on a task
+        that has none (test_parent_effort_is_its_subtasks_and_it_spans_them).
+        """
+        if minutes < 0:
+            return self.add(end, -minutes)
+        return self._subtract(end, minutes)
+
     def _subtract(self, start: dt.datetime, minutes: int) -> dt.datetime:
         cur = self.snap_backward(start).astimezone(self.tz)
         remaining = float(minutes)

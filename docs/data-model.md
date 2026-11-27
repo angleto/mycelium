@@ -46,8 +46,9 @@ org-scoped entity. Memory is partitioned by `org_id`.
   type[FS|SS|FF|SF], lag_working_minutes signed)`
   - constraints: no self-dependency, unique(predecessor_id,
     successor_id, type), predecessor and successor same `org_id`
-- `schedule(task_id PK, es, ef, ls, lf, slack,
+- `schedule(task_id PK, es, ef, ls, lf, slack (signed),
   on_logical_critical_path, scheduled_start, scheduled_end,
+  estimate_missing, dates_lower_bound, due_margin_minutes,
   computed_at, input_fingerprint)` (derived; not subject to user
   optimistic concurrency; the most recent recompute supersedes the
   previous)

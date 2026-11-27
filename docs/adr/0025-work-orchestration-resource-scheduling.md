@@ -99,7 +99,11 @@ Locked with the product owner (2026-05-19):
 ## Consequences
 
 - `/schedule` becomes truthful under finite capacity; the displayed
-  critical chain reflects resource contention.
+  critical chain reflects resource contention. *Amended 2026-11-27: the
+  critical chain was removed. Measured on production, its 258 tasks did
+  not contain the critical path it was defined to extend, and nothing
+  outside the Schedule view read it. See the 2026-11-27 amendment of
+  [ADR-0004](0004-deterministic-scheduler.md).*
 - New executor/scheduling tables + a scheduler engine rewrite; the
   CPM pass is retained as the heuristic input, not the final answer.
 - Builds on systems already in the repo: `executor_kind`, the

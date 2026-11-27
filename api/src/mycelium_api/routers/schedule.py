@@ -36,8 +36,10 @@ def _out(s: Schedule) -> ScheduleOut:
         lf=s.lf,
         slack_minutes=s.slack_minutes,
         on_logical_critical_path=s.on_logical_critical_path,
-        on_critical_chain=s.on_critical_chain,
         projected_cost=s.projected_cost,
+        estimate_missing=s.estimate_missing,
+        dates_lower_bound=s.dates_lower_bound,
+        due_margin_minutes=s.due_margin_minutes,
         scheduled_start=s.scheduled_start,
         scheduled_end=s.scheduled_end,
         assigned_executor_id=s.assigned_executor_id,
@@ -67,6 +69,9 @@ async def recompute(
         projected_credit_cost=summary.projected_credit_cost,
         policy=summary.policy,
         unassignable_count=summary.unassignable_count,
+        unestimated_count=summary.unestimated_count,
+        due_missed_count=summary.due_missed_count,
+        dependencies_ignored=summary.dependencies_ignored,
     )
 
 

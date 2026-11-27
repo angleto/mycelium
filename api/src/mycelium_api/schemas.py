@@ -1356,6 +1356,13 @@ class RecomputeOut(BaseModel):
     policy: SchedulePolicy
     # Count of llm tasks with no admissible executor (P2 dispatch gaps).
     unassignable_count: int = 0
+    # Tasks with no estimate: every date downstream of one is a lower bound.
+    unestimated_count: int = 0
+    # Tasks whose leveled finish is after their own due date.
+    due_missed_count: int = 0
+    # Dependencies left out because they contradict the parent/subtask
+    # structure (one between a task and its own ancestor, for instance).
+    dependencies_ignored: int = 0
 
 
 class ScheduleOut(BaseModel):
@@ -1364,12 +1371,18 @@ class ScheduleOut(BaseModel):
     ef: datetime.datetime | None
     ls: datetime.datetime | None
     lf: datetime.datetime | None
+    # Signed: latest finish minus earliest finish, in minutes. Below zero
+    # the task cannot finish by its due date or a successor's latest start.
     slack_minutes: int | None
     on_logical_critical_path: bool
-    # Resource-aware critical chain + projected LLM credit cost
-    # (docs/adr/0025, P1).
-    on_critical_chain: bool
+    # Projected LLM credit cost (docs/adr/0025, P1).
     projected_cost: Decimal
+    # No estimate: the duration is unknown and the task was placed as a point.
+    estimate_missing: bool = False
+    # The dates depend on an unknown duration: they are the earliest possible.
+    dates_lower_bound: bool = False
+    # Minutes by which the planned finish meets (+) or misses (-) the due date.
+    due_margin_minutes: int | None = None
     scheduled_start: datetime.datetime | None
     scheduled_end: datetime.datetime | None
     # Admission-control dispatch result (docs/adr/0025, P2): the chosen

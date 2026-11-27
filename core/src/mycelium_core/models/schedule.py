@@ -38,14 +38,23 @@ class Schedule(OrgScopedMixin, Base):
     ef: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ls: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lf: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Signed: ``lf - ef`` in wall-clock minutes (services/slack.py). Below
+    # zero the task cannot finish by the latest finish it is held to, its
+    # due date or a successor's.
     slack_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     on_logical_critical_path: Mapped[bool] = mapped_column(
         nullable=False, server_default=text("false")
     )
-    # Resource-aware critical chain (docs/adr/0025, P1): zero float in
-    # the *leveled* plan (after resource contention), distinct from the
-    # logical critical path which assumes infinite resources.
-    on_critical_chain: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # The task has no estimate (and is not a milestone, an appointment or
+    # closed): its duration is unknown and it was placed as a point.
+    estimate_missing: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # The dates depend on a duration nobody knows, this task's or one
+    # upstream of it: they are the earliest the work could be.
+    dates_lower_bound: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Minutes by which the leveled finish meets (+) or misses (-) the
+    # task's own due date. NULL with no due date, no placement, or a
+    # closed task.
+    due_margin_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Projected LLM credit cost = effort_hours * executor.credit_rate
     # (0 for human tasks). Work is not run yet -> projection only, no
     # billing meter (ADR-0019).
