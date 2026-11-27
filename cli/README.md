@@ -150,6 +150,28 @@ show there; `mycelium worker open` in the session's shell joins the same way.
 A hook that cannot reach Mycelium writes to `~/.local/state/mycelium/hooks.log`
 and never slows or breaks the session.
 
+### When to compact or restart: the reset shadow
+
+In a project you allow, the same hooks also record what a decision rule
+recommends at each prompt (continue or compact, on cost, with the quality
+terms it could not weigh named beside it) and what the session then did:
+compacted manually or automatically, cleared, delegated to a subagent, or
+went on (docs/adr/0081-a-reset-is-recommended-in-the-shadow-before-it-is-decided.md).
+It acts on nothing and sends nothing. The log in
+`~/.local/state/mycelium/reset_shadow/` holds numbers only: no prompt text,
+no file content, no path.
+
+```sh
+mycelium session reset-shadow allow ~/work/humus   # record sessions under this root
+mycelium session reset-shadow list                 # the allowed roots
+mycelium session reset-shadow summary              # recommended against done
+mycelium session reset-shadow deny ~/work/humus    # stop; the log stays
+```
+
+Run `install-hooks --apply` again after upgrading: the shadow also reads the
+`PreCompact` event, the only one that tells a manual compaction from an
+automatic one.
+
 ## What's left in the browser (deliberately)
 
 - **Invoicing** (issuer profiles, line items, SDI XML/PDF). Visual and

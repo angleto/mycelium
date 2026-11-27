@@ -10,6 +10,11 @@ whether the session needs its person.
 | Notification elicitation_dialog | blocked on a question |
 | Stop, StopFailure | your turn; and the machine's live sessions, at most once a minute |
 | SessionEnd | the session is closed |
+| PreCompact | nothing to the server; the reset shadow records the compaction |
+
+In a project the person allowed, every event also passes through the reset
+shadow (``reset_shadow``, docs/adr/0081), which writes a local record and
+sends nothing.
 
 Two properties decide its shape.
 
@@ -139,11 +144,24 @@ def _reconcile_detached() -> None:
         _log(f"reconcile: could not start: {exc}")
 
 
+def _shadow(event: str, payload: dict[str, Any]) -> None:
+    """The reset shadow sees every event first. A fault in it is logged and
+    goes no further: it must not stop the report of whether the session
+    needs its person."""
+    try:
+        from mycelium_cli import reset_shadow
+
+        reset_shadow.observe(event, payload)
+    except Exception as exc:  # the shadow never costs the session its attention report
+        _log(f"reset shadow: {type(exc).__name__}: {exc}")
+
+
 def handle(payload: dict[str, Any]) -> int:
     event = str(payload.get("hook_event_name") or "")
     ref = str(payload.get("session_id") or "")
     if not ref:
         return 0
+    _shadow(event, payload)
     if event == "SessionStart":
         return _start(payload)
     if event == "SessionEnd":

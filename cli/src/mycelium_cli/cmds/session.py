@@ -398,6 +398,10 @@ _EVENTS: tuple[tuple[str, bool, int], ...] = (
     ("Stop", True, 30),
     ("StopFailure", True, 15),
     ("SessionEnd", False, 5),
+    # Only the reset shadow reads it (docs/adr/0081): the payload's
+    # ``trigger`` is the one place a manual compaction is told from an
+    # automatic one.
+    ("PreCompact", True, 5),
 )
 
 _MARK = "mycelium-hook"
@@ -495,3 +499,80 @@ def install_hooks(
             "time you run `mycelium sessions`."
         )
     out().print(f"\nFor a popup with every session, add to ~/.tmux.conf:\n\n  {_TMUX_BINDING}\n")
+
+
+# ---------------------------------------------------------------------------
+# reset-shadow
+# ---------------------------------------------------------------------------
+
+shadow_app = typer.Typer(
+    no_args_is_help=True,
+    help=(
+        "Record, without acting, what a decision rule would recommend at each prompt "
+        "(continue or compact) beside what the session did. Local only, per project."
+    ),
+)
+app.add_typer(shadow_app, name="reset-shadow")
+
+
+@shadow_app.command("allow")
+def shadow_allow(
+    path: Annotated[Path, typer.Argument(help="A project root; its subdirectories are included.")],
+) -> None:
+    """Start recording for sessions under PATH. Nothing leaves this machine."""
+    from mycelium_cli import reset_shadow
+
+    root = reset_shadow.allow(str(path))
+    out().print(f"Recording sessions under {root} in {reset_shadow.log_path()}.")
+    out().print("It takes effect with the hooks installed (`mycelium session install-hooks`).")
+
+
+@shadow_app.command("deny")
+def shadow_deny(path: Annotated[Path, typer.Argument(help="A root added with allow.")]) -> None:
+    """Stop recording for sessions under PATH. What was recorded stays in the log."""
+    from mycelium_cli import reset_shadow
+
+    if not reset_shadow.deny(str(path)):
+        raise CLIError(f"{path} is not an allowed root; `mycelium session reset-shadow list`.")
+    out().print(f"No longer recording under {path}.")
+
+
+@shadow_app.command("list")
+def shadow_list() -> None:
+    """The allowed project roots."""
+    from mycelium_cli import reset_shadow
+
+    roots = reset_shadow.allowed_roots()
+    if json_mode():
+        emit_json({"roots": roots, "log": str(reset_shadow.log_path())})
+        return
+    if not roots:
+        out().print("No project is allowed; nothing is recorded.")
+        return
+    for r in roots:
+        out().print(r)
+
+
+@shadow_app.command("summary")
+def shadow_summary() -> None:
+    """What the rule recommended against what each session then did."""
+    from mycelium_cli import reset_shadow
+
+    s = reset_shadow.summary(reset_shadow.read_log())
+    if json_mode():
+        emit_json(s)
+        return
+    out().print(
+        f"{s['prompts']} prompts in {s['sessions']} sessions, "
+        f"{s['pending']} still waiting for what the session does next."
+    )
+    table = Table("basis", "recommended", "done", "count")
+    for p in s["pairs"]:
+        table.add_row(p["basis"], str(p["recommended"]), p["done"], str(p["count"]))
+    out().print(table)
+    for model, q in s["quality"].items():
+        out().print(
+            f"[dim]{model}: quality terms null on {q['source']}; 95% upper bounds of the "
+            f"failure rate, anchoring {q['anchoring_fail_upper']}, dilution "
+            f"{q['dilution_fail_upper']}. A cost recommendation is not a quality one.[/dim]"
+        )
