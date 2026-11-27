@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core import text_window
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.classification_feedback import ClassificationFeedback
@@ -63,6 +64,7 @@ from mycelium_core.services import trash as trash_svc
 from mycelium_core.services.note_effective import DECLINED, PROPOSED, effective_note_clause
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.review_state import require_state, require_version
+from mycelium_core.services.text_patch import body_sha256
 
 _PROPOSED = PROPOSED
 _DECLINED = DECLINED
@@ -895,18 +897,38 @@ async def remove_declined(
 
 
 @dataclass(frozen=True)
+class TextCut:
+    """A text of a reading, whole or the window of it the budget allowed.
+    ``body_bytes`` is always the size of the whole, so a cut is never
+    silent, and ``next_cursor`` is where :func:`read_source` continues."""
+
+    body: str
+    body_bytes: int
+    body_truncated: bool = False
+    next_cursor: str | None = None
+
+
+def _cut(whole: str, share: int | None) -> TextCut:
+    if share is None:
+        return TextCut(body=whole, body_bytes=len(whole.encode("utf-8")))
+    w = text_window.window(whole, budget=share)
+    return TextCut(
+        body=w.text,
+        body_bytes=w.total_bytes,
+        body_truncated=w.truncated,
+        next_cursor=text_window.cursor(w, body_sha256(whole)),
+    )
+
+
+@dataclass(frozen=True)
 class ProposalSource:
-    """One note a proposal was generated from, beside the proposal. ``body``
-    is whole unless the reader asked for a budget (``source_budget``), and
-    ``body_chars`` always says how long the whole is, so a cut is never
-    silent: the rest is read with :func:`read_source`."""
+    """One note a proposal was generated from, beside the proposal, whole or
+    cut to the reading's budget (``text``)."""
 
     note_id: uuid.UUID
     title: str | None
-    body: str
+    text: TextCut
     is_archived: bool
-    body_chars: int
-    body_truncated: bool
 
 
 @dataclass(frozen=True)
@@ -928,14 +950,14 @@ class CheckView:
 @dataclass(frozen=True)
 class RevisionRef:
     """The other end of a revision: the original a revision replaces, or a
-    revision that replaced this note. The body is carried for the original
+    revision that replaced this note. The text is carried for the original
     only, so the person can compare."""
 
     note_id: uuid.UUID
     title: str | None
     origin_model_id: str | None
     review_state: str | None
-    body: str | None
+    text: TextCut | None
 
 
 @dataclass(frozen=True)
@@ -946,7 +968,7 @@ class ProposalReading:
 
     note_id: uuid.UUID
     title: str | None
-    body: str
+    text: TextCut
     humus_kind: str | None
     origin_model_id: str | None
     review_state: str
@@ -959,19 +981,13 @@ class ProposalReading:
     revised_by: list[RevisionRef]
 
 
-#: Each source keeps at least this much under a budget, so a pattern over
-#: many sources still shows each one's opening rather than one source whole
-#: and the rest empty.
-_MIN_SOURCE_SHARE = 2_000
-
-
 async def read_node(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
-    source_budget: int | None = None,
+    budget: int | None = None,
 ) -> ProposalReading:
     """The whole of a generated note and of its sources, for the person
     deciding it (ADR-0075 decision 2) and for an agent asked to check or
@@ -979,6 +995,13 @@ async def read_node(
     stays out of search, listings, the walk and the graph until approved,
     and the answer carries its state so it is never mistaken for a note of
     the memory.
+
+    ``budget`` bounds, in bytes, the proposal, the original it revises and
+    its sources taken together (:func:`text_window.shares`): an MCP result
+    stays in the caller's context for the rest of the session, and one long
+    source made a single read 96,184 characters on production (2026-11-24),
+    past what a client accepts in one result. None is the web's whole
+    reading.
 
     Reads a pending, declined or approved node; an ordinary note, or one in
     the trash, is 404."""
@@ -1005,30 +1028,30 @@ async def read_node(
         .scalars()
         .all()
     )
-    # ``source_budget`` bounds the sources' text taken together, shared out
-    # evenly: an MCP result stays in the caller's context for the rest of
-    # the session, and one long source made a single read 96,184 characters
-    # on production (2026-11-24), past what a client accepts in one result.
-    # None is the web's whole reading.
-    share = (
-        None
-        if source_budget is None or not parents
-        else max(_MIN_SOURCE_SHARE, source_budget // len(parents))
-    )
-    sources = []
+    original = None
+    if note.revises_note_id is not None:
+        found = await session.get(Note, note.revises_note_id)
+        if found is not None and found.org_id == org_id and found.deleted_at is None:
+            original = found
+    # Every text of the reading, in the order the shares are handed back:
+    # the proposal, the original it revises, then the sources.
+    wholes = [body or ""]
+    if original is not None:
+        wholes.append((await notes_svc.get_body(session, note_id=original.id)) or "")
     for src in parents:
-        whole = (await notes_svc.get_body(session, note_id=src.id)) or ""
-        cut = share is not None and len(whole) > share
-        sources.append(
-            ProposalSource(
-                note_id=src.id,
-                title=src.title,
-                body=whole[:share] if cut else whole,
-                is_archived=src.is_archived,
-                body_chars=len(whole),
-                body_truncated=cut,
-            )
-        )
+        wholes.append((await notes_svc.get_body(session, note_id=src.id)) or "")
+    budgets: list[int | None] = (
+        [None] * len(wholes)
+        if budget is None
+        else list(text_window.shares([len(w.encode("utf-8")) for w in wholes], budget))
+    )
+    cuts = [_cut(w, b) for w, b in zip(wholes, budgets, strict=True)]
+    own_cut = cuts.pop(0)
+    original_cut = cuts.pop(0) if original is not None else None
+    sources = [
+        ProposalSource(note_id=src.id, title=src.title, text=cut, is_archived=src.is_archived)
+        for src, cut in zip(parents, cuts, strict=True)
+    ]
     state = note.review_state
     if state is None:  # excluded by _load_proposed; narrows the type
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
@@ -1054,24 +1077,24 @@ async def read_node(
         .scalars()
         .all()
     ]
-    revises = None
-    if note.revises_note_id is not None:
-        original = await session.get(Note, note.revises_note_id)
-        if original is not None and original.org_id == org_id and original.deleted_at is None:
-            revises = RevisionRef(
-                note_id=original.id,
-                title=original.title,
-                origin_model_id=original.origin_model_id,
-                review_state=original.review_state,
-                body=(await notes_svc.get_body(session, note_id=original.id)) or "",
-            )
+    revises = (
+        RevisionRef(
+            note_id=original.id,
+            title=original.title,
+            origin_model_id=original.origin_model_id,
+            review_state=original.review_state,
+            text=original_cut,
+        )
+        if original is not None
+        else None
+    )
     revised_by = [
         RevisionRef(
             note_id=r.id,
             title=r.title,
             origin_model_id=r.origin_model_id,
             review_state=r.review_state,
-            body=None,
+            text=None,
         )
         for r in (
             await session.execute(
@@ -1090,7 +1113,7 @@ async def read_node(
     return ProposalReading(
         note_id=note.id,
         title=note.title,
-        body=body or "",
+        text=own_cut,
         humus_kind=note.humus_kind,
         origin_model_id=note.origin_model_id,
         review_state=state,
@@ -1320,14 +1343,13 @@ async def revise_node(
 
 @dataclass(frozen=True)
 class SourceSlice:
-    """A window on one source's text: ``text`` starts at ``offset``;
-    ``next_offset`` is where the next window starts, None at the end."""
+    """The next window on one text of a reading: ``text`` continues where
+    the cursor pointed, ``next_cursor`` is None at the end."""
 
     source_id: uuid.UUID
-    offset: int
     text: str
-    total_chars: int
-    next_offset: int | None
+    total_bytes: int
+    next_cursor: str | None
 
 
 async def read_source(
@@ -1337,39 +1359,55 @@ async def read_source(
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
     source_id: uuid.UUID,
-    offset: int = 0,
-    limit: int = 20_000,
+    cursor: str | None = None,
+    budget: int = text_window.READ_BUDGET_BYTES,
 ) -> SourceSlice:
-    """Read one source of a proposal by windows, for a reader that cannot
-    take it whole in one result: the rest of a source :func:`read_node` cut.
-    The source must be a live ``hypha_of`` parent of the proposal that the
-    caller could open; anything else is 404, so this is no door onto an
-    arbitrary note."""
+    """Read one text of a proposal's reading by windows, for a reader that
+    cannot take it whole in one result: the rest of what :func:`read_node`
+    cut. ``source_id`` is the proposal itself, the original it revises, or
+    one of its live ``hypha_of`` parents that the caller could open;
+    anything else is 404, so this is no door onto an arbitrary note. The
+    proposal is reached here and not through the note tools, which do not
+    open a proposal.
+
+    A cursor is bound to the text it was cut from: if the text changed
+    since, the read is stale (``concurrency.stale_version`` with that
+    note's current version) and restarts without a cursor."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    is_parent = await session.scalar(
-        select(
-            exists().where(
-                NoteNoteLink.org_id == org_id,
-                NoteNoteLink.parent_note_id == source_id,
-                NoteNoteLink.child_note_id == note.id,
-                NoteNoteLink.kind == "hypha_of",
+    if source_id == note.id:
+        target = note
+    elif source_id == note.revises_note_id:
+        # Loaded as read_node loads it: the original may itself be a
+        # proposal, which the note service would not open.
+        found = await session.get(Note, source_id)
+        if found is None or found.org_id != org_id or found.deleted_at is not None:
+            raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+        target = found
+    else:
+        is_parent = await session.scalar(
+            select(
+                exists().where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.parent_note_id == source_id,
+                    NoteNoteLink.child_note_id == note.id,
+                    NoteNoteLink.kind == "hypha_of",
+                )
             )
         )
+        if not is_parent:
+            raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+        target = await notes_svc.get_note(session, org_id=org_id, note_id=source_id)
+    whole = (await notes_svc.get_body(session, note_id=target.id)) or ""
+    start = text_window.resume(
+        cursor, whole, version=target.version, operation="garden.review.read_source"
     )
-    if not is_parent:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-    await notes_svc.get_note(session, org_id=org_id, note_id=source_id)
-    if offset < 0 or limit < 1:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
-    whole = (await notes_svc.get_body(session, note_id=source_id)) or ""
-    end = min(len(whole), offset + limit)
+    w = text_window.window(whole, start=start, budget=budget)
     return SourceSlice(
         source_id=source_id,
-        offset=offset,
-        text=whole[offset:end],
-        total_chars=len(whole),
-        next_offset=end if end < len(whole) else None,
+        text=w.text,
+        total_bytes=w.total_bytes,
+        next_cursor=text_window.cursor(w, body_sha256(whole)),
     )
 
 
@@ -1642,6 +1680,7 @@ __all__ = [
     "RevisionRef",
     "SourceProposal",
     "SourceSlice",
+    "TextCut",
     "accept_ratio_by_model",
     "accept_ratio_overall",
     "approve_node",

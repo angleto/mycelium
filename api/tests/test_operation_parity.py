@@ -27,7 +27,7 @@ from mycelium_api.op_routes import OPERATION_ATTR
 from mycelium_core import operations as ops
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_mcp import tool_scopes
-from mycelium_mcp.op_tools import TOOL_OPERATIONS
+from mycelium_mcp.op_tools import TOOL_FIXED, TOOL_OPERATIONS
 
 #: Operations that should be reachable on a surface and are not yet, with
 #: what is missing. Empty: every declared operation is bound on every
@@ -190,7 +190,8 @@ def test_a_bound_tool_serves_the_operations_arguments_and_kind() -> None:
         op = ops.get(op_id)
         tool = tools[name]
         props = set(tool.parameters.get("properties", {}))
-        expected = {"token", "org_id"} | set(op.params.model_fields) | _EXTRAS.get(name, set())
+        offered = set(op.params.model_fields) - TOOL_FIXED.get(name, frozenset())
+        expected = {"token", "org_id"} | offered | _EXTRAS.get(name, set())
         if props != expected:
             problems.append(f"{name}: parameters {sorted(props)} != {sorted(expected)}")
         if not (tool.description or "").startswith(op.doc):
@@ -297,10 +298,12 @@ def test_the_generated_signatures_match_the_argument_models() -> None:
     for name, op_id in TOOL_OPERATIONS.items():
         sig = inspect.signature(tools[name].fn)
         model = ops.get(op_id).params
+        offered = [f for f in model.model_fields if f not in TOOL_FIXED.get(name, frozenset())]
         names = list(sig.parameters)[2:]
-        assert names[: len(model.model_fields)] == list(model.model_fields), name
-        assert set(names[len(model.model_fields) :]) == _EXTRAS.get(name, set()), name
-        for fname, fi in model.model_fields.items():
+        assert names[: len(offered)] == offered, name
+        assert set(names[len(offered) :]) == _EXTRAS.get(name, set()), name
+        for fname in offered:
+            fi = model.model_fields[fname]
             param = sig.parameters[fname]
             assert (param.default is inspect.Parameter.empty) == fi.is_required(), (name, fname)
 

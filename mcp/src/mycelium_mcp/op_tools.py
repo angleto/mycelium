@@ -29,6 +29,10 @@ from mycelium_mcp import tool_scopes
 #: tool name -> operation id, for every bound tool.
 TOOL_OPERATIONS: dict[str, str] = {}
 
+#: tool name -> the operation arguments it does not offer (``fixed``), so a
+#: check of the tool against its operation can tell a decision from a drift.
+TOOL_FIXED: dict[str, frozenset[str]] = {}
+
 OpenCtx = Callable[[str, str], AbstractAsyncContextManager[ops.OpCtx]]
 
 
@@ -68,7 +72,9 @@ def lean(value: Any, *, top: bool = True, keep: frozenset[str] = frozenset()) ->
 
 
 def _parameters(
-    op: ops.Operation, defaults: dict[str, Any] | None = None
+    op: ops.Operation,
+    defaults: dict[str, Any] | None = None,
+    fixed: dict[str, Any] | None = None,
 ) -> list[inspect.Parameter]:
     """``token`` and ``org_id`` first, as every hand-written tool declares
     them, then one parameter per field of the argument model, carrying the
@@ -78,6 +84,8 @@ def _parameters(
         inspect.Parameter("org_id", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
     ]
     for name, fi in op.params.model_fields.items():
+        if fixed and name in fixed:
+            continue
         extra: list[Any] = list(fi.metadata)
         if fi.description:
             extra.append(Field(description=fi.description))
@@ -105,6 +113,7 @@ def bind_tool(
     name: str,
     present: Callable[[Any], Any] | None = None,
     defaults: dict[str, Any] | None = None,
+    fixed: dict[str, Any] | None = None,
     lean_answer: bool = False,
     extras: dict[str, tuple[Any, Any, str]] | None = None,
     lean_keep: frozenset[str] = frozenset(),
@@ -118,7 +127,11 @@ def bind_tool(
 
     ``defaults`` changes the default of an argument on this surface only,
     where its readers usually want the other value (a model reading
-    ``parts`` does not want the joined ``transcript`` too). ``lean_answer``
+    ``parts`` does not want the joined ``transcript`` too). ``fixed`` goes
+    further: the argument is not offered on this surface at all and always
+    takes the given value, for an option this surface cannot honour (the
+    whole text of a reading, which no MCP client takes in one result).
+    ``lean_answer``
     leaves out null, false and empty fields, and says so in the
     description.
 
@@ -137,10 +150,10 @@ def bind_tool(
             "remove its hand-written TOOL_SCOPES entry"
         )
 
-    unknown = sorted(set(defaults or {}) - set(op.params.model_fields))
+    unknown = sorted((set(defaults or {}) | set(fixed or {})) - set(op.params.model_fields))
     if unknown:
         raise RuntimeError(f"tool {name}: defaults for {unknown}, not arguments of {op_id}")
-    params = _parameters(op, defaults)
+    params = _parameters(op, defaults, fixed)
     for xname, (xtype, xdefault, xdoc) in (extras or {}).items():
         if xname in op.params.model_fields:
             raise RuntimeError(f"tool {name}: extra {xname} shadows an argument of {op_id}")
@@ -165,7 +178,7 @@ def bind_tool(
         token = kwargs.pop("token", "")
         org_id = kwargs.pop("org_id", "")
         shaping = {x: kwargs.pop(x) for x in (extras or {})}
-        arguments = op.parse(kwargs)
+        arguments = op.parse({**kwargs, **(fixed or {})})
         async with open_ctx(token, org_id) as ctx:
             result = await op(ctx, arguments)
         data = op.dump(result)
@@ -189,7 +202,9 @@ def bind_tool(
     )(tool)
     tool_scopes.TOOL_SCOPES[name] = None if op.access is ops.META else op.access
     TOOL_OPERATIONS[name] = op_id
+    if fixed:
+        TOOL_FIXED[name] = frozenset(fixed)
     return tool
 
 
-__all__ = ["LEAN_NOTE", "TOOL_OPERATIONS", "OpenCtx", "bind_tool", "lean"]
+__all__ = ["LEAN_NOTE", "TOOL_FIXED", "TOOL_OPERATIONS", "OpenCtx", "bind_tool", "lean"]

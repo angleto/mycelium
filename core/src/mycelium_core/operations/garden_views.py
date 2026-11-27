@@ -362,21 +362,22 @@ class GardenReviewGuardedIn(BaseModel):
 
 class GardenReviewSourceOut(BaseModel):
     """A note a proposal was generated from. ``body_truncated`` says the body
-    is the opening only, ``body_chars`` how long the whole is; read the rest
-    with garden_review_read_source."""
+    is the opening only, ``body_bytes`` how long the whole is; read the rest
+    with garden_review_read_source from ``next_cursor``."""
 
     note_id: uuid.UUID
     title: str | None = None
     body: str
     is_archived: bool
-    body_chars: int
+    body_bytes: int
     body_truncated: bool = False
+    next_cursor: str | None = None
 
 
 class GardenReviewReadIn(BaseModel):
-    """``full_text`` serves the sources whole, for a person reading in the
-    app. Leave it false from an agent: the sources then share a budget, and
-    each says whether it was cut."""
+    """``full_text`` serves every text whole, for a person reading in the
+    app. The MCP tool does not offer it: there the proposal, the original
+    and the sources share a budget, and each says whether it was cut."""
 
     note_id: uuid.UUID
     full_text: bool = False
@@ -387,17 +388,20 @@ class GardenReviewSourceIn(BaseModel):
     # ``source_note_id``, not ``source_id``: the MCP gateway shortens and
     # expands ids by key name, and ``source_id`` names a memory blob's source
     # (a part, a task) elsewhere on that surface.
-    source_note_id: uuid.UUID = Field(description="One of its sources.")
-    offset: int = Field(0, ge=0)
-    limit: int = Field(20000, ge=1, le=20000)
+    source_note_id: uuid.UUID = Field(
+        description="The text to continue: one of its sources, the original it revises, or the "
+        "proposal itself."
+    )
+    cursor: str | None = Field(
+        None, description="The next_cursor the previous read gave; none starts at the beginning."
+    )
 
 
 class GardenReviewSourceSliceOut(BaseModel):
     source_note_id: uuid.UUID
-    offset: int
     text: str
-    total_chars: int
-    next_offset: int | None = None
+    total_bytes: int
+    next_cursor: str | None = None
 
 
 class GardenReviewFindingIn(BaseModel):
@@ -462,6 +466,9 @@ class GardenReviewRevisionRef(BaseModel):
     origin_model_id: str | None = None
     review_state: str | None = None
     body: str | None = None
+    body_bytes: int | None = None
+    body_truncated: bool = False
+    next_cursor: str | None = None
 
 
 class GardenReviewReadingOut(BaseModel):
@@ -472,6 +479,9 @@ class GardenReviewReadingOut(BaseModel):
     note_id: uuid.UUID
     title: str | None = None
     body: str
+    body_bytes: int
+    body_truncated: bool = False
+    next_cursor: str | None = None
     humus_kind: str | None = None
     origin_model_id: str | None = None
     review_state: str

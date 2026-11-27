@@ -24,7 +24,7 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core import __version__
+from mycelium_core import __version__, text_window
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import embedder_available
 from mycelium_core.errors import AuthError, DomainError, ForbiddenError, NotFoundError
@@ -106,6 +106,7 @@ from mycelium_core.services.taxonomy import ClientInput
 from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
+from mycelium_mcp import read_budget
 from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, required_keys
 
 #: What Mycelium is and how to behave in it. Surface-NEUTRAL on purpose: it
@@ -6287,7 +6288,9 @@ def _note(
         out["transcript"] = transcript
     if parts is not None:
         out["parts"] = [(_note_part(p) if part_bodies else _note_part_outline(p)) for p in parts]
-    return out
+    # Every body above is spent from one budget, so no note answer is
+    # larger than a client takes (read_budget).
+    return read_budget.note(out)
 
 
 def _turn(t: NoteTurn) -> dict[str, Any]:
@@ -6459,7 +6462,9 @@ async def reorder_note_parts(
             note_id=uuid.UUID(note_id),
             part_ids=[uuid.UUID(p) for p in part_ids],
         )
-        return [_note_part(p) for p in rows]
+        # The parts come back with their bodies, so from the same budget as
+        # every other note read (read_budget); get_note_part reads on.
+        return read_budget.parts([_note_part(p) for p in rows])
 
 
 @mcp.tool()
@@ -6515,7 +6520,7 @@ async def restore_note_part(token: str, org_id: str, part_id: str) -> dict[str, 
             actor_id=user,
             part_id=uuid.UUID(part_id),
         )
-        return _note_part(part)
+        return read_budget.Budget().part(_note_part(part))
 
 
 @mcp.tool()
@@ -6570,13 +6575,27 @@ async def delete_note_part(token: str, org_id: str, part_id: str) -> dict[str, A
 
 
 @mcp.tool()
-async def get_note_part(token: str, org_id: str, part_id: str) -> dict[str, Any]:
+async def get_note_part(
+    token: str, org_id: str, part_id: str, cursor: str | None = None
+) -> dict[str, Any]:
     """Read a single note part by id: random access into a long note's
-    body without fetching its other parts. Returns the full part incl.
-    body and version (find the part_id via ``list_note_parts``)."""
+    body without fetching its other parts (find the part_id via
+    ``list_note_parts``). Returns the part with its body and version.
+
+    A body longer than 24,000 bytes comes in windows that end at the end of
+    a line: the answer then says ``body_truncated``, the whole
+    ``body_bytes`` and a ``next_cursor``; call again with that cursor for
+    the next window, until there is none. The windows joined in order are
+    the body exactly, and ``body_sha256`` is always the whole body's, the
+    digest a guarded edit echoes. If the part changed since the cursor was
+    given the answer is ``concurrency.stale_version``: read it again without
+    a cursor."""
     async with _tenant(token, org_id) as (s, org, _user):
         part = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
-        return _note_part(part)
+        start = text_window.resume(
+            cursor, part.body or "", version=part.version, operation="get_note_part"
+        )
+        return read_budget.Budget().part(_note_part(part), start=start)
 
 
 @mcp.tool()

@@ -198,7 +198,11 @@ async def get(ctx: OpCtx, p: NoteGetIn) -> NoteOut:
     For a long note pass ``include_part_bodies=false``: ``outline`` then
     lists each part's id, title, size, first line and digest, with no
     bodies, and you fetch only the parts you need. ``transcript`` is the
-    join of the part bodies: a reader of ``parts`` does not need it."""
+    join of the part bodies: a reader of ``parts`` does not need it.
+
+    Over MCP the texts of one answer share a budget of 24,000 bytes. A
+    part cut to fit says ``body_truncated`` and its whole ``body_bytes``,
+    and get_note_part with its ``next_cursor`` reads on."""
     n = await notes_svc.get_note(ctx.session, org_id=ctx.org_id, note_id=p.note_id)
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
     pid = await note_links_svc.primary_task_id_for_note(

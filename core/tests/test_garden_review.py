@@ -262,7 +262,7 @@ async def test_decline_keeps_the_node_emits_event_and_reopens(_wire: None) -> No
         with pytest.raises(NotFoundError):
             await nt.get_note(s, org_id=org, note_id=nid, include_deleted=True)
         reading = await review.read_node(s, org_id=org, actor_id=user, note_id=nid)
-        assert reading.review_state == "declined" and reading.body
+        assert reading.review_state == "declined" and reading.text.body
         # Bus reject event carries the model (for the D4 accept-ratio later).
         ev = (
             await s.execute(
@@ -900,5 +900,5 @@ async def test_an_agent_writes_a_pattern_with_its_own_model(_wire: None) -> None
         )
         assert res.created and res.model_id == "external:claude-test"
         reading = await review.read_node(s, org_id=org, actor_id=user, note_id=res.note_id)
-        assert reading.body == "Two notes about soil, and what recurs in both."
+        assert reading.text.body == "Two notes about soil, and what recurs in both."
         assert reading.review_state == "proposed"

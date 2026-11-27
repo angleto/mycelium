@@ -198,3 +198,43 @@ contract, not a drive-by, and it is recorded as open.
 **Cap `get_note`'s part bodies by default.** A caller that asks to read a note
 is asking for the note; the outline escape hatch (`include_part_bodies=False`)
 already exists and is documented.
+
+## Amendment (2026-11-27, task dae6858d): note text is read by windows
+
+The last rejection above did not survive contact with a single-part note.
+On 2026-11-25 three notes of 95 to 137 kB could not be read from Claude Code
+at all: each was one part, so the outline led to a `get_note_part` that
+returned the same 120 kB, and the client refused the result. The outline is
+an escape from many parts, not from one long one, and a part may be up to
+`note_body_max_bytes` (1 MiB). `garden_review_read` had the same hole one
+level down: it budgeted its sources and returned the proposal and the
+original it revises whole.
+
+**Decision.** Every note text an MCP answer carries is spent from one budget
+of 24,000 UTF-8 bytes (`mycelium_core/text_window.py`), in the order the
+answer lists the texts. A text the budget does not hold whole is cut at the
+end of a line (on a character boundary when a single line is longer than
+the budget) and says so: `body_truncated`, the whole `body_bytes`, and a
+`next_cursor`. `get_note_part` with that cursor returns the next window, and
+the windows joined are the body exactly. A cursor carries a prefix of the
+body's SHA-256; asked of a body that changed since, it is
+`concurrency.stale_version` with the current version, so two revisions are
+never spliced. `garden_review_read` shares the same budget among the
+proposal, the original and the sources, and `garden_review_read_source`
+continues any of the three from a cursor; its `full_text` is no longer
+offered on MCP.
+
+This is not the cap rejected above, and the reason given there is why.
+That cap would have answered a request for the note with part of it and no
+way on. A window answers with the note, a piece at a time, and nothing is
+out of reach. The operations still return whole bodies; the window is the
+MCP surface's (`mycelium_mcp/read_budget.py`), and the web reads whole.
+
+**Limits.** The budget counts the text's bytes, not its JSON: a newline or
+a quote is two bytes on the wire and a control character six, which the
+margin to the client's limit absorbs for markdown and not for text made of
+nothing else. The checks attached to a proposal are outside the budget: each
+is capped where it is written (a 2,000-character summary, 50 findings), but
+their number is not. Task text is not covered yet: `work_digest`, `get_task` with
+`full_description` and the brief that `task_pull` delivers are still whole
+(task 0fa73a5c).

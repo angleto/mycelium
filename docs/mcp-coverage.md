@@ -101,7 +101,7 @@ over-fetch the org table and filter in its head.
 | `garden_review_for_source` | The notes generated from this note (distillations, patterns, |
 | `garden_review_pending` | The review inbox (ADR-0043): generated notes awaiting a person's |
 | `garden_review_read` | Read a generated note in full, pending, declined or approved, with |
-| `garden_review_read_source` | Read one source of a proposal in windows of up to 20,000 characters, |
+| `garden_review_read_source` | Read the rest of a text garden_review_read cut, a window of up to |
 | `garden_review_reject` | Decline a generated note (ADR-0043, ADR-0075): it stays out of the |
 | `garden_review_reject_on_decision` | Reject a generated note that a PERSON has decided to reject, on |
 | `garden_review_rejected` | The proposals a person declined (ADR-0075), most recently declined |

@@ -68,8 +68,16 @@ async def test_chunked_append_byte_integrity() -> None:
         assert res["appended_chars"] == len(chunks[idx])
         version = res["version"]
 
+    # Read back as an agent reads a body this long: window by window, each
+    # within the read budget, until there is no cursor.
     part = await get_note_part(token=token, org_id=org, part_id=part_id)
-    assert part["body"] == full  # byte-for-byte reassembly, no separators
+    pieces = [part["body"]]
+    while part.get("next_cursor"):
+        part = await get_note_part(
+            token=token, org_id=org, part_id=part_id, cursor=part["next_cursor"]
+        )
+        pieces.append(part["body"])
+    assert "".join(pieces) == full  # byte-for-byte reassembly, no separators
 
 
 async def test_chunked_append_idempotent_replay() -> None:

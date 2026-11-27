@@ -461,9 +461,10 @@ async def test_an_agent_reads_a_long_source_within_budget_and_pages_the_rest(
     """On production one 93,218-character source made a reading 96,184
     characters, which a client would not take as one result. An agent's
     reading now carries the source's opening, says it was cut and how long
-    the whole is, and the rest is read by windows; the person's reading
-    (``full_text``) is whole. A note that is not one of the proposal's
-    sources is not readable through this door."""
+    the whole is in bytes, and the rest is read by windows from a cursor,
+    each within the budget and ending at the end of a line; the person's
+    reading (``full_text``) is whole. A note that is not one of the
+    proposal's sources is not readable through this door."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h, org, user = await _signup(c)
@@ -494,7 +495,7 @@ async def test_an_agent_reads_a_long_source_within_budget_and_pages_the_rest(
                 origin_model_id="small",
             )
             src_id, other_id, nid = str(src.id), str(other.id), str(res.distilled_note_id)
-        total = len(long_body)
+        total = len(long_body.encode("utf-8"))
         assert total > 90_000
 
         a = await _assistant(c, h)
@@ -502,26 +503,28 @@ async def test_an_agent_reads_a_long_source_within_budget_and_pages_the_rest(
         assert agent.status_code == 200, agent.text
         assert len(agent.text) < 30_000, len(agent.text)
         source = agent.json()["sources"][0]
-        assert source["body_truncated"] is True and source["body_chars"] == total
-        assert long_body.startswith(source["body"])
+        assert source["body_truncated"] is True and source["body_bytes"] == total
+        assert long_body.startswith(source["body"]) and source["body"].endswith("\n")
 
         person = (
             await c.get(f"/garden/review/nodes/{nid}", headers=h, params={"full_text": True})
         ).json()["sources"][0]
-        assert person["body_truncated"] is False and len(person["body"]) == total
+        assert person["body_truncated"] is False and person["body"] == long_body
 
-        pieces, offset = [], 0
-        while offset is not None:
+        pieces, cursor = [source["body"]], source["next_cursor"]
+        while cursor is not None:
             window = await c.get(
                 f"/garden/review/nodes/{nid}/sources/{src_id}",
                 headers=a,
-                params={"offset": offset},
+                params={"cursor": cursor},
             )
             assert window.status_code == 200, window.text
-            pieces.append(window.json()["text"])
-            offset = window.json()["next_offset"]
-        assert "".join(pieces) == person["body"]
-        assert len(pieces) == -(-total // 20_000)
+            got = window.json()
+            assert len(got["text"].encode("utf-8")) <= 24_000
+            assert got["text"].endswith("\n")
+            pieces.append(got["text"])
+            cursor = got.get("next_cursor")
+        assert "".join(pieces) == long_body
 
         stranger = await c.get(f"/garden/review/nodes/{nid}/sources/{other_id}", headers=a)
         assert stranger.status_code == 404

@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from mycelium_core import text_window
 from mycelium_core.config import get_settings
 from mycelium_core.mcp_scopes import HUMAN_ONLY
 from mycelium_core.models.garden_health import GardenHealthDaily
@@ -664,13 +665,6 @@ async def candidates(ctx: OpCtx, p: GardenCandidatesIn) -> GardenCandidatesOut:
 # Review of generated text (ADR-0043)
 # --------------------------------------------------------------------------
 
-#: The sources' share of one agent reading, in characters, taken together.
-#: Measured on production 2026-11-24: one 93,218-character source made the
-#: whole reading 96,184 characters, which Claude Code would not take as one
-#: result. 24,000 leaves the proposal (at most 20,000 by the external cap),
-#: the checks and the envelope inside a result a client accepts.
-_SOURCE_BUDGET = 24_000
-
 
 @operation(
     "garden.review.pending",
@@ -899,20 +893,24 @@ async def review_read(ctx: OpCtx, p: GardenReviewReadIn) -> GardenReviewReadingO
     as something the person wrote; only the person's approval makes it a
     note.
 
-    The sources share a budget of about 24,000 characters; a source cut to
-    fit says ``body_truncated`` and its ``body_chars``. Read the rest with
+    The proposal, the original it revises and the sources share a budget
+    of 24,000 bytes; a text cut to fit says ``body_truncated``, its whole
+    ``body_bytes`` and a ``next_cursor``. Read the rest with
     garden_review_read_source before checking a claim against it."""
     r = await review_svc.read_node(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.actor_id,
         note_id=p.note_id,
-        source_budget=None if p.full_text else _SOURCE_BUDGET,
+        budget=None if p.full_text else text_window.READ_BUDGET_BYTES,
     )
     return GardenReviewReadingOut(
         note_id=r.note_id,
         title=r.title,
-        body=r.body,
+        body=r.text.body,
+        body_bytes=r.text.body_bytes,
+        body_truncated=r.text.body_truncated,
+        next_cursor=r.text.next_cursor,
         humus_kind=r.humus_kind,
         origin_model_id=r.origin_model_id,
         review_state=r.review_state,
@@ -923,10 +921,11 @@ async def review_read(ctx: OpCtx, p: GardenReviewReadIn) -> GardenReviewReadingO
             GardenReviewSourceOut(
                 note_id=x.note_id,
                 title=x.title,
-                body=x.body,
+                body=x.text.body,
                 is_archived=x.is_archived,
-                body_chars=x.body_chars,
-                body_truncated=x.body_truncated,
+                body_bytes=x.text.body_bytes,
+                body_truncated=x.text.body_truncated,
+                next_cursor=x.text.next_cursor,
             )
             for x in r.sources
         ],
@@ -950,7 +949,10 @@ async def review_read(ctx: OpCtx, p: GardenReviewReadIn) -> GardenReviewReadingO
                 title=r.revises.title,
                 origin_model_id=r.revises.origin_model_id,
                 review_state=r.revises.review_state,
-                body=r.revises.body,
+                body=r.revises.text.body if r.revises.text else None,
+                body_bytes=r.revises.text.body_bytes if r.revises.text else None,
+                body_truncated=bool(r.revises.text and r.revises.text.body_truncated),
+                next_cursor=r.revises.text.next_cursor if r.revises.text else None,
             )
             if r.revises
             else None
@@ -976,24 +978,25 @@ async def review_read(ctx: OpCtx, p: GardenReviewReadIn) -> GardenReviewReadingO
     result=GardenReviewSourceSliceOut,
 )
 async def review_read_source(ctx: OpCtx, p: GardenReviewSourceIn) -> GardenReviewSourceSliceOut:
-    """Read one source of a proposal in windows of up to 20,000 characters,
-    from ``offset``: the rest of a source garden_review_read cut. Call again
-    with ``next_offset`` until it is null."""
+    """Read the rest of a text garden_review_read cut, a window of up to
+    24,000 bytes at a time: pass the ``next_cursor`` it gave and the text's
+    id (a source, the original it revises, or the proposal itself), and
+    call again with each ``next_cursor`` until there is none. If the text
+    changed since the cursor was given, the answer is
+    ``concurrency.stale_version``: read it again from garden_review_read."""
     sl = await review_svc.read_source(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.actor_id,
         note_id=p.note_id,
         source_id=p.source_note_id,
-        offset=p.offset,
-        limit=p.limit,
+        cursor=p.cursor,
     )
     return GardenReviewSourceSliceOut(
         source_note_id=sl.source_id,
-        offset=sl.offset,
         text=sl.text,
-        total_chars=sl.total_chars,
-        next_offset=sl.next_offset,
+        total_bytes=sl.total_bytes,
+        next_cursor=sl.next_cursor,
     )
 
 

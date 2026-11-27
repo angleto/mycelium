@@ -4887,6 +4887,10 @@ export interface paths {
          *     lists each part's id, title, size, first line and digest, with no
          *     bodies, and you fetch only the parts you need. ``transcript`` is the
          *     join of the part bodies: a reader of ``parts`` does not need it.
+         *
+         *     Over MCP the texts of one answer share a budget of 24,000 bytes. A
+         *     part cut to fit says ``body_truncated`` and its whole ``body_bytes``,
+         *     and get_note_part with its ``next_cursor`` reads on.
          */
         get: operations["get_note_notes__note_id__get"];
         put?: never;
@@ -6843,8 +6847,9 @@ export interface paths {
          *     as something the person wrote; only the person's approval makes it a
          *     note.
          *
-         *     The sources share a budget of about 24,000 characters; a source cut to
-         *     fit says ``body_truncated`` and its ``body_chars``. Read the rest with
+         *     The proposal, the original it revises and the sources share a budget
+         *     of 24,000 bytes; a text cut to fit says ``body_truncated``, its whole
+         *     ``body_bytes`` and a ``next_cursor``. Read the rest with
          *     garden_review_read_source before checking a claim against it.
          */
         get: operations["garden_review_read_garden_review_nodes__note_id__get"];
@@ -6865,9 +6870,12 @@ export interface paths {
         };
         /**
          * Garden Review Read Source
-         * @description Read one source of a proposal in windows of up to 20,000 characters,
-         *     from ``offset``: the rest of a source garden_review_read cut. Call again
-         *     with ``next_offset`` until it is null.
+         * @description Read the rest of a text garden_review_read cut, a window of up to
+         *     24,000 bytes at a time: pass the ``next_cursor`` it gave and the text's
+         *     id (a source, the original it revises, or the proposal itself), and
+         *     call again with each ``next_cursor`` until there is none. If the text
+         *     changed since the cursor was given, the answer is
+         *     ``concurrency.stale_version``: read it again from garden_review_read.
          */
         get: operations["garden_review_read_source_garden_review_nodes__note_id__sources__source_note_id__get"];
         put?: never;
@@ -12378,6 +12386,15 @@ export interface components {
             title?: string | null;
             /** Body */
             body: string;
+            /** Body Bytes */
+            body_bytes: number;
+            /**
+             * Body Truncated
+             * @default false
+             */
+            body_truncated?: boolean;
+            /** Next Cursor */
+            next_cursor?: string | null;
             /** Humus Kind */
             humus_kind?: string | null;
             /** Origin Model Id */
@@ -12501,12 +12518,21 @@ export interface components {
             review_state?: string | null;
             /** Body */
             body?: string | null;
+            /** Body Bytes */
+            body_bytes?: number | null;
+            /**
+             * Body Truncated
+             * @default false
+             */
+            body_truncated?: boolean;
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /**
          * GardenReviewSourceOut
          * @description A note a proposal was generated from. ``body_truncated`` says the body
-         *     is the opening only, ``body_chars`` how long the whole is; read the rest
-         *     with garden_review_read_source.
+         *     is the opening only, ``body_bytes`` how long the whole is; read the rest
+         *     with garden_review_read_source from ``next_cursor``.
          */
         GardenReviewSourceOut: {
             /**
@@ -12520,13 +12546,15 @@ export interface components {
             body: string;
             /** Is Archived */
             is_archived: boolean;
-            /** Body Chars */
-            body_chars: number;
+            /** Body Bytes */
+            body_bytes: number;
             /**
              * Body Truncated
              * @default false
              */
             body_truncated?: boolean;
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** GardenReviewSourceSliceOut */
         GardenReviewSourceSliceOut: {
@@ -12535,14 +12563,12 @@ export interface components {
              * Format: uuid
              */
             source_note_id: string;
-            /** Offset */
-            offset: number;
             /** Text */
             text: string;
-            /** Total Chars */
-            total_chars: number;
-            /** Next Offset */
-            next_offset?: number | null;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -33252,8 +33278,8 @@ export interface operations {
     garden_review_read_source_garden_review_nodes__note_id__sources__source_note_id__get: {
         parameters: {
             query?: {
-                offset?: number;
-                limit?: number;
+                /** @description The next_cursor the previous read gave; none starts at the beginning. */
+                cursor?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -33264,7 +33290,7 @@ export interface operations {
             path: {
                 /** @description The proposal. */
                 note_id: string;
-                /** @description One of its sources. */
+                /** @description The text to continue: one of its sources, the original it revises, or the proposal itself. */
                 source_note_id: string;
             };
             cookie?: never;

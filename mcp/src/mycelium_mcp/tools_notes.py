@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mycelium_mcp import read_budget
 from mycelium_mcp.op_context import op_ctx
 from mycelium_mcp.op_tools import bind_tool
 from mycelium_mcp.server import mcp
@@ -25,11 +26,11 @@ def _note(data: dict[str, Any]) -> dict[str, Any]:
     if outline is not None:
         data["parts"] = outline
     data["parts"] = [_without_note_id(p) for p in data.get("parts") or []]
-    return data
+    return read_budget.note(data)
 
 
 def _parts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_without_note_id(p) for p in rows]
+    return read_budget.parts([_without_note_id(p) for p in rows])
 
 
 def _page(data: dict[str, Any], fields: list[str] | None = None) -> dict[str, Any]:
@@ -38,6 +39,7 @@ def _page(data: dict[str, Any], fields: list[str] | None = None) -> dict[str, An
     if fields is not None:
         keep = set(fields) | {"id"}
         data["items"] = [{k: v for k, v in row.items() if k in keep} for row in data["items"]]
+    data["items"] = read_budget.note_rows(data["items"])
     return data
 
 

@@ -83,7 +83,12 @@ _BINDINGS: tuple[tuple[str, str, Any], ...] = (
 
 #: The generated tool functions by name, for Python callers that used to
 #: import the hand-written ones from ``server``.
+#: Arguments a garden tool does not offer on this surface. A reading's whole
+#: text is the person's, in the app: no MCP client takes it in one result, and
+#: the windows of garden_review_read_source reach all of it.
+_FIXED: dict[str, dict[str, Any]] = {"garden_review_read": {"full_text": False}}
+
 TOOLS: dict[str, Any] = {
-    name: bind_tool(mcp, _op_ctx, op_id, name=name, present=present)
+    name: bind_tool(mcp, _op_ctx, op_id, name=name, present=present, fixed=_FIXED.get(name))
     for name, op_id, present in _BINDINGS
 }
