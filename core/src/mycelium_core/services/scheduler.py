@@ -79,7 +79,9 @@ from mycelium_core.services.rbac import require_role
 from mycelium_core.services.slack import slack_minutes
 
 # Fixed, stable set of ``Schedule.unassignable_reason`` strings (English,
-# enum-ish; documented in docs/adr/0025 P2). Never free-form prose.
+# enum-ish). Never free-form prose. This list is where the set is written
+# down (ADR-0025 names the mechanism, not the values), and the SPA labels
+# each one under ``scheduler.unreason``.
 #  - no_capable_agent: no enabled llm_agent advertises every capability
 #    the task requires (or there is no enabled llm_agent at all).
 #  - budget_exhausted: every eligible enabled agent would exceed its
@@ -90,7 +92,14 @@ from mycelium_core.services.slack import slack_minutes
 #    flags a visible dispatch gap, it never silently reroutes.
 _UNASSIGNABLE_NO_CAPABLE_AGENT = "no_capable_agent"
 _UNASSIGNABLE_BUDGET_EXHAUSTED = "budget_exhausted"
+#  - estimate_missing: the task has no estimate. Admission checks each
+#    agent's credit budget against effort times rate, and with no effort
+#    that check passes whatever the task costs; placing it would also hold
+#    a slot for no time. Before 2026-11-27 (task 238a76da) such a task got
+#    no executor and no flag, so the dispatch tick never took it and
+#    nothing said why.
 _UNASSIGNABLE_ASSIGNEE_INACTIVE = "assignee_inactive"
+_UNASSIGNABLE_ESTIMATE_MISSING = "estimate_missing"
 
 
 # A task with subtasks in scope enters the CPM graph as two zero-length
@@ -1164,7 +1173,7 @@ class Scheduler:
                     )
                 sched[nid] = (n.ss, n.se)
                 return
-            if n.kind is ExecKind.llm_agent and n.duration_min > 0:
+            if n.kind is ExecKind.llm_agent and (n.duration_min > 0 or n.estimate_missing):
                 await _place_on_agent(nid, n, pin)
                 return
             # On no timeline: no estimate, a milestone, or nobody assigned
@@ -1192,6 +1201,9 @@ class Scheduler:
                 # its own reason: "no_capable_agent" would send the owner
                 # looking for a missing capability tag.
                 _gap(_UNASSIGNABLE_ASSIGNEE_INACTIVE)
+                return
+            if ln.estimate_missing:
+                _gap(_UNASSIGNABLE_ESTIMATE_MISSING)
                 return
             elig = _eligible_agents(ln)
             if not elig:

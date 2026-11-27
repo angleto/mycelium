@@ -22,6 +22,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests_helpers import seed_ai_assistant_identity
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.dependency import DependencyType
@@ -376,3 +377,32 @@ async def test_nested_parent_and_a_start_dependency_read_the_right_end() -> None
     # Neither parent has an estimate, and nothing is missing: a parent's
     # effort is its subtasks'.
     assert e.estimate_missing is False and e.dates_lower_bound is False
+
+
+async def test_an_agent_task_with_no_estimate_is_a_flagged_dispatch_gap() -> None:
+    """An agent task with no estimate cannot be admitted: admission checks
+    the agent's credit budget against effort times rate, and with no effort
+    that check would pass whatever the task costs. It is a dispatch gap with
+    its own reason, which tells the owner what to do about it.
+
+    Before the change (task 238a76da): the task went off every timeline
+    with no executor and was NOT flagged, so the dispatch tick never took
+    it and nothing said why; this test failed on the first assertion.
+    """
+    org, user = await _workspace("AGU")
+    async with tenant_session(str(org), str(user)) as s:
+        ai = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
+        task = await tasks.create_task(
+            s, org_id=org, actor_id=user, title="For the agent", assignee_id=ai.id
+        )
+        summary = await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
+        row = await sch.get_schedule(s, org_id=org, task_id=task.id)
+
+    assert row is not None
+    assert row.unassignable is True
+    assert row.unassignable_reason == "estimate_missing"
+    assert row.estimate_missing is True
+    assert row.assigned_executor_id is None
+    assert row.scheduled_start is None
+    assert summary.unassignable_count == 1
+    assert summary.unestimated_count == 1

@@ -2058,6 +2058,7 @@ export const it: Catalog = {
       no_capable_agent: 'nessun agente idoneo',
       budget_exhausted: 'budget esaurito',
       assignee_inactive: 'assegnatario disattivato',
+      estimate_missing: 'senza stima: stimalo per assegnarlo',
       none: 'non assegnabile',
     },
     legendParent:

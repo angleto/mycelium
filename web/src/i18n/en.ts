@@ -2063,6 +2063,7 @@ export const en = {
       no_capable_agent: 'no capable agent',
       budget_exhausted: 'budget exhausted',
       assignee_inactive: 'assignee deactivated',
+      estimate_missing: 'no estimate: estimate it to dispatch it',
       none: 'unassignable',
     },
     legendParent:
