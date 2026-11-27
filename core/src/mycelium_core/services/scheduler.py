@@ -48,7 +48,7 @@ import datetime as dt
 import hashlib
 import heapq
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -102,11 +102,15 @@ _UNASSIGNABLE_ASSIGNEE_INACTIVE = "assignee_inactive"
 _UNASSIGNABLE_ESTIMATE_MISSING = "estimate_missing"
 
 
-# A task with subtasks in scope enters the CPM graph as two zero-length
-# nodes, its start and its finish, with ids derived from its own. The task
-# itself is not a node: its row is read off these two and its subtasks.
+# A task with subtasks in scope enters the CPM graph as three zero-length
+# nodes with ids derived from its own: its start (the bound its own
+# predecessors put on its subtasks), its first (the instant its first
+# subtask starts, which is what a dependency out of its start reads) and
+# its finish. The task itself is not a node: its row is read off these and
+# its subtasks.
 _ROLE_TASK = "task"
 _ROLE_START = "start"
+_ROLE_FIRST = "first"
 _ROLE_FINISH = "finish"
 
 
@@ -427,6 +431,12 @@ class _Edge:
     successor_id: uuid.UUID
     type: DependencyType
     lag_working_minutes: int
+    # One of the edges into a parent's ``first`` node, which takes the
+    # EARLIEST of them rather than the latest: a span starts when its first
+    # subtask does. Such an edge says nothing about its predecessor's latest
+    # dates (any one subtask may start late, as long as another starts in
+    # time), so the backward pass does not read it.
+    earliest: bool = False
 
 
 @dataclass
@@ -435,13 +445,19 @@ class _PlanGraph:
     # Parent -> its direct subtasks in scope, each list in id order.
     children: dict[uuid.UUID, list[uuid.UUID]]
     start_of: dict[uuid.UUID, uuid.UUID]
+    first_of: dict[uuid.UUID, uuid.UUID]
     finish_of: dict[uuid.UUID, uuid.UUID]
     edges: list[_Edge]
     dependencies_ignored: int
 
     @property
     def node_ids(self) -> list[uuid.UUID]:
-        return [*self.leaves, *self.start_of.values(), *self.finish_of.values()]
+        return [
+            *self.leaves,
+            *self.start_of.values(),
+            *self.first_of.values(),
+            *self.finish_of.values(),
+        ]
 
     def leaf_descendants(self, parent: uuid.UUID) -> list[uuid.UUID]:
         out: list[uuid.UUID] = []
@@ -450,6 +466,62 @@ class _PlanGraph:
             for c in self.children[stack.pop()]:
                 (stack if c in self.children else out).append(c)
         return out
+
+
+def _reachable(
+    adj: Mapping[uuid.UUID, Iterable[uuid.UUID]], srcs: Iterable[uuid.UUID]
+) -> set[uuid.UUID]:
+    seen = set(srcs)
+    stack = list(seen)
+    while stack:
+        for nxt in adj.get(stack.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
+
+
+def _components(ids: list[uuid.UUID], edges: Sequence[_Edge]) -> dict[uuid.UUID, int]:
+    """Strongly connected components (Tarjan, iterative): node -> index."""
+    succ: dict[uuid.UUID, list[uuid.UUID]] = {i: [] for i in ids}
+    for e in edges:
+        succ[e.predecessor_id].append(e.successor_id)
+    index: dict[uuid.UUID, int] = {}
+    low: dict[uuid.UUID, int] = {}
+    comp: dict[uuid.UUID, int] = {}
+    stack: list[uuid.UUID] = []
+    on_stack: set[uuid.UUID] = set()
+    counter = 0
+    for root in ids:
+        if root in index:
+            continue
+        work = [(root, 0)]
+        while work:
+            v, i = work.pop()
+            if i == 0:
+                index[v] = low[v] = counter
+                counter += 1
+                stack.append(v)
+                on_stack.add(v)
+            if i < len(succ[v]):
+                work.append((v, i + 1))
+                w = succ[v][i]
+                if w not in index:
+                    work.append((w, 0))
+                elif w in on_stack:
+                    low[v] = min(low[v], index[w])
+                continue
+            if low[v] == index[v]:
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    comp[w] = index[v]
+                    if w == v:
+                        break
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[v])
+    return comp
 
 
 def _reaches(adj: dict[uuid.UUID, set[uuid.UUID]], src: uuid.UUID, dst: uuid.UUID) -> bool:
@@ -467,18 +539,23 @@ def _reaches(adj: dict[uuid.UUID, set[uuid.UUID]], src: uuid.UUID, dst: uuid.UUI
 
 
 def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
-    """The CPM graph of a scope: its leaf tasks, and each parent as a start
-    node and a finish node around its subtasks.
+    """The CPM graph of a scope: its leaf tasks, and each parent as three
+    nodes around its subtasks.
 
-    A parent P is in the graph as ``start(P)`` and ``finish(P)``. Every
-    direct subtask C starts no earlier than ``start(P)`` (SS 0) and
-    ``finish(P)`` is no earlier than C's finish (FF 0), so P spans its
-    subtasks and its own estimate is never scheduled: measured 2026-11-26,
-    the one critical task on production was an epic whose 624 h estimate
-    was added on top of its subtasks. A dependency touching P attaches to
-    the end of P it names: FS and SS into P hold P's start, FF and SF into
-    P hold its finish; FS and FF out of P read its finish, SS and SF read
-    its start. This is exact. The alternative of copying each dependency
+    A parent P is in the graph as ``start(P)``, ``first(P)`` and
+    ``finish(P)``. Every direct subtask C starts no earlier than
+    ``start(P)`` (SS 0) and ``finish(P)`` is no earlier than C's finish
+    (FF 0), so P spans its subtasks and its own estimate is never
+    scheduled: measured 2026-11-26, the one critical task on production was
+    an epic whose 624 h estimate was added on top of its subtasks.
+    ``first(P)`` is the earliest start among P's leaf subtasks, which is
+    when P really starts: ``start(P)`` is only the bound P's own
+    predecessors put on them, and until 2026-11-27 an SS out of P read it,
+    so a successor could start before P when every subtask was held later
+    (verification of be2fff43). A dependency touching P attaches to the end
+    of P it names: FS and SS into P hold ``start(P)``, FF and SF into P hold
+    ``finish(P)``; FS and FF out of P read ``finish(P)``, SS and SF read
+    ``first(P)``. This is exact. The alternative of copying each dependency
     onto every subtask is exact for FS into and out of a parent but
     over-constrains SS out of it and FF into it (every subtask would be
     held, where the span only needs its first or last one).
@@ -506,6 +583,7 @@ def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
         if p is not None and p != t.id and p in by_id:
             children.setdefault(p, []).append(t.id)
     start_of = {p: uuid.uuid5(p, _ROLE_START) for p in children}
+    first_of = {p: uuid.uuid5(p, _ROLE_FIRST) for p in children}
     finish_of = {p: uuid.uuid5(p, _ROLE_FINISH) for p in children}
 
     def entry(tid: uuid.UUID) -> uuid.UUID:
@@ -513,6 +591,14 @@ def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
 
     def exit_(tid: uuid.UUID) -> uuid.UUID:
         return finish_of.get(tid, tid)
+
+    def leaves_under(parent: uuid.UUID) -> list[uuid.UUID]:
+        out: list[uuid.UUID] = []
+        stack = [parent]
+        while stack:
+            for c in children[stack.pop()]:
+                (stack if c in children else out).append(c)
+        return sorted(out, key=str)
 
     structural = [
         e
@@ -522,10 +608,10 @@ def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
             _Edge(start_of[p], entry(c), DependencyType.SS, 0),
             _Edge(exit_(c), finish_of[p], DependencyType.FF, 0),
         )
-    ]
+    ] + [_Edge(start_of[p], first_of[p], DependencyType.SS, 0) for p in children]
     declared = [
         _Edge(
-            entry(d.predecessor_id)
+            first_of.get(d.predecessor_id, d.predecessor_id)
             if d.type in (DependencyType.SS, DependencyType.SF)
             else exit_(d.predecessor_id),
             entry(d.successor_id)
@@ -537,30 +623,110 @@ def _plan_graph(tasks: list[Task], deps: list[TaskDependency]) -> _PlanGraph:
         for d in sorted(deps, key=lambda x: str(x.id))
     ]
     leaves = sorted((t.id for t in tasks if t.id not in children), key=str)
+    if not children:
+        return _PlanGraph(
+            leaves=leaves,
+            children=children,
+            start_of=start_of,
+            first_of=first_of,
+            finish_of=finish_of,
+            edges=declared,
+            dependencies_ignored=0,
+        )
+    ignored = 0
+
+    # Which subtasks can be the first one. A subtask that comes after a
+    # successor of P's start cannot start before P does, so leaving it out
+    # of P's earliest changes nothing, and keeping it would close a loop
+    # (subtask -> first(P) -> successor -> subtask) out of a plan that has
+    # none: "the review starts with the epic, step 3 of the epic waits for
+    # the review" is an ordinary plan. That holds for lags of zero or
+    # more; a negative lag on such a chain could let the subtask start
+    # earlier than P's first, and it is not read here. When every subtask
+    # of P comes after one of those successors the dependencies say P
+    # starts after it starts, which is a contradiction: the dependency
+    # that makes it so is left out and counted, as below.
+    adj: dict[uuid.UUID, dict[uuid.UUID, int]] = {}
+
+    def link(e: _Edge, by: int) -> None:
+        out = adj.setdefault(e.predecessor_id, {})
+        out[e.successor_id] = out.get(e.successor_id, 0) + by
+        if out[e.successor_id] == 0:
+            del out[e.successor_id]
+
+    for e in (*structural, *declared):
+        link(e, 1)
+    out_of_first: dict[uuid.UUID, list[_Edge]] = {}
+    for e in declared:
+        out_of_first.setdefault(e.predecessor_id, []).append(e)
+    dropped: set[int] = set()
+    earliest: list[_Edge] = []
+    for p in sorted(children, key=str):
+        under = leaves_under(p)
+        later: set[uuid.UUID] = set()
+        for e in out_of_first.get(first_of[p], []):
+            after = _reachable(adj, [e.successor_id]) & set(under)
+            if later | after >= set(under):
+                dropped.add(id(e))
+                link(e, -1)
+                ignored += 1
+                continue
+            later |= after
+        earliest += [
+            _Edge(c, first_of[p], DependencyType.SS, 0, earliest=True)
+            for c in under
+            if c not in later
+        ]
+    declared = [e for e in declared if id(e) not in dropped]
     graph = _PlanGraph(
         leaves=leaves,
         children=children,
         start_of=start_of,
+        first_of=first_of,
         finish_of=finish_of,
-        edges=structural + declared,
-        dependencies_ignored=0,
+        edges=structural + earliest + declared,
+        dependencies_ignored=ignored,
     )
-    if not children:
-        return graph
     try:
         _topo(graph.node_ids, graph.edges)
         return graph
     except DomainError:
         pass
-    adj: dict[uuid.UUID, set[uuid.UUID]] = {}
+    # A loop through the first of two parents is not by itself a
+    # contradiction: an edge into a first says "no later than", not
+    # "after", so "step 1 of A leads to the start of B, a step of B leads
+    # back to a step of A" holds as long as either span has another step to
+    # start with. The passes need an order, though, so inside a loop a
+    # candidate first is dropped wherever its parent keeps one from outside
+    # the loop. That candidate may in fact be the earliest, and then the
+    # span's first reads later than it is; dropping a declared dependency
+    # instead, which is what the loop would otherwise cost, loses a
+    # constraint somebody wrote. Only when no candidate is left outside does
+    # the loop stand, and then a declared dependency goes below.
+    component = _components(graph.node_ids, structural + earliest + declared)
+    by_first: dict[uuid.UUID, list[_Edge]] = {}
+    for e in earliest:
+        by_first.setdefault(e.successor_id, []).append(e)
+    earliest = []
+    for f, into in by_first.items():
+        outside = [e for e in into if component[e.predecessor_id] != component[f]]
+        earliest += outside or into
+    structural += earliest
+    graph.edges = structural + declared
+    try:
+        _topo(graph.node_ids, graph.edges)
+        return graph
+    except DomainError:
+        pass
+    plain: dict[uuid.UUID, set[uuid.UUID]] = {}
     for e in structural:
-        adj.setdefault(e.predecessor_id, set()).add(e.successor_id)
+        plain.setdefault(e.predecessor_id, set()).add(e.successor_id)
     kept: list[_Edge] = []
     for e in declared:
-        if _reaches(adj, e.successor_id, e.predecessor_id):
+        if _reaches(plain, e.successor_id, e.predecessor_id):
             graph.dependencies_ignored += 1
             continue
-        adj.setdefault(e.predecessor_id, set()).add(e.successor_id)
+        plain.setdefault(e.predecessor_id, set()).add(e.successor_id)
         kept.append(e)
     graph.edges = structural + kept
     return graph
@@ -855,16 +1021,21 @@ class Scheduler:
                 kind=n_kind,
                 estimate_missing=missing,
             )
-        for parent_id, vid in [*graph.start_of.items(), *graph.finish_of.items()]:
-            t = by_task[parent_id]
-            nodes[vid] = _Node(
-                task=t,
-                assignee=first_assignee.get(parent_id) or task_human_user.get(parent_id),
-                duration_min=0,
-                terminal=False,
-                kind=task_kind.get(parent_id, t.executor_kind),
-                role=_ROLE_START if vid == graph.start_of[parent_id] else _ROLE_FINISH,
-            )
+        for role, of in (
+            (_ROLE_START, graph.start_of),
+            (_ROLE_FIRST, graph.first_of),
+            (_ROLE_FINISH, graph.finish_of),
+        ):
+            for parent_id, vid in of.items():
+                t = by_task[parent_id]
+                nodes[vid] = _Node(
+                    task=t,
+                    assignee=first_assignee.get(parent_id) or task_human_user.get(parent_id),
+                    duration_min=0,
+                    terminal=False,
+                    kind=task_kind.get(parent_id, t.executor_kind),
+                    role=role,
+                )
         graph_ids = graph.node_ids
 
         incoming: dict[uuid.UUID, list[_Edge]] = {i: [] for i in graph_ids}
@@ -895,6 +1066,15 @@ class Scheduler:
                     lag = d.lag_working_minutes
                     bounds.append(ref if lag == 0 else pcal.add(ref, lag))
                 n.es = n.ef = max(bounds, default=now)
+                continue
+            if n.role == _ROLE_FIRST:
+                # A span starts when its first subtask does: the earliest
+                # of the subtasks that can be first, and never before the
+                # span's own start.
+                n.es = n.ef = max(
+                    min(nodes[d.predecessor_id].es for d in incoming[nid] if d.earliest),
+                    *(nodes[d.predecessor_id].es for d in incoming[nid] if not d.earliest),
+                )
                 continue
             if n.terminal:
                 anchor = n.task.actual_start or now
@@ -968,11 +1148,13 @@ class Scheduler:
             n = nodes[nid]
             cal, _ = await self._calendar(n.assignee)
             due = n.task.due_date
-            if due is not None and n.role != _ROLE_START and not n.terminal:
-                finish_ub = [due]
-            else:
-                finish_ub = [project_end]
+            own_due = (
+                due is not None and n.role not in (_ROLE_START, _ROLE_FIRST) and not n.terminal
+            )
+            finish_ub = [due] if own_due and due is not None else [project_end]
             for d in outgoing[nid]:
+                if d.earliest:
+                    continue
                 snode = nodes[d.successor_id]
                 lag = d.lag_working_minutes
                 if d.type is DependencyType.FS:
@@ -992,8 +1174,8 @@ class Scheduler:
                     )
             n.lf = min(finish_ub)
             n.ls = cal.subtract(n.lf, n.duration_min)
-            n.due_bound = (due is not None and n.role != _ROLE_START and not n.terminal) or any(
-                nodes[d.successor_id].due_bound for d in outgoing[nid]
+            n.due_bound = own_due or any(
+                nodes[d.successor_id].due_bound for d in outgoing[nid] if not d.earliest
             )
 
         # --- Stage 2: resource-constrained list scheduling (ADR-0025) ---
@@ -1139,6 +1321,14 @@ class Scheduler:
             if n.role == _ROLE_START:
                 at = await _gate(nid, n, wall_clock=False)
                 n.ss = n.se = at
+                return
+            if n.role == _ROLE_FIRST:
+                # Where the first subtask was placed: this node is ready
+                # only once every subtask that can be first is.
+                n.ss = n.se = max(
+                    min(nodes[d.predecessor_id].ss for d in incoming[nid] if d.earliest),
+                    *(nodes[d.predecessor_id].ss for d in incoming[nid] if not d.earliest),
+                )
                 return
             if n.role == _ROLE_FINISH:
                 bounds = [(await _bound(d))[0] for d in incoming[nid]]
@@ -1297,11 +1487,18 @@ class Scheduler:
 
         for t in tasks:
             if t.id in graph.children:
-                span_start = nodes[graph.start_of[t.id]]
+                span_first = nodes[graph.first_of[t.id]]
                 span_finish = nodes[graph.finish_of[t.id]]
                 leaves = [nodes[i] for i in graph.leaf_descendants(t.id)]
                 es = min(x.es for x in leaves)
-                ls = min(x.ls for x in leaves)
+                # The latest the span can start: the latest its subtasks
+                # can, or earlier if a dependency out of its start says so.
+                # A zero-length node's latest start sits at the END of a
+                # working window (13:00 rather than 14:00, the same working
+                # instant); written as the start of the next one, like
+                # every other start in the row.
+                first_cal, _ = await self._calendar(span_first.assignee)
+                ls = min(first_cal.snap_forward(span_first.ls), *(x.ls for x in leaves))
                 ef, lf = span_finish.ef, span_finish.lf
                 ss = min(sched[x.task.id][0] for x in leaves)
                 se = max(sched[x.task.id][1] for x in leaves)
@@ -1325,7 +1522,7 @@ class Scheduler:
                     unassignable=False,
                     unassignable_reason=None,
                     estimate_missing=False,
-                    dates_lower_bound=span_finish.lower_bound or span_start.lower_bound,
+                    dates_lower_bound=span_finish.lower_bound or span_first.lower_bound,
                     due_margin_minutes=margin,
                     computed_at=now,
                     input_fingerprint=fp,

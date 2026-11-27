@@ -192,3 +192,50 @@ placed on Monday, before the work it depends on was done
   Tuesday would move the cursor to Tuesday and leave Monday empty for
   every task placed after it (test_waiting_work_leaves_the_free_morning_to_other_work
   fails with that variant).
+
+## Amendment (2026-11-27, third): a parent starts with its first subtask
+
+### Context
+
+The first amendment of this date put a parent in the graph as a start node
+and a finish node, and an SS or SF out of the parent read the start node.
+That node is only the bound the parent's own predecessors put on its
+subtasks. When every subtask was held later, by its own predecessors or by
+its person's queue, a successor of the parent's start began before the
+parent did, while the parent's row said the parent began later. Found by
+the verification of the two tasks behind those amendments; the cases are in
+core/tests/test_scheduler_parent_start.py.
+
+### Decision
+
+- **A third node per parent, its first**: the earliest start among its
+  leaf subtasks, in the CPM passes and in the leveled pass alike. SS and SF
+  out of a parent read it; everything else attaches as before.
+- **The backward pass does not read the edges into it.** "The earliest of
+  the subtasks starts by L" does not say which one, so it bounds none of
+  them; it bounds the parent's start node, as before.
+- **A subtask that comes after a successor of the parent's start is not a
+  candidate first.** It cannot start before the parent does, so leaving it
+  out changes nothing, and keeping it would close a loop out of an ordinary
+  plan ("the review starts with the epic, step 2 waits for the review").
+  When every subtask comes after such a successor, the parent would start
+  after a task that starts with it: that dependency is left out and
+  counted in `dependencies_ignored`.
+- **A loop through the firsts of two parents is resolved on the
+  candidates, not on a declared dependency.** An edge into a first means
+  "no later than", so such a loop is not a contradiction while each span
+  has a step to start with outside it; the passes still need an order, so
+  a candidate inside the loop is dropped wherever its parent keeps one
+  outside. That candidate may be the earliest, and then the span's first
+  reads later than it is. On the synthetic workspace of production's size
+  used above, dropping declared dependencies instead left out 25 of 700;
+  with this rule 8, the 4 left out before plus 4 SS or SF out of a parent
+  whose every subtask comes after the successor.
+
+### Consequences
+
+- Successors of a parent's start move later where its subtasks were held.
+- A chain with a negative lag from a successor of the parent's start back
+  into one of its subtasks is not read when choosing the candidates: such
+  a subtask could start before the parent's first. Not measured on
+  production.
