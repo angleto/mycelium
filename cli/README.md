@@ -152,7 +152,7 @@ and never slows or breaks the session.
 
 ### When to compact or restart: the reset shadow
 
-In a project you allow, the same hooks also record what a decision rule
+When you turn it on, in a project you allow, the same hooks also record what a decision rule
 recommends at each prompt (continue or compact, on cost, with the quality
 terms it could not weigh named beside it) and what the session then did:
 compacted manually or automatically, cleared, delegated to a subagent, or
@@ -162,11 +162,18 @@ It acts on nothing and sends nothing. The log in
 no file content, no path.
 
 ```sh
-mycelium session reset-shadow allow ~/work/humus   # record sessions under this root
-mycelium session reset-shadow list                 # the allowed roots
+mycelium session reset-shadow allow ~/work/humus   # this root may be recorded
+mycelium session reset-shadow on                   # start recording (it starts off)
+mycelium session reset-shadow status               # on or off, the roots, the log
 mycelium session reset-shadow summary              # recommended against done
-mycelium session reset-shadow deny ~/work/humus    # stop; the log stays
+mycelium session reset-shadow off                  # stop everywhere; roots and log stay
+mycelium session reset-shadow deny ~/work/humus    # stop for this root
+MYCELIUM_RESET_SHADOW=off claude                   # one session not recorded
 ```
+
+The rule behind the recommendations is not yet tested on real sessions, so
+nothing is recorded until you run `on`, and each of the three switches
+(the session, everywhere, the project) can stop it alone.
 
 Run `install-hooks --apply` again after upgrading: the shadow also reads the
 `PreCompact` event, the only one that tells a manual compaction from an

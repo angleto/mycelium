@@ -114,13 +114,27 @@ only: ADR-0049, and the log describes a person's work in projects some of
 which are a client's. Nothing is sent to the server. The log rotates past
 40 MB, keeping one previous file, which is roughly the last 100,000 prompts.
 
-**Who allows it.** Nothing is recorded for a directory that is not under a
-root added with `mycelium session reset-shadow allow PATH`. Without the
-allow file the recorder costs one `stat`. `deny` removes a root. `list`
-shows them. `summary` pairs each prompt's recommendation with what the
-session did before the next prompt (continue, compaction by trigger, clean
-restart, delegation, end), per basis. It prints the quality upper bounds
-beside the table, so a cost recommendation is never read as a quality one.
+**Who turns it on, and at what scale.** The rule is not tested on real
+sessions, the theorem behind it is certified only in part, and the essay is
+not published. Recording is therefore something the person starts knowingly
+and can stop at any scale. Three switches must all say yes:
+
+- **per session**: `MYCELIUM_RESET_SHADOW=off` in the environment Claude
+  Code is started with. The hooks inherit it. A value other than `on` or
+  `off` also means off, and is written to the hook log, so a typo never
+  records;
+- **everywhere**: `mycelium session reset-shadow off` stops it and keeps the
+  allowed projects, and `on` resumes. It **starts off**: allowing a project
+  records nothing until `on`;
+- **per project**: nothing is recorded for a directory that is not under a
+  root added with `allow PATH`. `deny` removes one.
+
+`status` shows the three switches, the roots and the log's size. When it is
+off the recorder costs an environment lookup and at most one small file
+read. `summary` pairs each prompt's recommendation with what the session did
+before the next prompt (continue, compaction by trigger, clean restart,
+delegation, end), per basis. It prints the quality upper bounds beside the
+table, so a cost recommendation is never read as a quality one.
 
 ## Consequences
 

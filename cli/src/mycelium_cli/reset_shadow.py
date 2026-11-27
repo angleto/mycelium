@@ -7,13 +7,27 @@ What is written, to ``<state dir>/reset_shadow/log.jsonl``, is numbers and
 event names: context length, call and prompt counts, whether HEAD moved,
 the recommendation and its margin, which hook fired. No prompt text, no file
 content, no path. The project is named as ``agent_host.project_name`` names
-it. Nothing is recorded for a directory that is not under a root the person
-allowed with ``mycelium session reset-shadow allow``. A session's history
-belongs to the project it ran in, and some projects are a client's.
+it.
+
+Three switches decide whether anything is recorded, and all three must say
+yes. The rule behind the recommendations is not yet tested on real sessions,
+so recording is something the person turns on knowingly, and can turn off
+at any scale:
+
+- **per session**: ``MYCELIUM_RESET_SHADOW=off`` in the environment Claude
+  Code was started with turns it off for that session. Hooks inherit that
+  environment. Any value other than ``on`` or ``off`` also turns it off, and
+  is written to the hook log: a typo must not record;
+- **everywhere**: ``mycelium session reset-shadow off`` stops it without
+  forgetting which projects were allowed, and ``on`` resumes. It starts
+  **off**: allowing a project does not start recording;
+- **per project**: nothing is recorded for a directory that is not under a
+  root added with ``allow``. A session's history belongs to the project it
+  ran in, and some projects are a client's.
 
 It runs inside the hook, so it holds to the hook's two properties
-(docs/adr/0078). Every error goes to the hook log and is swallowed. When
-nothing is allowed it costs one ``stat`` and nothing else.
+(docs/adr/0078). Every error goes to the hook log and is swallowed. When it
+is off it costs an environment lookup and at most one small file read.
 
 Standard library only.
 """
@@ -78,32 +92,73 @@ def _write_atomic(path: Path, data: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def allowed_roots() -> list[str]:
+#: The variable that turns the shadow off for one session.
+ENV_SWITCH = "MYCELIUM_RESET_SHADOW"
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """What ``allow.json`` holds. ``enabled`` defaults to False: a file
+    written by ``allow`` alone records nothing until ``on``."""
+
+    enabled: bool = False
+    roots: tuple[str, ...] = ()
+
+
+def settings() -> Settings:
     try:
         data = json.loads(allow_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return []
-    roots = data.get("roots") if isinstance(data, dict) else None
-    return [str(r) for r in roots] if isinstance(roots, list) else []
+        return Settings()
+    if not isinstance(data, dict):
+        return Settings()
+    roots = data.get("roots")
+    return Settings(
+        enabled=data.get("enabled") is True,
+        roots=tuple(str(r) for r in roots) if isinstance(roots, list) else (),
+    )
 
 
-def _set_roots(roots: list[str]) -> None:
-    _write_atomic(allow_path(), {"roots": sorted(set(roots))})
+def _save_settings(s: Settings) -> None:
+    _write_atomic(allow_path(), {"enabled": s.enabled, "roots": sorted(set(s.roots))})
+
+
+def allowed_roots() -> list[str]:
+    return list(settings().roots)
 
 
 def allow(path: str) -> str:
     root = str(Path(path).expanduser().resolve())
-    _set_roots([*allowed_roots(), root])
+    s = settings()
+    _save_settings(Settings(enabled=s.enabled, roots=(*s.roots, root)))
     return root
 
 
 def deny(path: str) -> bool:
     root = str(Path(path).expanduser().resolve())
-    roots = allowed_roots()
-    if root not in roots:
+    s = settings()
+    if root not in s.roots:
         return False
-    _set_roots([r for r in roots if r != root])
+    _save_settings(Settings(enabled=s.enabled, roots=tuple(r for r in s.roots if r != root)))
     return True
+
+
+def set_enabled(enabled: bool) -> Settings:
+    s = Settings(enabled=enabled, roots=settings().roots)
+    _save_settings(s)
+    return s
+
+
+def session_switch() -> bool | None:
+    """The per-session switch: False when the environment turns the shadow
+    off, None when it says nothing. An unrecognised value turns it off and is
+    reported, rather than resolving to "on"."""
+    raw = os.environ.get(ENV_SWITCH)
+    if raw is None or raw.strip().lower() == "on":
+        return None
+    if raw.strip().lower() != "off":
+        raise ValueError(f"{ENV_SWITCH}={raw!r} is neither 'on' nor 'off'; not recording")
+    return False
 
 
 def is_allowed(cwd: str, roots: list[str]) -> bool:
@@ -212,11 +267,20 @@ def _now() -> str:
 
 
 def observe(event: str, payload: dict[str, Any]) -> None:
-    """Record what this hook event means for the shadow, if anything."""
+    """Record what this hook event means for the shadow, if anything.
+
+    The switches are read cheapest first: the environment, then the file.
+    A ``ValueError`` from an unrecognised session switch reaches the hook's
+    own guard, which logs it, and nothing is recorded."""
+    if session_switch() is False:
+        return
     if not allow_path().exists():
         return
+    current = settings()
+    if not current.enabled:
+        return
     cwd = str(payload.get("cwd") or "")
-    if not is_allowed(cwd, allowed_roots()):
+    if not is_allowed(cwd, list(current.roots)):
         return
     ref = str(payload.get("session_id") or "")
     if not ref:

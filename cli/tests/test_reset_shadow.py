@@ -173,6 +173,11 @@ def project(tmp_path: Path) -> Path:
     return root
 
 
+def _turn_on(root: Path) -> None:
+    reset_shadow.allow(str(root))
+    reset_shadow.set_enabled(True)
+
+
 def _prompt(
     root: Path, transcript: Path, monkeypatch: pytest.MonkeyPatch, ref: str = "s-1"
 ) -> None:
@@ -198,6 +203,7 @@ def test_nothing_is_recorded_for_a_project_not_allowed(
     _prompt(project, transcript, monkeypatch)
     assert not reset_shadow.log_path().exists()
     reset_shadow.allow(str(tmp_path / "elsewhere"))
+    reset_shadow.set_enabled(True)
     _prompt(project, transcript, monkeypatch)
     assert not reset_shadow.log_path().exists()
 
@@ -205,7 +211,7 @@ def test_nothing_is_recorded_for_a_project_not_allowed(
 def test_an_allowed_project_records_numbers_and_no_text(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reset_shadow.allow(str(project))
+    _turn_on(project)
     transcript = tmp_path / "t.jsonl"
     secret = "the prompt text must never reach the log"
     transcript.write_text(
@@ -234,7 +240,7 @@ def test_an_allowed_project_records_numbers_and_no_text(
 def test_the_transcript_is_read_from_where_the_last_prompt_left_it(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reset_shadow.allow(str(project))
+    _turn_on(project)
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_assistant("m1", 60_000) + "\n" + '{"type": "assistant", "mess')
     _prompt(project, transcript, monkeypatch)
@@ -265,7 +271,7 @@ def test_lines_before_the_offset_are_not_read_again(tmp_path: Path) -> None:
 def test_a_commit_between_prompts_is_seen_as_head_moved(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reset_shadow.allow(str(project))
+    _turn_on(project)
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_assistant("m1", 60_000) + "\n")
     _prompt(project, transcript, monkeypatch)
@@ -289,7 +295,7 @@ def test_a_commit_between_prompts_is_seen_as_head_moved(
 def test_a_failure_marks_the_next_prompt_only(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reset_shadow.allow(str(project))
+    _turn_on(project)
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_assistant("m1", 60_000) + "\n")
     _hook(
@@ -304,7 +310,7 @@ def test_a_failure_marks_the_next_prompt_only(
 def test_a_fault_in_the_shadow_does_not_stop_the_attention_report(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reset_shadow.allow(str(project))
+    _turn_on(project)
     sent: list[tuple[Any, ...]] = []
 
     def broken(*_a: Any, **_k: Any) -> None:
@@ -336,6 +342,7 @@ def test_the_shadow_imports_neither_the_http_client_nor_typer(
         "import json, sys\n"
         "from mycelium_cli import reset_shadow\n"
         f"reset_shadow.allow({str(project)!r})\n"
+        "reset_shadow.set_enabled(True)\n"
         "reset_shadow.observe('UserPromptSubmit', {'session_id': 's', "
         f"'cwd': {str(project)!r}, 'transcript_path': {str(transcript)!r}}})\n"
         "print(json.dumps(['httpx' in sys.modules, 'typer' in sys.modules, "
@@ -352,6 +359,76 @@ def test_the_shadow_imports_neither_the_http_client_nor_typer(
     assert recorded
     assert not typer_loaded
     assert not httpx_loaded
+
+
+# ---------------------------------------------------------------------------
+# The switches
+# ---------------------------------------------------------------------------
+
+
+def _one_prompt(project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> int:
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(_assistant("m1", 300_000) + "\n")
+    _prompt(project, transcript, monkeypatch)
+    return len(_records()) if reset_shadow.log_path().exists() else 0
+
+
+def test_allowing_a_project_does_not_start_recording(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reset_shadow.allow(str(project))
+    assert reset_shadow.settings().enabled is False
+    assert _one_prompt(project, tmp_path, monkeypatch) == 0
+
+
+def test_off_stops_everywhere_and_keeps_the_projects(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _turn_on(project)
+    assert _one_prompt(project, tmp_path, monkeypatch) == 1
+    reset_shadow.set_enabled(False)
+    assert _one_prompt(project, tmp_path, monkeypatch) == 1
+    assert reset_shadow.allowed_roots() == [str(project.resolve())]
+    reset_shadow.set_enabled(True)
+    assert _one_prompt(project, tmp_path, monkeypatch) == 2
+
+
+def test_the_environment_turns_one_session_off(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _turn_on(project)
+    monkeypatch.setenv(reset_shadow.ENV_SWITCH, "off")
+    assert _one_prompt(project, tmp_path, monkeypatch) == 0
+    monkeypatch.setenv(reset_shadow.ENV_SWITCH, "on")
+    assert _one_prompt(project, tmp_path, monkeypatch) == 1
+
+
+def test_a_mistyped_session_switch_records_nothing_and_says_why(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _turn_on(project)
+    monkeypatch.setenv(reset_shadow.ENV_SWITCH, "of")
+    assert _one_prompt(project, tmp_path, monkeypatch) == 0
+    from mycelium_cli import agent_host
+
+    assert "MYCELIUM_RESET_SHADOW='of'" in agent_host.log_path().read_text()
+
+
+def test_the_cli_turns_it_on_and_off_and_reports_the_switches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "p"
+    root.mkdir()
+    runner.invoke(app, ["session", "reset-shadow", "allow", str(root)])
+    status = json.loads(runner.invoke(app, ["--json", "session", "reset-shadow", "status"]).stdout)
+    assert status["enabled"] is False and status["roots"] == [str(root.resolve())]
+    assert runner.invoke(app, ["session", "reset-shadow", "on"]).exit_code == 0
+    assert reset_shadow.settings().enabled is True
+    assert runner.invoke(app, ["session", "reset-shadow", "off"]).exit_code == 0
+    assert reset_shadow.settings() == reset_shadow.Settings(False, (str(root.resolve()),))
+    monkeypatch.setenv(reset_shadow.ENV_SWITCH, "off")
+    status = json.loads(runner.invoke(app, ["--json", "session", "reset-shadow", "status"]).stdout)
+    assert status["session_switch"] == "off"
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +471,7 @@ def test_the_cli_allows_lists_and_denies(tmp_path: Path) -> None:
     root = tmp_path / "p"
     root.mkdir()
     assert runner.invoke(app, ["session", "reset-shadow", "allow", str(root)]).exit_code == 0
-    listed = runner.invoke(app, ["--json", "session", "reset-shadow", "list"])
+    listed = runner.invoke(app, ["--json", "session", "reset-shadow", "status"])
     assert str(root.resolve()) in json.loads(listed.stdout)["roots"]
     assert runner.invoke(app, ["session", "reset-shadow", "deny", str(root)]).exit_code == 0
     assert reset_shadow.allowed_roots() == []

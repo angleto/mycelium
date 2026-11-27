@@ -519,11 +519,15 @@ app.add_typer(shadow_app, name="reset-shadow")
 def shadow_allow(
     path: Annotated[Path, typer.Argument(help="A project root; its subdirectories are included.")],
 ) -> None:
-    """Start recording for sessions under PATH. Nothing leaves this machine."""
+    """Allow recording for sessions under PATH. Nothing leaves this machine,
+    and nothing is recorded until `on`."""
     from mycelium_cli import reset_shadow
 
     root = reset_shadow.allow(str(path))
-    out().print(f"Recording sessions under {root} in {reset_shadow.log_path()}.")
+    state = (
+        "on" if reset_shadow.settings().enabled else "off: run `mycelium session reset-shadow on`"
+    )
+    out().print(f"Allowed {root}. Recording is {state}.")
     out().print("It takes effect with the hooks installed (`mycelium session install-hooks`).")
 
 
@@ -533,24 +537,61 @@ def shadow_deny(path: Annotated[Path, typer.Argument(help="A root added with all
     from mycelium_cli import reset_shadow
 
     if not reset_shadow.deny(str(path)):
-        raise CLIError(f"{path} is not an allowed root; `mycelium session reset-shadow list`.")
+        raise CLIError(f"{path} is not an allowed root; `mycelium session reset-shadow status`.")
     out().print(f"No longer recording under {path}.")
 
 
-@shadow_app.command("list")
-def shadow_list() -> None:
-    """The allowed project roots."""
+@shadow_app.command("on")
+def shadow_on() -> None:
+    """Start recording, in the allowed projects only."""
     from mycelium_cli import reset_shadow
 
-    roots = reset_shadow.allowed_roots()
+    s = reset_shadow.set_enabled(True)
+    if not s.roots:
+        out().print("Recording is on, but no project is allowed yet: nothing will be recorded.")
+        return
+    out().print(f"Recording is on for {len(s.roots)} allowed root(s).")
+
+
+@shadow_app.command("off")
+def shadow_off() -> None:
+    """Stop recording everywhere. The allowed projects and the log are kept."""
+    from mycelium_cli import reset_shadow
+
+    reset_shadow.set_enabled(False)
+    out().print("Recording is off. `on` resumes it with the same projects.")
+
+
+@shadow_app.command("status")
+def shadow_status() -> None:
+    """Whether recording is on, the allowed roots, and this shell's switch."""
+    from mycelium_cli import reset_shadow
+
+    s = reset_shadow.settings()
+    try:
+        session = reset_shadow.session_switch()
+        session_text = "off" if session is False else "not set"
+    except ValueError as exc:
+        session_text = f"off ({exc})"
+    log = reset_shadow.log_path()
     if json_mode():
-        emit_json({"roots": roots, "log": str(reset_shadow.log_path())})
+        emit_json(
+            {
+                "enabled": s.enabled,
+                "roots": list(s.roots),
+                "session_switch": session_text,
+                "log": str(log),
+                "log_bytes": log.stat().st_size if log.exists() else 0,
+            }
+        )
         return
-    if not roots:
-        out().print("No project is allowed; nothing is recorded.")
-        return
-    for r in roots:
-        out().print(r)
+    out().print(f"recording: {'on' if s.enabled else 'off'}")
+    out().print(f"{reset_shadow.ENV_SWITCH} in this shell: {session_text}")
+    out().print(f"log: {log} ({log.stat().st_size if log.exists() else 0} bytes)")
+    if not s.roots:
+        out().print("allowed roots: none")
+    for r in s.roots:
+        out().print(f"allowed: {r}")
 
 
 @shadow_app.command("summary")
