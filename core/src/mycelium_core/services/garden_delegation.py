@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.delegated_decision import DelegatedDecision
 from mycelium_core.models.kg import KgEdge
@@ -37,6 +37,7 @@ from mycelium_core.services import garden_review as review_svc
 from mycelium_core.services import kg as kg_svc
 from mycelium_core.services import link_proposals as proposals_svc
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.review_state import require_state, require_version
 
 #: Key of the workspace setting, a list of ``DecisionKind`` values.
 SETTINGS_KEY = "garden_delegation"
@@ -143,10 +144,10 @@ async def decide(
             raise DomainError(MessageCode.DOMAIN_ERROR)
         if verdict is Verdict.approve:
             note = await session.get(Note, target_id)
-            if note is None or note.org_id != org_id or note.review_state != "proposed":
+            if note is None or note.org_id != org_id or note.review_state is None:
                 raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-            if note.version != expected_version:
-                raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+            require_state(note.review_state, acts_on=("proposed",), current_version=note.version)
+            require_version(note.version, expected_version)
             supported = await session.scalar(
                 select(func.count())
                 .select_from(ProposalCheck)
@@ -244,7 +245,8 @@ async def revert(
     - an approved fact is proposed again.
 
     Reverting twice is a no-op. A thing that has moved since (someone else
-    decided it again) is refused as stale rather than undone blindly."""
+    decided it again) is refused rather than undone blindly, as
+    ``review.state_conflict`` naming the state it is in now."""
     await require_role(session, org_id, actor_id, Role.member)
     row = await session.get(DelegatedDecision, decision_id)
     if row is None or row.org_id != org_id:
@@ -257,8 +259,7 @@ async def revert(
         if note is None or note.org_id != org_id:
             raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
         expected = "approved" if verdict is Verdict.approve else "declined"
-        if note.review_state != expected:
-            raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+        require_state(note.review_state, acts_on=(expected,), current_version=note.version)
         if verdict is Verdict.approve:
             await review_svc.withdraw_approval(
                 session, org_id=org_id, actor_id=actor_id, note_id=note.id
@@ -285,8 +286,9 @@ async def revert(
         edge = await session.get(KgEdge, row.target_id)
         if edge is None or edge.org_id != org_id:
             raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
-        if edge.review_state != "approved" or edge.invalidated_at is not None:
-            raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+        if edge.invalidated_at is not None:
+            raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+        require_state(edge.review_state, acts_on=("approved",), current_version=edge.version)
         await kg_svc.withdraw_fact_approval(
             session, org_id=org_id, actor_id=actor_id, edge_id=edge.id
         )

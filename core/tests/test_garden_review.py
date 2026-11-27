@@ -33,6 +33,7 @@ from mycelium_core.ai_providers import set_llm_override
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.note import Note, NoteKind
@@ -473,9 +474,9 @@ async def test_approving_a_declined_node_is_one_decision_not_two() -> None:
 
 
 async def test_reopen_and_remove_act_only_on_a_declined_node() -> None:
-    """Reopen is a no-op on a pending node and 404 on an approved one;
-    removal is 404 on anything but a declined node, so nothing is thrown
-    away unread; both refuse a stale version."""
+    """Reopen is a no-op on a pending node and a state conflict on an
+    approved one; removal is a state conflict on anything but a declined
+    node, so nothing is thrown away unread; both refuse a stale version."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         pending = await _proposed(s, org, user, model="m")
@@ -484,15 +485,17 @@ async def test_reopen_and_remove_act_only_on_a_declined_node() -> None:
             s, org_id=org, actor_id=user, note_id=pending, expected_version=v
         )
         assert same.review_state == "proposed" and same.version == v
-        with pytest.raises(NotFoundError):
+        with pytest.raises(ConflictError) as unread:
             await review.remove_declined(
                 s, org_id=org, actor_id=user, note_id=pending, expected_version=v
             )
+        assert unread.value.code is MessageCode.REVIEW_STATE_CONFLICT
         approved = await review.approve_node(s, org_id=org, actor_id=user, note_id=pending)
-        with pytest.raises(NotFoundError):
+        with pytest.raises(ConflictError) as effective:
             await review.reopen_node(
                 s, org_id=org, actor_id=user, note_id=pending, expected_version=approved.version
             )
+        assert effective.value.code is MessageCode.REVIEW_STATE_CONFLICT
 
         other = await _proposed(s, org, user, model="m")
         d = await review.decline_node(s, org_id=org, actor_id=user, note_id=other)
@@ -854,7 +857,7 @@ async def test_revising_a_declined_note_leaves_it_declined_and_an_approved_one_i
         assert (by["m"].approved, by["m"].rejected) == (0, 1)
 
         approved = await review.approve_node(s, org_id=org, actor_id=user, note_id=rev.id)
-        with pytest.raises(NotFoundError):
+        with pytest.raises(ConflictError) as refused:
             await review.revise_node(
                 s,
                 org_id=org,
@@ -864,6 +867,8 @@ async def test_revising_a_declined_note_leaves_it_declined_and_an_approved_one_i
                 text="again",
                 origin_model_id="strong",
             )
+        assert refused.value.code is MessageCode.REVIEW_STATE_CONFLICT
+        assert refused.value.params["state"] == "approved"
         with pytest.raises(DomainError):
             await review.revise_node(
                 s,

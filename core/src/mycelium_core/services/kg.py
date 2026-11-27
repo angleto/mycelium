@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from mycelium_core.ai_providers import LLMProvider
-from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.kg import (
     KG_ENTITY_TYPES,
@@ -58,6 +58,7 @@ from mycelium_core.services.identities import ensure_for_user
 from mycelium_core.services.llm_resolver import MeteredLLM, resolve_llm
 from mycelium_core.services.note_effective import GATED_STATES
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.review_state import require_state, require_version
 
 _WS_RE = re.compile(r"\s+")
 _PRED_RE = re.compile(r"[^a-z0-9]+")
@@ -725,6 +726,14 @@ async def _load_reviewable(
     return edge
 
 
+def _require_live(edge: KgEdge) -> None:
+    """A rejected or invalidated fact has left every read, so on the review
+    surface it is absent rather than in the wrong state: rejecting
+    invalidates it, and the database freezes an invalidated row."""
+    if edge.review_state == _REJECTED or edge.invalidated_at is not None:
+        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+
+
 async def approve_fact(
     session: AsyncSession,
     *,
@@ -740,15 +749,15 @@ async def approve_fact(
     since fails with ``stale_version``, checked before the idempotent
     short-circuit so a stale view is an error even when the end state would
     coincide. Approving an approved fact is a no-op; a rejected one is no
-    longer a proposal and is absent."""
+    longer a proposal and is absent. The order of the checks is the one
+    :mod:`~mycelium_core.services.review_state` states."""
     await require_role(session, org_id, actor_id, Role.member)
     edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
-    if expected_version is not None and edge.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    _require_live(edge)
+    require_state(edge.review_state, acts_on=(_PROPOSED, _APPROVED), current_version=edge.version)
+    require_version(edge.version, expected_version)
     if edge.review_state == _APPROVED:
         return edge
-    if edge.review_state != _PROPOSED or edge.invalidated_at is not None:
-        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
     edge.review_state = _APPROVED
     edge.version += 1
     await session.flush()
@@ -777,8 +786,8 @@ async def withdraw_fact_approval(
     the database freezes an invalidated row."""
     await require_role(session, org_id, actor_id, Role.member)
     edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
-    if edge.review_state != _APPROVED or edge.invalidated_at is not None:
-        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    _require_live(edge)
+    require_state(edge.review_state, acts_on=(_APPROVED,), current_version=edge.version)
     edge.review_state = _PROPOSED
     edge.version += 1
     await session.flush()
@@ -813,12 +822,12 @@ async def reject_fact(
     no-op; ``expected_version`` as for :func:`approve_fact`."""
     await require_role(session, org_id, actor_id, Role.member)
     edge = await _load_reviewable(session, org_id=org_id, edge_id=edge_id)
-    if expected_version is not None and edge.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
     if edge.review_state == _REJECTED:
+        require_version(edge.version, expected_version)
         return edge
-    if edge.review_state != _PROPOSED or edge.invalidated_at is not None:
-        raise NotFoundError(MessageCode.KG_FACT_NOT_FOUND)
+    _require_live(edge)
+    require_state(edge.review_state, acts_on=(_PROPOSED, _REJECTED), current_version=edge.version)
+    require_version(edge.version, expected_version)
     edge.review_state = _REJECTED
     # The identity first: resolving it may flush, and a flush between the two
     # assignments would write invalidated_at alone, after which the trigger

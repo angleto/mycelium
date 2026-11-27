@@ -1064,7 +1064,8 @@ async def review_revise(ctx: OpCtx, p: GardenReviewReviseIn) -> GardenReviewRevi
     The revision is a new proposal from the same sources, born pending: the
     person still approves it. The original is declined with the reason
     'revised', kept and reopenable, and not counted against its model. An
-    approved note is an ordinary note and cannot be revised here."""
+    approved note is an ordinary note and cannot be revised here: that is
+    ``review.state_conflict``, and you edit the note as any other."""
     note = await review_svc.revise_node(
         ctx.session,
         org_id=ctx.org_id,

@@ -59,6 +59,9 @@ class MessageCode(enum.StrEnum):
     USER_NOT_FOUND = "user.not_found"
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
+    # A review verb asked of a proposal in a state it does not act on. Not a
+    # stale write: no re-read makes the verb apply (services/review_state.py).
+    REVIEW_STATE_CONFLICT = "review.state_conflict"
     TASK_NOT_FOUND = "task.not_found"
     # A task's parent cannot be itself or one of its own descendants.
     TASK_PARENT_CYCLE = "task.parent_cycle"
@@ -412,6 +415,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.USER_NOT_FOUND: "User not found",
         MessageCode.ORG_NOT_FOUND: "Workspace not found",
         MessageCode.CONFLICT_STALE_VERSION: "Stale version write",
+        MessageCode.REVIEW_STATE_CONFLICT: (
+            "This proposal is {state}, and the action does not apply to it in that state. "
+            "Re-reading will not change this: act on the state it is in."
+        ),
         MessageCode.TASK_NOT_FOUND: "Task not found",
         MessageCode.CHECKLIST_ITEM_NOT_FOUND: "Checklist item not found",
         MessageCode.CHECKLIST_ITEM_TEXT_EMPTY: "Checklist item text must not be empty",

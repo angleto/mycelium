@@ -227,7 +227,9 @@ async def test_removing_a_declined_proposal_is_the_one_irreversible_act(_wire: N
         pending_removal = await c.post(
             "/garden/review/remove", headers=h, json={"note_id": nid, "expected_version": v}
         )
-        assert pending_removal.status_code == 404
+        assert pending_removal.status_code == 409, pending_removal.text
+        assert pending_removal.json()["code"] == "review.state_conflict"
+        assert pending_removal.json()["params"]["state"] == "proposed"
 
         dec = await c.post(
             "/garden/review/reject", headers=h, json={"note_id": nid, "expected_version": v}

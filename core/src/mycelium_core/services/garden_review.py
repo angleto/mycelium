@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.classification_feedback import ClassificationFeedback
 from mycelium_core.models.event_outbox import EventOutbox
@@ -62,6 +62,7 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import trash as trash_svc
 from mycelium_core.services.note_effective import DECLINED, PROPOSED, effective_note_clause
 from mycelium_core.services.rbac import require_role
+from mycelium_core.services.review_state import require_state, require_version
 
 _PROPOSED = PROPOSED
 _DECLINED = DECLINED
@@ -490,12 +491,12 @@ async def approve_node(
     who decided and where, recorded next to the executor."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if expected_version is not None and note.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_state(
+        note.review_state, acts_on=(_PROPOSED, _DECLINED, _APPROVED), current_version=note.version
+    )
+    require_version(note.version, expected_version)
     if note.review_state == _APPROVED:
         return note  # idempotent: already approved
-    if note.review_state not in (_PROPOSED, _DECLINED):
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     previous = note.review_state
     note.review_state = _APPROVED
     note.review_decided_at = dt.datetime.now(dt.UTC)
@@ -562,7 +563,8 @@ async def decline_node(
     removes it for good. Emits a bus ``reject`` event carrying
     ``origin_model_id`` (so the per-model accept-ratio / earned-autonomy
     signal, ADR-0043 D4, can be derived later). Idempotent if already
-    declined; 404 if the node is not a pending proposal.
+    declined; an approved node is ``review.state_conflict``, and a note that
+    was never proposed is 404.
 
     ``expected_version`` mirrors :func:`approve_node` (TOCTOU guard, task
     2e36e732): checked before the idempotent short-circuit, ``None`` =
@@ -579,12 +581,10 @@ async def decline_node(
     ``decision`` mirrors :func:`approve_node`."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if expected_version is not None and note.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_state(note.review_state, acts_on=(_PROPOSED, _DECLINED), current_version=note.version)
+    require_version(note.version, expected_version)
     if note.review_state == _DECLINED:
         return note  # idempotent: already declined
-    if note.review_state != _PROPOSED:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     note.review_state = _DECLINED
     note.review_decided_at = dt.datetime.now(dt.UTC)
     note.version += 1
@@ -653,8 +653,10 @@ async def approve_node_on_decision(
     ``expected_version`` is required here, not optional: the agent must
     have read the node it is acting on."""
     node = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if node.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_state(
+        node.review_state, acts_on=(_PROPOSED, _DECLINED, _APPROVED), current_version=node.version
+    )
+    require_version(node.version, expected_version)
     decided_by = await _verify_review_decision(
         session, org_id=org_id, node=node, decision_comment_id=decision_comment_id, verb="approve"
     )
@@ -683,8 +685,8 @@ async def reject_node_on_decision(
     must name the node on a ``reject`` line. The reason is the person's
     comment, which the audit row points to."""
     node = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if node.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_state(node.review_state, acts_on=(_PROPOSED, _DECLINED), current_version=node.version)
+    require_version(node.version, expected_version)
     decided_by = await _verify_review_decision(
         session, org_id=org_id, node=node, decision_comment_id=decision_comment_id, verb="reject"
     )
@@ -797,15 +799,14 @@ async def reopen_node(
     approval and nowhere else, and a pending node never justifies it.
 
     ``expected_version`` is required: the person reopens the node they read.
-    Reopening an already pending node is a no-op; any other state is 404."""
+    Reopening an already pending node is a no-op; an approved one is
+    ``review.state_conflict``."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if note.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_state(note.review_state, acts_on=(_DECLINED, _PROPOSED), current_version=note.version)
+    require_version(note.version, expected_version)
     if note.review_state == _PROPOSED:
         return note  # idempotent: already pending
-    if note.review_state != _DECLINED:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     note.review_state = _PROPOSED
     note.review_decided_at = None
     note.version += 1
@@ -837,8 +838,7 @@ async def withdraw_approval(
     phase B); a person withdraws their own with ``restore_source``."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if note.review_state != _APPROVED:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    require_state(note.review_state, acts_on=(_APPROVED,), current_version=note.version)
     note.review_state = _PROPOSED
     note.review_decided_at = None
     note.version += 1
@@ -874,10 +874,8 @@ async def remove_declined(
     ``expected_version`` is required: the person removes what they read."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if note.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
-    if note.review_state != _DECLINED:
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    require_state(note.review_state, acts_on=(_DECLINED,), current_version=note.version)
+    require_version(note.version, expected_version)
     title = note.title
     await trash_svc.purge_rows(session, task_ids=[], note_ids=[note_id])
     # The ORM still holds the instance the purge deleted under it with a
@@ -1159,8 +1157,7 @@ async def submit_check(
     token; for a person's session the person's own identity is recorded."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if note.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+    require_version(note.version, expected_version)
     if not findings or len(findings) > _MAX_FINDINGS:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     all_supported = all(f.status is ClaimStatus.supported for f in findings)
@@ -1237,13 +1234,14 @@ async def revise_node(
     person has judged it; it stays among the declined, readable and
     reopenable. A pattern's or a season's signature moves to the revision,
     so asking again for that synthesis finds the revision. An approved note
-    is an ordinary note and is not revised here (404)."""
+    is an ordinary note and is not revised here: ``review.state_conflict``
+    names the state, and the note is edited as any other note is."""
     await require_role(session, org_id, actor_id, Role.member)
     original = await _load_proposed(session, org_id=org_id, note_id=note_id)
-    if original.version != expected_version:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
-    if original.review_state not in (_PROPOSED, _DECLINED):
-        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    require_state(
+        original.review_state, acts_on=(_PROPOSED, _DECLINED), current_version=original.version
+    )
+    require_version(original.version, expected_version)
     body = decomposition_svc.external_text(text)
     model_id = decomposition_svc.external_model_id(origin_model_id)
     parents = list(

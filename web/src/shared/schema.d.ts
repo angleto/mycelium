@@ -6972,7 +6972,8 @@ export interface paths {
          *     The revision is a new proposal from the same sources, born pending: the
          *     person still approves it. The original is declined with the reason
          *     'revised', kept and reopenable, and not counted against its model. An
-         *     approved note is an ordinary note and cannot be revised here.
+         *     approved note is an ordinary note and cannot be revised here: that is
+         *     ``review.state_conflict``, and you edit the note as any other.
          */
         post: operations["garden_review_revise_garden_review_revise_post"];
         delete?: never;
