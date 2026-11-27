@@ -114,19 +114,20 @@ async def test_a_collaborator_who_can_no_longer_act_is_not_reminded() -> None:
         )
         for uid in (dead.user_id, gone.user_id):
             await tasks_svc.assign(s, org_id=org, actor_id=owner, task_id=task.id, user_id=uid)
-            # A usable channel IN THIS ORG. Without it they would receive
-            # nothing whatever the filter does, and the assertion below
-            # would pass with the fix removed.
+        task_id = task.id
+    # A usable channel IN THIS ORG. Without it they would receive nothing
+    # whatever the filter does, and the assertion below would pass with the
+    # fix removed. Each sets their own: a preference is only ever the
+    # person's own to write.
+    for uid in (dead.user_id, gone.user_id):
+        async with tenant_session(str(org), str(uid)) as s:
             await nf.set_pref(
                 s,
                 org_id=org,
-                actor_id=owner,
-                user_id=uid,
+                actor_id=uid,
                 channel=NotificationChannelKind.email,
                 enabled=True,
-                target=f"{uid}@example.test",
             )
-        task_id = task.id
 
     async with admin_session() as s:
         await s.execute(update(User).where(User.id == dead.user_id).values(is_active=False))

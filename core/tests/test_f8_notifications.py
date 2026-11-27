@@ -54,23 +54,29 @@ def _email() -> str:
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:
+    org, user, _ = await _org_with_email()
+    return org, user
+
+
+async def _org_with_email() -> tuple[uuid.UUID, uuid.UUID, str]:
+    """The account address is where the email channel delivers: it is the
+    proved destination, so a test that keys a fake on the target needs it."""
+    email = _email()
     async with admin_session() as s:
-        r = await signup(s, email=_email(), password="pw-strong-123", org_name="NTF")
-    return r.org_id, r.user_id
+        r = await signup(s, email=email, password="pw-strong-123", org_name="NTF")
+    return r.org_id, r.user_id, email
 
 
 async def test_enqueue_idempotent_and_dispatch_respects_prefs() -> None:
-    org, user = await _org()
+    org, user, email = await _org_with_email()
     snd = FakeSender()
     async with tenant_session(str(org), str(user)) as s:
         await nf.set_pref(
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         a = await nf.enqueue(
             s,
@@ -97,21 +103,19 @@ async def test_enqueue_idempotent_and_dispatch_respects_prefs() -> None:
         assert a.id == b.id  # idempotent
         r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
     assert (r.sent, r.failed) == (1, 0)
-    assert snd.sent == [("me@example.test", "Hi")]
+    assert snd.sent == [(email, "Hi")]
 
 
 async def test_dispatch_fault_isolation_and_missing_pref() -> None:
-    org, user = await _org()
-    snd = FakeSender(fail_targets={"bad@example.test"})
+    org, user, email = await _org_with_email()
+    snd = FakeSender(fail_targets={email})
     async with tenant_session(str(org), str(user)) as s:
         await nf.set_pref(
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="bad@example.test",
         )
         await nf.enqueue(
             s,
@@ -160,10 +164,8 @@ async def test_dispatch_suppresses_notification_for_terminal_task() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         t = await tasks_svc.create_task(
             s, org_id=org, actor_id=user, title="close-me", assignee_ids=[user]
@@ -202,10 +204,8 @@ async def test_dispatch_suppresses_for_archived_or_deleted_task() -> None:
                 s,
                 org_id=org,
                 actor_id=user,
-                user_id=user,
                 channel=NotificationChannelKind.email,
                 enabled=True,
-                target="me@example.test",
             )
             t = await tasks_svc.create_task(
                 s, org_id=org, actor_id=user, title="x", assignee_ids=[user]
@@ -243,10 +243,8 @@ async def test_dispatch_gate_does_not_over_suppress() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         t = await tasks_svc.create_task(
             s, org_id=org, actor_id=user, title="live", assignee_ids=[user]
@@ -336,10 +334,8 @@ async def test_reminder_scan_minute_precise_on_appointment() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         start = dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=2)
         task = await tasks_svc.create_task(
@@ -373,10 +369,8 @@ async def test_reminder_scan_promotes_subday_on_date_only() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         # Migration 0005: due_date is timestamptz; "no time specified"
         # is end-of-day UTC (the SPA's convention).
@@ -409,10 +403,8 @@ async def test_reminder_scan_is_idempotent() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="me@example.test",
         )
         due_day = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=12)).date()
         due = dt.datetime.combine(due_day, dt.time(23, 59, 59), tzinfo=dt.UTC)
@@ -485,15 +477,13 @@ async def test_delete_notification_dismisses_own_only() -> None:
         assert await nf.list_notifications(s, org_id=org, user_id=user) == []
 
 
-async def _enable_email(s, org, user, target: str = "me@example.test") -> None:
+async def _enable_email(s, org, user) -> None:
     await nf.set_pref(
         s,
         org_id=org,
         actor_id=user,
-        user_id=user,
         channel=NotificationChannelKind.email,
         enabled=True,
-        target=target,
     )
 
 
@@ -579,8 +569,8 @@ async def test_failed_reminder_revived_for_retry() -> None:
     """A transient send failure marks the row failed; a later enqueue
     (same dedupe_key) revives it to pending so the next dispatch retries.
     A working sender then delivers it."""
-    org, user = await _org()
-    failing = FakeSender(fail_targets={"me@example.test"})
+    org, user, email = await _org_with_email()
+    failing = FakeSender(fail_targets={email})
     ok = FakeSender()
     async with tenant_session(str(org), str(user)) as s:
         await _enable_email(s, org, user)
@@ -619,8 +609,8 @@ async def test_failed_reminder_revived_for_retry() -> None:
 async def test_failed_reminder_retry_capped() -> None:
     """Retry of a permanently-failing target is bounded: after
     MAX_NOTIFICATION_ATTEMPTS failures the row is no longer revived."""
-    org, user = await _org()
-    failing = FakeSender(fail_targets={"me@example.test"})
+    org, user, email = await _org_with_email()
+    failing = FakeSender(fail_targets={email})
     async with tenant_session(str(org), str(user)) as s:
         await _enable_email(s, org, user)
         for _ in range(nf.MAX_NOTIFICATION_ATTEMPTS):

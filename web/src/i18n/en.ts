@@ -2904,10 +2904,6 @@ export const en = {
     nav: 'Notifications',
     title: 'Notifications & recurrences',
     prefs: 'Channel preference',
-    channel: 'Channel',
-    enabled: 'Enabled',
-    target: 'Target (chat id / email)',
-    savePref: 'Save preference',
     saved: 'Saved.',
     list: 'Notifications',
     none: 'None.',
@@ -2929,11 +2925,9 @@ export const en = {
     scan: 'Scan reminders',
     count: 'Count: {{n}}',
     loading: 'Loading...',
-    configured: 'configured',
-    notConfigured: 'not configured',
-    needTarget: 'Set a target first to enable this channel',
+    needLink: 'Link Telegram in Settings, Account first: the linked chat is where it delivers.',
     hintPrefs:
-      'Reminders/notifications are delivered on a configured + enabled channel. A channel needs a target (Telegram chat id or email) before it can be enabled.',
+      'Reminders and notifications are delivered on every enabled channel. You only switch a channel on or off: e-mail goes to your account address, Telegram to the chat you linked in Settings, Account.',
     hintActions:
       'Dispatch sends pending notifications. Spawn due materializes recurring tasks. Scan reminders enqueues due-date reminders for tasks assigned to you.',
     browserPush: {

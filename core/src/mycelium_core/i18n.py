@@ -214,6 +214,7 @@ class MessageCode(enum.StrEnum):
     MANDATE_REQUIRED = "invoice.mandate_required"
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
+    NOTIFICATION_CHANNEL_NOT_LINKED = "notification.channel_not_linked"
     USER_TIMEZONE_INVALID = "user.timezone_invalid"
     USER_DAY_START_INVALID = "user.day_start_invalid"
     EXECUTOR_NOT_FOUND = "executor.not_found"
@@ -721,6 +722,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.MANDATE_NOT_FOUND: "No active SdI transmission mandate to revoke",
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
+        MessageCode.NOTIFICATION_CHANNEL_NOT_LINKED: (
+            "The {channel} channel cannot be enabled before it is linked: "
+            "link it first, and its destination will come from the link"
+        ),
         MessageCode.USER_TIMEZONE_INVALID: "Invalid timezone: {detail}",
         MessageCode.USER_DAY_START_INVALID: (
             "Invalid day start: must be 0..1439 minutes after midnight (got {detail})"

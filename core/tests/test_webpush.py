@@ -85,10 +85,8 @@ async def test_webpush_dispatch_fans_out_and_prunes_gone() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.webpush,
             enabled=True,
-            target="",
         )
         for ep in ("https://p/live1", "https://p/live2", "https://p/dead"):
             await push_svc.upsert_subscription(
@@ -124,10 +122,8 @@ async def test_webpush_dispatch_fails_without_subscriptions() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.webpush,
             enabled=True,
-            target="",
         )
         await nf.enqueue(
             s,
@@ -154,19 +150,15 @@ async def test_scan_includes_webpush_only_with_subscription() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.webpush,
             enabled=True,
-            target="",
         )
         await nf.set_pref(
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=False,
-            target="",
         )
         start = dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=2)
         await tasks_svc.create_task(

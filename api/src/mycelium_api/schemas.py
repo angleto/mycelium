@@ -3284,10 +3284,16 @@ class InvoicePreviewOut(BaseModel):
 
 
 class NotificationPrefIn(BaseModel):
-    user_id: uuid.UUID
+    """One of the CALLER's own channels, switched on or off. There is no
+    ``user_id`` and no ``target``: a preference is set only by the person it
+    reaches, and its destination is derived from an identity they proved.
+    Extra keys are refused, not ignored, so a client still sending either
+    learns it no longer chooses them."""
+
+    model_config = ConfigDict(extra="forbid")
+
     channel: NotificationChannelKind
     enabled: bool = True
-    target: str = Field(default="", max_length=320)
 
 
 class NotificationPrefOut(BaseModel):

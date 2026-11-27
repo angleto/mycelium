@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
-import { currentUserId } from '../auth/session'
 import { useSession } from '../auth/useSession'
 import type { components } from '../shared'
 
@@ -49,9 +48,6 @@ export function NotificationsRoute() {
   const [list, setList] = useState<Notif[]>([])
   const [prefs, setPrefs] = useState<Pref[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
-  const [channel, setChannel] = useState<Channel>('email')
-  const [enabled, setEnabled] = useState(true)
-  const [target, setTarget] = useState('')
   const [recTask, setRecTask] = useState('')
   const [freq, setFreq] = useState<Freq>('weekly')
   const [nextRun, setNextRun] = useState('')
@@ -148,19 +144,11 @@ export function NotificationsRoute() {
         setErr(t('error.generic'))
         return
       }
-      const uid = currentUserId()
-      if (uid) {
-        await authFetch('/notifications/prefs', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            user_id: uid,
-            channel: 'webpush',
-            enabled: true,
-            target: '',
-          }),
-        })
-      }
+      await authFetch('/notifications/prefs', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'webpush', enabled: true }),
+      })
       setPushOn(true)
       setMsg(t('notif.saved'))
       await reload()
@@ -183,19 +171,11 @@ export function NotificationsRoute() {
         })
         await sub.unsubscribe()
       }
-      const uid = currentUserId()
-      if (uid) {
-        await authFetch('/notifications/prefs', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            user_id: uid,
-            channel: 'webpush',
-            enabled: false,
-            target: '',
-          }),
-        })
-      }
+      await authFetch('/notifications/prefs', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'webpush', enabled: false }),
+      })
       setPushOn(false)
       setMsg(t('notif.saved'))
       await reload()
@@ -204,26 +184,21 @@ export function NotificationsRoute() {
     }
   }
 
-  async function onSavePref(e: FormEvent) {
-    e.preventDefault()
-    const uid = currentUserId()
-    if (!uid) return
+  // The destination is not chosen here: the server derives it from what the
+  // person proved (the account e-mail, the chat linked in Settings). So a
+  // channel is only switched on or off.
+  async function onToggle(c: Channel, on: boolean) {
     setErr(null)
-    // A channel is usable only once configured: no target -> not enabled.
     const { error } = await api.PUT('/notifications/prefs', {
       params: { header: workspaceHeader() },
-      body: {
-        user_id: uid,
-        channel,
-        enabled: target.trim() !== '' && enabled,
-        target,
-      },
+      body: { channel: c, enabled: on },
     })
     if (error) {
       setErr(errMessage(error))
       return
     }
     setMsg(t('notif.saved'))
+    await reload()
   }
 
   async function onDelete(id: string) {
@@ -294,47 +269,28 @@ export function NotificationsRoute() {
       <p className="hint">{t('notif.hintPrefs')}</p>
       <ul className="list">
         {CHANNELS.map((c) => {
+          // A pref row may be missing in this workspace even when the person
+          // has linked Telegram from another one: the link belongs to the
+          // person, so the switch stays usable and the server says whether
+          // the channel can be reached.
           const p = prefs.find((x) => x.channel === c)
-          const on = p && p.enabled && p.target
           return (
             <li key={c}>
-              <strong>{c}</strong>{' '}
-              <span className={on ? 'ok' : 'muted'}>
-                {on
-                  ? `${t('notif.configured')} (${p?.target})`
-                  : t('notif.notConfigured')}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={Boolean(p?.enabled && p.target)}
+                  onChange={(e) => void onToggle(c, e.target.checked)}
+                />{' '}
+                <strong>{c}</strong>
+              </label>{' '}
+              <span className="muted">
+                {p?.target ? p.target : c === 'telegram' ? t('notif.needLink') : ''}
               </span>
             </li>
           )
         })}
       </ul>
-      <form onSubmit={(e) => void onSavePref(e)} className="row">
-        <select
-          value={channel}
-          onChange={(e) => setChannel(e.target.value as Channel)}
-        >
-          {CHANNELS.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <input
-          placeholder={t('notif.target')}
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-        />
-        <label title={target.trim() === '' ? t('notif.needTarget') : undefined}>
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={target.trim() === ''}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />{' '}
-          {t('notif.enabled')}
-        </label>
-        <button type="submit">{t('notif.savePref')}</button>
-      </form>
 
       <h2>{t('notif.browserPush.title')}</h2>
       <div className="row">

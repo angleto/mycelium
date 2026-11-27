@@ -103,6 +103,8 @@ Conceptual entities. The physical schema is in
   violate memory isolation (ADR-0007), which governs RAG/email content,
   not the user's task list.
 - **Notification / NotificationPref**: a message on a channel
-  (Telegram/email) and per-user, per-event preferences.
+  (Telegram/email/web push) and per-user, per-channel preferences. A
+  preference is written only by its person, and its destination is derived
+  from an identity they proved (ADR-0082).
 - **Comment / Attachment / ActivityLog**: collaboration and audit
   (append-only log).

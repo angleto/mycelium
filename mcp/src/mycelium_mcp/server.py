@@ -8907,23 +8907,25 @@ async def list_issuer_profiles(token: str, org_id: str) -> list[dict[str, Any]]:
 async def set_notification_pref(
     token: str,
     org_id: str,
-    user_id: str,
     channel: str,
-    target: str,
     enabled: bool = True,
 ) -> dict[str, Any]:
-    """Set a user's per-channel notification preference."""
+    """Switch one of YOUR OWN notification channels on or off.
+
+    Only the caller's own preference can be set, and the destination is not
+    an argument: email goes to the account address, telegram to the chat
+    linked from the web app, webpush to this person's device subscriptions.
+    Enabling telegram before it is linked fails with
+    ``notification.channel_not_linked``."""
     async with _tenant(token, org_id) as (s, org, user):
         p = await notif_svc.set_pref(
             s,
             org_id=org,
             actor_id=user,
-            user_id=uuid.UUID(user_id),
             channel=NotificationChannelKind(channel),
             enabled=enabled,
-            target=target,
         )
-        return {"channel": p.channel.value, "enabled": p.enabled}
+        return {"channel": p.channel.value, "enabled": p.enabled, "target": p.target}
 
 
 @mcp.tool()

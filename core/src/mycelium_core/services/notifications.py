@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import DomainError, UnprocessableError
 from mycelium_core.i18n import DEFAULT_LOCALE, MessageCode, render
 from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.identity import Identity, IdentityKind
@@ -39,6 +39,7 @@ from mycelium_core.models.notification import (
 from mycelium_core.models.push_subscription import PushSubscription
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
+from mycelium_core.models.telegram import TelegramLink
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.notification_channel import NotificationSender, get_sender
@@ -62,22 +63,69 @@ class DispatchResult:
     suppressed: int = 0
 
 
+async def _proved_destination(
+    session: AsyncSession, *, user_id: uuid.UUID, channel: NotificationChannelKind
+) -> str | None:
+    """Where ``channel`` reaches ``user_id``, read from an identity that
+    person proved, or ``None`` when the channel has no such identity yet.
+
+    The destination is never taken from a request. It used to be, and then a
+    preference was only as trustworthy as whoever last wrote it: a member could
+    point a colleague's reminders at their own address, and any caller holding
+    the write scope, an agent included, could send the person's notifications
+    to a chat or a mailbox nobody verified (found 2026-11-27, pinned in
+    api/tests/test_notification_pref_ownership.py). Each channel now has
+    exactly one source:
+
+    - email: the account address, proved at signup and never changed by any
+      route;
+    - telegram: the chat bound by the link flow, which proves control of the
+      chat by redeeming a one-time code from inside it;
+    - webpush: nothing, the targets are the device subscriptions.
+
+    What this does not cover: an account whose mailbox is compromised, and a
+    linked chat later handed to someone else. Both are the identity provider's
+    failure, not one this layer can see."""
+    if channel is NotificationChannelKind.email:
+        return (await session.execute(select(User.email).where(User.id == user_id))).scalar_one()
+    if channel is NotificationChannelKind.telegram:
+        chat_id = (
+            await session.execute(
+                select(TelegramLink.chat_id).where(TelegramLink.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+        return None if chat_id is None else str(chat_id)
+    return ""
+
+
 async def set_pref(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
-    user_id: uuid.UUID,
     channel: NotificationChannelKind,
     enabled: bool,
-    target: str,
 ) -> NotificationPref:
+    """Turn one of the ACTOR's own channels on or off in this workspace.
+
+    There is no way to name another person: a preference decides where that
+    person is reached, so it is theirs to set and nobody else's, whatever their
+    role. The destination is derived, see ``_proved_destination``. Enabling a
+    channel that has no proved destination is refused rather than stored
+    enabled-and-empty, which dispatch would skip in silence."""
     await require_role(session, org_id, actor_id, Role.member)
+    target = await _proved_destination(session, user_id=actor_id, channel=channel)
+    if target is None:
+        if enabled:
+            raise UnprocessableError(
+                MessageCode.NOTIFICATION_CHANNEL_NOT_LINKED, channel=channel.value
+            )
+        target = ""
     pref = (
         await session.execute(
             select(NotificationPref).where(
                 NotificationPref.org_id == org_id,
-                NotificationPref.user_id == user_id,
+                NotificationPref.user_id == actor_id,
                 NotificationPref.channel == channel,
             )
         )
@@ -85,7 +133,7 @@ async def set_pref(
     if pref is None:
         pref = NotificationPref(
             org_id=org_id,
-            user_id=user_id,
+            user_id=actor_id,
             channel=channel,
             enabled=enabled,
             target=target,

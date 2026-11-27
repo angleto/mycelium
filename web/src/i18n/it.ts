@@ -2892,10 +2892,6 @@ export const it: Catalog = {
     nav: 'Notifiche',
     title: 'Notifiche e ricorrenze',
     prefs: 'Preferenza canale',
-    channel: 'Canale',
-    enabled: 'Attivo',
-    target: 'Destinazione (chat id / email)',
-    savePref: 'Salva preferenza',
     saved: 'Salvato.',
     list: 'Notifiche',
     none: 'Nessuna.',
@@ -2917,11 +2913,9 @@ export const it: Catalog = {
     scan: 'Scansiona promemoria',
     count: 'Conteggio: {{n}}',
     loading: 'Caricamento...',
-    configured: 'configurato',
-    notConfigured: 'non configurato',
-    needTarget: 'Imposta prima un target per abilitare questo canale',
+    needLink: 'Collega prima Telegram in Impostazioni, Account: la chat collegata e la destinazione.',
     hintPrefs:
-      'Promemoria/notifiche vengono inviati su un canale configurato e abilitato. Un canale richiede un target (chat id Telegram o email) prima di poter essere abilitato.',
+      "Promemoria e notifiche arrivano su ogni canale attivo. Qui accendi o spegni un canale: l'email va all'indirizzo del tuo account, Telegram alla chat collegata in Impostazioni, Account.",
     hintActions:
       'Invia spedisce le notifiche in sospeso. Genera dovute materializza i task ricorrenti. Scansiona promemoria accoda i promemoria di scadenza per i task assegnati a te.',
     browserPush: {

@@ -10,8 +10,11 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.notification import NotificationChannelKind
+from mycelium_core.models.telegram import TelegramLink
 from mycelium_core.services import notifications as nf
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.auth import signup
@@ -27,19 +30,19 @@ async def _org() -> tuple[uuid.UUID, uuid.UUID]:
     return r.org_id, r.user_id
 
 
-async def _enable_email_and_telegram(s: object, org: uuid.UUID, user: uuid.UUID) -> None:
-    for channel, target in (
-        (NotificationChannelKind.email, "me@example.test"),
-        (NotificationChannelKind.telegram, "123456"),
-    ):
+async def _enable_email_and_telegram(s: AsyncSession, org: uuid.UUID, user: uuid.UUID) -> None:
+    # Telegram can only be enabled once a chat is linked: the link is the
+    # proof that becomes the destination. The row stands for a completed link
+    # flow, which test_telegram_link.py exercises end to end.
+    s.add(TelegramLink(user_id=user, chat_id=uuid.uuid4().int & 0xFFFFFFFF))
+    await s.flush()
+    for channel in (NotificationChannelKind.email, NotificationChannelKind.telegram):
         await nf.set_pref(
-            s,  # type: ignore[arg-type]
+            s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=channel,
             enabled=True,
-            target=target,
         )
 
 

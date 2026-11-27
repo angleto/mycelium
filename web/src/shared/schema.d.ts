@@ -15039,24 +15039,21 @@ export interface components {
             /** Sent At */
             sent_at?: string | null;
         };
-        /** NotificationPrefIn */
+        /**
+         * NotificationPrefIn
+         * @description One of the CALLER's own channels, switched on or off. There is no
+         *     ``user_id`` and no ``target``: a preference is set only by the person it
+         *     reaches, and its destination is derived from an identity they proved.
+         *     Extra keys are refused, not ignored, so a client still sending either
+         *     learns it no longer chooses them.
+         */
         NotificationPrefIn: {
-            /**
-             * User Id
-             * Format: uuid
-             */
-            user_id: string;
             channel: components["schemas"]["NotificationChannelKind"];
             /**
              * Enabled
              * @default true
              */
             enabled?: boolean;
-            /**
-             * Target
-             * @default
-             */
-            target?: string;
         };
         /** NotificationPrefOut */
         NotificationPrefOut: {

@@ -472,7 +472,7 @@ over-fetch the org table and filter in its head.
 | `reopen_annotation` | Reopen a resolved comment thread. |
 | `scan_reminders` | Enqueue idempotent due-date reminders for assignees. |
 | `set_issuer_profile` | Create-or-update the default issuer profile, the invoice |
-| `set_notification_pref` | Set a user's per-channel notification preference. |
+| `set_notification_pref` | Switch one of YOUR OWN notification channels on or off. |
 | `spawn_due_recurrences` | Materialize due recurrences as independent task rows. |
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
 <!-- END GENERATED -->

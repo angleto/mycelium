@@ -49,14 +49,8 @@ async def test_mcp_notifications(_sender: FakeSender) -> None:
             password="pw-strong-123",
             org_name="MCP8",
         )
-    token, org, me = r.token, str(r.org_id), str(r.user_id)
+    token, org = r.token, str(r.org_id)
 
-    await set_notification_pref(
-        token=token,
-        org_id=org,
-        user_id=me,
-        channel="email",
-        target="me@example.test",
-    )
+    await set_notification_pref(token=token, org_id=org, channel="email")
     out = await dispatch_notifications(token=token, org_id=org)
     assert out == {"sent": 0, "failed": 0}  # nothing queued yet

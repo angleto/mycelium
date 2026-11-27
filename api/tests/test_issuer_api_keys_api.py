@@ -165,10 +165,8 @@ async def test_t35_expiry_warning_scan_idempotent() -> None:
             s,
             org_id=org,
             actor_id=user,
-            user_id=user,
             channel=NotificationChannelKind.email,
             enabled=True,
-            target="ops@example.test",
         )
         near = await svc.mint(
             s, org_id=org, actor_id=user, issuer_profile_id=prof.id, name="near", ttl_days=20

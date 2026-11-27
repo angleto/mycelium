@@ -70,10 +70,8 @@ async def set_pref(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
-        user_id=body.user_id,
         channel=body.channel,
         enabled=body.enabled,
-        target=body.target,
     )
     return _pref_out(p)
 
