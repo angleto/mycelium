@@ -34,9 +34,9 @@ async def mint_text_block_capability(
     """Mint a mycelium_cap_ token for a text block. ``(kind, verb)`` maps to the
     capability action via :func:`capability_tokens.text_block_action`; the
     resource_kind follows ``kind`` (note_part -> note_part id;
-    task_description -> task id; annotation -> annotation id). read is
-    multi-use within the TTL; write / patch are single-use (consumed on the
-    first successful write). Member-gated, so the token grants nothing the
+    task_description -> task id; annotation -> annotation id). Each is
+    single-use: read is consumed by the download it serves, write / patch on
+    the first successful write. Member-gated, so the token grants nothing the
     caller did not already hold. The raw token is returned exactly once; the
     caller hits the matching raw / stream / patch route with
     ``Authorization: Bearer <token>`` (no PAT, no X-Workspace-Id)."""

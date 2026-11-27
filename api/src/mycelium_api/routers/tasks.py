@@ -74,7 +74,11 @@ from mycelium_api.schemas import (
     WorkerOpenIn,
     WorkerOut,
 )
-from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
+from mycelium_api.textstream import (
+    read_capped_text,
+    read_patch_payload,
+    text_block_download,
+)
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
@@ -1107,17 +1111,12 @@ async def download_task_description_raw(
 ) -> Response:
     """Token-free raw download of a task's ``description`` markdown. Returns
     it as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
-    (the base gate the patch route checks). Bearer or a multi-use
+    (the base gate the patch route checks). Bearer or a single-use
     ``task_description:read`` capability for this task. Use the MCP
     ``get_text_block_capability`` tool (kind=``task_description``) for the
     matching ``curl -D-``."""
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
-    body = task.description or ""
-    return Response(
-        content=body,
-        media_type="text/markdown; charset=utf-8",
-        headers=text_block_headers(version=task.version, body=body),
-    )
+    return await text_block_download(ctx, version=task.version, body=task.description or "")
 
 
 @router.put("/{task_id}/description/stream", response_model=VersionOut)

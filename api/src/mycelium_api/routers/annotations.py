@@ -39,7 +39,11 @@ from mycelium_api.schemas import (
     SuggestionIn,
     VersionOut,
 )
-from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
+from mycelium_api.textstream import (
+    read_capped_text,
+    read_patch_payload,
+    text_block_download,
+)
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
@@ -530,17 +534,12 @@ async def download_annotation_body_raw(
 ) -> Response:
     """Token-free raw download of a comment/annotation body. Returns it as
     ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers (the
-    base gate the patch route checks). Bearer or a multi-use
+    base gate the patch route checks). Bearer or a single-use
     ``annotation_body:read`` capability for this annotation. Use the MCP
     ``get_text_block_capability`` tool (kind=``annotation``) for the
     matching ``curl -D-``."""
     ann = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
-    body = ann.body or ""
-    return Response(
-        content=body,
-        media_type="text/markdown; charset=utf-8",
-        headers=text_block_headers(version=ann.version, body=body),
-    )
+    return await text_block_download(ctx, version=ann.version, body=ann.body or "")
 
 
 @router.post("/{annotation_id}/body/patch", response_model=VersionOut)

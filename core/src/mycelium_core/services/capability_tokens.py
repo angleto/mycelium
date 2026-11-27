@@ -74,8 +74,10 @@ RESOURCE_TASK = "task"
 # - attachment write is PARENT-scoped (resource_id = note/task id), like
 #   attachment read; single-use.
 # - the three text blocks are EXACT-resource-scoped (resource_id = the
-#   part / task / annotation id). read = multi-use (idempotent); write and
-#   patch = single-use (consumed on first successful write).
+#   part / task / annotation id). All three verbs are single-use: read is
+#   consumed by the download that serves it (since 2026-11-27: its token sits
+#   in the conversation that ran the curl, and multi-use left it a working key
+#   for the rest of the TTL), write and patch on the first successful write.
 ACTION_ATTACHMENT_WRITE = "attachment:write"
 
 ACTION_NOTE_PART_BODY_READ = "note_part_body:read"

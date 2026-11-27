@@ -105,20 +105,24 @@ async def test_part_body_raw_headers_and_patch_roundtrip() -> None:
 
 async def test_a_capability_minted_before_the_trash_stops_serving_the_body() -> None:
     """The note-effective check is at READ time, not at minting (task
-    a186c989): the read capability is multi-use for its whole TTL, so a
-    token taken while the note was live must stop working the moment the
-    note goes to the bin -- and the plain bearer read must too."""
+    a186c989): a token taken while the note was live must stop working the
+    moment the note goes to the bin -- and the plain bearer read must too.
+    A read token is single-use, so the one used after the bin is a second
+    token minted while the note was live."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h, org, user = await _signup(c)
         nid, pid, _v = await _note_with_part(c, h, "secret MIKE\n")
-        cap = await _mint(
-            org,
-            user,
-            action=svc.ACTION_NOTE_PART_BODY_READ,
-            resource_kind=svc.RESOURCE_NOTE_PART,
-            resource_id=uuid.UUID(pid),
-        )
+        cap, later = [
+            await _mint(
+                org,
+                user,
+                action=svc.ACTION_NOTE_PART_BODY_READ,
+                resource_kind=svc.RESOURCE_NOTE_PART,
+                resource_id=uuid.UUID(pid),
+            )
+            for _ in range(2)
+        ]
         cap_headers = {"Authorization": f"Bearer {cap}"}
         first = await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=cap_headers)
         assert first.status_code == 200 and "MIKE" in first.text
@@ -131,7 +135,9 @@ async def test_a_capability_minted_before_the_trash_stops_serving_the_body() -> 
         )
         assert gone.status_code == 200, gone.text
 
-        again = await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=cap_headers)
+        again = await c.get(
+            f"/notes/{nid}/parts/{pid}/body/raw", headers={"Authorization": f"Bearer {later}"}
+        )
         assert again.status_code == 404, again.text
         assert "MIKE" not in again.text
         assert (await c.get(f"/notes/{nid}/parts/{pid}/body/raw", headers=h)).status_code == 404
@@ -458,3 +464,60 @@ async def test_annotation_body_raw_and_patch() -> None:
         )
         assert r.status_code == 200, r.text
         assert (await c.get(f"/annotations/{aid}/body/raw", headers=h)).text == new
+
+
+# --- a read capability is spent by the download it serves ------------------
+
+
+async def test_a_text_read_capability_serves_one_download_and_no_second() -> None:
+    """A read token is in the conversation that ran its ``curl``: an MCP
+    server cannot give a credential to the client's shell any other way.
+    Multi-use, it stayed a key to that text for the rest of its TTL for
+    anyone reading the transcript (field report, 2026-11-25). Single-use,
+    the one GET with ``-D -`` still carries the body and both base-gate
+    headers, and the next use of the token is refused. The bearer read is
+    untouched.
+
+    Observed against 0d235536 (2026-11-27): the second download of the note
+    part answered 200, where the loop stopped; the three kinds were multi-use
+    by the same flag of their dependencies."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid, pid, _v = await _note_with_part(c, h, "a part\n")
+        tid = (await c.post("/tasks", headers=h, json={"title": "t"})).json()["id"]
+        r0 = await c.get(f"/tasks/{tid}/description/raw", headers=h)
+        await c.put(
+            f"/tasks/{tid}/description/stream",
+            headers=h,
+            params={"expected_version": int(r0.headers["X-Version"])},
+            content=b"a description\n",
+        )
+        aid = (
+            await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={"doc_kind": "task_description", "doc_id": tid, "body": "a comment\n"},
+            )
+        ).json()["id"]
+        cases = [
+            (svc.ACTION_NOTE_PART_BODY_READ, svc.RESOURCE_NOTE_PART, pid,
+             f"/notes/{nid}/parts/{pid}/body/raw", "a part\n"),
+            (svc.ACTION_TASK_DESCRIPTION_READ, svc.RESOURCE_TASK, tid,
+             f"/tasks/{tid}/description/raw", "a description\n"),
+            (svc.ACTION_ANNOTATION_BODY_READ, svc.RESOURCE_ANNOTATION, aid,
+             f"/annotations/{aid}/body/raw", "a comment\n"),
+        ]  # fmt: skip
+        for action, kind, rid, url, body in cases:
+            cap = await _mint(
+                org, user, action=action, resource_kind=kind, resource_id=uuid.UUID(rid)
+            )
+            auth = {"Authorization": f"Bearer {cap}"}
+            first = await c.get(url, headers=auth)
+            assert first.status_code == 200, (url, first.text)
+            assert first.text == body
+            assert first.headers["X-Version"] and first.headers["X-Body-SHA256"]
+            second = await c.get(url, headers=auth)
+            assert second.status_code == 401, (url, second.status_code)
+            assert body not in second.text
+            assert (await c.get(url, headers=h)).text == body

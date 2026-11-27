@@ -238,3 +238,21 @@ is capped where it is written (a 2,000-character summary, 50 findings), but
 their number is not. Task text is not covered yet: `work_digest`, `get_task` with
 `full_description` and the brief that `task_pull` delivers are still whole
 (task 0fa73a5c).
+
+**And a read capability is single-use** (same task, 2026-11-27). Point 4
+above offered `get_text_block_capability` as the way to a whole text. Its
+token rides in the conversation that runs the `curl`: an MCP server cannot
+hand a credential to the client's shell any other way, and moving it to an
+environment variable or a file only moves where it is written. Multi-use
+for its TTL, it was a working key to that text for anyone who could read
+the transcript. A text read capability (note part, task description,
+comment) is now consumed by the download that serves it; one GET with
+`-D -` already carried the body and the base-gate headers, so nothing
+legitimate needed a second. With the windows above, reading a note needs
+no capability at all; the capability remains for putting a body in a file
+to edit and patch.
+
+What it does not close: the window between minting a token and its first
+use, for reads and for the single-use write and patch tokens alike, and
+`attachment:read`, which stays multi-use for its TTL because one token
+downloads every file of a parent.

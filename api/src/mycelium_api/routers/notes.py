@@ -77,7 +77,11 @@ from mycelium_api.schemas import (
     TaskChecklistReorderIn,
     VersionOut,
 )
-from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
+from mycelium_api.textstream import (
+    read_capped_text,
+    read_patch_payload,
+    text_block_download,
+)
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session
 from mycelium_core.errors import DomainError
@@ -816,17 +820,12 @@ async def download_note_part_body_raw(
 ) -> Response:
     """Token-free raw download of a note part's markdown body. Returns the
     body as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
-    (the base gate the patch route checks). Bearer or a multi-use
+    (the base gate the patch route checks). Bearer or a single-use
     ``note_part_body:read`` capability for this part; the bytes never ride a
     tool argument. Use the MCP ``get_note_part_body_capability`` tool for the
     matching ``curl -D-``."""
     part = await parts_svc.get_part(ctx.session, org_id=ctx.org_id, part_id=part_id)
-    body = part.body or ""
-    return Response(
-        content=body,
-        media_type="text/markdown; charset=utf-8",
-        headers=text_block_headers(version=part.version, body=body),
-    )
+    return await text_block_download(ctx, version=part.version, body=part.body or "")
 
 
 @router.post(

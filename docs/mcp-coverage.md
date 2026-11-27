@@ -283,10 +283,10 @@ over-fetch the org table and filter in its head.
 | `gdpr_erase_note` | GDPR hard-erasure of a note: cascades to its memory blobs (by note |
 | `get_note` | Read one note with its ordered ``parts`` (markdown blocks). Each part |
 | `get_note_part` | Read a single note part by id: random access into a long note's |
-| `get_note_part_body_capability` | Mint a multi-use ``note_part_body:read`` capability and return a |
+| `get_note_part_body_capability` | Mint a single-use ``note_part_body:read`` capability and return a |
 | `get_note_revision` | Single note-revision lookup; 404 if the id doesn't belong to |
 | `get_or_create_task_note` | Open a task's "work note" (creating it on first call). Idempotent: |
-| `get_text_block_capability` | Mint a multi-use ``<kind>:read`` capability for a task description |
+| `get_text_block_capability` | Mint a single-use ``<kind>:read`` capability for a task description |
 | `invoice_credit_note` | Create a TD04 credit note linked to a transmitted invoice. |
 | `list_email_messages` | List ingested messages, optionally filtered by account. |
 | `list_note_parts` | A note's parts in order. With ``include_body=false`` each part is its |

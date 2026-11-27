@@ -2793,8 +2793,8 @@ class AttachmentCapabilityOut(BaseModel):
 
 class TextBlockCapabilityIn(BaseModel):
     # Mint a mycelium_cap_ token for a text block (note part body / task
-    # description / comment body). ``verb`` picks read (multi-use) vs write
-    # / patch (single-use); ``kind`` + ``resource_id`` pin the exact target.
+    # description / comment body). ``verb`` picks read, write or patch, each
+    # single-use; ``kind`` + ``resource_id`` pin the exact target.
     kind: Literal["note_part", "task_description", "annotation"]
     resource_id: uuid.UUID
     verb: Literal["read", "write", "patch"]

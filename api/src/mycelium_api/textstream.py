@@ -11,12 +11,17 @@ so the write costs no LLM tokens and needs no S3 backend. The MCP
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import TYPE_CHECKING
+
+from fastapi import Request, Response
 
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError
+from mycelium_core.errors import AuthError, DomainError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.services import text_patch
+from mycelium_core.services import capability_tokens, text_patch
+
+if TYPE_CHECKING:
+    from mycelium_api.deps import TenantCtx
 
 
 def text_block_headers(*, version: int, body: str) -> dict[str, str]:
@@ -33,6 +38,30 @@ def text_block_headers(*, version: int, body: str) -> dict[str, str]:
         "X-Body-SHA256": text_patch.body_sha256(body),
         "X-Content-Type-Options": "nosniff",
     }
+
+
+async def text_block_download(ctx: TenantCtx, *, version: int, body: str) -> Response:
+    """The answer of every raw-text download, and where a read capability
+    is spent.
+
+    A read capability is single-use, like a write one. Its token travels
+    in the conversation that ran the ``curl`` (an MCP server cannot hand a
+    credential to the client's shell any other way), so a multi-use one
+    stayed a working key to that text for the rest of its TTL, for anyone
+    who could read the transcript. One GET with ``-D -`` carries both the
+    body and the base-gate headers, so nothing legitimate needed a second.
+    Of two concurrent GETs with one token, the one that loses the consume
+    is refused, so a token is never served twice. What this does not
+    close: the window between minting and the first use."""
+    if ctx.capability_token_id is not None and not await capability_tokens.consume(
+        ctx.session, token_id=ctx.capability_token_id
+    ):
+        raise AuthError(MessageCode.CAPABILITY_TOKEN_INVALID)
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers=text_block_headers(version=version, body=body),
+    )
 
 
 async def read_patch_payload(request: Request) -> str:

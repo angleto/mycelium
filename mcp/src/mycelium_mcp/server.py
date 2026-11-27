@@ -7793,11 +7793,12 @@ def _capability_curl(
         curl = f"curl -fsS -D - '{url}' -H 'Authorization: {auth}' -o <path-to-file>"
         headers = {"Authorization": auth}
         note = (
-            "Multi-use read capability baked into the Authorization header "
-            "(NOT consumed; expires at expires_at). '-D -' dumps the response "
-            "headers so you capture X-Version and X-Body-SHA256 -- the base "
-            "gate inputs for a later patch. No PAT and no X-Workspace-Id. The "
-            "body is written to <path-to-file>."
+            "Single-use read capability baked into the Authorization header: "
+            "the download consumes it, and it expires at expires_at. '-D -' "
+            "dumps the response headers in the same GET so you capture "
+            "X-Version and X-Body-SHA256 -- the base gate inputs for a later "
+            "patch. No PAT and no X-Workspace-Id. The body is written to "
+            "<path-to-file>."
         )
     else:
         content_type = "text/markdown; charset=utf-8" if mode == "markdown" else "text/x-diff"
@@ -7993,12 +7994,16 @@ async def get_note_part_body_capability(
     part_id: str,
     ttl_seconds: int = 300,
 ) -> dict[str, Any]:
-    """Mint a multi-use ``note_part_body:read`` capability and return a
+    """Mint a single-use ``note_part_body:read`` capability and return a
     ``curl`` that downloads THIS part's markdown body to a file. ``-D -``
     dumps the response headers so you capture ``X-Version`` +
     ``X-Body-SHA256`` (the base-gate inputs a later
-    ``patch_note_part_body_capability`` needs). No PAT, no X-Workspace-Id;
-    not consumed; expires in ``ttl_seconds`` (default 300)."""
+    ``patch_note_part_body_capability`` needs) in the same, only GET. No
+    PAT, no X-Workspace-Id; expires in ``ttl_seconds`` (default 300).
+
+    Use it to put the body in a file you will edit and patch. To READ a
+    part, call ``get_note_part``: a long body comes in windows with a
+    cursor, and no token enters the conversation."""
     from mycelium_core.config import get_settings
     from mycelium_core.services import capability_tokens as cap_svc
 
@@ -8077,13 +8082,13 @@ async def get_text_block_capability(
     resource_id: str,
     ttl_seconds: int = 300,
 ) -> dict[str, Any]:
-    """Mint a multi-use ``<kind>:read`` capability for a task description
+    """Mint a single-use ``<kind>:read`` capability for a task description
     (``kind='task_description'``, ``resource_id`` = task id) or a comment
     body (``kind='annotation'``, ``resource_id`` = annotation id), and return
     a ``curl`` that downloads it to a file. ``-D -`` dumps headers so you
-    capture ``X-Version`` + ``X-Body-SHA256`` for a later patch. Note parts
-    use ``get_note_part_body_capability`` (two-id path). No PAT, no
-    X-Workspace-Id; not consumed."""
+    capture ``X-Version`` + ``X-Body-SHA256`` for a later patch, in the
+    same, only GET. Note parts use ``get_note_part_body_capability``
+    (two-id path). No PAT, no X-Workspace-Id; consumed by the download."""
     from mycelium_core.config import get_settings
     from mycelium_core.services import capability_tokens as cap_svc
 

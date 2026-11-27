@@ -838,10 +838,11 @@ async def attachment_read_ctx(
 
 
 # Exact-resource-scoped block deps. Each accepts a normal bearer OR a
-# mycelium_cap_ token whose action+resource match the route. read = multi-use
-# (idempotent, NOT consumed); write/patch = single-use (consumed after the
-# write commits). The attachment-write deps key on the parent note/task in
-# the path -- itself the scoped resource -- so they need no extra row read.
+# mycelium_cap_ token whose action+resource match the route. All are
+# single-use: read is consumed by the download that serves it
+# (textstream.text_block_download), write/patch after the write commits.
+# The attachment-write deps key on the parent note/task in the path --
+# itself the scoped resource -- so they need no extra row read.
 
 
 async def note_attachment_write_ctx(
@@ -900,14 +901,15 @@ async def part_body_read_ctx(
     x_workspace_role: Annotated[str | None, Header()] = None,
     x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
-    """Note-part body raw download: bearer OR a multi-use
-    ``note_part_body:read`` capability scoped to this part."""
+    """Note-part body raw download: bearer OR a single-use
+    ``note_part_body:read`` capability scoped to this part (spent by
+    ``textstream.text_block_download``)."""
     async with _capability_or_bearer(
         token,
         expected_actions=(capability_tokens.ACTION_NOTE_PART_BODY_READ,),
         expected_resource_kinds=(capability_tokens.RESOURCE_NOTE_PART,),
         resource_id=part_id,
-        single_use=False,
+        single_use=True,
         x_workspace_id=x_workspace_id,
         x_project_id=x_project_id,
         x_workspace_role=x_workspace_role,
@@ -948,14 +950,15 @@ async def task_description_read_ctx(
     x_workspace_role: Annotated[str | None, Header()] = None,
     x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
-    """Task description raw download: bearer OR a multi-use
-    ``task_description:read`` capability scoped to this task."""
+    """Task description raw download: bearer OR a single-use
+    ``task_description:read`` capability scoped to this task (spent by
+    ``textstream.text_block_download``)."""
     async with _capability_or_bearer(
         token,
         expected_actions=(capability_tokens.ACTION_TASK_DESCRIPTION_READ,),
         expected_resource_kinds=(capability_tokens.RESOURCE_TASK,),
         resource_id=task_id,
-        single_use=False,
+        single_use=True,
         x_workspace_id=x_workspace_id,
         x_project_id=x_project_id,
         x_workspace_role=x_workspace_role,
@@ -1021,14 +1024,15 @@ async def annotation_body_read_ctx(
     x_workspace_role: Annotated[str | None, Header()] = None,
     x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
-    """Comment/annotation body raw download: bearer OR a multi-use
-    ``annotation_body:read`` capability scoped to this annotation."""
+    """Comment/annotation body raw download: bearer OR a single-use
+    ``annotation_body:read`` capability scoped to this annotation (spent by
+    ``textstream.text_block_download``)."""
     async with _capability_or_bearer(
         token,
         expected_actions=(capability_tokens.ACTION_ANNOTATION_BODY_READ,),
         expected_resource_kinds=(capability_tokens.RESOURCE_ANNOTATION,),
         resource_id=annotation_id,
-        single_use=False,
+        single_use=True,
         x_workspace_id=x_workspace_id,
         x_project_id=x_project_id,
         x_workspace_role=x_workspace_role,
