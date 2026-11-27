@@ -151,11 +151,15 @@ export function ConnectionsPanel({ kind, id }: { kind: ItemKind; id: string }) {
 
   function detail(c: Connection): string | null {
     if (c.relation !== 'depends_on') return null
-    const d = c.detail as { type?: string; lag_minutes?: number } | undefined
+    const d = c.detail as { type?: string; lag_minutes?: number; holding?: boolean } | undefined
     const lagMin = d?.lag_minutes ?? 0
+    // ``holding`` comes from the server's readiness rule: the waiting task
+    // cannot start yet because of this dependency.
+    const holding = d?.holding ? t(`itemConnections.holding.${c.direction === 'in' ? 'in' : 'out'}`) : null
     return [
       t(`itemConnections.depType.${d?.type ?? 'FS'}`),
       lagMin ? t('itemConnections.lag', { minutes: lagMin }) : null,
+      holding,
     ]
       .filter(Boolean)
       .join(' · ')

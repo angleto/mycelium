@@ -11,7 +11,7 @@ import i18n from '../i18n'
 // row that can be removed has Disconnect, a mention and a promotion say why
 // they cannot; Connect offers only the relations the server lists, and sends
 // the relation, the direction and the other item; a dependency also sends
-// its type and wait.
+// its type and wait, and a dependency that still holds the task back says so.
 
 const fetchMock = vi.hoisted(() => {
   const fn = vi.fn<(...args: unknown[]) => Promise<Response>>()
@@ -51,7 +51,7 @@ const ITEMS = [
     other_id: id(3),
     other_title: 'Build',
     removable: true,
-    detail: { type: 'FS', lag_minutes: 30 },
+    detail: { type: 'FS', lag_minutes: 30, holding: true },
   },
   {
     handle: 'mention:in:note:z',
@@ -119,6 +119,9 @@ describe('ConnectionsPanel', () => {
     ])
     expect(host.textContent).toContain(i18n.t('itemConnections.depType.FS'))
     expect(host.textContent).toContain(i18n.t('itemConnections.lag', { minutes: 30 }))
+    // The server says the dependency still holds this task back.
+    expect(host.textContent).toContain(i18n.t('itemConnections.holding.out'))
+    expect(host.textContent).not.toContain(i18n.t('itemConnections.holding.in'))
     const disconnects = [...host.querySelectorAll('button')].filter(
       (b) => b.textContent === i18n.t('itemConnections.disconnect'),
     )

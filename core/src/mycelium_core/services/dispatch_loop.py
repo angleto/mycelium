@@ -78,7 +78,7 @@ from mycelium_core.models.organization import Organization
 from mycelium_core.models.schedule import Schedule
 from mycelium_core.models.task import ExecKind, SchedulePolicy, Task
 from mycelium_core.services import agent_runtime as agent_runtime_svc
-from mycelium_core.services import audit
+from mycelium_core.services import audit, readiness
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import scheduler as scheduler_svc
 from mycelium_core.services.rbac import require_role
@@ -271,7 +271,12 @@ async def _admitted_agent_rows(
     P4's ``_resolved_executor`` notion (the loop does NOT re-derive
     scheduling). Deterministic order: the leveled placement
     (``scheduled_start``, NULLs last) then ``str(task_id)`` final
-    tie-break (the scheduler's own deterministic-core contract)."""
+    tie-break (the scheduler's own deterministic-core contract).
+
+    A task a dependency still holds back (``readiness``) is not admitted:
+    the plan places it after its predecessor, but the loop does not wait
+    for a planned start, so without this an agent was started on a task
+    whose finish-to-start predecessor was still open."""
     # docs/adr/0028: kind comes from the assignee identity when set,
     # else from the task's ``executor_kind`` hint. The dispatcher
     # picks tasks routed to the llm_agent pool either way.
@@ -286,6 +291,7 @@ async def _admitted_agent_rows(
                 Schedule.assigned_executor_id.is_not(None),
                 Task.deleted_at.is_(None),
                 Task.is_archived.is_(False),
+                ~readiness.held_back(Task.id),
             )
         )
     ).all()

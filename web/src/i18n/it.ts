@@ -219,6 +219,10 @@ export const it: Catalog = {
     depTypeLabel: 'Quando',
     lagLabel: 'Attesa (minuti)',
     lag: '{{minutes}} min di attesa',
+    holding: {
+      out: 'ancora in attesa',
+      in: 'la trattiene ancora',
+    },
     empty: {
       note: 'Questa nota non è collegata a niente.',
       task: 'Questo task non è collegato a niente.',

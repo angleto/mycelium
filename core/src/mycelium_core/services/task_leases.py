@@ -57,7 +57,7 @@ from mycelium_core.models.task_lease import LeaseRelease, TaskLease
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import agent_workers as workers_svc
-from mycelium_core.services import audit
+from mycelium_core.services import audit, readiness
 from mycelium_core.services import caller as caller_svc
 from mycelium_core.services.rbac import require_role
 
@@ -627,9 +627,21 @@ async def pull(
     deliberately (a re-check after a fix, a single-agent workspace) has a
     legitimate reason to turn it off, and that is a decision for the
     caller rather than a state of the world.
+
+    Pulling from the workflow's INITIAL state is starting work, so a task
+    a dependency still holds back is skipped there (``readiness``). From
+    any other station the task has already been started, and what holds a
+    start back no longer applies to it.
     """
     await require_role(session, org_id, actor_id, Role.member)
     holder = await resolve_holder(session, org_id=org_id, actor_id=actor_id, worker_id=worker_id)
+    starting = bool(
+        (
+            await session.execute(
+                select(WorkflowState.is_initial).where(WorkflowState.id == state_id)
+            )
+        ).scalar_one_or_none()
+    )
 
     for _ in range(_PULL_ATTEMPTS):
         now = _now()
@@ -655,6 +667,8 @@ async def pull(
             stmt = stmt.where(Task.assignee_id == assignee_id)
         if exclude_own_handoffs:
             stmt = stmt.where(_not_my_handoff(holder))
+        if starting:
+            stmt = stmt.where(~readiness.held_back(Task.id))
 
         candidate_id = (await session.execute(stmt)).scalar_one_or_none()
         if candidate_id is None:

@@ -12,7 +12,6 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
@@ -21,7 +20,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.workflow import WorkflowState
-from mycelium_core.services import audit
+from mycelium_core.services import audit, readiness
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.tasks import get_task
 
@@ -159,22 +158,14 @@ async def list_dependencies(
 
 
 async def _blocked_ids(session: AsyncSession, node_ids: set[uuid.UUID]) -> set[uuid.UUID]:
-    """Derived overlay (FR-3): a task is blocked if it has an incoming
-    dependency whose predecessor is not in a terminal workflow state.
-    Non-persistent; refined by the scheduler (F3)."""
+    """Derived overlay (FR-3): the tasks among ``node_ids`` that a dependency
+    still holds back, by the rule in ``readiness``. Non-persistent."""
     if not node_ids:
         return set()
-    pred = aliased(Task)
     rows = (
         (
             await session.execute(
-                select(TaskDependency.successor_id)
-                .join(pred, pred.id == TaskDependency.predecessor_id)
-                .join(WorkflowState, WorkflowState.id == pred.state_id)
-                .where(
-                    TaskDependency.successor_id.in_(node_ids),
-                    WorkflowState.is_terminal.is_(False),
-                )
+                select(Task.id).where(Task.id.in_(node_ids), readiness.held_back(Task.id))
             )
         )
         .scalars()
@@ -187,7 +178,7 @@ async def blocked_task_ids(
     session: AsyncSession, *, org_id: uuid.UUID, node_ids: set[uuid.UUID]
 ) -> set[uuid.UUID]:
     """Public view of the derived blocked overlay (consumed by the
-    advisory layer, F4b): tasks with a non-terminal predecessor."""
+    advisory layer, F4b): the tasks a dependency still holds back."""
     return await _blocked_ids(session, node_ids)
 
 

@@ -106,7 +106,8 @@ async def test_every_mechanism_round_trips_with_its_direction() -> None:
             ("related", "none", "buddy"),
         }
         dep = next(c for c in from_work if c.relation is Relation.depends_on)
-        assert dep.detail == {"type": "FS", "lag_minutes": 30}
+        # "first" is still open, so the finish-to-start dependency holds.
+        assert dep.detail == {"type": "FS", "lag_minutes": 30, "holding": True}
         assert _seen(await conn.list_connections(s, org_id=org, item=parent)) == {
             ("subtask_of", "in", "work")
         }

@@ -3851,6 +3851,12 @@ async def task_pull(
     checker reads as the author and every check is refused. Turn it off
     to re-check your own work deliberately.
 
+    Pulling from the workflow's initial state is starting work, so a task
+    that still waits for another one is skipped there: a finish-to-start
+    dependency whose predecessor is not finished, or a start-to-start one
+    whose predecessor has not started (``list_connections`` shows which
+    dependency is still holding).
+
     Raises ``task.lease.queue_empty`` when nothing matches. Moving the
     task to a different state later RELEASES this lease: work after that
     point needs a new one."""

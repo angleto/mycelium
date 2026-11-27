@@ -1143,3 +1143,40 @@ async def test_a_tick_recomputes_an_unchanged_plan_past_its_age_bound(
         past = _AS_OF + bound + dt.timedelta(seconds=1)
         await loop.tick(s, org_id=org, actor_id=user, as_of=past)
         assert await _computed_at(s) == {past}
+
+
+# --- (k) a task a dependency holds back is not dispatched ------------
+
+
+async def test_a_task_waiting_for_its_predecessor_is_not_admitted(_fake_embedder: None) -> None:
+    """The plan places the successor after its predecessor, but the loop
+    does not wait for a planned start: before 2026-11-26 both agent tasks of
+    a finish-to-start pair got a request in the same tick."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="WAIT")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        await _capable_agent(s, org=org, user=user)
+        first = await _llm_task(s, org=org, user=user, title="First")
+        second = await _llm_task(s, org=org, user=user, title="Second")
+        await dep_svc.add_dependency(
+            s,
+            org_id=org,
+            actor_id=user,
+            predecessor_id=first.id,
+            successor_id=second.id,
+            type=DependencyType.FS,
+        )
+        await loop.tick(s, org_id=org, actor_id=user, as_of=_AS_OF)
+        requested = set(
+            (
+                await s.execute(
+                    select(DispatchRequest.task_id).where(
+                        DispatchRequest.status.in_(loop.ACTIVE_DISPATCH_STATUSES)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert requested == {first.id}

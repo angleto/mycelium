@@ -14,7 +14,9 @@ from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.dependency import DependencyType, TaskDependency
 from mycelium_core.models.task import Task
+from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import dependencies as dependencies_svc
+from mycelium_core.services import readiness
 from mycelium_core.services.connections import (
     Connection,
     Direction,
@@ -36,11 +38,18 @@ class _TaskDependencies:
         if item.kind is not T:
             return []
         pred, succ = aliased(Task), aliased(Task)
+        pred_state = aliased(WorkflowState)
         rows = (
             await session.execute(
-                select(TaskDependency, pred.title, succ.title)
+                select(
+                    TaskDependency,
+                    pred.title,
+                    succ.title,
+                    readiness.holds_back(TaskDependency, pred, pred_state),
+                )
                 .join(pred, pred.id == TaskDependency.predecessor_id)
                 .join(succ, succ.id == TaskDependency.successor_id)
+                .join(pred_state, pred_state.id == pred.state_id)
                 .where(
                     TaskDependency.org_id == org_id,
                     or_(
@@ -53,7 +62,7 @@ class _TaskDependencies:
             )
         ).all()
         out: list[Connection] = []
-        for d, p_title, s_title in rows:
+        for d, p_title, s_title, holding in rows:
             # The successor waits for the predecessor: seen from the
             # successor, it depends on the other.
             is_successor = d.successor_id == item.id
@@ -67,7 +76,13 @@ class _TaskDependencies:
                     other_title=p_title if is_successor else s_title,
                     removable=True,
                     created_at=d.created_at,
-                    detail={"type": str(d.type.value), "lag_minutes": d.lag_working_minutes},
+                    # ``holding``: the successor still cannot start because
+                    # of this dependency, by the readiness rule.
+                    detail={
+                        "type": str(d.type.value),
+                        "lag_minutes": d.lag_working_minutes,
+                        "holding": bool(holding),
+                    },
                 )
             )
         return out

@@ -220,6 +220,10 @@ export const en = {
     depTypeLabel: 'When',
     lagLabel: 'Wait (minutes)',
     lag: '{{minutes}} min wait',
+    holding: {
+      out: 'still waiting',
+      in: 'still holding it back',
+    },
     empty: {
       note: 'This note is not connected to anything.',
       task: 'This task is not connected to anything.',
