@@ -43,8 +43,10 @@ deterministic core).
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import hashlib
+import heapq
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -111,6 +113,10 @@ class _Node:
     # This node's dates depend on a duration nobody knows: its own or one
     # upstream of it. They are the earliest the work could be, no more.
     lower_bound: bool = False
+    # A due date bounds this node's latest finish: its own, or one of a
+    # task after it. Then ``lf`` is a deadline and the priority rule reads
+    # it as one.
+    due_bound: bool = False
     # docs/adr/0028: the routing kind (human vs llm_agent) is no
     # longer stored on the task; it comes from the joined
     # ``identities.kind``. We materialise it here so the rest of the
@@ -236,12 +242,25 @@ def _policy_key(
     # datetime. ``dt.datetime.max`` lacks tzinfo and would raise on
     # comparison with the aware values returned by SQLAlchemy.
     _DUE_MAX = dt.datetime.max.replace(tzinfo=dt.UTC)
+
+    def _deadline(x: _Node) -> dt.datetime:
+        # The earliest-due-date rule reads the latest finish that due dates
+        # impose, the task's own or one inherited from a task after it, not
+        # only the task's own date: a task with no date that an urgent task
+        # waits for is as urgent as the work it holds up. Measured on
+        # 2026-11-27 (test_due_date_is_a_finish_constraint_with_its_margin):
+        # once successors wait for their predecessors' placement, ranking
+        # by the own date alone put that predecessor after unrelated work
+        # and the urgent task missed by 300 minutes instead of 180. A task
+        # with no date anywhere after it ranks last, as before.
+        return x.lf if x.due_bound else _DUE_MAX
+
     if policy is SchedulePolicy.fastest:
         return lambda x: (
             _slack(x),
             0 if _slack(x) <= 0 else 1,
             x.task.priority,
-            x.task.due_date or _DUE_MAX,
+            _deadline(x),
             x.task.created_at,
             str(x.task.id),
         )
@@ -249,7 +268,7 @@ def _policy_key(
         return lambda x: (
             1 if rate_of(x) > 0 else 0,
             x.task.priority,
-            x.task.due_date or _DUE_MAX,
+            _deadline(x),
             x.task.created_at,
             str(x.task.id),
         )
@@ -257,14 +276,14 @@ def _policy_key(
         return lambda x: (
             x.duration_min,
             x.task.priority,
-            x.task.due_date or _DUE_MAX,
+            _deadline(x),
             x.task.created_at,
             str(x.task.id),
         )
     # balanced: the canonical ADR-0004 priority rule.
     return lambda x: (
         x.task.priority,
-        x.task.due_date or _DUE_MAX,
+        _deadline(x),
         x.task.created_at,
         str(x.task.id),
     )
@@ -278,6 +297,65 @@ def _effort_minutes(task: Task) -> int | None:
     if hours is None:
         return None
     return round(float(hours) * 60)
+
+
+class _Timeline:
+    """One person's booked time: appointments, pins and the work placed so
+    far, as disjoint intervals in time order.
+
+    Work is placed in the first stretch at or after its gate where it fits,
+    so a task placed late in the pass can still go into a free morning that
+    an earlier task left behind; placing only after the last booked task
+    would leave that morning empty once tasks wait for their predecessors.
+    Two intervals with no working time between them (Friday 18:00 and
+    Monday 09:00) are kept as one, so the search walks real gaps rather
+    than nights: a person with a thousand back-to-back tasks is one
+    interval, not a thousand.
+
+    The context switch cost is paid before every task after the person's
+    first placed one, as it was on the cursor this replaces; it does not
+    look at what the task is placed next to.
+    """
+
+    def __init__(self, cal: WorkCalendar) -> None:
+        self._cal = cal
+        self._starts: list[dt.datetime] = []
+        self._ends: list[dt.datetime] = []
+        self._placed = False
+
+    def occupy(self, start: dt.datetime, end: dt.datetime) -> None:
+        snap = self._cal.snap_forward
+        i = bisect.bisect_left(self._starts, start)
+        if i > 0 and snap(self._ends[i - 1]) >= start:
+            i -= 1
+            start = self._starts[i]
+            end = max(end, self._ends[i])
+            del self._starts[i], self._ends[i]
+        while i < len(self._starts) and self._starts[i] <= snap(end):
+            end = max(end, self._ends[i])
+            del self._starts[i], self._ends[i]
+        self._starts.insert(i, start)
+        self._ends.insert(i, end)
+
+    def place(
+        self, gate: dt.datetime, minutes: int, cap: float, *, switch_min: int
+    ) -> tuple[dt.datetime, dt.datetime]:
+        cal = self._cal
+        start = cal.snap_forward(gate)
+        while True:
+            s = start
+            if self._placed and switch_min > 0:
+                # Context switch: lose switch_min of working time before
+                # the next distinct task can start.
+                s = cal.snap_forward(cal.add(s, switch_min))
+            end = cal.add_capped(s, minutes, cap)
+            i = bisect.bisect_right(self._ends, s)
+            if i < len(self._starts) and self._starts[i] < end:
+                start = cal.snap_forward(self._ends[i])
+                continue
+            self.occupy(s, end)
+            self._placed = True
+            return s, end
 
 
 def _earliest_free_slot(free: list[dt.datetime]) -> int:
@@ -905,6 +983,9 @@ class Scheduler:
                     )
             n.lf = min(finish_ub)
             n.ls = cal.subtract(n.lf, n.duration_min)
+            n.due_bound = (due is not None and n.role != _ROLE_START and not n.terminal) or any(
+                nodes[d.successor_id].due_bound for d in outgoing[nid]
+            )
 
         # --- Stage 2: resource-constrained list scheduling (ADR-0025) ---
         # Executors were just ensured. Index humans by user (the row
@@ -953,212 +1034,185 @@ class Scheduler:
 
         key = _policy_key(policy, _node_rate)
 
-        # Partition: human serial timeline vs LLM K-pool vs the
-        # off-timeline rest (terminals, zero-duration milestones,
-        # human tasks with no assignee) which keep their CPM ES/EF.
+        # One placement pass over every node of the graph (task be2fff43).
+        # A node is placed once all its predecessors are, so a task starts
+        # where its predecessors really are in the leveled plan, whoever
+        # does them; among the nodes whose predecessors are all placed, the
+        # policy's priority rule picks (a serial schedule generation
+        # scheme). Before 2026-11-27 people were placed one by one in
+        # priority order from their CPM earliest start, and only the agent
+        # pool read a predecessor's leveled window: a person's task could
+        # start a day before the task it depends on was done.
+        #
         # Keyed by leaf task id. A parent is never placed: its window is
         # the span of its subtasks' placements, read off after placing.
         sched: dict[uuid.UUID, tuple[dt.datetime, dt.datetime]] = {}
-        by_person: dict[uuid.UUID, list[_Node]] = {}
-        llm_nodes: list[_Node] = []
         # Migration 0094 / ADR-0008 addendum: appointment-tasks
-        # (``duration_minutes`` NOT NULL on the row) are pre-placed
-        # hard constraints. They never enter the placement loop:
-        # ``start_at`` is the fixed pin, ``start_at + duration`` the
-        # end. They also feed the per-person busy list so plain work
-        # is scheduled around them. The legacy ``events`` table was
-        # dropped in migration 0097.
-        appt_busy_by_user: dict[uuid.UUID, list[tuple[dt.datetime, dt.datetime]]] = {}
-        # Migration 0095/0096: every participant of an appointment-task
-        # (including the assignee, mirrored by the 0096 trigger) lives
-        # in ``task_participants`` with the denormalised window. Pull
-        # them all in one query and bucket by ``users.id`` (resolved
-        # through ``identities`` -- AI assistants have no users.id and
-        # are not put on the human serialization timeline). This way
-        # the scheduler sees N-way appointments: every participant has
-        # the slot in their busy list, not just the assignee. The rows
-        # were loaded with the other inputs, above the fingerprint.
+        # (``duration_minutes`` NOT NULL on the row) are pre-placed hard
+        # constraints at their fixed window. Every participant (migrations
+        # 0095/0096: the assignee is mirrored into ``task_participants``)
+        # has the slot on their timeline, so plain work goes around it. AI
+        # assistants have no users.id and no human timeline.
+        timelines: dict[uuid.UUID, _Timeline] = {}
+
+        async def _timeline(user_id: uuid.UUID) -> _Timeline:
+            if user_id not in timelines:
+                cal, _ = await self._calendar(user_id)
+                timelines[user_id] = _Timeline(cal)
+            return timelines[user_id]
+
         for uid, p_start, p_dur in participant_rows:
-            p_end = p_start + dt.timedelta(minutes=p_dur)
-            appt_busy_by_user.setdefault(uid, []).append((p_start, p_end))
-        for n in nodes.values():
-            if n.role != _ROLE_TASK:
-                continue
-            t = n.task
-            if t.start_at is not None and t.duration_minutes is not None:
-                # Pre-placed: fixed window, never moves. Busy list is
-                # populated above from task_participants (covers the
-                # assignee via the 0096 mirror trigger and every extra
-                # participant), so we only place the row in ``sched``.
-                appt_end = t.start_at + dt.timedelta(minutes=t.duration_minutes)
-                sched[t.id] = (t.start_at, appt_end)
-                n.ss, n.se = t.start_at, appt_end
-                continue
-            if (
-                n.kind is ExecKind.human
-                and n.assignee is not None
-                and not n.terminal
-                and n.duration_min > 0
-            ):
-                by_person.setdefault(n.assignee, []).append(n)
-            elif n.kind is ExecKind.llm_agent and not n.terminal and n.duration_min > 0:
-                llm_nodes.append(n)
-            else:
-                sched[n.task.id] = (n.es, n.ef)
-
-        # Humans: per-person serialization + event-clash avoidance +
-        # the policy priority rule. Between consecutive distinct tasks
-        # for the person, advance the cursor by that human executor's
-        # context_switch_cost_minutes (snap to the calendar). No penalty
-        # before the first task and none for a manual pin (a pin is
-        # fixed and does not move the switching cursor).
-        for user_id, plist in sorted(by_person.items(), key=lambda kv: str(kv[0])):
-            cal, cap = await self._calendar(user_id)
-            switch_min = (
-                human_exec[user_id].context_switch_cost_minutes if user_id in human_exec else 0
-            )
-            # Hard constraints on the person's timeline: appointment-
-            # tasks (migration 0094) collected above into
-            # ``appt_busy_by_user`` via task_participants (the 0096
-            # trigger mirrors the assignee so the loop sees both the
-            # primary owner and every extra participant).
-            busy: list[tuple[dt.datetime, dt.datetime]] = sorted(appt_busy_by_user.get(user_id, []))
-            plist.sort(key=key)
-            cursor = now
-            placed_first = False
-            for n in plist:
-                pin = _manual_pin_start(n.task, prev)
-                if pin is not None:
-                    end = cal.add_capped(pin, n.duration_min, cap)
-                    sched[n.task.id] = (pin, end)
-                    n.ss, n.se = pin, end
-                    # A pin does not advance the switching cursor (it is
-                    # fixed).
-                    continue
-                base = max(n.es, cursor)
-                if placed_first and switch_min > 0:
-                    # Context switch: lose switch_min of working time
-                    # before the next distinct task can start.
-                    base = cal.add(cal.snap_forward(base), switch_min)
-                start = cal.snap_forward(base)
-                end = start
-                for _ in range(0, 1000):
-                    end = cal.add_capped(start, n.duration_min, cap)
-                    clash = next(
-                        (b for b in busy if b[0] < end and b[1] > start),
-                        None,
+            (await _timeline(uid)).occupy(p_start, p_start + dt.timedelta(minutes=p_dur))
+        # A manual pin on a person's task is fixed too: it goes on the
+        # timeline before anything is placed, so later work goes around it
+        # rather than over it.
+        for nid in graph.leaves:
+            n = nodes[nid]
+            pin = _manual_pin_start(n.task, prev)
+            if pin is not None and n.kind is ExecKind.human and n.assignee is not None:
+                if not n.terminal and n.duration_min > 0:
+                    cal, cap = await self._calendar(n.assignee)
+                    (await _timeline(n.assignee)).occupy(
+                        pin, cal.add_capped(pin, n.duration_min, cap)
                     )
-                    if clash is None:
-                        break
-                    start = cal.snap_forward(clash[1])
-                sched[n.task.id] = (start, end)
-                n.ss, n.se = start, end
-                cursor = end
-                placed_first = True
 
-        # LLM agents (P2 admission-control dispatch, replacing P1's
-        # single default pool). Each enabled agent is a K-parallel
-        # resource (max_parallel slots, 24/7 -- no working calendar, no
-        # daily cap) with an optional credit_budget. For each llm task,
-        # in deterministic policy order, among its CAPABILITY-ELIGIBLE
-        # enabled agents pick the admissible one (a slot free at the
-        # earliest time AND projected cumulative spend on that agent +
-        # this task's cost <= its credit_budget if set). Assign it, place
-        # it on that agent's pool timeline, accumulate that agent's
-        # spend. A task with no admissible eligible agent is FLAGGED
-        # ``unassignable`` (it is NOT silently scheduled as in P1) and
-        # keeps its logical ES/EF as a visible dispatch gap.
-        #
-        # Processed in topo order so a predecessor's leveled finish gates
-        # its successor; within that, ties broken by the policy key then
-        # str(id) (deterministic). Per-agent slot state:
+        # LLM agents (P2 admission-control dispatch). Each enabled agent is
+        # a K-parallel resource (max_parallel slots, 24/7 -- no working
+        # calendar, no daily cap) with an optional credit_budget. For each
+        # llm task, among its CAPABILITY-ELIGIBLE enabled agents pick the
+        # admissible one (a slot free at the earliest time AND projected
+        # cumulative spend on that agent + this task's cost <= its
+        # credit_budget if set). A task with no admissible eligible agent
+        # is FLAGGED ``unassignable`` (never silently scheduled) and keeps
+        # its logical ES/EF as a visible dispatch gap.
         agent_state: dict[uuid.UUID, tuple[list[dt.datetime], list[uuid.UUID | None], Decimal]] = {}
         for a in agents:
             k = max(1, a.max_parallel)
             agent_state[a.id] = ([now] * k, [None] * k, Decimal(0))
         unassignable_ids: set[uuid.UUID] = set()
-        # Topo order tie-broken by the policy key (then str(id) inside
-        # the key): a fully deterministic dispatch sequence.
-        order_pos = {nid: i for i, nid in enumerate(order)}
 
-        def _leveled(nid: uuid.UUID) -> tuple[dt.datetime, dt.datetime]:
-            """Where a predecessor sits in the leveled plan so far, for
-            gating an llm task: a placed task's window, an unplaced one's
-            CPM window, a parent's start held by what precedes the parent,
-            and a parent's finish at its last subtask's end. The llm loop
-            runs in topological order and humans are placed before it, so
-            everything this reads for a predecessor is already placed."""
-            n = nodes[nid]
-            if n.role == _ROLE_TASK:
-                if n.ss != dt.datetime.min:
-                    return n.ss, n.se
-                return n.es, n.ef
-            if n.role == _ROLE_START:
-                at = n.es
-                for d in incoming[nid]:
-                    p_start, p_end = _leveled(d.predecessor_id)
-                    at = max(at, p_end if d.type is DependencyType.FS else p_start)
-                return at, at
-            end = n.ef
+        async def _bound(d: _Edge) -> tuple[dt.datetime, bool]:
+            """What one dependency asks of its successor in the leveled plan:
+            the instant, and whether it bounds the successor's finish (FF,
+            SF) rather than its start (FS, SS). Same reading as the forward
+            pass, on the predecessor's placed window. A zero lag is the
+            instant itself: snapping it onto the predecessor's calendar
+            would hold an agent, which works at night, until morning."""
+            p = nodes[d.predecessor_id]
+            ref = p.se if d.type in (DependencyType.FS, DependencyType.FF) else p.ss
+            if d.lag_working_minutes != 0:
+                pcal, _ = await self._calendar(p.assignee)
+                ref = pcal.add(ref, d.lag_working_minutes)
+            return ref, d.type in (DependencyType.FF, DependencyType.SF)
+
+        async def _gate(nid: uuid.UUID, n: _Node, *, wall_clock: bool) -> dt.datetime:
+            """Earliest start the placed predecessors allow, never before the
+            CPM earliest start (which already holds now, the constraint and
+            the actual start). A finish bound becomes a start bound by the
+            node's own duration: on the wall clock for an agent, on the
+            working calendar for everybody else."""
+            cal, _ = await self._calendar(n.assignee)
+            at = n.es
             for d in incoming[nid]:
-                p_start, p_end = _leveled(d.predecessor_id)
-                end = max(end, p_end if d.type is DependencyType.FF else p_start)
-            return end, end
+                ref, holds_finish = await _bound(d)
+                if holds_finish:
+                    ref = (
+                        ref - dt.timedelta(minutes=n.duration_min)
+                        if wall_clock
+                        else cal.subtract(ref, n.duration_min)
+                    )
+                at = max(at, ref)
+            return at
 
-        llm_seq = sorted(
-            llm_nodes,
-            key=lambda n: (order_pos[n.task.id], key(n)),
-        )
-        for ln in llm_seq:
-            nid = ln.task.id
-            pin = _manual_pin_start(ln.task, prev)
+        async def _place(nid: uuid.UUID) -> None:
+            n = nodes[nid]
+            t = n.task
+            if n.role == _ROLE_START:
+                at = await _gate(nid, n, wall_clock=False)
+                n.ss = n.se = at
+                return
+            if n.role == _ROLE_FINISH:
+                bounds = [(await _bound(d))[0] for d in incoming[nid]]
+                n.ss = n.se = max(bounds, default=n.ef)
+                return
+            if t.start_at is not None and t.duration_minutes is not None:
+                n.ss, n.se = t.start_at, t.start_at + dt.timedelta(minutes=t.duration_minutes)
+                sched[nid] = (n.ss, n.se)
+                return
+            if n.terminal:
+                n.ss, n.se = n.es, n.ef
+                sched[nid] = (n.ss, n.se)
+                return
+            pin = _manual_pin_start(t, prev)
+            if n.kind is ExecKind.human and n.assignee is not None and n.duration_min > 0:
+                cal, cap = await self._calendar(n.assignee)
+                if pin is not None:
+                    # Already on the timeline (see above); fixed.
+                    n.ss, n.se = pin, cal.add_capped(pin, n.duration_min, cap)
+                else:
+                    switch_min = (
+                        human_exec[n.assignee].context_switch_cost_minutes
+                        if n.assignee in human_exec
+                        else 0
+                    )
+                    line = await _timeline(n.assignee)
+                    n.ss, n.se = line.place(
+                        await _gate(nid, n, wall_clock=False),
+                        n.duration_min,
+                        cap,
+                        switch_min=switch_min,
+                    )
+                sched[nid] = (n.ss, n.se)
+                return
+            if n.kind is ExecKind.llm_agent and n.duration_min > 0:
+                await _place_on_agent(nid, n, pin)
+                return
+            # On no timeline: no estimate, a milestone, or nobody assigned
+            # who could hold it. It still waits for its predecessors.
+            cal, cap = await self._calendar(n.assignee)
+            at = await _gate(nid, n, wall_clock=False)
+            if n.duration_min == 0:
+                n.ss = n.se = at
+            else:
+                n.ss = cal.snap_forward(at)
+                n.se = cal.add_capped(n.ss, n.duration_min, cap)
+            sched[nid] = (n.ss, n.se)
+
+        async def _place_on_agent(nid: uuid.UUID, ln: _Node, pin: dt.datetime | None) -> None:
+            def _gap(reason: str) -> None:
+                ln.assigned = None
+                ln.unassignable_reason = reason
+                unassignable_ids.add(nid)
+                ln.ss, ln.se = ln.es, ln.ef
+                sched[nid] = (ln.es, ln.ef)
+
             if nid in self._assignee_inactive:
                 # Addressed to an assistant that can no longer act. Not a
                 # capability problem and not a budget problem, so it gets
                 # its own reason: "no_capable_agent" would send the owner
                 # looking for a missing capability tag.
-                ln.assigned = None
-                ln.unassignable_reason = _UNASSIGNABLE_ASSIGNEE_INACTIVE
-                unassignable_ids.add(nid)
-                sched[nid] = (ln.es, ln.ef)
-                continue
+                _gap(_UNASSIGNABLE_ASSIGNEE_INACTIVE)
+                return
             elig = _eligible_agents(ln)
             if not elig:
                 # No enabled agent advertises every required capability
                 # (or no enabled agent at all). Flagged dispatch gap.
-                ln.assigned = None
-                ln.unassignable_reason = _UNASSIGNABLE_NO_CAPABLE_AGENT
-                unassignable_ids.add(nid)
-                sched[nid] = (ln.es, ln.ef)
-                continue
+                _gap(_UNASSIGNABLE_NO_CAPABLE_AGENT)
+                return
             eff_h = _effort_hours(ln)
-            earliest = max(ln.es, now)
-            if pin is not None:
-                earliest = pin
-            else:
-                for d in incoming[nid]:
-                    p_start, p_end = _leveled(d.predecessor_id)
-                    if d.type in (DependencyType.FS, DependencyType.FF):
-                        earliest = max(earliest, p_end)
-                    else:
-                        earliest = max(earliest, p_start)
+            earliest = pin if pin is not None else max(await _gate(nid, ln, wall_clock=True), now)
             # Among eligible agents, those that ADMIT this task on budget
             # (no budget set = unlimited; budget set = cumulative + this
             # task's cost on that agent must not exceed it).
-            admissible: list[Executor] = []
-            for a in elig:
-                free, _last, spent = agent_state[a.id]
-                cost_on_a = eff_h * agent_rate_by_id[a.id]
-                if a.credit_budget is not None and spent + cost_on_a > a.credit_budget:
-                    continue
-                admissible.append(a)
+            admissible = [
+                a
+                for a in elig
+                if a.credit_budget is None
+                or agent_state[a.id][2] + eff_h * agent_rate_by_id[a.id] <= a.credit_budget
+            ]
             if not admissible:
-                # Eligible agents exist but every one would exceed budget.
-                ln.assigned = None
-                ln.unassignable_reason = _UNASSIGNABLE_BUDGET_EXHAUSTED
-                unassignable_ids.add(nid)
-                sched[nid] = (ln.es, ln.ef)
-                continue
+                _gap(_UNASSIGNABLE_BUDGET_EXHAUSTED)
+                return
             # Deterministic executor pick: lowest credit_rate_per_hour,
             # then earliest-free / most free capacity (the smallest
             # earliest-free slot time across the agent's slots), then
@@ -1175,15 +1229,33 @@ class Scheduler:
             end = start + dt.timedelta(minutes=ln.duration_min)
             free[slot] = end
             last[slot] = nid
-            agent_state[chosen.id] = (
-                free,
-                last,
-                spent + eff_h * agent_rate_by_id[chosen.id],
-            )
+            agent_state[chosen.id] = (free, last, spent + eff_h * agent_rate_by_id[chosen.id])
             ln.assigned = chosen.id
             ln.unassignable_reason = None
             sched[nid] = (start, end)
             ln.ss, ln.se = start, end
+
+        # Kahn's order with a priority heap: a node is ready when all its
+        # predecessors are placed. A parent's start or finish node goes as
+        # soon as it is ready (it takes no resource); a task goes in the
+        # policy's order, which ends with the id, so the sequence is total
+        # and the plan deterministic.
+        def _rank(nid: uuid.UUID) -> tuple[int, tuple[object, ...], str]:
+            n = nodes[nid]
+            if n.role != _ROLE_TASK:
+                return (0, (), str(nid))
+            return (1, key(n), str(nid))
+
+        indeg = {nid: len(incoming[nid]) for nid in graph_ids}
+        ready = [(*_rank(nid), nid) for nid in graph_ids if indeg[nid] == 0]
+        heapq.heapify(ready)
+        while ready:
+            *_, nid = heapq.heappop(ready)
+            await _place(nid)
+            for d in outgoing[nid]:
+                indeg[d.successor_id] -= 1
+                if indeg[d.successor_id] == 0:
+                    heapq.heappush(ready, (*_rank(d.successor_id), d.successor_id))
 
         # An unassignable llm task is a dispatch gap, not a placed task:
         # it has no scheduled_start/end and does not drive the makespan.

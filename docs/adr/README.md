@@ -12,7 +12,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0001 Architecture: Python monorepo, single service layer](0001-architecture-monorepo-python-service-layer.md)
 - [0002 Multi-tenant: optimistic concurrency, mandatory RLS](0002-multi-tenant-optimistic-concurrency-rls.md)
 - [0003 Unified tag with typed satellite profiles](0003-tag-unified-typed-satellite-profiles.md)
-- [0004 Deterministic scheduler, not RCPSP](0004-deterministic-scheduler.md) — amended 2026-11-27: a parent spans its subtasks, a missing estimate is unknown, a due date bounds the finish, one slack
+- [0004 Deterministic scheduler, not RCPSP](0004-deterministic-scheduler.md) — amended 2026-11-27: a parent spans its subtasks, a missing estimate is unknown, a due date bounds the finish, one slack; amended again 2026-11-27: one placement pass that waits for predecessors
 - [0005 Hierarchical memory on pgvector, hybrid RRF retrieval](0005-hierarchical-memory-pgvector-hybrid-rrf.md)
 - [0006 At-rest encryption at the volume level](0006-at-rest-volume-encryption.md)
 - [0007 Hard memory isolation per (org, project)](0007-memory-hard-isolation-org-project.md)

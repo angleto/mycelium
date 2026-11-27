@@ -126,7 +126,8 @@ mean what a reader takes them to mean:
 - The human serial placement still orders a person's tasks by their CPM
   earliest start and the priority rule, not by the leveled finish of
   their predecessors; only the agent pool waits for a predecessor's
-  leveled end. That is unchanged here and is its own task (be2fff43).
+  leveled end. That is unchanged here and is its own task (be2fff43),
+  delivered the same day: see the next amendment.
 
 ### Alternatives rejected
 
@@ -140,3 +141,54 @@ mean what a reader takes them to mean:
   workspace on one link that the dependency service accepted.
 - Measuring slack in working minutes: the advisory layer has no calendar
   to state it in, and a person reads "late by two days" in calendar time.
+
+## Amendment (2026-11-27, later): one placement pass that waits for predecessors
+
+### Context
+
+After the amendment above, a person's tasks were still placed one person at
+a time, in priority order, from their CPM earliest start, which assumes
+infinite resources. Only the agent pool read where a predecessor really was
+in the leveled plan, and it read FF and SF as if they were FS. A task of
+person 2 depending on a task that person 1's queue pushed to Tuesday was
+placed on Monday, before the work it depends on was done
+(core/tests/test_scheduler_leveled_gate.py records the cases).
+
+### Decision
+
+- **One pass over the whole graph** (a serial schedule generation scheme).
+  A node is placed once all its predecessors are; among the nodes whose
+  predecessors are all placed, the policy's priority rule picks. Every
+  dependency is read on its predecessor's placed window, the same way the
+  forward pass reads it: FS and SS bound the start, FF and SF the finish.
+  That holds for a person's task, an agent's task, and a task on no
+  timeline (no estimate, a milestone), which now moves with its
+  predecessors instead of keeping its CPM window.
+- **A person's timeline is a set of booked intervals**, not a cursor:
+  appointments, pins and placed work. Work goes into the first stretch at
+  or after its gate where it fits, so a task placed late in the pass can
+  still use a morning an earlier, waiting task left free. Intervals with
+  no working time between them are kept as one. Pins are booked before
+  anything is placed, so other work no longer overlaps them.
+- **The earliest-due-date rule reads the latest finish that due dates
+  impose**, the task's own or one inherited from a task after it. A task
+  with no date that an urgent task waits for ranks with that urgency; a
+  task with no date anywhere after it ranks last, as before.
+
+### Consequences
+
+- Plans move: successors start later where their predecessors were pushed
+  back; a predecessor of an urgent task is placed earlier.
+- Measured on 2026-11-27 on 1200 tasks and 400 dependencies across two
+  people and an agent: a recompute took 1.1 to 1.3 s, against 1.1 to 1.4 s
+  before, with the same plan end.
+
+### Alternatives rejected
+
+- Keeping per-person placement and adding the gate to it: the people are
+  placed one after the other, so a person placed first cannot wait for a
+  predecessor of a person placed later.
+- One cursor per person in the single pass: a task that waits until
+  Tuesday would move the cursor to Tuesday and leave Monday empty for
+  every task placed after it (test_waiting_work_leaves_the_free_morning_to_other_work
+  fails with that variant).
