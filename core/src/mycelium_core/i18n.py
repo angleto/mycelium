@@ -996,9 +996,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "it can no longer be applied automatically."
         ),
         MessageCode.SUGGESTION_DECISION_INVALID: (
-            "The cited comment is not a person's decision to accept this "
-            "suggestion ({reason}). Ask the person to reply on the document "
-            "with a line 'accept <suggestion id>'."
+            "No decision by a person to accept this suggestion could be verified "
+            "({reason}). Ask the person to reply on the document with a line "
+            "'accept <suggestion id>'."
         ),
         MessageCode.ANNOTATION_INSTRUCTION_INVALID: (
             "The cited instruction cannot be answered by this suggestion ({reason}). "

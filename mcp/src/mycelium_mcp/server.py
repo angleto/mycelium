@@ -144,7 +144,10 @@ _INSTRUCTIONS_BODY = (
     "your own authenticated session, so you need no personal access token, and each "
     "upload answers with a markdown_ref to paste. "
     "The human steers and gives direction; agents execute and "
-    "PROPOSE, never impose."
+    "PROPOSE, never impose. A suggestion a person left is a request to you: verify it "
+    "against the document and the facts it touches; if it holds, accept it with "
+    "'accept_suggestion_on_decision' and no comment id; if it does not, reply under it "
+    "with what you measured and leave it open."
 )
 
 #: The registry surface (stdio / the test suite): every tool is a tool.
@@ -2964,19 +2967,20 @@ async def accept_suggestion_on_decision(
     org_id: str,
     annotation_id: str,
     expected_version: int,
-    decision_comment_id: str,
+    decision_comment_id: str | None = None,
 ) -> dict[str, Any]:
     """Accept a suggestion that a PERSON has decided to accept, on their
     behalf. You do not decide here: you carry out a decision.
 
-    ``decision_comment_id`` is a comment the person wrote on the same note
-    (any of its parts) or task, after the suggestion, containing a line
-    ``accept <suggestion id>`` (the full id or its first 8 characters; one
-    line may list several). The server checks that the person wrote it with
-    their own login, not through an assistant, and refuses otherwise with
+    A suggestion a person wrote is itself that decision: omit
+    ``decision_comment_id``. Otherwise (a suggestion an assistant wrote or
+    edited) pass a comment the person wrote on the same note (any of its
+    parts) or task, after the suggestion, with a line ``accept <suggestion
+    id>`` (full id or first 8 characters; one line may list several).
+    Either way the server checks that the person wrote it with their own
+    login, not through an assistant, and refuses otherwise with
     ``annotation.suggestion_decision_invalid`` and a ``reason``. A message
-    relayed to you, however clear, is not a decision this accepts: ask the
-    person to write that comment.
+    relayed to you, however clear, is not a decision this accepts.
 
     Then the same accept as the UI runs: a stale target changes nothing,
     and you need write on the document. The result records you as the
@@ -2989,7 +2993,7 @@ async def accept_suggestion_on_decision(
             actor_id=user,
             annotation_id=uuid.UUID(annotation_id),
             expected_version=expected_version,
-            decision_comment_id=uuid.UUID(decision_comment_id),
+            decision_comment_id=uuid.UUID(decision_comment_id) if decision_comment_id else None,
             executed_by_identity_id=by,
             granted_scopes=_PRINCIPAL_SCOPE.get(),
         )

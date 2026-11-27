@@ -23,6 +23,7 @@ the XOR CHECK live in the table.
 from __future__ import annotations
 
 import datetime as dt
+import enum
 import re
 import uuid
 from collections.abc import Callable
@@ -1516,6 +1517,10 @@ def _same_document_clause(ann: Annotation) -> ColumnElement[bool]:
     return and_(Annotation.doc_kind == "note_part", Annotation.note_part_id.in_(same_note_parts))
 
 
+def _refuse_suggestion_decision(reason: str) -> DomainError:
+    return DomainError(MessageCode.SUGGESTION_DECISION_INVALID, reason=reason)
+
+
 async def _verify_decision(
     session: AsyncSession,
     *,
@@ -1537,9 +1542,7 @@ async def _verify_decision(
 
     A ``reason`` names the clause that failed; nothing is changed."""
 
-    def refuse(reason: str) -> DomainError:
-        return DomainError(MessageCode.SUGGESTION_DECISION_INVALID, reason=reason)
-
+    refuse = _refuse_suggestion_decision
     dec = await load_decision_comment(
         session, org_id=org_id, comment_id=decision_comment_id, refuse=refuse
     )
@@ -1575,6 +1578,18 @@ async def _verify_decision(
     return decided_by
 
 
+class DecidedIn(enum.StrEnum):
+    """Where the person's decision to accept a suggestion lives (ADR-0066).
+
+    ``comment``: a separate comment with an ``accept <id>`` line.
+    ``suggestion``: the suggestion itself, which a person wrote with their
+    own hand (amendment of 2026-11-26): the proposed text is already the
+    person's decision about that text, and the agent carries it out."""
+
+    comment = "comment"
+    suggestion = "suggestion"
+
+
 async def accept_suggestion_on_decision(
     session: AsyncSession,
     *,
@@ -1582,7 +1597,7 @@ async def accept_suggestion_on_decision(
     actor_id: uuid.UUID,
     annotation_id: uuid.UUID,
     expected_version: int,
-    decision_comment_id: uuid.UUID,
+    decision_comment_id: uuid.UUID | None,
     executed_by_identity_id: uuid.UUID | None,
     granted_scopes: list[str] | None = None,
 ) -> int:
@@ -1600,17 +1615,34 @@ async def accept_suggestion_on_decision(
     fence into a formality. A comment written with the person's own
     credential is something the server can check.
 
+    With no ``decision_comment_id`` the suggestion is its own decision, and
+    it must pass on itself the checks a decision comment passes on its
+    writer (:func:`person_who_wrote`): a person is its author, every write
+    to it was made with that person's own credential, and they are still a
+    member. The comment-only clauses (same document, written after, names
+    the suggestion) have nothing to apply to. A suggestion an agent wrote,
+    or touched, still needs a person's comment. This gives the agent no
+    more than the author already has: any member may accept any
+    suggestion in the UI, their own included.
+
     The accept records both roles: ``resolved_by`` is the executor,
-    ``decided_by`` the person, ``decision_comment_id`` where they decided."""
+    ``decided_by`` the person, ``decision_comment_id`` where they decided
+    (NULL when the suggestion is the decision; the audit row says which in
+    ``decided_in``)."""
     await require_role(session, org_id, actor_id, Role.member)
     ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
     if ann.kind != "suggestion":
         raise DomainError(MessageCode.ANNOTATION_NOT_SUGGESTION)
     if ann.status != "open":
         raise DomainError(MessageCode.SUGGESTION_NOT_PENDING)
-    decided_by = await _verify_decision(
-        session, org_id=org_id, ann=ann, decision_comment_id=decision_comment_id
-    )
+    if decision_comment_id is None:
+        decided_by = await person_who_wrote(
+            session, org_id=org_id, dec=ann, refuse=_refuse_suggestion_decision
+        )
+    else:
+        decided_by = await _verify_decision(
+            session, org_id=org_id, ann=ann, decision_comment_id=decision_comment_id
+        )
     return await _accept(
         session,
         org_id=org_id,
@@ -1632,7 +1664,7 @@ async def _accept(
     expected_version: int,
     resolved_by_identity_id: uuid.UUID | None,
     granted_scopes: list[str] | None,
-    decision: tuple[uuid.UUID, uuid.UUID] | None,
+    decision: tuple[uuid.UUID, uuid.UUID | None] | None,
 ) -> int:
     """The accept itself, shared by the person's path and the agent's: one
     splice, one stale check, one body-write fence, whoever triggers it."""
@@ -1659,9 +1691,11 @@ async def _accept(
         decided_by, decision_comment_id = decision
         values["decided_by_identity_id"] = decided_by
         values["decision_comment_id"] = decision_comment_id
+        decided_in = DecidedIn.suggestion if decision_comment_id is None else DecidedIn.comment
         diff = {
             "decided_by_identity_id": str(decided_by),
-            "decision_comment_id": str(decision_comment_id),
+            "decision_comment_id": str(decision_comment_id) if decision_comment_id else None,
+            "decided_in": decided_in.value,
             "executed_by_identity_id": str(by) if by is not None else None,
         }
     new_version = await optimistic_update(

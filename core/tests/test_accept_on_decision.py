@@ -362,3 +362,118 @@ def test_the_agent_reaches_this_tool_and_still_not_the_plain_accept() -> None:
         assert not _scope_permits("accept_suggestion")
     finally:
         _PRINCIPAL_SCOPE.reset(tok)
+
+
+# ── the suggestion is its own decision (ADR-0066 amendment, 2026-11-26) ────
+#
+# Observed on the service of 396d63e4 (2026-11-26): all four tests below
+# failed, each refused as ``not_a_comment`` (no comment cited), so a person who
+# wrote a suggestion had to approve it again in a second comment, and the
+# refusals of the other three named the missing comment rather than the
+# clause the suggestion itself fails.
+
+
+async def _suggestion(
+    w: _World, *, through_agent: bool, author: uuid.UUID | None = None
+) -> tuple[uuid.UUID, Annotation]:
+    async with w.person() as s:
+        t = await tasks_svc.create_task(
+            s, org_id=w.org, actor_id=w.user, title="t", description="ship on friday"
+        )
+    async with w.through_agent() if through_agent else w.person() as s:
+        sug = await anno.propose_suggestion(
+            s,
+            org_id=w.org,
+            actor_id=w.user,
+            doc_kind="task_description",
+            doc_id=t.id,
+            original_text="friday",
+            proposed_text="monday",
+            author_identity_id=author,
+        )
+    return t.id, sug
+
+
+async def _carry_out(w: _World, sug: Annotation) -> int:
+    async with w.through_agent() as s:
+        return await anno.accept_suggestion_on_decision(
+            s,
+            org_id=w.org,
+            actor_id=w.user,
+            annotation_id=sug.id,
+            expected_version=sug.version,
+            decision_comment_id=None,
+            executed_by_identity_id=w.agent,
+            granted_scopes=["comments:write", "tasks:write"],
+        )
+
+
+async def _carry_out_refused(w: _World, sug: Annotation) -> str:
+    with pytest.raises(DomainError) as e:
+        await _carry_out(w, sug)
+    assert e.value.code == MessageCode.SUGGESTION_DECISION_INVALID
+    reason = e.value.params["reason"]
+    assert isinstance(reason, str)
+    return reason
+
+
+async def test_a_suggestion_a_person_wrote_is_accepted_without_a_comment() -> None:
+    w = await _world()
+    task_id, sug = await _suggestion(w, through_agent=False)
+
+    await _carry_out(w, sug)
+
+    assert await _description(w, task_id) == "ship on monday"
+    async with w.person() as s:
+        row = (await s.execute(select(Annotation).where(Annotation.id == sug.id))).scalar_one()
+        audit = (
+            await s.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == sug.id, ActivityLog.action == "accept"
+                )
+            )
+        ).scalar_one()
+    assert row.status == "accepted"
+    assert row.resolved_by_identity_id == w.agent
+    assert row.decided_by_identity_id == sug.author_identity_id != w.agent
+    assert row.decision_comment_id is None
+    assert audit.diff is not None
+    assert audit.diff["decided_in"] == "suggestion"
+    assert audit.diff["decision_comment_id"] is None
+
+
+async def test_a_suggestion_an_assistant_wrote_still_needs_a_persons_comment() -> None:
+    w = await _world()
+    task_id, sug = await _suggestion(w, through_agent=True, author=w.agent)
+    assert await _carry_out_refused(w, sug) == "author_not_a_person"
+    assert await _description(w, task_id) == "ship on friday"
+
+
+async def test_a_suggestion_signed_as_the_person_but_written_with_an_agent_token_is_refused() -> (
+    None
+):
+    """Clause 2 applied to the suggestion: an agent token with no assistant
+    bound writes as the person's own identity, and the log says who wrote."""
+    w = await _world()
+    task_id, sug = await _suggestion(w, through_agent=True)
+    assert await _carry_out_refused(w, sug) == "written_through_an_agent"
+    assert await _description(w, task_id) == "ship on friday"
+
+
+async def test_a_persons_suggestion_edited_by_an_agent_is_refused() -> None:
+    w = await _world()
+    task_id, sug = await _suggestion(w, through_agent=False)
+    async with w.through_agent() as s:
+        v = await anno.edit(
+            s,
+            org_id=w.org,
+            actor_id=w.user,
+            annotation_id=sug.id,
+            body="the agent's rationale",
+            expected_version=sug.version,
+        )
+    async with w.person() as s:
+        sug = (await s.execute(select(Annotation).where(Annotation.id == sug.id))).scalar_one()
+    assert sug.version == v
+    assert await _carry_out_refused(w, sug) == "written_through_an_agent"
+    assert await _description(w, task_id) == "ship on friday"

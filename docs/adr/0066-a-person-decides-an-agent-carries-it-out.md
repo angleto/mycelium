@@ -141,3 +141,59 @@ and `mycelium auth login` and the SPA's MCP panel still mint bare tokens rather
 than binding them to an assistant with a scope list. The first is closed
 (2026-11-18): those guards now ask `services.caller` (ADR-0072), so a bare
 token, the CLI's included, is refused on them like any agent's.
+
+## Amendment (2026-11-26, task 1745b004): a person's suggestion is its own decision
+
+A person who leaves a suggestion is asking the agent to integrate it or check
+it. Under the decision above the agent could not act on it: it needed a
+second comment with `accept <id>`, so the person had to approve, separately,
+the text they had just proposed. Measured on note 61a346b6, suggestion
+a10bf667.
+
+The reason this ADR refuses a relayed instruction does not apply. The server
+cannot verify an instruction the agent reports. It can verify a suggestion
+exactly as it verifies a decision comment, and the proposed text is already
+the person's decision about that text. Nothing in "Rejected" covers the case:
+"the same identity proposes and executes" is about proposals agents write.
+
+**Decision.** `accept_suggestion_on_decision` takes `decision_comment_id` as
+optional. Without it, the suggestion is the decision. It must pass clauses
+1-3 applied to itself instead of to a comment: a person is its author, every
+write to it (creation, edit, restore) was made with that person's own
+credential, and the person is still a member. Clauses 4-6 (same document,
+written after, names the suggestion) have nothing to apply to. The same
+code checks both cases (`person_who_wrote`). The stale check and the
+body-write fence stay as they were. The row records `decided_by` = the
+suggestion's author and `decision_comment_id` NULL. The activity log entry
+for the accept says where the decision lives, `decided_in`, which is
+`suggestion` or `comment`.
+
+A suggestion an assistant wrote, or touched, still needs a person's comment.
+Its refusal names the clause it fails: `author_not_a_person` for one written
+under an assistant's identity, and `written_through_an_agent` for one written
+or edited with an agent token under the person's identity.
+
+An agent never rejects a person's suggestion. Rejecting was already
+`HUMAN_ONLY`, so this holds by construction. The server's instructions now
+say what to do instead: when the check fails, reply under the suggestion
+with what was measured, and leave it open.
+
+**Why it gives the agent nothing new.** In the UI any member may accept any
+suggestion, their own included. An agent accepting a person's suggestion
+does what that person could do with one click, and only in the direction
+they wrote.
+
+**Limits.**
+
+- The limit stated above still holds: a person's session token, handed by
+  hand to an agent on stdio, cannot be told apart from the person, and here
+  it could also write the suggestion.
+- In a workspace with several people, a suggestion one person leaves for
+  another to weigh can now be integrated by an agent, as soon as the agent
+  judges that it holds. The UI already allowed the author to accept it
+  themselves, so no one gains a power they did not have. What is lost is
+  that a suggestion stays open by default: someone who wants it discussed,
+  and not integrated, has to say so in a reply. A per-suggestion flag would
+  close the gap, and it is not built.
+- A protected note still refuses every write made with an assistant's
+  credential, this one included.
