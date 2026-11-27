@@ -54,7 +54,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**330 tools across 18 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**331 tools across 19 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -203,7 +203,16 @@ over-fetch the org table and filter in its head.
 | `worker_open` | Open a working session and get the id that identifies YOU. |
 | `workers_list` | The working sessions that are open. ``mine_only`` narrows to the |
 
-### orchestration (16)
+### notifications (4)
+
+| Tool | Summary |
+|---|---|
+| `dispatch_notifications` | Send pending notifications (per-item fault isolation). |
+| `notify_self` | Send a message to yourself, on every channel of yours that can reach |
+| `scan_reminders` | Enqueue idempotent due-date reminders for assignees. |
+| `set_notification_pref` | Switch one of YOUR OWN notification channels on or off. |
+
+### orchestration (15)
 
 | Tool | Summary |
 |---|---|
@@ -213,7 +222,6 @@ over-fetch the org table and filter in its head.
 | `agent_runs_list` | List agent runs (member-level), newest first, optionally filtered |
 | `dispatch_approve` | Owner: approve a pending dispatch request, then immediately |
 | `dispatch_deny` | Owner: deny an active dispatch request (never starts a run), with |
-| `dispatch_notifications` | Send pending notifications (per-item fault isolation). |
 | `dispatch_requests_list` | List the closed-loop dispatch queue (member-level, RLS-scoped), |
 | `dispatch_tick` | Owner: run one closed-loop tick now (recompute -> admit -> gate |
 | `executor_create` | Owner: create an executor (docs/adr/0025 P2). An ``llm_agent`` |
@@ -447,7 +455,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_instructions` | Stream a huge file (GB, DICOM, MRI) as attachment; needs s3 and a personal access token. |
 | `work_digest` | What happened on the tasks of a client or project in a window: the |
 
-### misc (24)
+### misc (22)
 
 | Tool | Summary |
 |---|---|
@@ -470,9 +478,7 @@ over-fetch the org table and filter in its head.
 | `list_time_entries` | List time entries, newest first, each with its ``memo`` (the free-text |
 | `ping` | Liveness probe; returns the mycelium-core version. |
 | `reopen_annotation` | Reopen a resolved comment thread. |
-| `scan_reminders` | Enqueue idempotent due-date reminders for assignees. |
 | `set_issuer_profile` | Create-or-update the default issuer profile, the invoice |
-| `set_notification_pref` | Switch one of YOUR OWN notification channels on or off. |
 | `spawn_due_recurrences` | Materialize due recurrences as independent task rows. |
 | `what_can_i_do_now` | Deterministic plan over the CALLER's OWN actionable tasks for a free |
 <!-- END GENERATED -->

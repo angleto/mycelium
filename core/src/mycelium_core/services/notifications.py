@@ -17,12 +17,12 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError, UnprocessableError
+from mycelium_core.errors import DomainError, QuotaExceededError, UnprocessableError
 from mycelium_core.i18n import DEFAULT_LOCALE, MessageCode, render
 from mycelium_core.models.dependency import TaskDependency
 from mycelium_core.models.identity import Identity, IdentityKind
@@ -162,6 +162,109 @@ async def list_prefs(
         .scalars()
         .all()
     )
+
+
+#: A person's own notifications (``notify_self``) per channel per rolling
+#: hour. The resource protected is the person's attention and the provider's
+#: per-chat rate, and every message costs the same there, so a count is the
+#: honest unit. 30 is far above the use it exists for (a laptop reporting
+#: its charger, an agent saying it is blocked) and far below what makes a
+#: phone unusable; a script stuck in a loop is refused after it.
+SELF_NOTIFY_PER_HOUR = 30
+SELF_NOTIFY_KIND = "self"
+
+
+@dataclass(frozen=True, slots=True)
+class SelfNotifyResult:
+    queued: list[NotificationChannelKind]
+    already_queued: list[NotificationChannelKind]
+
+
+async def notify_self(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    title: str,
+    body: str,
+    key: str | None = None,
+) -> SelfNotifyResult:
+    """Queue a message to the CALLER, on every channel of theirs that can be
+    reached in this workspace. The worker sends it with the next dispatch.
+
+    There is no recipient and no destination to pass: both are the caller's,
+    and a channel's destination is one they proved (ADR-0082). That is what
+    makes this safe to offer an agent token: whatever it writes, it can only
+    reach the person it acts for.
+
+    ``key`` makes a repeat a no-op on each channel the message is already
+    queued or sent on: a charger that flaps, or a retried script, sends once
+    per key. Without it every call is a new message.
+
+    Refused when no channel can reach the caller (so the caller learns
+    nothing would arrive) and past ``SELF_NOTIFY_PER_HOUR`` on any channel."""
+    await require_role(session, org_id, actor_id, Role.member)
+    has_push = (
+        await session.execute(
+            select(PushSubscription.id).where(PushSubscription.user_id == actor_id).limit(1)
+        )
+    ).first() is not None
+    channels = [
+        p.channel
+        for p in await list_prefs(session, org_id=org_id, user_id=actor_id)
+        if p.enabled
+        and (p.target if p.channel is not NotificationChannelKind.webpush else has_push)
+    ]
+    if not channels:
+        raise UnprocessableError(MessageCode.NOTIFICATION_NO_REACHABLE_CHANNEL)
+    since = dt.datetime.now(tz=dt.UTC) - dt.timedelta(hours=1)
+    busiest = (
+        await session.execute(
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                Notification.org_id == org_id,
+                Notification.user_id == actor_id,
+                Notification.kind == SELF_NOTIFY_KIND,
+                Notification.created_at >= since,
+            )
+            .group_by(Notification.channel)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none() or 0
+    queued: list[NotificationChannelKind] = []
+    already: list[NotificationChannelKind] = []
+    for channel in channels:
+        dedupe = None if key is None else f"self:{actor_id}:{channel.value}:{key}"
+        if dedupe is not None:
+            exists = (
+                await session.execute(
+                    select(Notification.id).where(
+                        Notification.org_id == org_id, Notification.dedupe_key == dedupe
+                    )
+                )
+            ).first()
+            if exists is not None:
+                already.append(channel)
+                continue
+        if busiest >= SELF_NOTIFY_PER_HOUR:
+            raise QuotaExceededError(
+                MessageCode.NOTIFICATION_SELF_QUOTA, limit=SELF_NOTIFY_PER_HOUR
+            )
+        await enqueue(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            user_id=actor_id,
+            channel=channel,
+            kind=SELF_NOTIFY_KIND,
+            title=title,
+            body=body,
+            dedupe_key=dedupe,
+        )
+        queued.append(channel)
+    return SelfNotifyResult(queued=queued, already_queued=already)
 
 
 # Max dispatch attempts before a ``failed`` notification stops being

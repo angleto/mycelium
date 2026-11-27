@@ -46,6 +46,19 @@ target last.
    off when there is no link, web push emptied. Rows already right are not
    touched.
 
+5. **A message to oneself is an operation of its own**,
+   `notifications.notify_self` on the registry (REST `POST
+   /notifications/self`, MCP `notify_self`, CLI `mycelium notif send`), with
+   its own flat scope `notifications:notify_self`. It queues one row per
+   reachable channel of the caller and never dispatches: the worker sends it
+   with the next tick. It takes no recipient and no destination, refuses
+   extra keys, refuses when nothing would arrive
+   (`notification.no_reachable_channel`), deduplicates by an optional key,
+   and stops at 30 messages per channel per rolling hour
+   (`notification.self_quota`, 429). It is open to agent tokens on purpose:
+   points 1 and 2 are what make "the caller's own channels" mean the person,
+   so there is nothing for a person-only gate to protect.
+
 ## Consequences
 
 - A person can no longer route e-mail notifications to an address other

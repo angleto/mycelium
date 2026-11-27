@@ -1,4 +1,4 @@
-"""``mycelium notif`` — list and dismiss notifications."""
+"""``mycelium notif`` — list, dismiss and send notifications."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import typer
 from mycelium_cli.cmds._common import client, get_json, resolve_id, short_id
 from mycelium_cli.ui import emit_json, emit_table, info, json_mode, success
 
-app = typer.Typer(no_args_is_help=True, help="Notifications: list, dismiss.")
+app = typer.Typer(no_args_is_help=True, help="Notifications: list, dismiss, send to yourself.")
 
 
 @app.command("list")
@@ -54,3 +54,33 @@ def dismiss(
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"dismissed {short_id(notification_id)}")
+
+
+@app.command()
+def send(
+    title: str = typer.Argument(..., help="The message's first line (at most 120 characters)."),
+    body: str = typer.Option("", "--body", "-b", help="More text below the title."),
+    key: str | None = typer.Option(
+        None,
+        "--key",
+        "-k",
+        help="Send once per key: repeating it is a no-op on channels it already went to.",
+    ),
+) -> None:
+    """Send a message to yourself, on your own channels.
+
+    It goes to every channel of yours that can reach you in this workspace
+    (e-mail, linked Telegram, subscribed browsers), within about a minute.
+    There is no recipient to choose: it only ever reaches you."""
+    payload: dict[str, str] = {"title": title, "body": body}
+    if key is not None:
+        payload["key"] = key
+    with client() as c:
+        out = get_json(c.post("/notifications/self", json=payload))
+    if json_mode():
+        emit_json(out)
+        return
+    if out.get("queued"):
+        success(f"queued on {', '.join(out['queued'])}: goes out within about a minute")
+    if out.get("already_queued"):
+        info(f"already sent with this key on {', '.join(out['already_queued'])}")

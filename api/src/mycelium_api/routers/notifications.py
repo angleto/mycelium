@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
+from mycelium_api.op_routes import bind_route
 from mycelium_api.schemas import (
     CountOut,
     DispatchOut,
@@ -189,3 +190,8 @@ async def scan_reminders(
         within_days=within_days,
     )
     return CountOut(count=n)
+
+
+# A message to oneself, on the operation registry (docs/adr/0082): the
+# laptop's power alert reaches it through the CLI, an agent over MCP.
+bind_route(router, "POST", "/self", "notifications.notify_self", name="notify_self")

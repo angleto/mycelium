@@ -9010,6 +9010,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/self": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Self
+         * @description Send a message to yourself, on every channel of yours that can reach
+         *     you here (e-mail, linked Telegram, subscribed browsers). It goes out
+         *     with the next dispatch, within about a minute. There is no recipient to
+         *     choose: it only ever reaches the person the credential acts for. Pass
+         *     ``key`` to make a repeat a no-op on channels it already went to. Refused
+         *     with ``notification.no_reachable_channel`` when nothing would arrive,
+         *     and past 30 messages per channel per hour.
+         */
+        post: operations["notify_self_notifications_self_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/oauth/google/start": {
         parameters: {
             query?: never;
@@ -15073,6 +15099,25 @@ export interface components {
          * @enum {string}
          */
         NotificationStatus: "pending" | "sent" | "failed";
+        /** NotifySelfIn */
+        NotifySelfIn: {
+            /** Title */
+            title: string;
+            /**
+             * Body
+             * @default
+             */
+            body?: string;
+            /** Key */
+            key?: string | null;
+        };
+        /** NotifySelfOut */
+        NotifySelfOut: {
+            /** Queued */
+            queued: components["schemas"]["NotificationChannelKind"][];
+            /** Already Queued */
+            already_queued: components["schemas"]["NotificationChannelKind"][];
+        };
         /** OAuthClientCreateIn */
         OAuthClientCreateIn: {
             /** Client Name */
@@ -37775,6 +37820,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CountOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_self_notifications_self_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotifySelfIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotifySelfOut"];
                 };
             };
             /** @description Validation Error */

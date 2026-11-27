@@ -98,6 +98,7 @@ mycelium client list
 mycelium project list --client acme
 mycelium workspace list
 mycelium notif list
+mycelium notif send "AC unplugged" -b "battery 40%" -k ac-off-1   # to yourself only, once per key
 mycelium open today                         # SPA fallback (browser)
 mycelium open a1b2                          # open task detail in the SPA
 

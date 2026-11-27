@@ -296,6 +296,18 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Set per-channel notification preferences and enqueue due-date reminders. "
         "Internal only (see 'Send notifications externally').",
     ),
+    # A message to oneself (docs/adr/0082). Its own key and not
+    # notifications:send: that one force-sends every pending row of the
+    # workspace to external channels, this one queues one row for the caller,
+    # on destinations the caller proved, bounded per hour.
+    ScopeDef(
+        "notifications:notify_self",
+        "write",
+        "Message yourself",
+        "Queue a message to the person this credential acts for, on their own "
+        "channels (e-mail, linked Telegram, subscribed browsers). Cannot reach "
+        "anyone else. At most 30 per channel per hour.",
+    ),
     ScopeDef(
         "agent_runs:write",
         "write",

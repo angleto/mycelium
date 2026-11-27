@@ -10113,6 +10113,7 @@ from mycelium_mcp import (  # noqa: E402,F401
     tools_garden,
     tools_kg,
     tools_notes,
+    tools_notifications,
     tools_sessions,
     tools_tasks,
 )
