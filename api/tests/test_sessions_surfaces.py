@@ -176,7 +176,7 @@ async def test_the_hook_drives_the_real_server_through_a_turn(
 
         monkeypatch.setattr(sync, "client", bridged)
         monkeypatch.setattr(sync, "logged_in", lambda: True)
-        monkeypatch.setattr(session_hook, "_reconcile_detached", lambda: None)
+        monkeypatch.setattr(session_hook, "_detached", lambda _mode: None)
         # The registry is this machine's; in a test it lists the one session.
         live = sync.agent_host.LiveSession(
             "cc-hook", None, str(_state), "interactive", "busy", None, None

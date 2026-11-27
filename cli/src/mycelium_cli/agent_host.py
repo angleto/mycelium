@@ -300,7 +300,8 @@ def switch_to(pane: Pane) -> None:
 class HookState:
     """What the hooks of one host session wrote down: the Mycelium session it
     opened, the last attention they sent, the profile they sent it on, and
-    the join key the agent was given.
+    the join key the agent was given, and whether its session was opened as
+    accepting messages, so that every reopening says the same.
 
     ``sent`` is what makes a ``PostToolUse`` cost a file read and nothing
     else when the session was already reported as working. ``join_key`` is
@@ -314,6 +315,7 @@ class HookState:
     sent: str
     profile: str | None = None
     join_key: str | None = None
+    accepts_messages: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -322,6 +324,7 @@ class HookState:
             "sent": self.sent,
             "profile": self.profile,
             "join_key": self.join_key,
+            "accepts_messages": self.accepts_messages,
         }
 
 
@@ -348,6 +351,7 @@ def load_state(host_ref: str) -> HookState | None:
             sent=str(data.get("sent") or ""),
             profile=data.get("profile"),
             join_key=data.get("join_key"),
+            accepts_messages=bool(data.get("accepts_messages")),
         )
     except KeyError:
         return None

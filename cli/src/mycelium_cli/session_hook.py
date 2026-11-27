@@ -4,13 +4,18 @@ whether the session needs its person.
 
 | hook | what is sent |
 |---|---|
-| SessionStart | the session is opened; the agent is told its join key |
+| SessionStart | the session is opened, the agent is told its join key, the relay starts |
 | UserPromptSubmit, PostToolUse | working |
 | Notification permission_prompt | blocked on a permission |
 | Notification elicitation_dialog | blocked on a question |
 | Stop, StopFailure | your turn; and the machine's live sessions, at most once a minute |
 | SessionEnd | the session is closed |
 | PreCompact | nothing to the server; the reset shadow records the compaction |
+
+``--with-relay`` is how a machine opts in to messages from the sessions page
+(``session_relay``, docs/adr/0079): ``install-hooks --relay`` writes it on
+``SessionStart``, and the session is opened as accepting messages only when
+the process also offers its inbox.
 
 In a project the person allowed, every event also passes through the reset
 shadow (``reset_shadow``, docs/adr/0081), which writes a local record and
@@ -61,7 +66,7 @@ _BLOCKING_NOTIFICATIONS = {
 }
 
 
-def _log(message: str) -> None:
+def log(message: str) -> None:
     try:
         p = agent_host.log_path()
         p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -102,15 +107,17 @@ def context_for_agent(session: dict[str, Any], key: str) -> str:
     )
 
 
-def _start(payload: dict[str, Any]) -> int:
+def _start(payload: dict[str, Any], *, relay: bool) -> int:
+    from mycelium_cli import session_relay
     from mycelium_cli import session_sync as sync
 
     if not sync.logged_in():
-        _log("SessionStart: the CLI is not logged in; run `mycelium auth login`")
+        log("SessionStart: the CLI is not logged in; run `mycelium auth login`")
         return 0
     ref = str(payload.get("session_id") or "")
     cwd = str(payload.get("cwd") or "")
-    session, key = sync.open_session(ref, cwd)
+    inbox = session_relay.Inbox.from_env(os.environ) if relay else None
+    session, key = sync.open_session(ref, cwd, accepts_messages=inbox is not None)
     env_file = os.environ.get("CLAUDE_ENV_FILE")
     if env_file:
         with open(env_file, "a", encoding="utf-8") as f:
@@ -124,24 +131,28 @@ def _start(payload: dict[str, Any]) -> int:
         },
         sys.stdout,
     )
-    _reconcile_detached()
+    if inbox is not None:
+        session_relay.point(inbox.host_pid, ref)
+        _detached("--relay")
+    _detached("--reconcile")
     return 0
 
 
-def _reconcile_detached() -> None:
-    """Run a reconcile in its own process, so a hook that must answer at
-    once (SessionStart injects context, synchronously) does not wait for the
-    registry and the server."""
+def _detached(mode: str) -> None:
+    """Run this module in ``mode`` in its own process, so a hook that must
+    answer at once (SessionStart injects context, synchronously) waits for
+    neither the registry nor the server. It inherits the environment, which
+    is where the relay finds the session's inbox."""
     try:
-        subprocess.Popen(
-            [sys.executable, "-m", "mycelium_cli.session_hook", "--reconcile"],
+        subprocess.Popen(  # noqa: S603  # this interpreter, this module and a literal mode; no shell
+            [sys.executable, "-m", "mycelium_cli.session_hook", mode],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
     except OSError as exc:
-        _log(f"reconcile: could not start: {exc}")
+        log(f"{mode}: could not start: {exc}")
 
 
 def _shadow(event: str, payload: dict[str, Any]) -> None:
@@ -153,17 +164,17 @@ def _shadow(event: str, payload: dict[str, Any]) -> None:
 
         reset_shadow.observe(event, payload)
     except Exception as exc:  # the shadow never costs the session its attention report
-        _log(f"reset shadow: {type(exc).__name__}: {exc}")
+        log(f"reset shadow: {type(exc).__name__}: {exc}")
 
 
-def handle(payload: dict[str, Any]) -> int:
+def handle(payload: dict[str, Any], *, relay: bool = False) -> int:
     event = str(payload.get("hook_event_name") or "")
     ref = str(payload.get("session_id") or "")
     if not ref:
         return 0
     _shadow(event, payload)
     if event == "SessionStart":
-        return _start(payload)
+        return _start(payload, relay=relay)
     if event == "SessionEnd":
         from mycelium_cli import session_sync as sync
 
@@ -197,13 +208,20 @@ def main(argv: list[str] | None = None) -> int:
             if sync.logged_in():
                 sync.reconcile()
             return 0
+        if args == ["--relay"]:
+            from mycelium_cli import session_relay
+
+            inbox = session_relay.Inbox.from_env(os.environ)
+            if inbox is not None:
+                session_relay.run(inbox)
+            return 0
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             return 0
-        return handle(payload)
+        return handle(payload, relay=args == ["--with-relay"])
     except Exception as exc:  # the hook never fails the session it observes
-        _log(f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}")
+        log(f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}")
         return 0
 
 

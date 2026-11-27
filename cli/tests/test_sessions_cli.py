@@ -227,7 +227,7 @@ def test_session_start_hands_the_agent_its_key_and_the_shell_its_variable(
         "open_session",
         lambda ref, cwd, **_k: ({"id": "sid", "project": "humus"}, "k3y-value"),
     )
-    monkeypatch.setattr(session_hook, "_reconcile_detached", lambda: None)
+    monkeypatch.setattr(session_hook, "_detached", lambda _mode: None)
 
     code, out = _run_hook(
         {"hook_event_name": "SessionStart", "session_id": "s-4", "cwd": "/w/humus"}, monkeypatch

@@ -50,9 +50,17 @@ def logged_in() -> bool:
 
 
 def open_session(
-    host_ref: str, cwd: str, *, title: str | None = None
+    host_ref: str, cwd: str, *, title: str | None = None, accepts_messages: bool | None = None
 ) -> tuple[dict[str, Any], str]:
+    """Open the session, or reopen it under the same host id.
+
+    ``accepts_messages`` is decided by ``SessionStart``, the one hook that
+    starts a relay; None, from a reopening in any other hook, repeats what
+    the state file says, so a report that reopens a session does not turn
+    its messages off."""
     previous = agent_host.load_state(host_ref)
+    if accepts_messages is None:
+        accepts_messages = previous.accepts_messages if previous else False
     body = {
         "agent": agent_host.CLAUDE_CODE,
         "host_ref": host_ref,
@@ -60,6 +68,7 @@ def open_session(
         "machine": agent_host.machine_label(),
         "title": title,
         "join_key": previous.join_key if previous else None,
+        "accepts_messages": accepts_messages,
     }
     with client(timeout=HOOK_TIMEOUT_S) as c:
         out = get_json(c.post("/sessions/open", json=body))
@@ -71,6 +80,7 @@ def open_session(
             sent=_encode(session["attention"], session.get("blocked_on")),
             profile=profile_name(),
             join_key=key,
+            accepts_messages=accepts_messages,
         )
     )
     return session, key

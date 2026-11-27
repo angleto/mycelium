@@ -101,21 +101,27 @@ This section describes the one relay written now; §6 says what of it is the
 server's and what is the host's.
 
 `SessionStart` launches `mycelium-hook --relay` detached, as it already
-launches the reconcile. The relay inherits the socket path and the token
-from the hook's environment and keeps them in memory; they never reach the
-server or a file. One relay per session, not one per machine, because the
-token is per session and exists only in that session's children; a machine
-daemon would have to gather every session's token in one place.
+launches the reconcile. The relay inherits the socket path, the token and
+`CLAUDE_PID`, the Claude Code process the hook is a child of (all three
+measured in a hook's environment, phase B), and keeps them in memory; they
+never reach the server or a file. One relay per Claude Code process, not one
+per machine, because the token is per process and exists only in that
+process's children; a machine daemon would have to gather every session's
+token in one place.
 
-`SessionStart` fires again on resume, `/clear` and compaction, so the relay
-takes an exclusive `flock` on a lock file named after the host session in
-the state directory, and a second relay for the same session exits at once.
-The lock goes with the process, so a crashed relay never leaves it held. The
-relay finds its Claude Code process once, at start, by walking its own
-ancestors to the one Claude Code's registry lists for its session id, and
-exits at the first poll that finds that process gone: a relay is detached
-from the terminal, so without this an orphan of a killed session would keep
-polling.
+One relay per process and not per session, because `/clear` and `/resume`
+give the process a new session id and fire `SessionStart` again in it: a
+relay per session would leave one more behind at each. The relay takes an
+exclusive `flock` on a lock file named after the process, and a second relay
+for the same process exits at once; the lock goes with the process, so a
+crashed relay never leaves it held. Before starting a relay, `SessionStart`
+writes which host session the process is in now, and the relay reads it at
+every poll, so after a `/clear` the running relay serves the new session.
+The relay exits at the first poll that finds `CLAUDE_PID` gone: a relay is
+detached from the terminal, so without this an orphan of a killed session
+would keep polling. A dead process's pid is not taken again within one
+poll: on the machine of the measurement pids advanced by about a hundred a
+second against a `pid_max` of 4 194 304, so a pid returns after hours.
 
 ### 3. Delivery: poll, claim, write, report, at most once
 
@@ -227,7 +233,9 @@ that already closes stale sessions, and with the session if it is erased.
   the lock, the process check, the claim loop, the two lines it writes
   (pinned by a test), `install-hooks --relay`. One test runs against a real
   Claude Code session in tmux, armed by an environment flag, and is recorded
-  failing against a relay without the auth line.
+  failing against a frame Claude Code does not read. (The record first said
+  "against a relay without the auth line"; measured, that relay delivers on
+  Linux, so it is no negative control.)
 - **C.** Web: the composer on rows with `can_send`, the messages and their
   states, i18n in it and en, the browser suite selecting by role.
 
@@ -283,13 +291,22 @@ that already closes stale sessions, and with the session if it is erased.
   actions. Signing messages in the browser with a key only the person holds,
   checked by the relay, would close this; it is not designed here.
 - **The frame format.** It is not on Claude Code's public page. If it
-  changes, the socket may accept the write and drop the message, and the
-  relay would report `delivered`; the page would show a delivered message on
-  a row whose attention did not move. The armed end-to-end test notices it
-  first.
-- **`crossSessionInbound`.** The measurement ran with the default. Whether
-  `hold` or `refuse` also stop a message proven to come from the session's
-  own child is not documented; phase B measures it.
+  changes, the socket accepts the write and drops the message, and the
+  relay reports `delivered`; the page would show a delivered message on a
+  row whose attention did not move. Measured in phase B: a frame with
+  another `type` is written without an error and never reaches the
+  session. The armed end-to-end test notices it first, and was recorded
+  failing against that frame.
+- **The auth line proves nothing on Linux.** Measured in phase B on 2.1.332:
+  a message with no auth line, and one with a wrong token, reach the
+  session all the same. The relay sends the documented line, which Windows
+  requires, but on Linux any process of the user can write into any
+  session, with or without this design (see processes of the same user).
+- **`crossSessionInbound` set to `hold` or `refuse`.** Measured in phase B:
+  with either, the message did not reach the session within a minute, and
+  the socket took the write without an error, so the relay reports
+  `delivered`. A person who sets either should not run the relay on that
+  machine.
 - **A session without hooks**, or started before they were installed, has no
   relay and shows no composer.
 - **Windows**, where the auth line is required and the socket is a named

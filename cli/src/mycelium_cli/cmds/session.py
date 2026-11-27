@@ -406,6 +406,10 @@ _EVENTS: tuple[tuple[str, bool, int], ...] = (
 
 _MARK = "mycelium-hook"
 
+#: On ``SessionStart`` only: start the relay that writes messages from the
+#: sessions page into the session (docs/adr/0079).
+RELAY_FLAG = "--with-relay"
+
 
 def _hook_command() -> str:
     found = shutil.which(_MARK)
@@ -415,35 +419,54 @@ def _hook_command() -> str:
     return str(beside) if beside.exists() else _MARK
 
 
-def hooks_block(command: str) -> dict[str, list[dict[str, Any]]]:
+def _command_for(event: str, command: str, *, relay: bool) -> str:
+    return f"{command} {RELAY_FLAG}" if relay and event == "SessionStart" else command
+
+
+def hooks_block(command: str, *, relay: bool = False) -> dict[str, list[dict[str, Any]]]:
     block: dict[str, list[dict[str, Any]]] = {}
     for event, is_async, timeout in _EVENTS:
-        h: dict[str, Any] = {"type": "command", "command": command, "timeout": timeout}
+        h: dict[str, Any] = {
+            "type": "command",
+            "command": _command_for(event, command, relay=relay),
+            "timeout": timeout,
+        }
         if is_async:
             h["async"] = True
         block[event] = [{"hooks": [h]}]
     return block
 
 
-def merge_hooks(settings: dict[str, Any], command: str) -> list[str]:
-    """Add the hook to every event that does not run it yet; return the
-    events it was added to. Hooks already there, the person's or another
-    tool's, are left exactly as they are."""
+def merge_hooks(settings: dict[str, Any], command: str, *, relay: bool | None = None) -> list[str]:
+    """Add the hook to every event that does not run it yet, and with
+    ``relay`` True or False turn the relay on or off where it runs already;
+    return the events changed. None leaves the relay as it is, so running
+    the command again never turns it off unasked. Hooks of the person's or
+    of another tool are left exactly as they are."""
     hooks = settings.setdefault("hooks", {})
-    added: list[str] = []
-    for event, groups in hooks_block(command).items():
+    changed: list[str] = []
+    for event, groups in hooks_block(command, relay=bool(relay)).items():
         current = hooks.setdefault(event, [])
-        present = any(
-            _MARK in str(h.get("command", ""))
+        ours = [
+            h
             for g in current
             if isinstance(g, dict)
             for h in g.get("hooks", [])
-            if isinstance(h, dict)
-        )
-        if not present:
+            if isinstance(h, dict) and _MARK in str(h.get("command", ""))
+        ]
+        if not ours:
             current.extend(groups)
-            added.append(event)
-    return added
+            changed.append(event)
+            continue
+        if relay is None or event != "SessionStart":
+            continue
+        for h in ours:
+            base = str(h["command"]).removesuffix(f" {RELAY_FLAG}")
+            want = _command_for(event, base, relay=relay)
+            if h["command"] != want:
+                h["command"] = want
+                changed.append(event)
+    return changed
 
 
 _TMUX_BINDING = 'bind-key S display-popup -E -w 90% -h 60% "mycelium sessions --pick"'
@@ -462,6 +485,16 @@ def install_hooks(
         Path,
         typer.Option("--settings", help="The Claude Code settings file to merge into."),
     ] = Path("~/.claude/settings.json"),
+    relay: Annotated[
+        bool | None,
+        typer.Option(
+            "--relay/--no-relay",
+            help=(
+                "Let the sessions on this machine receive messages written on the Mycelium "
+                "sessions page. Left as it is when neither is given."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Make your Claude Code sessions show in Mycelium: the hooks that report
     whether a session needs you, and a tmux key to jump to the one that does.
@@ -471,7 +504,7 @@ def install_hooks(
     path = settings_path.expanduser()
     if not apply:
         out().print(f"Add to {path} (or run again with --apply):\n")
-        out().print_json(json.dumps({"hooks": hooks_block(command)}))
+        out().print_json(json.dumps({"hooks": hooks_block(command, relay=bool(relay))}))
         out().print(
             f"\nAnd to ~/.tmux.conf, for a popup with every session:\n\n  {_TMUX_BINDING}\n"
         )
@@ -482,8 +515,8 @@ def install_hooks(
         raise CLIError(f"{path} is not valid JSON ({exc}); nothing was changed.") from exc
     if not isinstance(settings, dict):
         raise CLIError(f"{path} does not hold a JSON object; nothing was changed.")
-    added = merge_hooks(settings, command)
-    if not added:
+    changed = merge_hooks(settings, command, relay=relay)
+    if not changed:
         out().print(f"The hooks are already in {path}; nothing changed.")
     else:
         if path.exists():
@@ -493,7 +526,7 @@ def install_hooks(
             out().print(f"Previous settings kept in {backup}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-        out().print(f"Added the Mycelium hook to {', '.join(added)} in {path}.")
+        out().print(f"Wrote the Mycelium hook on {', '.join(changed)} in {path}.")
         out().print(
             "Sessions started from now on report themselves; running ones show up the first "
             "time you run `mycelium sessions`."
