@@ -929,7 +929,13 @@ def _task(
             "due_date": t.due_date.isoformat() if t.due_date else None,
             "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
             "version": t.version,
-            "tags": [_tag_brief(g) for g in (tags or [])],
+            # None means the caller did not load them, and then the key is
+            # left out: an empty list here is a claim that the task has no
+            # tags, and every task has at least a project and a client.
+            # ``create_task`` once answered ``[]`` for a task it had just
+            # tagged (task 4012493f), and an agent reading that answer
+            # re-applies the project or creates the task again.
+            "tags": [_tag_brief(g) for g in tags] if tags is not None else None,
             # Accountability travels as a HANDLE here, not as the stored uuid.
             # The row used to carry ``assignee_id`` and ``owner_id`` raw: two
             # full uuids on every row, ~46 tokens of a ~160-token row, which a
@@ -1337,8 +1343,12 @@ async def create_task(
         )
         state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
         amap, omap = await _row_handles(s, org_id=org, rows=[task])
+        # Read back, not echoed from ``tag_ids``: the client is derived from
+        # the project, and with no project the task lands in the defaults.
+        tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
         return _task(
             task,
+            tagmap.get(task.id, []),
             state=state,
             assignee_handle=amap.get(task.assignee_id) if task.assignee_id else None,
             owner_handle=omap.get(task.owner_id) if task.owner_id else None,
@@ -2159,7 +2169,13 @@ def _task_full(
             "collaborators": collaborators if collaborators else None,
             "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
             "version": t.version,
-            "tags": [_tag_brief(g) for g in (tags or [])],
+            # None means the caller did not load them, and then the key is
+            # left out: an empty list here is a claim that the task has no
+            # tags, and every task has at least a project and a client.
+            # ``create_task`` once answered ``[]`` for a task it had just
+            # tagged (task 4012493f), and an agent reading that answer
+            # re-applies the project or creates the task again.
+            "tags": [_tag_brief(g) for g in tags] if tags is not None else None,
         }
     )
 
