@@ -11,6 +11,7 @@ from mycelium_core.models.adjudication import (
 )
 from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
 from mycelium_core.models.agent_session import AgentSession
+from mycelium_core.models.agent_session_message import AgentSessionMessage
 from mycelium_core.models.agent_token import AgentToken
 from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.ai_assistant_oauth_grant import AiAssistantOAuthGrant
@@ -209,6 +210,7 @@ __all__ = [
     "AgentRun",
     "AgentRunStatus",
     "AgentSession",
+    "AgentSessionMessage",
     "AgentToken",
     "AgentWorker",
     "AiAssistantOAuthGrant",

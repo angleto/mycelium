@@ -51,6 +51,7 @@ from mycelium_core.models.agent_session import (
     SessionCloseReason,
     hash_join_key,
 )
+from mycelium_core.models.agent_session_message import AgentSessionMessage, MessageState
 from mycelium_core.models.agent_worker import AgentWorker
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
@@ -107,7 +108,7 @@ async def _caller_binding(
     return caller.token_id, identity_id
 
 
-async def _own_open(
+async def own_open(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, session_id: uuid.UUID
 ) -> AgentSession:
     """An open session this credential opened, locked for the write, or not
@@ -143,6 +144,7 @@ async def open_session(
     machine: str | None = None,
     title: str | None = None,
     join_key: str | None = None,
+    accepts_messages: bool = False,
 ) -> tuple[AgentSession, str]:
     """Open the session the host calls ``host_ref``, or find the one this
     credential already opened under it, and return it with its join key.
@@ -157,7 +159,11 @@ async def open_session(
 
     Reopening a closed row is what a resume after ``SessionEnd`` needs, and
     a session closed as idle that turns out to be alive comes back the same
-    way, on its next event, with its history."""
+    way, on its next event, with its history.
+
+    ``accepts_messages`` is what the host says now, on every opening: a
+    machine that stopped running relays stops offering a composer at its
+    next session start."""
     await require_role(session, org_id, actor_id, Role.member)
     token_id, identity_id = await _caller_binding(session, org_id=org_id, actor_id=actor_id)
     ref = _clip(host_ref, 128)
@@ -200,6 +206,7 @@ async def open_session(
     row.last_seen_at = at
     row.closed_at = None
     row.closed_reason = None
+    row.accepts_messages = accepts_messages
     presented = (join_key or "").strip()
     if (
         presented
@@ -242,7 +249,7 @@ async def report(
     the row itself is the record of the last claim."""
     if (attention is Attention.BLOCKED) != (blocked_on is not None):
         raise UnprocessableError(MessageCode.SESSION_BLOCKED_ON_MISMATCH)
-    row = await _own_open(session, org_id=org_id, actor_id=actor_id, session_id=session_id)
+    row = await own_open(session, org_id=org_id, actor_id=actor_id, session_id=session_id)
     at = _now()
     changed = row.attention != attention.value or row.blocked_on != (
         blocked_on.value if blocked_on else None
@@ -258,6 +265,30 @@ async def report(
     return row
 
 
+async def _abandon_queued(
+    session: AsyncSession, session_ids: Sequence[uuid.UUID], at: dt.datetime
+) -> None:
+    """Every message still queued for these sessions will never be sent.
+
+    Called in the transaction that closes them, by each of the three paths
+    that close a session. Stored rather than read off the closed row, because
+    a closed row can be reopened by a resume, and its new relay must not
+    claim what the page already showed as not delivered (docs/adr/0079 §3).
+    A ``claimed`` message is left alone: its relay may have written it
+    already, and its outcome, or its silence, says what happened."""
+    if not session_ids:
+        return
+    await session.execute(
+        update(AgentSessionMessage)
+        .where(
+            AgentSessionMessage.session_id.in_(session_ids),
+            AgentSessionMessage.state == MessageState.QUEUED.value,
+        )
+        .values(state=MessageState.NOT_DELIVERED.value, state_since=at)
+        .execution_options(synchronize_session=False)
+    )
+
+
 async def close_session(
     session: AsyncSession,
     *,
@@ -268,13 +299,14 @@ async def close_session(
     """The host says the session ended. Its workers are left alone: they are
     bound to the agent's credential, not to this one, and what they hold is
     freed by their own close or by their deadlines, never by a session row."""
-    row = await _own_open(session, org_id=org_id, actor_id=actor_id, session_id=session_id)
+    row = await own_open(session, org_id=org_id, actor_id=actor_id, session_id=session_id)
     at = _now()
     row.closed_at = at
     row.closed_reason = SessionCloseReason.ENDED.value
     row.last_seen_at = at
     row.version += 1
     await session.flush()
+    await _abandon_queued(session, [row.id], at)
     await audit.log(
         session,
         org_id=org_id,
@@ -362,6 +394,7 @@ async def reconcile(
         .scalars()
         .all()
     )
+    await _abandon_queued(session, gone, at)
     for sid in gone:
         await audit.log(
             session,
@@ -419,6 +452,7 @@ async def close_idle(
             .execution_options(synchronize_session=False)
         )
     ).all()
+    await _abandon_queued(session, [row.id for row in closed], at)
     for row in closed:
         await audit.log(
             session,
@@ -465,6 +499,10 @@ class SessionView:
     heard_at: dt.datetime
     group: Group
     held: list[HeldTask] = field(default_factory=list)
+    #: The caller opened it, and its host delivers messages to it: what
+    #: ``can_send`` is made of, with the caller being a person.
+    opened_by_caller: bool = False
+    accepts_messages: bool = False
 
 
 #: Read top to bottom, as the questions are asked.
@@ -584,6 +622,8 @@ async def overview(
                 heard_at=heard,
                 group=_group(s.attention, heard, at),
                 held=[t for w in mine for t in held.get(w.id, [])],
+                opened_by_caller=s.opened_by_user_id == actor_id,
+                accepts_messages=s.accepts_messages,
             )
         )
     for w in orphans:

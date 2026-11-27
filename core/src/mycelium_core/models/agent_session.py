@@ -29,7 +29,7 @@ import enum
 import hashlib
 import uuid
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -137,6 +137,13 @@ class AgentSession(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
     # opening, and never stored: a reader of this table cannot join a worker
     # to a session it was not given.
     join_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Said by the host when it opens the session: a relay on its machine
+    # delivers the messages a person sends to it (docs/adr/0079). The page
+    # offers a composer only where this is true.
+    accepts_messages: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
     opened_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False

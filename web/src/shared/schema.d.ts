@@ -7311,6 +7311,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Session Message
+         * @description Send a message to an open session you opened, for its relay to
+         *     deliver. Delivered at most once: a message that may not have arrived is
+         *     shown as such, never sent again.
+         */
+        post: operations["send_session_message_sessions_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Messages
+         * @description Your latest messages to your open sessions, with what became of each.
+         */
+        get: operations["list_session_messages_sessions_messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/messages/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim Session Message
+         * @description Take the oldest queued message of a session this credential opened.
+         *     Report what became of it with sessions.message_outcome.
+         */
+        post: operations["claim_session_message_sessions_messages_claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/messages/outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Session Message Outcome
+         * @description Say what became of a claimed message. Only the first outcome counts;
+         *     a repeat answers the one stored.
+         */
+        post: operations["record_session_message_outcome_sessions_messages_outcome_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/stream": {
         parameters: {
             query?: never;
@@ -16984,6 +17068,91 @@ export interface components {
             /** Quiet */
             quiet: number;
         };
+        /** SessionMessageClaimIn */
+        SessionMessageClaimIn: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+        };
+        /** SessionMessageClaimedBody */
+        SessionMessageClaimedBody: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Text
+             * @description Write it into the session whole: it names its sender.
+             */
+            text: string;
+        };
+        /** SessionMessageClaimedOut */
+        SessionMessageClaimedOut: {
+            /** @description The message to deliver now, or null when none is queued. */
+            message: components["schemas"]["SessionMessageClaimedBody"] | null;
+        };
+        /** SessionMessageOut */
+        SessionMessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Body */
+            body: string;
+            /**
+             * Status
+             * @description queued; claimed (its relay took it); uncertain (claimed over two minutes ago with no outcome: it may not have arrived); delivered (written into the session); failed; not_delivered (its session closed first). Nothing is sent again on its own.
+             * @enum {string}
+             */
+            status: "queued" | "claimed" | "uncertain" | "delivered" | "failed" | "not_delivered";
+            /**
+             * Status Since
+             * Format: date-time
+             */
+            status_since: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Failure */
+            failure: string | null;
+        };
+        /** SessionMessageOutcomeIn */
+        SessionMessageOutcomeIn: {
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /**
+             * Delivered
+             * @description Written into the session without an error.
+             */
+            delivered: boolean;
+            /**
+             * Failure
+             * @description Why it could not be written, when it was not.
+             */
+            failure?: string | null;
+        };
+        /** SessionMessagesOut */
+        SessionMessagesOut: {
+            /**
+             * Messages
+             * @description Your latest messages to each open session you opened, newest first.
+             */
+            messages: components["schemas"]["SessionMessageOut"][];
+        };
         /** SessionOpenIn */
         SessionOpenIn: {
             /** @description Which host runs the session. */
@@ -17013,6 +17182,12 @@ export interface components {
              * @description The key a previous opening returned, if the host kept it. Kept when it matches, so the agent's context stays valid; otherwise a new one is issued.
              */
             join_key?: string | null;
+            /**
+             * Accepts Messages
+             * @description A relay on this machine delivers the messages a person sends to the session. Said on every opening.
+             * @default false
+             */
+            accepts_messages?: boolean;
         };
         /** SessionOpenedOut */
         SessionOpenedOut: {
@@ -17138,6 +17313,24 @@ export interface components {
             group: "needs_you" | "working" | "quiet";
             /** Held */
             held: components["schemas"]["HeldTaskOut"][];
+            /**
+             * Can Send
+             * @description The caller is a person, opened this session, and its machine delivers messages to it: sessions.send will accept a message for it.
+             */
+            can_send: boolean;
+        };
+        /** SessionSendIn */
+        SessionSendIn: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Body
+             * @description The instruction, 1 to 8000 characters once trimmed: checked by the service, so a refusal carries its own code.
+             */
+            body: string;
         };
         /** SessionsPage */
         SessionsPage: {
@@ -34050,6 +34243,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_session_message_sessions_send_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_messages_sessions_messages_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessagesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claim_session_message_sessions_messages_claim_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionMessageClaimIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessageClaimedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_session_message_outcome_sessions_messages_outcome_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionMessageOutcomeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessageOut"];
                 };
             };
             /** @description Validation Error */

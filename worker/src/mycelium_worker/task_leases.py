@@ -43,6 +43,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import agent_sessions as sessions_svc
 from mycelium_core.services import agent_workers as workers_svc
+from mycelium_core.services import session_messages as messages_svc
 from mycelium_core.services import task_leases
 
 _log = logging.getLogger("mycelium.worker.task_leases")
@@ -132,6 +133,12 @@ async def run_once(batch_size: int | None = None) -> int:
                     ",".join(str(t) for t in task_ids[:20]),
                 )
             total += len(task_ids)
+            # Last, in its own transaction: retention is never a reason to
+            # lose the reclaims and closes above, or the lines that say so.
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                purged = await messages_svc.purge_closed(s)
+            if purged:
+                _log.info("task-lease sweep org=%s purged_session_messages=%d", org_id, purged)
         except Exception:
             _log.exception("task-lease sweep failed for org=%s", org_id)
     return total

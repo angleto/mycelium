@@ -27,6 +27,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     heard_at: ago(5),
     group: 'working',
     held: [],
+    can_send: false,
     ...over,
   }
 }

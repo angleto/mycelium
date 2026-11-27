@@ -17,6 +17,10 @@ _ROUTES: tuple[tuple[str, str, str, str], ...] = (
     ("POST", "/report", "sessions.report", "report_session"),
     ("POST", "/reconcile", "sessions.reconcile", "reconcile_sessions"),
     ("POST", "/close", "sessions.close", "close_session"),
+    ("POST", "/send", "sessions.send", "send_session_message"),
+    ("GET", "/messages", "sessions.messages", "list_session_messages"),
+    ("POST", "/messages/claim", "sessions.messages_claim", "claim_session_message"),
+    ("POST", "/messages/outcome", "sessions.message_outcome", "record_session_message_outcome"),
 )
 
 for _method, _path, _op_id, _name in _ROUTES:

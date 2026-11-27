@@ -250,7 +250,8 @@ async def authenticate(
     workspace, so RLS would block a direct lookup. The SECURITY
     DEFINER ``authenticate_agent_token`` function (migration 0056)
     does the lookup, validates expiry / revocation, bumps
-    ``last_used_at``, and returns the principal -- all while saving
+    ``last_used_at`` when it is a minute old (migration 0041: a machine's
+    relays poll with one token), and returns the principal -- all while saving
     and restoring the caller's GUCs around the operation.
 
     ``session`` may be ``None`` (the helper opens its own

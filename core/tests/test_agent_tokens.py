@@ -5,7 +5,7 @@ Real DB, no mocking of domain logic. Covers:
 - mint returns ``raw`` exactly once and its sha256 matches the stored hash
 - list_tokens is RLS-scoped (a foreign workspace sees zero rows)
 - authenticate succeeds with the raw, fails for tampered / revoked / expired
-- last_used_at bumps on a successful authenticate
+- last_used_at bumps on a successful authenticate, at most once a minute
 - decode_token_async accepts a JWT (existing path) and an agent token
 - agent-token-bound claims carry ``org_id`` + ``scope='mcp'`` + ``typ='agent'``
 """
@@ -17,7 +17,7 @@ import hashlib
 import uuid
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import AuthError, ForbiddenError
@@ -244,6 +244,18 @@ async def test_authenticate_rejects_a_token_whose_user_is_deactivated() -> None:
         r = await svc.mint(s, org_id=org, actor_id=user, name="cli")
     raw = r.raw
     assert await svc.authenticate(raw) is not None
+    # Older than the minute the function waits before touching it again
+    # (migration 0041), so the touch below says which call got past the
+    # reject clause.
+    async with tenant_session(str(org), str(user)) as s:
+        await s.execute(
+            update(AgentToken)
+            .where(AgentToken.id == r.token.id)
+            .values(last_used_at=func.now() - datetime.timedelta(minutes=2))
+        )
+        aged = (
+            await s.execute(select(AgentToken.last_used_at).where(AgentToken.id == r.token.id))
+        ).scalar_one()
 
     async with admin_session() as s:
         await s.execute(update(User).where(User.id == user).values(is_active=False))
@@ -261,6 +273,7 @@ async def test_authenticate_rejects_a_token_whose_user_is_deactivated() -> None:
     async with tenant_session(str(org), str(user)) as s:
         row = (await s.execute(select(AgentToken).where(AgentToken.id == r.token.id))).scalar_one()
         before_reactivation = row.last_used_at
+    assert before_reactivation == aged, "a refused call does not record the token as used"
 
     async with admin_session() as s:
         await s.execute(update(User).where(User.id == user).values(is_active=True))

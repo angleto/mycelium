@@ -48,6 +48,7 @@ function row(id: string, over: Partial<Row>): Row {
     heard_at: ago(10),
     group: 'working',
     held: [],
+    can_send: false,
     ...over,
   }
 }

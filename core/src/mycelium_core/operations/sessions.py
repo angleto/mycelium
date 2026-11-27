@@ -23,9 +23,13 @@ from mycelium_core.models.agent_session import (
     SessionAgent,
     SessionCloseReason,
 )
+from mycelium_core.models.agent_session_message import MAX_BODY_CHARS
 from mycelium_core.operations import Kind, OpCtx, operation
 from mycelium_core.services import agent_sessions as svc
+from mycelium_core.services import caller as caller_svc
+from mycelium_core.services import session_messages as messages_svc
 from mycelium_core.services.agent_sessions import Group
+from mycelium_core.services.session_messages import Status
 
 SESSIONS = "sessions"
 
@@ -94,6 +98,11 @@ class SessionOpenIn(BaseModel):
         description="The key a previous opening returned, if the host kept it. Kept when it "
         "matches, so the agent's context stays valid; otherwise a new one is issued.",
     )
+    accepts_messages: bool = Field(
+        default=False,
+        description="A relay on this machine delivers the messages a person sends to the "
+        "session. Said on every opening.",
+    )
 
 
 class SessionOpenedOut(BaseModel):
@@ -129,6 +138,7 @@ async def open_(ctx: OpCtx, p: SessionOpenIn) -> SessionOpenedOut:
         machine=p.machine,
         title=p.title,
         join_key=p.join_key,
+        accepts_messages=p.accepts_messages,
     )
     return SessionOpenedOut(session=_out(row), join_key=key)
 
@@ -261,6 +271,10 @@ class SessionRowOut(BaseModel):
         "has not been heard from for quiet_after_seconds)."
     )
     held: list[HeldTaskOut]
+    can_send: bool = Field(
+        description="The caller is a person, opened this session, and its machine delivers "
+        "messages to it: sessions.send will accept a message for it."
+    )
 
 
 class SessionCounts(BaseModel):
@@ -294,6 +308,7 @@ async def list_(ctx: OpCtx, p: SessionsListIn) -> SessionsPage:
     the tasks it holds. Workers that joined no session are listed too, as
     sessions of an unknown host."""
     now = dt.datetime.now(dt.UTC)
+    is_person = (await caller_svc.current(ctx.session)).is_person
     views = await svc.overview(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, limit=p.limit, now=now
     )
@@ -316,6 +331,7 @@ async def list_(ctx: OpCtx, p: SessionsListIn) -> SessionsPage:
                 HeldTaskOut(task_id=t.task_id, title=t.title, expires_at=t.expires_at)
                 for t in v.held
             ],
+            can_send=is_person and v.opened_by_caller and v.accepts_messages,
         )
         for v in views
     ]
@@ -329,4 +345,175 @@ async def list_(ctx: OpCtx, p: SessionsListIn) -> SessionsPage:
         counts=counts,
         quiet_after_seconds=int(svc.QUIET_AFTER.total_seconds()),
         now=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Messages a person sends to a session (docs/adr/0079).
+# ---------------------------------------------------------------------------
+
+_PERSON_ONLY = (
+    "a message reaches a session with local tools, so only a person sends one, and only "
+    "the person who wrote them reads them; no model has a part in this path"
+)
+
+_RELAY_ONLY = (
+    "made by the relay on the session's machine, with the credential that opened the "
+    "session; a model has no part in delivering a message"
+)
+
+
+class SessionMessageOut(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    body: str
+    status: Status = Field(
+        description="queued; claimed (its relay took it); uncertain (claimed over two minutes "
+        "ago with no outcome: it may not have arrived); delivered (written into the session); "
+        "failed; not_delivered (its session closed first). Nothing is sent again on its own."
+    )
+    status_since: dt.datetime
+    created_at: dt.datetime
+    failure: str | None
+
+
+def _message_out(m: messages_svc.MessageView) -> SessionMessageOut:
+    return SessionMessageOut(
+        id=m.id,
+        session_id=m.session_id,
+        body=m.body,
+        status=m.status,
+        status_since=m.status_since,
+        created_at=m.created_at,
+        failure=m.failure,
+    )
+
+
+class SessionSendIn(BaseModel):
+    session_id: uuid.UUID
+    body: str = Field(
+        description=f"The instruction, 1 to {MAX_BODY_CHARS} characters once trimmed: checked "
+        "by the service, so a refusal carries its own code."
+    )
+
+
+@operation(
+    "sessions.send",
+    domain=SESSIONS,
+    kind=Kind.WRITE,
+    access="tasks:write",
+    params=SessionSendIn,
+    result=SessionMessageOut,
+    only="rest",
+    why=_PERSON_ONLY,
+)
+async def send(ctx: OpCtx, p: SessionSendIn) -> SessionMessageOut:
+    """Send a message to an open session you opened, for its relay to
+    deliver. Delivered at most once: a message that may not have arrived is
+    shown as such, never sent again."""
+    return _message_out(
+        await messages_svc.send(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.actor_id,
+            session_id=p.session_id,
+            body=p.body,
+        )
+    )
+
+
+class SessionMessagesIn(BaseModel):
+    pass
+
+
+class SessionMessagesOut(BaseModel):
+    messages: list[SessionMessageOut] = Field(
+        description="Your latest messages to each open session you opened, newest first."
+    )
+
+
+@operation(
+    "sessions.messages",
+    domain=SESSIONS,
+    kind=Kind.READ,
+    access="tasks:read",
+    params=SessionMessagesIn,
+    result=SessionMessagesOut,
+    only="rest",
+    why=_PERSON_ONLY,
+)
+async def messages(ctx: OpCtx, p: SessionMessagesIn) -> SessionMessagesOut:
+    """Your latest messages to your open sessions, with what became of each."""
+    views = await messages_svc.mine(ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id)
+    return SessionMessagesOut(messages=[_message_out(m) for m in views])
+
+
+class SessionMessageClaimIn(BaseModel):
+    session_id: uuid.UUID
+
+
+class SessionMessageClaimedBody(BaseModel):
+    id: uuid.UUID
+    text: str = Field(description="Write it into the session whole: it names its sender.")
+
+
+class SessionMessageClaimedOut(BaseModel):
+    message: SessionMessageClaimedBody | None = Field(
+        description="The message to deliver now, or null when none is queued."
+    )
+
+
+@operation(
+    "sessions.messages_claim",
+    domain=SESSIONS,
+    kind=Kind.WRITE,
+    access="tasks:write",
+    params=SessionMessageClaimIn,
+    result=SessionMessageClaimedOut,
+    only="rest",
+    why=_RELAY_ONLY,
+)
+async def messages_claim(ctx: OpCtx, p: SessionMessageClaimIn) -> SessionMessageClaimedOut:
+    """Take the oldest queued message of a session this credential opened.
+    Report what became of it with sessions.message_outcome."""
+    claimed = await messages_svc.claim(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.actor_id, session_id=p.session_id
+    )
+    return SessionMessageClaimedOut(
+        message=None
+        if claimed is None
+        else SessionMessageClaimedBody(id=claimed.id, text=claimed.text)
+    )
+
+
+class SessionMessageOutcomeIn(BaseModel):
+    message_id: uuid.UUID
+    delivered: bool = Field(description="Written into the session without an error.")
+    failure: str | None = Field(
+        default=None, max_length=300, description="Why it could not be written, when it was not."
+    )
+
+
+@operation(
+    "sessions.message_outcome",
+    domain=SESSIONS,
+    kind=Kind.WRITE,
+    access="tasks:write",
+    params=SessionMessageOutcomeIn,
+    result=SessionMessageOut,
+    only="rest",
+    why=_RELAY_ONLY,
+)
+async def message_outcome(ctx: OpCtx, p: SessionMessageOutcomeIn) -> SessionMessageOut:
+    """Say what became of a claimed message. Only the first outcome counts;
+    a repeat answers the one stored."""
+    return _message_out(
+        await messages_svc.record_outcome(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.actor_id,
+            message_id=p.message_id,
+            delivered=p.delivered,
+            failure=p.failure,
+        )
     )

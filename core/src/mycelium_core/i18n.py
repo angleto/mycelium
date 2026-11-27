@@ -256,6 +256,9 @@ class MessageCode(enum.StrEnum):
     SESSION_MACHINE_REQUIRED = "session.machine_required"
     SESSION_BLOCKED_ON_MISMATCH = "session.blocked_on_mismatch"
     SESSION_JOIN_KEY_UNKNOWN = "session.join_key_unknown"
+    SESSION_MESSAGE_BODY = "session.message_body"
+    SESSION_MESSAGES_NOT_ACCEPTED = "session.messages_not_accepted"
+    SESSION_MESSAGE_NOT_FOUND = "session.message_not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -845,6 +848,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "This join key names no open session of yours. Its session was closed or opened "
             "again with a new key, so the key in your context is stale. Open the worker "
             "without join_key, and say so to the person: the session will not show what you hold"
+        ),
+        MessageCode.SESSION_MESSAGE_BODY: (
+            "A message to a session is between 1 and {max} characters of text"
+        ),
+        MessageCode.SESSION_MESSAGES_NOT_ACCEPTED: (
+            "This session does not accept messages: its host runs no relay for it on its machine"
+        ),
+        MessageCode.SESSION_MESSAGE_NOT_FOUND: (
+            "No message with this id for a session this credential opened"
         ),
         MessageCode.WORKER_NEEDS_CREDENTIAL: (
             "A worker is bound to the credential that opens it, and this session has none "
